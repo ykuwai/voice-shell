@@ -31,6 +31,9 @@ STATE_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "qwen-voice"
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME",
                                  Path.home() / ".config")) / "voice-shell"
 DICT_FILE = CONFIG_DIR / "dictionary.json"
+# 手元だけに置く辞書。社名・取引先・個人的な語など、公開したくないものを入れる。
+# リポジトリには入らない（.gitignore で除外）。
+PRIVATE_DICT_FILE = CONFIG_DIR / "dictionary.private.json"
 PID_FILE = STATE_DIR / "daemon.pid"
 LOG_FILE = STATE_DIR / "utterances.jsonl"
 # 認識途中のテキスト。上書きし続けるだけで履歴は残さない（ビューアの表示用）。
@@ -147,36 +150,58 @@ DEFAULT_DICT = {
 }
 
 
-_dict_cache = (None, None)   # (更新時刻, 中身)
+_dict_cache = (None, None)   # (更新時刻の組, 中身)
 
 
-def load_dictionary() -> dict:
-    """ユーザー辞書を読む。壊れていても落とさず既定値で動かす。
-
-    発話ごとに呼ばれるので、更新時刻が変わったときだけ読み直す。
-    これにより Web UI での編集がデーモン再起動なしで反映される。
-    """
-    global _dict_cache
+def _read_one(path: Path) -> dict:
+    """辞書ファイル1つを読む。無い・壊れているときは空。"""
     try:
-        mtime = DICT_FILE.stat().st_mtime
-    except OSError:
-        return DEFAULT_DICT
-
-    if _dict_cache[0] == mtime:
-        return _dict_cache[1]
-
-    try:
-        data = json.loads(DICT_FILE.read_text())
+        data = json.loads(path.read_text())
+    except FileNotFoundError:
+        return {"ignore": [], "replace": {}}
     except (json.JSONDecodeError, OSError) as e:
-        print(f"辞書を読めませんでした ({e}) — 既定値で動かします", file=sys.stderr)
-        return DEFAULT_DICT
-
-    d = {
+        print(f"{path.name} を読めませんでした ({e}) — 無視します", file=sys.stderr)
+        return {"ignore": [], "replace": {}}
+    return {
         "ignore": [s for s in data.get("ignore", []) if isinstance(s, str)],
         "replace": {k: v for k, v in data.get("replace", {}).items()
                     if isinstance(k, str) and isinstance(v, str)},
     }
-    _dict_cache = (mtime, d)
+
+
+def _mtimes():
+    out = []
+    for p in (DICT_FILE, PRIVATE_DICT_FILE):
+        try:
+            out.append(p.stat().st_mtime)
+        except OSError:
+            out.append(None)
+    return tuple(out)
+
+
+def load_dictionary() -> dict:
+    """共有辞書と手元辞書を合わせて返す。
+
+    発話ごとに呼ばれるので、更新時刻が変わったときだけ読み直す。
+    これにより Web UI での編集がデーモン再起動なしで反映される。
+    手元辞書（private）が優先される。
+    """
+    global _dict_cache
+    mtimes = _mtimes()
+    if _dict_cache[0] == mtimes:
+        return _dict_cache[1]
+
+    if mtimes == (None, None):
+        return DEFAULT_DICT
+
+    shared = _read_one(DICT_FILE)
+    private = _read_one(PRIVATE_DICT_FILE)
+
+    d = {
+        "ignore": shared["ignore"] + private["ignore"],
+        "replace": {**shared["replace"], **private["replace"]},
+    }
+    _dict_cache = (mtimes, d)
     return d
 
 

@@ -19,8 +19,9 @@ from aiohttp import web, WSCloseCode
 DEFAULT_LOG = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "qwen-voice" / "utterances.jsonl"
 
 # ユーザー辞書。voice_daemon.py と同じ場所を読み書きする。
-DICT_FILE = (Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-             / "voice-shell" / "dictionary.json")
+_CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "voice-shell"
+DICT_FILE = _CONFIG / "dictionary.json"                  # 共有（リポジトリに反映できる）
+PRIVATE_DICT_FILE = _CONFIG / "dictionary.private.json"  # 手元だけ
 
 
 def _builtin_noise() -> list:
@@ -41,13 +42,13 @@ def _builtin_noise() -> list:
     return []
 
 
-def _read_dict(raw: bool = False) -> dict:
-    """ユーザー辞書を読む。無い・壊れている場合は空で返す。
+def _read_dict(raw: bool = False, path: Path = None) -> dict:
+    """辞書を読む。無い・壊れている場合は空で返す。
 
     raw=True なら内部用のキー（_seen）も含めてそのまま返す。
     """
     try:
-        data = json.loads(DICT_FILE.read_text())
+        data = json.loads((path or DICT_FILE).read_text())
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return {"ignore": [], "replace": {}}
     if raw:
@@ -249,14 +250,24 @@ async def main_async(args):
     app.router.add_get("/", handle_index)
     app.router.add_get("/ws", handle_ws)
     app.router.add_get("/api/state", handle_state)
-    async def handle_dict_get(_req):
-        """ユーザー辞書と、組み込みで無視している語を返す。"""
-        d = _read_dict()
-        d["builtin"] = _builtin_noise()
+    async def handle_dict_get(req):
+        """辞書と、組み込みで無視している語を返す。
+
+        ?scope=private で手元だけの辞書を返す。
+        """
+        private = req.query.get("scope") == "private"
+        d = _read_dict(path=PRIVATE_DICT_FILE if private else DICT_FILE)
+        d["builtin"] = [] if private else _builtin_noise()
         return web.json_response(d)
 
     async def handle_dict_put(req):
-        """ユーザー辞書を保存する。デーモンは毎発話読み直すので即反映される。"""
+        """辞書を保存する。デーモンは毎発話読み直すので即反映される。
+
+        ?scope=private で手元だけの辞書に書く。
+        """
+        private = req.query.get("scope") == "private"
+        target = PRIVATE_DICT_FILE if private else DICT_FILE
+
         body = await req.json()
         data = {
             "ignore": sorted({s.strip() for s in body.get("ignore", [])
@@ -264,13 +275,14 @@ async def main_async(args):
             "replace": {k.strip(): v.strip() for k, v in body.get("replace", {}).items()
                         if isinstance(k, str) and isinstance(v, str) and k.strip()},
         }
-        # 既定項目の追加履歴は内部用。消すと消した項目が復活してしまうので残す。
-        prev = _read_dict(raw=True)
-        seen = set(prev.get("_seen", [])) | set(prev.get("replace", {}))
-        data["_seen"] = sorted(seen | set(data["replace"]))
+        if not private:
+            # 既定項目の追加履歴は内部用。消すと消した項目が復活してしまうので残す。
+            prev = _read_dict(raw=True, path=target)
+            seen = set(prev.get("_seen", [])) | set(prev.get("replace", {}))
+            data["_seen"] = sorted(seen | set(data["replace"]))
 
-        DICT_FILE.parent.mkdir(parents=True, exist_ok=True)
-        DICT_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
         return web.json_response({k: v for k, v in data.items() if k != "_seen"})
 
     app.router.add_get("/api/dictionary", handle_dict_get)
