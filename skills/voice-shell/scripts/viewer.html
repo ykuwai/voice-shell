@@ -162,15 +162,12 @@
 
   button.go { border-color:var(--sent); color:var(--sent); font-weight:600; }
 
-  /* 読み込み中。時間がかかるので、止まっていないことを見せる */
+  /* 起動中。背景が左から埋まって進み具合を示す（点滅は重ねない） */
   button.busy {
     border-color:var(--signal); color:var(--signal);
     font-variant-numeric:tabular-nums; cursor:progress;
+    background-color:transparent;
   }
-  @media (prefers-reduced-motion:no-preference) {
-    button.busy { animation:pulse 1.4s ease-in-out infinite; }
-  }
-  @keyframes pulse { 50% { opacity:.5; } }
 
   .hint {
     margin:.75rem 0 0; font-size:.78rem; color:var(--ink-soft); min-height:1.2em;
@@ -648,14 +645,22 @@ let starting = false;
 
 let startedAt = 0;   // 起動を押した時刻。経過を出して「止まっていない」と分かるようにする
 
+const BOOT_SEC = 40;   // 実測でおよそ40秒
+
 function paintPower() {
   if (starting) {
-    const sec = Math.round((Date.now() - startedAt) / 1000);
-    el.power.textContent = `読み込み中… ${sec}秒`;
+    const sec = (Date.now() - startedAt) / 1000;
+    const left = Math.max(0, Math.ceil(BOOT_SEC - sec));
+    el.power.textContent = left > 0 ? `起動中… あと${left}秒` : '起動中… もうすぐ';
+    // 進み具合を背景で見せる（数字だけだと分かりにくい）
+    const pct = Math.min(100, (sec / BOOT_SEC) * 100);
+    el.power.style.background =
+      `linear-gradient(to right, var(--field) ${pct}%, transparent ${pct}%)`;
     el.power.disabled = true;
     el.power.classList.add('busy');
     return;
   }
+  el.power.style.background = '';
   el.power.classList.remove('busy');
   el.power.disabled = false;
   el.power.textContent = engineOn ? '聞き取りを止める' : '聞き取りを始める';
@@ -676,7 +681,7 @@ el.power.onclick = async () => {
   if (next) {
     starting = true;
     startedAt = Date.now();
-    setState('down', '読み込んでいます');
+    setState('down', '起動しています');
     el.hint.textContent = 'モデルを読み込んでいます。40秒ほどかかります。';
     // 1秒ごとに秒数を進める（止まっていないと分かるように）
     clearInterval(tick);
@@ -716,7 +721,7 @@ async function refreshState() {
 
       paintPower();
       if (starting) {
-        setState('down', '読み込んでいます');
+        setState('down', '起動しています');
         return;
       }
       if (!engineOn) {
