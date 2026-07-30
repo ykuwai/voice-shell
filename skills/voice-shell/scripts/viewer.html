@@ -60,7 +60,18 @@
     .beacon.live { animation:breathe 2.4s ease-in-out infinite; }
   }
   @keyframes breathe { 50% { opacity:.35; } }
-  .lede { margin:.55rem 0 0; font-size:.82rem; color:var(--ink-soft); }
+  /* 画面切替タブ（発話 / 辞書） */
+  .views { display:flex; gap:.2rem; margin:.8rem 0 -1rem; }
+  .view-tab {
+    font-size:.85rem; padding:.35rem .95rem;
+    background:transparent; color:var(--ink-faint);
+    border:1px solid transparent; border-bottom:2px solid transparent;
+    border-radius:0;
+  }
+  .view-tab:hover { color:var(--ink-soft); border-color:transparent; }
+  .view-tab.on {
+    color:var(--ink); font-weight:600; border-bottom-color:var(--focus);
+  }
 
   /* ── 認識中 ───────────────────────────── */
   .now {
@@ -147,7 +158,8 @@
   .toggle input { accent-color:var(--focus); cursor:pointer; margin:0; }
 
   /* ── ユーザー辞書 ─────────────────────── */
-  .dict { padding:1.25rem 0; border-bottom:1px solid var(--rule); }
+  /* 開くとログと入れ替わる（重ねない・浮かせない） */
+  .dict { padding:.5rem 0 1.25rem; }
   .dict-head {
     font-family:ui-monospace, "SF Mono", Menlo, monospace;
     font-size:.68rem; letter-spacing:.09em; text-transform:uppercase;
@@ -164,14 +176,38 @@
   }
   .tab.on { color:var(--ink); border-bottom-color:var(--focus); font-weight:600; }
 
-  /* 1件 = 1行のフォーム。矢印を手で書かせない。 */
-  .rows { display:flex; flex-direction:column; gap:.4rem; }
-  .row { display:flex; align-items:center; gap:.5rem; }
-  .row input {
+  /* 追加欄は上に固定。長い一覧を下までスクロールしなくてよい */
+  .new-row {
+    display:flex; align-items:center; gap:.5rem; margin-bottom:.5rem;
+    padding-bottom:.6rem; border-bottom:1px dashed var(--rule);
+  }
+  .new-row input {
     flex:1; min-width:0; font:inherit; font-size:.92rem;
     padding:.4rem .6rem; border-radius:2px;
+    color:var(--ink); background:var(--field); border:1px solid var(--focus);
+  }
+  .new-row button { flex:none; border-color:var(--sent); color:var(--sent); font-weight:600; }
+
+  .filter {
+    display:block; width:100%; font:inherit; font-size:.85rem;
+    padding:.3rem .55rem; margin-bottom:.5rem; border-radius:2px;
     color:var(--ink); background:var(--field); border:1px solid var(--rule);
   }
+
+  /* 1件 = 1行。行数が多いので詰めて、一覧側だけスクロールさせる */
+  .rows {
+    display:flex; flex-direction:column; gap:.15rem;
+    max-height:15rem; overflow-y:auto;
+  }
+  .row { display:flex; align-items:center; gap:.4rem; }
+  .row input {
+    flex:1; min-width:0; font:inherit; font-size:.88rem;
+    padding:.2rem .45rem; border-radius:2px;
+    color:var(--ink); background:transparent; border:1px solid transparent;
+  }
+  .row input:hover { border-color:var(--rule); }
+  .row input:focus { background:var(--field); border-color:var(--rule); }
+  .row.hit input { background:var(--field); }
   .row input:focus-visible { outline:2px solid var(--focus); outline-offset:1px; }
   .row .arrow { color:var(--ink-faint); font-size:.9rem; flex:none; }
   .row .del {
@@ -234,8 +270,14 @@
       <h1>voice-shell</h1>
       <span class="state"><span class="beacon" id="beacon"></span><span id="stateText">接続中</span></span>
     </div>
-    <p class="lede">Claude Code に送られている音声プロンプトです。</p>
+    <nav class="views" role="tablist">
+      <button class="view-tab on" id="viewSpeech" role="tab">発話</button>
+      <button class="view-tab" id="viewDict" role="tab">辞書</button>
+    </nav>
   </header>
+
+<!-- ── 発話 ─────────────────────────────── -->
+<div id="speechView">
 
   <section class="now idle" id="now" aria-live="polite">
     <div class="gutter">認識中</div>
@@ -258,15 +300,18 @@
     <button id="hold">手直ししてから送る</button>
     <span class="spacer"></span>
     <label class="toggle"><input type="checkbox" id="clean">フィラーを除去</label>
-    <button id="dictBtn">辞書</button>
     <span class="tally"><span id="count">0</span> 件</span>
     <button id="copy">コピー</button>
   </div>
   <p class="hint" id="hint"></p>
 
-  <section class="dict" id="dict" hidden>
-    <div class="dict-head">ユーザー辞書</div>
+  <div id="log"></div>
+  <p class="none" id="none">まだ発話がありません。マイクに向かって話してください。</p>
 
+</div><!-- /speechView -->
+
+<!-- ── 辞書 ─────────────────────────────── -->
+  <section class="dict" id="dict" hidden>
     <div class="dict-tabs" role="tablist">
       <button class="tab on" id="tabReplace" role="tab">言い換え</button>
       <button class="tab" id="tabIgnore" role="tab">無視する発話</button>
@@ -274,16 +319,25 @@
 
     <!-- 言い換え -->
     <div class="pane" id="paneReplace">
-      <p class="dict-label">誤認識しやすい語を、送る前に置き換えます。</p>
+      <p class="dict-label">送る前に置き換えます。</p>
+      <div class="new-row">
+        <input id="newFrom" placeholder="聞こえた語">
+        <span class="arrow">→</span>
+        <input id="newTo" placeholder="送る語">
+        <button id="addReplace">追加</button>
+      </div>
+      <input class="filter" id="filterReplace" placeholder="絞り込み（登録済みを探す）">
       <div class="rows" id="replaceRows"></div>
-      <button class="add" id="addReplace">＋ 行を追加</button>
     </div>
 
     <!-- 無視する発話 -->
     <div class="pane" id="paneIgnore" hidden>
-      <p class="dict-label">これ単独で認識されたときは送りません（物音の誤認識よけ）。</p>
+      <p class="dict-label">この語だけの発話は送りません。</p>
+      <div class="new-row">
+        <input id="newIgnore" placeholder="この語だけなら送らない">
+        <button id="addIgnore">追加</button>
+      </div>
       <div class="rows" id="ignoreRows"></div>
-      <button class="add" id="addIgnore">＋ 行を追加</button>
 
       <p class="dict-label builtin-head">
         最初から無視している語（<span id="builtinCount">0</span>）— 登録は不要です
@@ -293,7 +347,6 @@
 
     <div class="dict-actions">
       <button class="go" id="dictSave">保存する</button>
-      <button id="dictClose">閉じる</button>
       <span class="spacer"></span>
       <button id="dictExport">CSV で保存</button>
       <button id="dictImport">CSV を読み込む</button>
@@ -301,9 +354,6 @@
     </div>
     <p class="dict-note" id="dictNote"></p>
   </section>
-
-  <div id="log"></div>
-  <p class="none" id="none">まだ発話がありません。マイクに向かって話してください。</p>
 
 </div>
 
@@ -318,11 +368,12 @@ const $ = id => document.getElementById(id);
 const el = {};
 for (const id of ['beacon','stateText','now','stream','tray','draft','send','discard',
                   'mute','muteLabel','hold','hint','clean','count','copy','log','none',
-                  'dict','dictBtn','dictSave','dictClose','dictNote',
+                  'dict','speechView','viewSpeech','viewDict','dictSave','dictNote',
                   'tabReplace','tabIgnore','paneReplace','paneIgnore',
                   'replaceRows','ignoreRows','addReplace','addIgnore',
                   'dictExport','dictImport','dictFile',
-                  'builtinChips','builtinCount'])
+                  'builtinChips','builtinCount',
+                  'newFrom','newTo','newIgnore','filterReplace'])
   el[id] = $(id);
 
 let paused = false;   // 手直ししてから送るモード
@@ -605,20 +656,65 @@ function showTab(which) {
 el.tabReplace.onclick = () => showTab('replace');
 el.tabIgnore.onclick = () => showTab('ignore');
 
-el.dictBtn.onclick = async () => {
-  if (el.dict.hidden) {
+// 画面ごと入れ替える（発話 ⇄ 辞書）
+async function showView(which) {
+  const dict = which === 'dict';
+  if (dict) {
     renderDict(await (await fetch('/api/dictionary')).json());
-    el.dict.hidden = false;
     el.dictNote.textContent = '';
     showTab('replace');
-  } else {
-    el.dict.hidden = true;
+    el.newFrom.focus();
   }
-};
+  el.dict.hidden = !dict;
+  el.speechView.hidden = dict;
+  el.viewDict.classList.toggle('on', dict);
+  el.viewSpeech.classList.toggle('on', !dict);
+  window.scrollTo(0, 0);
+}
 
-el.dictClose.onclick = () => { el.dict.hidden = true; };
-el.addReplace.onclick = () => el.replaceRows.appendChild(replaceRow());
-el.addIgnore.onclick = () => el.ignoreRows.appendChild(ignoreRow());
+el.viewSpeech.onclick = () => showView('speech');
+el.viewDict.onclick = () => showView('dict');
+
+// 追加は一覧の先頭に入れる（下までスクロールしなくてよい）
+function addReplaceEntry() {
+  const from = el.newFrom.value.trim(), to = el.newTo.value.trim();
+  if (!from || !to) { el.newFrom.focus(); return; }
+  el.replaceRows.prepend(replaceRow(from, to));
+  el.newFrom.value = el.newTo.value = '';
+  el.newFrom.focus();
+  el.dictNote.textContent = '「保存する」を押すと有効になります。';
+}
+
+function addIgnoreEntry() {
+  const w = el.newIgnore.value.trim();
+  if (!w) return;
+  el.ignoreRows.prepend(ignoreRow(w));
+  el.newIgnore.value = '';
+  el.newIgnore.focus();
+  el.dictNote.textContent = '「保存する」を押すと有効になります。';
+}
+
+el.addReplace.onclick = addReplaceEntry;
+el.addIgnore.onclick = addIgnoreEntry;
+
+// Enter で追加できるようにする（続けて何件も入れられる）
+for (const [input, fn] of [[el.newFrom, addReplaceEntry], [el.newTo, addReplaceEntry],
+                           [el.newIgnore, addIgnoreEntry]]) {
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); fn(); }
+  });
+}
+
+// 絞り込み（登録済みを探す）
+el.filterReplace.addEventListener('input', () => {
+  const q = el.filterReplace.value.trim().toLowerCase();
+  for (const row of el.replaceRows.children) {
+    const text = row.querySelector('.from').value + ' ' + row.querySelector('.to').value;
+    const hit = q && text.toLowerCase().includes(q);
+    row.hidden = q && !hit;
+    row.classList.toggle('hit', !!hit);
+  }
+});
 
 el.dictSave.onclick = async () => {
   const d = collectDict();
