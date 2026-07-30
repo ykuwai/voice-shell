@@ -52,10 +52,13 @@
     display:flex; align-items:center; gap:.45rem;
     font-size:.75rem; color:var(--ink-soft); font-variant-numeric:tabular-nums;
   }
+  /* 状態ごとに色を分ける。以前は「ためる」「送らない」「切断」が
+     すべて同じ褐色で、見ても区別がつかなかった */
   .beacon { width:7px; height:7px; border-radius:50%; background:var(--ink-faint); flex:none; }
-  .beacon.live { background:var(--sent); }
-  .beacon.paused { background:var(--hold); }
-  .beacon.down { background:var(--hold); opacity:.5; }
+  .beacon.live { background:var(--sent); }                                    /* 届いている */
+  .beacon.hold { background:var(--hold); }                                    /* 溜めている */
+  .beacon.off  { background:transparent; box-shadow:inset 0 0 0 1.5px var(--ink-faint); }
+  .beacon.down { background:transparent; box-shadow:inset 0 0 0 1.5px var(--signal); }
   @media (prefers-reduced-motion:no-preference) {
     .beacon.live { animation:breathe 2.4s ease-in-out infinite; }
   }
@@ -95,6 +98,9 @@
   }
   @keyframes blink { 50% { opacity:0; } }
   .now.idle .caret { display:none; }
+  /* 何も聞こえていないときに空行に見えないようにする */
+  .quiet { display:none; color:var(--ink-faint); font-size:.9rem; }
+  .now.idle .quiet { display:inline; }
 
   /* ── 保留トレイ ───────────────────────── */
   .tray { padding:1.25rem 0; border-bottom:1px solid var(--rule); }
@@ -133,19 +139,27 @@
   button:hover { border-color:var(--ink-faint); }
   button:focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
 
-  /* 主操作：マイクの入切。状態が一目で分かるよう塗る */
-  button.primary {
-    display:inline-flex; align-items:center; gap:.45rem; font-weight:600;
-    border-color:var(--sent); color:var(--sent);
+  /* 音声の届け先。3つは排他なので、選択中の位置で状態が分かる。
+     （2つのトグルだと「切りつつ溜める」という存在しない状態が見えてしまう） */
+  .route { display:flex; gap:.15rem; }
+  .seg {
+    display:inline-flex; align-items:center; gap:.4rem;
+    font-size:.82rem; padding:.35rem .85rem;
+    background:transparent; color:var(--ink-faint);
+    border:1px solid transparent; border-bottom:2px solid transparent;
+    border-radius:0;
   }
-  button.primary .dot-icon {
-    width:8px; height:8px; border-radius:50%; background:currentColor; flex:none;
+  .seg:hover { color:var(--ink-soft); border-color:transparent; }
+  .seg .seg-dot {
+    width:7px; height:7px; border-radius:50%; flex:none;
+    box-shadow:inset 0 0 0 1.5px currentColor;   /* 非選択は輪だけ */
   }
-  button.primary.off { border-color:var(--hold); color:var(--hold); }
-  button.primary.off .dot-icon { background:transparent; box-shadow:inset 0 0 0 1.5px currentColor; }
+  .seg.on { color:var(--ink); font-weight:600; }
+  .seg.on .seg-dot { background:currentColor; box-shadow:none; }
+  #segLive.on { color:var(--sent); border-bottom-color:var(--sent); }
+  #segHold.on { color:var(--hold); border-bottom-color:var(--hold); }
+  #segOff.on  { color:var(--ink-soft); border-bottom-color:var(--ink-faint); }
 
-  /* 手直しモード中は押されている状態を示す */
-  button.armed { border-color:var(--focus); color:var(--focus); font-weight:600; }
   button.go { border-color:var(--sent); color:var(--sent); font-weight:600; }
 
   .hint {
@@ -288,32 +302,39 @@
 
   <section class="now idle" id="now" aria-live="polite">
     <div class="gutter">認識中</div>
-    <div class="stream"><span id="stream"></span><span class="caret"></span></div>
+    <div class="stream"><span id="stream"></span><span class="caret"></span><span class="quiet" id="quiet">（無音）</span></div>
   </section>
 
   <section class="tray" id="tray" hidden>
-    <div class="tray-head">保留中 — 送信前に手直しできます</div>
-    <textarea id="draft" aria-label="送信前のテキスト"></textarea>
+    <div class="tray-head">ためています — 送る前に直せます</div>
+    <textarea id="draft" aria-label="送る前のテキスト"></textarea>
     <div class="tray-actions">
-      <button class="go" id="send">送信する</button>
-      <button id="discard">破棄</button>
+      <button class="go" id="send">Claude に送る</button>
+      <button id="discard">消す</button>
     </div>
   </section>
 
   <div class="bar">
-    <button class="primary" id="mute">
-      <span class="dot-icon" aria-hidden="true"></span><span id="muteLabel">マイクを切る</span>
-    </button>
-    <button id="hold">手直ししてから送る</button>
+    <div class="route" role="radiogroup" aria-label="音声の届け先">
+      <button class="seg on" id="segLive" role="radio" aria-checked="true">
+        <span class="seg-dot" aria-hidden="true"></span>直接送る
+      </button>
+      <button class="seg" id="segHold" role="radio" aria-checked="false">
+        <span class="seg-dot" aria-hidden="true"></span>ためて送る
+      </button>
+      <button class="seg" id="segOff" role="radio" aria-checked="false">
+        <span class="seg-dot" aria-hidden="true"></span>送らない
+      </button>
+    </div>
     <span class="spacer"></span>
-    <label class="toggle"><input type="checkbox" id="clean">フィラーを除去</label>
+    <label class="toggle"><input type="checkbox" id="clean">「えーと」を消す</label>
     <span class="tally"><span id="count">0</span> 件</span>
-    <button id="copy">コピー</button>
+    <button id="copy">全部コピー</button>
   </div>
   <p class="hint" id="hint"></p>
 
   <div id="log"></div>
-  <p class="none" id="none">まだ発話がありません。マイクに向かって話してください。</p>
+  <p class="none" id="none">まだ何も送っていません。話すとここに出ます。</p>
 
 </div><!-- /speechView -->
 
@@ -382,7 +403,7 @@ window.addEventListener('error', e => {
 const $ = id => document.getElementById(id);
 const el = {};
 for (const id of ['beacon','stateText','now','stream','tray','draft','send','discard',
-                  'mute','muteLabel','hold','hint','clean','count','copy','log','none',
+                  'segLive','segHold','segOff','hint','clean','count','copy','log','none',
                   'dict','speechView','viewSpeech','viewDict','dictSave','dictNote',
                   'tabReplace','tabIgnore','paneReplace','paneIgnore',
                   'replaceRows','ignoreRows','addReplace','addIgnore',
@@ -392,8 +413,6 @@ for (const id of ['beacon','stateText','now','stream','tray','draft','send','dis
                   'scopePrivate','scopeNote'])
   el[id] = $(id);
 
-let paused = false;   // 手直ししてから送るモード
-let muted  = false;   // マイクを切っている
 
 /* ── 整形 ───────────────────────────────── */
 const FILLERS = ['えーと','えっと','ええと','あのー','あの','えー','えっ','まあ',
@@ -433,7 +452,7 @@ function addEntry(rec) {
     new Date().toLocaleTimeString('ja-JP', {hour12:false});
   const mark = document.createElement('span');
   mark.className = 'mark ' + (rec.edited ? 'edited' : 'sent');
-  mark.textContent = rec.edited ? '手直し送信' : '送信済み';
+  mark.textContent = rec.edited ? '直して送信' : '送信済み';
   gutter.append(stamp, mark);
 
   const text = document.createElement('div');
@@ -494,6 +513,8 @@ function grow() {
 function appendHeld(text) {
   text = (text || '').trim();
   if (!text) return;
+  // ためるモードでないときに来た分でトレイを開かない（説明のつかない表示になる）
+  if (route !== 'hold') return;
   el.tray.hidden = false;
   const cur = el.draft.value;
   el.draft.value = cur ? cur.replace(/\s*$/, '') + '\n' + text : text;
@@ -504,47 +525,93 @@ function appendHeld(text) {
   }
 }
 
+// 音声の届け先。3つのうち1つだけが有効。
+// デーモンはミュート中に hold の判定へ進まないので、「切りつつ溜める」は存在しない。
+const ROUTE = {
+  live: {muted: false, paused: false},
+  hold: {muted: false, paused: true},
+  off:  {muted: true,  paused: false},
+};
+const HINT = {
+  live: '話すとそのまま Claude Code に届きます。',
+  hold: '話した分は下に溜まります。直してから「Claude に送る」。',
+  off:  '話しても何も記録されません。通話中や別作業のときに。',
+};
+const STATUS = {
+  live: 'Claude に届いています',
+  hold: 'ためています',
+  off:  '送っていません',
+};
+const TITLE = {live: '● 送信中', hold: '◐ ためています', off: '○ 送りません'};
+
+let route = 'live';
+let inFlight = false;   // 切替中はポーリングに巻き戻されないようにする
+
 function paint() {
-  // マイクを切っているときは、そちらが優先の状態
-  if (muted) {
-    setState('paused', 'マイクを切っています');
-    el.hint.textContent = '話しても記録されません。別の作業をしていても安全です。';
-  } else if (paused) {
-    setState('paused', '手直ししてから送ります');
-    el.hint.textContent = '話した内容は下に溜まります。直してから「送信する」を押してください。';
-  } else {
-    setState('live', '聞いています');
-    el.hint.textContent = '話した内容はそのまま Claude Code に届きます。';
+  const segs = {live: el.segLive, hold: el.segHold, off: el.segOff};
+  for (const [k, b] of Object.entries(segs)) {
+    b.classList.toggle('on', route === k);
+    b.setAttribute('aria-checked', String(route === k));
   }
+  setState(route, STATUS[route]);
+  el.hint.textContent = HINT[route];
+  // 端末で作業している間はタブのタイトルだけが手がかりになる
+  document.title = TITLE[route] + ' — voice-shell';
 
-  el.muteLabel.textContent = muted ? 'マイクを入れる' : 'マイクを切る';
-  el.mute.classList.toggle('off', muted);
-
-  el.hold.textContent = paused ? 'そのまま送るのに戻す' : '手直ししてから送る';
-  el.hold.classList.toggle('armed', paused);
-  el.hold.disabled = muted;         // 切っている間は溜まらないので意味がない
-  el.hold.style.opacity = muted ? .45 : 1;
-
-  el.now.classList.toggle('idle', muted);
-  if (muted) el.stream.textContent = '';
+  el.now.classList.toggle('idle', route === 'off');
+  if (route === 'off') el.stream.textContent = '';
 }
 
+async function setRoute(next) {
+  const prev = route;
+  route = next;
+  paint();                            // 押した瞬間に反映する
+  inFlight = true;
+  try {
+    const w = ROUTE[next];
+    // 溜め始める前にミュートを解き、切るときは溜めも止める
+    await post('/api/pause', {paused: w.paused});
+    await post('/api/mute', {muted: w.muted});
+  } catch (err) {
+    route = prev;
+    paint();
+    el.hint.textContent = '切替に失敗しました: ' + err.message;
+    return;
+  } finally {
+    inFlight = false;
+  }
+  refreshState();
+}
+
+el.segLive.onclick = () => setRoute('live');
+el.segHold.onclick = () => setRoute('hold');
+el.segOff.onclick = () => setRoute('off');
+
+let seeded = false;   // 溜まっていた分をリロード時に一度だけ復元する
+
 async function refreshState() {
+  if (inFlight) return;               // 切替中は上書きしない
   try {
     const s = await (await fetch('/api/state')).json();
-    paused = s.paused;
-    muted = s.muted;
+    route = s.muted ? 'off' : (s.paused ? 'hold' : 'live');
     paint();
 
-    // 保留モード中はトレイを出しておく（喋った分がここに足されていく）
-    if (paused && !muted) {
+    // リロードで溜めた分が消えないように復元する（入力中は触らない）
+    if (!seeded && Array.isArray(s.held) && s.held.length && !el.draft.value.trim()) {
+      el.draft.value = s.held.map(r => r.text).join('\n');
+      el.tray.hidden = false;
+      grow();
+    }
+    seeded = true;
+
+    if (route === 'hold') {
       el.tray.hidden = false;
       grow();
     } else if (!el.draft.value.trim()) {
       el.tray.hidden = true;
     }
   } catch {
-    setState('down', '応答なし');
+    setState('down', 'つながっていません — 再接続中');
     el.hint.textContent = '';
   }
 }
@@ -554,45 +621,37 @@ const post = (path, body) =>
                body: JSON.stringify(body || {})});
 
 /* ── 操作 ───────────────────────────────── */
-el.mute.onclick = async () => {
-  muted = !muted;
-  paint();                                  // 押した瞬間に反映する
-  try {
-    const r = await post('/api/mute', {muted});
-    const got = await r.json();
-    if (got.muted !== muted) {              // 反映されなかった
-      muted = got.muted; paint();
-      el.hint.textContent = 'マイクの切替に失敗しました。';
-      return;
-    }
-  } catch (err) {
-    el.hint.textContent = 'マイクの切替に失敗しました: ' + err.message;
-    return;
-  }
-  refreshState();
-};
-
-el.hold.onclick = async () => {
-  paused = !paused;
-  paint();
-  await post('/api/pause', {paused});
-  refreshState();
-};
-
 el.send.onclick = async () => {
   const text = el.draft.value.trim();
   if (!text) return;
   await post('/api/send', {text});
   el.draft.value = '';
   grow();
-  el.tray.hidden = !paused;   // 停止中はトレイを残して次の発話を受ける
+  el.tray.hidden = route !== 'hold';   // ためている間はトレイを残す
 };
 
+// 消したものは一度だけ戻せるようにする（確認ダイアログは毎回だと煩わしい）
+let lastDiscarded = '';
+
 el.discard.onclick = async () => {
+  lastDiscarded = el.draft.value;
   await post('/api/discard');
   el.draft.value = '';
   grow();
-  el.tray.hidden = !paused;
+  el.tray.hidden = route !== 'hold';
+  if (lastDiscarded.trim()) {
+    el.hint.textContent = '消しました。';
+    const undo = document.createElement('button');
+    undo.textContent = '元に戻す';
+    undo.style.marginLeft = '.5rem';
+    undo.onclick = () => {
+      el.draft.value = lastDiscarded;
+      el.tray.hidden = false;
+      grow();
+      el.hint.textContent = HINT[route];
+    };
+    el.hint.appendChild(undo);
+  }
 };
 
 el.draft.addEventListener('input', grow);
