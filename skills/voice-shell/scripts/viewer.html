@@ -171,6 +171,14 @@
   }
   .toggle input { accent-color:var(--focus); cursor:pointer; margin:0; }
 
+  /* 使うマイク。切り替えても録音だけ入れ替わるので待たされない */
+  .mic {
+    font:inherit; font-size:.79rem; max-width:14rem;
+    padding:.3rem .5rem; border-radius:2px;
+    color:var(--ink-soft); background:var(--field); border:1px solid var(--rule);
+  }
+  .mic:focus-visible { outline:2px solid var(--focus); outline-offset:1px; }
+
   /* ── ユーザー辞書 ─────────────────────── */
   /* 開くとログと入れ替わる（重ねない・浮かせない） */
   .dict { padding:.5rem 0 1.25rem; }
@@ -327,6 +335,7 @@
       </button>
     </div>
     <span class="spacer"></span>
+    <select id="mic" class="mic" aria-label="使うマイク"></select>
     <label class="toggle"><input type="checkbox" id="clean">「えーと」を消す</label>
     <span class="tally"><span id="count">0</span> 件</span>
     <button id="copy">全部コピー</button>
@@ -403,7 +412,7 @@ window.addEventListener('error', e => {
 const $ = id => document.getElementById(id);
 const el = {};
 for (const id of ['beacon','stateText','now','stream','tray','draft','send','discard',
-                  'segLive','segHold','segOff','hint','clean','count','copy','log','none',
+                  'segLive','segHold','segOff','hint','clean','count','copy','log','none','mic',
                   'dict','speechView','viewSpeech','viewDict','dictSave','dictNote',
                   'tabReplace','tabIgnore','paneReplace','paneIgnore',
                   'replaceRows','ignoreRows','addReplace','addIgnore',
@@ -586,6 +595,39 @@ async function setRoute(next) {
 el.segLive.onclick = () => setRoute('live');
 el.segHold.onclick = () => setRoute('hold');
 el.segOff.onclick = () => setRoute('off');
+
+// 使うマイク。切り替えても録音プロセスだけ入れ替わる（モデルはそのまま）
+async function loadMics() {
+  try {
+    const d = await (await fetch('/api/mics')).json();
+    if (!d.mics.length) { el.mic.hidden = true; return; }
+    el.mic.replaceChildren(...d.mics.map(m => {
+      const o = document.createElement('option');
+      o.value = m.id;
+      o.textContent = m.label;
+      o.selected = m.id === d.current;
+      return o;
+    }));
+    // 一覧に無いものが選ばれている場合も表示に出す
+    if (d.current && ![...el.mic.options].some(o => o.value === d.current)) {
+      const o = document.createElement('option');
+      o.value = d.current; o.textContent = d.current; o.selected = true;
+      el.mic.prepend(o);
+    }
+    el.mic.hidden = false;
+  } catch {
+    el.mic.hidden = true;
+  }
+}
+
+el.mic.onchange = async () => {
+  await fetch('/api/mics', {
+    method: 'PUT', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({device: el.mic.value})
+  });
+  el.hint.textContent = `マイクを切り替えました: ${el.mic.selectedOptions[0].textContent}`;
+  setTimeout(() => { el.hint.textContent = HINT[route]; }, 2500);
+};
 
 let seeded = false;   // 溜まっていた分をリロード時に一度だけ復元する
 
@@ -897,6 +939,7 @@ el.draft.addEventListener('keydown', e => {
 });
 
 retally();
+loadMics();
 connect();
 setInterval(refreshState, 3000);
 </script>

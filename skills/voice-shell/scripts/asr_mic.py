@@ -4,13 +4,18 @@ realtime.py（端末表示）と webapp.py（ブラウザ表示）が共有す�
 両者の違いは「認識イベントをどう出力するか」だけなので、この module は
 イベントを yield するところまでを受け持つ。
 """
+import re
+import os
 import shutil
 import subprocess
 import sys
 from typing import Iterator, Tuple
 
 import numpy as np
-from qwen_asr.inference.utils import SAMPLE_RATE
+
+# 音声認識モデルが期待するサンプルレート。クラウドの API を使うときは
+# qwen_asr が入っていないので、その場合も動くよう固定値で持つ。
+SAMPLE_RATE = 16000
 
 BLOCK_SEC = 0.1  # マイクを読む単位
 
@@ -24,8 +29,12 @@ else:
 
 
 def add_common_args(p):
-    """realtime.py / webapp.py で共通の引数を登録する。"""
-    p.add_argument("--model", default="Qwen/Qwen3-ASR-1.7B", help="モデル名")
+    """各スクリプトで共通の引数を登録する。"""
+    p.add_argument("--engine", default=os.environ.get("VOICE_SHELL_ENGINE", "local"),
+                   help="認識エンジン。local（Qwen3-ASR をこの PC の GPU で動かす）か、"
+                        "クラウドの API 名。VOICE_SHELL_ENGINE でも指定できる")
+    p.add_argument("--model", default=None,
+                   help="モデル名。省略するとエンジンごとの既定値を使う")
     p.add_argument("--language", default=None,
                    help="言語を固定 (例: Japanese)。省略で自動判定")
     p.add_argument("--device", default=DEFAULT_DEVICE,
@@ -57,15 +66,21 @@ def add_common_args(p):
 
 
 def load_model(args):
-    """ストリーミング用に vLLM バックエンドでモデルを読み込む。
+    """認識エンジンを用意する。
 
-    max_model_len を明示しないと既定値 65536 が KV キャッシュに 7GiB 要求し、
-    16GB GPU では起動に失敗する。
+    engine が local なら Qwen3-ASR をこの PC の GPU で動かす。
+    それ以外はクラウドの API を使う（GPU が無い PC でも動かせる）。
     """
+    if args.engine != "local":
+        import engines
+        return engines.load(args)
+
+    # max_model_len を明示しないと既定値 65536 が KV キャッシュに 7GiB 要求し、
+    # 16GB GPU では起動に失敗する。
     from qwen_asr import Qwen3ASRModel
 
     model = Qwen3ASRModel.LLM(
-        model=args.model,
+        model=args.model or "Qwen/Qwen3-ASR-1.7B",
         gpu_memory_utilization=args.gpu_memory_utilization,
         max_model_len=args.max_model_len,
         max_new_tokens=64,
@@ -101,6 +116,62 @@ def _kill_engine_on_exit():
     _signal.signal(_signal.SIGTERM, lambda *_: sys.exit(0))
 
 
+def list_mics() -> list:
+    """使えるマイクの一覧を返す。[{"id": ..., "label": ...}, ...]
+
+    OS ごとに取り方が違うので、ここで吸収する。
+    """
+    out = []
+    try:
+        if sys.platform == "darwin":
+            # ffmpeg はデバイス一覧を stderr に出し、終了コードも 1 になる
+            r = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-f", "avfoundation",
+                 "-list_devices", "true", "-i", ""],
+                capture_output=True, timeout=10)
+            audio = False
+            for line in r.stderr.decode(errors="replace").splitlines():
+                if "AVFoundation audio devices" in line:
+                    audio = True
+                    continue
+                if audio:
+                    m = re.search(r"\[(\d+)\]\s+(.+)$", line)
+                    if m:
+                        out.append({"id": f":{m.group(1)}", "label": m.group(2).strip()})
+
+        elif sys.platform.startswith("win"):
+            r = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-list_devices", "true",
+                 "-f", "dshow", "-i", "dummy"],
+                capture_output=True, timeout=10)
+            for line in r.stderr.decode(errors="replace").splitlines():
+                if "(audio)" in line:
+                    m = re.search(r'"(.+?)"', line)
+                    if m:
+                        out.append({"id": f"audio={m.group(1)}", "label": m.group(1)})
+
+        else:
+            # arecord -L は「名前」と「説明」が交互に並ぶ
+            r = subprocess.run(["arecord", "-L"], capture_output=True, timeout=10)
+            name = None
+            for line in r.stdout.decode(errors="replace").splitlines():
+                if not line.startswith((" ", "\t")):
+                    name = line.strip()
+                    # 環境依存で数が多いので、実用的なものだけ拾う
+                    if name and (name in ("default", "pipewire", "pulse")
+                                 or name.startswith("plughw:")):
+                        out.append({"id": name, "label": name})
+                    else:
+                        name = None
+                elif name and out and out[-1]["id"] == name:
+                    out[-1]["label"] = f"{name} — {line.strip()}"
+                    name = None
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+    return out
+
+
 def mic_command(device: str, in_sr: int) -> list:
     """生 PCM を標準出力に流すコマンドを組む。
 
@@ -133,27 +204,46 @@ def mic_command(device: str, in_sr: int) -> list:
             "-r", str(in_sr), "-c", "1", "-t", "raw", "-q"]
 
 
-def read_blocks(device: str, in_sr: int) -> Iterator[Tuple[np.ndarray, float, float]]:
+def read_blocks(device: str, in_sr: int,
+                want_device=None) -> Iterator[Tuple[np.ndarray, float, float]]:
     """マイクを読み続け、(16kHz PCM, 長さ秒, RMS) を yield する。
 
     PipeWire がマイクを占有していると PortAudio からは見えないため、
     arecord に生 PCM を吐かせてパイプで受け取る。
-    """
-    proc = subprocess.Popen(mic_command(device, in_sr), stdout=subprocess.PIPE)
-    nbytes = int(in_sr * BLOCK_SEC) * 2  # 16bit モノラル
 
-    if in_sr == SAMPLE_RATE:
-        to_16k = lambda b: b  # noqa: E731
-    else:
+    want_device() が別のデバイス名を返したら、録音プロセスだけ差し替える。
+    モデルは載せたままなので、マイクの切り替えは待たされない。
+    """
+    def start(dev):
+        return subprocess.Popen(mic_command(dev, in_sr), stdout=subprocess.PIPE)
+
+    def make_resampler():
+        if in_sr == SAMPLE_RATE:
+            return lambda b: b
         import soxr
-        print(f"マイクを {in_sr}Hz で録音し {SAMPLE_RATE}Hz に変換します", file=sys.stderr)
         # ストリーム用リサンプラを一度だけ構築する。ブロックごとに
         # soxr.resample() を呼ぶとフィルタの生成・破棄が毎回走り約4倍遅い。
-        stream = soxr.ResampleStream(in_sr, SAMPLE_RATE, 1, dtype="float32")
-        to_16k = stream.resample_chunk
+        return soxr.ResampleStream(in_sr, SAMPLE_RATE, 1, dtype="float32").resample_chunk
+
+    current = device
+    proc = start(current)
+    nbytes = int(in_sr * BLOCK_SEC) * 2  # 16bit モノラル
+    to_16k = make_resampler()
+    if in_sr != SAMPLE_RATE:
+        print(f"マイクを {in_sr}Hz で録音し {SAMPLE_RATE}Hz に変換します", file=sys.stderr)
 
     try:
         while True:
+            # 切り替えを頼まれていたら録音だけやり直す
+            if want_device is not None:
+                asked = want_device()
+                if asked and asked != current:
+                    proc.terminate()
+                    current = asked
+                    proc = start(current)
+                    to_16k = make_resampler()   # 履歴を持たせない
+                    print(f"マイクを切り替えました: {current}", file=sys.stderr, flush=True)
+
             raw = proc.stdout.read(nbytes)
             if not raw:
                 return
@@ -177,6 +267,12 @@ def stream_utterances(model, args, should_stop=lambda: False):
     喋っている最中には切らず、息継ぎ（pause_sec）を待ってから区切る。
     ライブラリ側に発話区切り（VAD）は無いため、ここで RMS を見て判定している。
     """
+    # クラウドの API は自前でストリームを持つので、そちらに任せる
+    if args.engine != "local":
+        import engines
+        yield from engines.stream(model, args, should_stop)
+        return
+
     def new_state():
         return model.init_streaming_state(
             language=args.language,
@@ -195,7 +291,8 @@ def stream_utterances(model, args, should_stop=lambda: False):
         return ({"type": "final", "text": state.text, "language": state.language}
                 if state.text.strip() else None)
 
-    for block, dur, rms in read_blocks(args.device, args.input_samplerate):
+    for block, dur, rms in read_blocks(args.device, args.input_samplerate,
+                                       want_device=getattr(args, "want_device", None)):
         if should_stop():
             break
 
