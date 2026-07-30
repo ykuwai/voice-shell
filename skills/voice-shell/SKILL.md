@@ -1,6 +1,6 @@
 ---
 name: "voice-shell"
-description: "音声でプロンプトを送れるようにする。マイクを聞き続ける常駐プロセスを起動し、ユーザーが喋った内容を Monitor 経由で受け取って指示として扱う。「音声モード」「声で指示したい」「マイクで話す」「ハンズフリー」「音声で操作」、または \"voice mode\", \"talk to me\", \"hands-free\", \"dictate my prompts\", \"speak instead of typing\" と言われたときに使う。停止は「音声モード終了」/ \"stop voice mode\"。"
+description: "音声でプロンプトを送れるようにする。マイクを聞き続ける常駐プロセスを起動し、ユーザーが喋った内容を Monitor 経由で受け取って指示として扱う。「音声モード」「声で指示したい」「マイクで話す」「ハンズフリー」「音声で操作」、または \"voice mode\", \"talk to me\", \"hands-free\", \"dictate my prompts\", \"speak instead of typing\" と言われたときに使う。停止は「音声モード終了」/ \"stop voice mode\"。「voice-shell をセットアップして」と言われた場合は SETUP.md の手順で環境（NVIDIA GPU / Apple Silicon / CPU のみ）を判別して案内する。"
 version: "0.1.0"
 license: "MIT"
 argument-hint: "[start | stop | status]"
@@ -18,7 +18,19 @@ allowed-tools:
 裏で Qwen3-ASR の常駐プロセスがマイクを聞き、発話が確定するたびに JSONL へ1行追記する。
 そのログを Monitor で tail し、届いた行をユーザーからの指示として扱う。
 
-引数: `$ARGUMENTS`（`start` / `stop` / `status`。省略時は `start`）
+引数: `$ARGUMENTS`（`start` / `stop` / `status` / `setup`。省略時は `start`）
+
+## まだセットアップされていないとき
+
+`start` が「Qwen3-ASR が入った Python が見つかりません」で失敗した場合、または
+ユーザーが「セットアップして」「使えるようにして」と言った場合は
+[SETUP.md](SETUP.md) を読んで、そこの手順で案内する。
+
+OS と GPU によって入れるものが変わる（NVIDIA / Apple Silicon / CPU のみ）。
+**環境を調べてから、どれで進めるかユーザーに確認する。** 勝手に全部入れない。
+
+Apple Silicon と CPU 版は**エンジンの差し替えが未実装**なので、その環境では
+まだ動かない。案内するときはそのことを必ず伝える。
 
 ## 開始する
 
