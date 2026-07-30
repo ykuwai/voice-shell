@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.log
+# 検証用に落としたサンプル音声（README の手順で再取得できる）
+sample_*.wav
+sample_*.flac

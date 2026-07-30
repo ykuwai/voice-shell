@@ -1,0 +1,717 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>voice-shell — 音声プロンプト</title>
+<style>
+  :root {
+    --paper:#faf9f7;
+    --ink:#14161a;
+    --ink-soft:#5a6068;
+    --ink-faint:#8d939b;
+    --rule:#e2e0dc;
+    --field:#f2f0ec;
+    --signal:#a8770c;      /* 認識中 */
+    --sent:#3d6b4a;        /* 送信済み */
+    --hold:#8a5a3c;        /* 保留中 */
+    --focus:#2b5c8a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper:#131519; --ink:#e8e6e1; --ink-soft:#9aa0a8; --ink-faint:#666c74;
+      --rule:#262a30; --field:#1b1e23;
+      --signal:#d4a437; --sent:#7fae8b; --hold:#c99871; --focus:#6ba3d8;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:#131519; --ink:#e8e6e1; --ink-soft:#9aa0a8; --ink-faint:#666c74;
+    --rule:#262a30; --field:#1b1e23;
+    --signal:#d4a437; --sent:#7fae8b; --hold:#c99871; --focus:#6ba3d8;
+  }
+  :root[data-theme="light"] {
+    --paper:#faf9f7; --ink:#14161a; --ink-soft:#5a6068; --ink-faint:#8d939b;
+    --rule:#e2e0dc; --field:#f2f0ec;
+    --signal:#a8770c; --sent:#3d6b4a; --hold:#8a5a3c; --focus:#2b5c8a;
+  }
+
+  * { box-sizing:border-box; }
+  html { -webkit-text-size-adjust:100%; }
+  body {
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:"Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+    font-size:16px; line-height:1.75;
+  }
+  .page { max-width:53rem; margin:0 auto; padding:2.5rem 1.5rem 4rem; }
+
+  /* ── ヘッダ ───────────────────────────── */
+  header { border-bottom:1px solid var(--rule); padding-bottom:1rem; margin-bottom:1.75rem; }
+  .title-row { display:flex; align-items:baseline; gap:.9rem; flex-wrap:wrap; }
+  h1 { margin:0; font-size:1.05rem; font-weight:600; letter-spacing:.01em; }
+  .state {
+    display:flex; align-items:center; gap:.45rem;
+    font-size:.75rem; color:var(--ink-soft); font-variant-numeric:tabular-nums;
+  }
+  .beacon { width:7px; height:7px; border-radius:50%; background:var(--ink-faint); flex:none; }
+  .beacon.live { background:var(--sent); }
+  .beacon.paused { background:var(--hold); }
+  .beacon.down { background:var(--hold); opacity:.5; }
+  @media (prefers-reduced-motion:no-preference) {
+    .beacon.live { animation:breathe 2.4s ease-in-out infinite; }
+  }
+  @keyframes breathe { 50% { opacity:.35; } }
+  .lede { margin:.55rem 0 0; font-size:.82rem; color:var(--ink-soft); }
+
+  /* ── 認識中 ───────────────────────────── */
+  .now {
+    display:grid; grid-template-columns:5.5rem 1fr; gap:1rem;
+    padding:1rem 0; min-height:4.5rem; align-items:start;
+    border-bottom:1px solid var(--rule);
+  }
+  .now .gutter {
+    font-family:ui-monospace, "SF Mono", Menlo, monospace;
+    font-size:.68rem; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--signal); padding-top:.35rem;
+  }
+  .now .stream { font-size:1.06rem; }
+  .now.idle .stream { color:var(--ink-faint); }
+  .caret {
+    display:inline-block; width:1px; height:1.05em; background:var(--signal);
+    margin-left:2px; vertical-align:-.14em;
+  }
+  @media (prefers-reduced-motion:no-preference) {
+    .caret { animation:blink 1.1s step-end infinite; }
+  }
+  @keyframes blink { 50% { opacity:0; } }
+  .now.idle .caret { display:none; }
+
+  /* ── 保留トレイ ───────────────────────── */
+  .tray { padding:1.25rem 0; border-bottom:1px solid var(--rule); }
+  .tray-head {
+    font-family:ui-monospace, "SF Mono", Menlo, monospace;
+    font-size:.68rem; letter-spacing:.09em; text-transform:uppercase;
+    color:var(--hold); margin-bottom:.7rem;
+  }
+  textarea {
+    display:block; width:100%; min-height:6.5rem; padding:.85rem .95rem;
+    font:inherit; font-size:.98rem; line-height:1.7;
+    color:var(--ink); background:var(--field);
+    border:1px solid var(--rule); border-radius:2px;
+    resize:none;        /* 内容に合わせて自動で伸ばすので手動リサイズは不要 */
+    overflow:hidden;    /* 内側にスクロールバーを出さない */
+  }
+  textarea:focus-visible { outline:2px solid var(--focus); outline-offset:1px; }
+  .tray-actions { display:flex; gap:.5rem; margin-top:.7rem; }
+
+  /* ── 操作 ─────────────────────────────── */
+  .bar {
+    display:flex; align-items:center; gap:.6rem; flex-wrap:wrap;
+    padding:1rem 0; border-bottom:1px solid var(--rule);
+  }
+  .bar .spacer { flex:1; }
+  .tally {
+    font-family:ui-monospace, "SF Mono", Menlo, monospace;
+    font-size:.72rem; color:var(--ink-faint); font-variant-numeric:tabular-nums;
+  }
+  button {
+    font:inherit; font-size:.82rem; line-height:1.4; cursor:pointer;
+    padding:.42rem .9rem; border-radius:3px;
+    color:var(--ink); background:var(--field); border:1px solid var(--rule);
+    transition:background .12s, border-color .12s, color .12s;
+  }
+  button:hover { border-color:var(--ink-faint); }
+  button:focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+
+  /* 主操作：マイクの入切。状態が一目で分かるよう塗る */
+  button.primary {
+    display:inline-flex; align-items:center; gap:.45rem; font-weight:600;
+    border-color:var(--sent); color:var(--sent);
+  }
+  button.primary .dot-icon {
+    width:8px; height:8px; border-radius:50%; background:currentColor; flex:none;
+  }
+  button.primary.off { border-color:var(--hold); color:var(--hold); }
+  button.primary.off .dot-icon { background:transparent; box-shadow:inset 0 0 0 1.5px currentColor; }
+
+  /* 手直しモード中は押されている状態を示す */
+  button.armed { border-color:var(--focus); color:var(--focus); font-weight:600; }
+  button.go { border-color:var(--sent); color:var(--sent); font-weight:600; }
+
+  .hint {
+    margin:.75rem 0 0; font-size:.78rem; color:var(--ink-soft); min-height:1.2em;
+  }
+  .toggle {
+    display:inline-flex; align-items:center; gap:.4rem;
+    font-size:.79rem; color:var(--ink-soft); cursor:pointer;
+  }
+  .toggle input { accent-color:var(--focus); cursor:pointer; margin:0; }
+
+  /* ── ユーザー辞書 ─────────────────────── */
+  .dict { padding:1.25rem 0; border-bottom:1px solid var(--rule); }
+  .dict-head {
+    font-family:ui-monospace, "SF Mono", Menlo, monospace;
+    font-size:.68rem; letter-spacing:.09em; text-transform:uppercase;
+    color:var(--focus); margin-bottom:.9rem;
+  }
+  .dict-label {
+    display:block; font-size:.78rem; color:var(--ink-soft); margin:0 0 .7rem;
+  }
+  .dict-tabs { display:flex; gap:.4rem; margin-bottom:.9rem; }
+  .tab {
+    font-size:.79rem; padding:.3rem .8rem;
+    background:transparent; color:var(--ink-soft); border-color:transparent;
+    border-bottom:2px solid transparent; border-radius:0;
+  }
+  .tab.on { color:var(--ink); border-bottom-color:var(--focus); font-weight:600; }
+
+  /* 1件 = 1行のフォーム。矢印を手で書かせない。 */
+  .rows { display:flex; flex-direction:column; gap:.4rem; }
+  .row { display:flex; align-items:center; gap:.5rem; }
+  .row input {
+    flex:1; min-width:0; font:inherit; font-size:.92rem;
+    padding:.4rem .6rem; border-radius:2px;
+    color:var(--ink); background:var(--field); border:1px solid var(--rule);
+  }
+  .row input:focus-visible { outline:2px solid var(--focus); outline-offset:1px; }
+  .row .arrow { color:var(--ink-faint); font-size:.9rem; flex:none; }
+  .row .del {
+    flex:none; padding:.25rem .5rem; font-size:.8rem; line-height:1;
+    color:var(--ink-faint); border-color:transparent; background:transparent;
+  }
+  .row .del:hover { color:var(--hold); border-color:var(--rule); }
+  .add {
+    margin-top:.6rem; font-size:.79rem;
+    background:transparent; color:var(--ink-soft); border-style:dashed;
+  }
+  /* 組み込みで無視している語。編集できないので淡く出す */
+  .builtin-head { margin-top:1.3rem; padding-top:1rem; border-top:1px solid var(--rule); }
+  .chips { display:flex; flex-wrap:wrap; gap:.3rem; }
+  .chip {
+    font-size:.78rem; padding:.15rem .5rem; border-radius:2px;
+    color:var(--ink-soft); background:var(--field); border:1px solid var(--rule);
+  }
+
+  .dict-actions {
+    display:flex; gap:.5rem; align-items:center; margin-top:1rem; flex-wrap:wrap;
+  }
+  .dict-actions .spacer { flex:1; }
+  .dict-note { margin:.6rem 0 0; font-size:.76rem; color:var(--ink-soft); min-height:1.2em; }
+
+  /* ── 発話ログ ─────────────────────────── */
+  #log { display:flex; flex-direction:column-reverse; }
+  .entry {
+    display:grid; grid-template-columns:5.5rem 1fr; gap:1rem;
+    padding:.85rem 0; border-bottom:1px solid var(--rule);
+  }
+  @media (prefers-reduced-motion:no-preference) {
+    .entry { animation:settle .3s ease-out; }
+  }
+  @keyframes settle { from { opacity:0; transform:translateY(-3px); } }
+  .entry .gutter {
+    font-family:ui-monospace, "SF Mono", Menlo, monospace;
+    font-size:.7rem; color:var(--ink-faint);
+    font-variant-numeric:tabular-nums; padding-top:.3rem;
+    display:flex; flex-direction:column; gap:.2rem;
+  }
+  .mark { font-size:.62rem; letter-spacing:.07em; }
+  .mark.sent { color:var(--sent); }
+  .mark.edited { color:var(--focus); }
+  .entry .text { white-space:pre-wrap; overflow-wrap:anywhere; }
+
+  .none { padding:1.5rem 0; color:var(--ink-faint); font-size:.86rem; }
+
+  @media (max-width:34rem) {
+    .now, .entry { grid-template-columns:1fr; gap:.25rem; }
+    .entry .gutter, .now .gutter { flex-direction:row; gap:.6rem; padding-top:0; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header>
+    <div class="title-row">
+      <h1>voice-shell</h1>
+      <span class="state"><span class="beacon" id="beacon"></span><span id="stateText">接続中</span></span>
+    </div>
+    <p class="lede">Claude Code に送られている音声プロンプトです。</p>
+  </header>
+
+  <section class="now idle" id="now" aria-live="polite">
+    <div class="gutter">認識中</div>
+    <div class="stream"><span id="stream"></span><span class="caret"></span></div>
+  </section>
+
+  <section class="tray" id="tray" hidden>
+    <div class="tray-head">保留中 — 送信前に手直しできます</div>
+    <textarea id="draft" aria-label="送信前のテキスト"></textarea>
+    <div class="tray-actions">
+      <button class="go" id="send">送信する</button>
+      <button id="discard">破棄</button>
+    </div>
+  </section>
+
+  <div class="bar">
+    <button class="primary" id="mute">
+      <span class="dot-icon" aria-hidden="true"></span><span id="muteLabel">マイクを切る</span>
+    </button>
+    <button id="hold">手直ししてから送る</button>
+    <span class="spacer"></span>
+    <label class="toggle"><input type="checkbox" id="clean">フィラーを除去</label>
+    <button id="dictBtn">辞書</button>
+    <span class="tally"><span id="count">0</span> 件</span>
+    <button id="copy">コピー</button>
+  </div>
+  <p class="hint" id="hint"></p>
+
+  <section class="dict" id="dict" hidden>
+    <div class="dict-head">ユーザー辞書</div>
+
+    <div class="dict-tabs" role="tablist">
+      <button class="tab on" id="tabReplace" role="tab">言い換え</button>
+      <button class="tab" id="tabIgnore" role="tab">無視する発話</button>
+    </div>
+
+    <!-- 言い換え -->
+    <div class="pane" id="paneReplace">
+      <p class="dict-label">誤認識しやすい語を、送る前に置き換えます。</p>
+      <div class="rows" id="replaceRows"></div>
+      <button class="add" id="addReplace">＋ 行を追加</button>
+    </div>
+
+    <!-- 無視する発話 -->
+    <div class="pane" id="paneIgnore" hidden>
+      <p class="dict-label">これ単独で認識されたときは送りません（物音の誤認識よけ）。</p>
+      <div class="rows" id="ignoreRows"></div>
+      <button class="add" id="addIgnore">＋ 行を追加</button>
+
+      <p class="dict-label builtin-head">
+        最初から無視している語（<span id="builtinCount">0</span>）— 登録は不要です
+      </p>
+      <div class="chips" id="builtinChips"></div>
+    </div>
+
+    <div class="dict-actions">
+      <button class="go" id="dictSave">保存する</button>
+      <button id="dictClose">閉じる</button>
+      <span class="spacer"></span>
+      <button id="dictExport">CSV で保存</button>
+      <button id="dictImport">CSV を読み込む</button>
+      <input type="file" id="dictFile" accept=".csv,text/csv" hidden>
+    </div>
+    <p class="dict-note" id="dictNote"></p>
+  </section>
+
+  <div id="log"></div>
+  <p class="none" id="none">まだ発話がありません。マイクに向かって話してください。</p>
+
+</div>
+
+<script>
+// 画面に出ない不具合を見えるようにする（読み込み失敗はボタンが無反応になるだけなので）
+window.addEventListener('error', e => {
+  const box = document.getElementById('hint');
+  if (box) box.textContent = '画面の読み込みでエラー: ' + e.message;
+});
+
+const $ = id => document.getElementById(id);
+const el = {};
+for (const id of ['beacon','stateText','now','stream','tray','draft','send','discard',
+                  'mute','muteLabel','hold','hint','clean','count','copy','log','none',
+                  'dict','dictBtn','dictSave','dictClose','dictNote',
+                  'tabReplace','tabIgnore','paneReplace','paneIgnore',
+                  'replaceRows','ignoreRows','addReplace','addIgnore',
+                  'dictExport','dictImport','dictFile',
+                  'builtinChips','builtinCount'])
+  el[id] = $(id);
+
+let paused = false;   // 手直ししてから送るモード
+let muted  = false;   // マイクを切っている
+
+/* ── 整形 ───────────────────────────────── */
+const FILLERS = ['えーと','えっと','ええと','あのー','あの','えー','えっ','まあ',
+                 'なんか','そのー','うーん','んー'];
+const FILLER_RE = new RegExp('(' + FILLERS.sort((a,b)=>b.length-a.length)
+  .map(s => s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|') + ')','g');
+
+// 日本語モードで英語を話すと単語ごとに読点が入るため戻す
+const fixLatin = t => t.replace(/([A-Za-z])、(?=[A-Za-z])/g,'$1 ');
+
+const stripFillers = t => t.replace(FILLER_RE,'')
+  .replace(/、{2,}/g,'、').replace(/^[、。\s]+/,'').replace(/\s{2,}/g,' ').trim();
+
+const format = raw => el.clean.checked ? stripFillers(fixLatin(raw)) : fixLatin(raw);
+
+/* ── 表示 ───────────────────────────────── */
+function setState(kind, text) {
+  el.beacon.className = 'beacon ' + kind;
+  el.stateText.textContent = text;
+}
+
+function retally() {
+  const n = el.log.children.length;
+  el.count.textContent = n;
+  el.none.hidden = n > 0;
+}
+
+function addEntry(rec) {
+  const row = document.createElement('div');
+  row.className = 'entry';
+
+  const gutter = document.createElement('div');
+  gutter.className = 'gutter';
+  const stamp = document.createElement('span');
+  // ログには時刻を載せていないので、受け取った時刻を表示する
+  stamp.textContent = rec.time ||
+    new Date().toLocaleTimeString('ja-JP', {hour12:false});
+  const mark = document.createElement('span');
+  mark.className = 'mark ' + (rec.edited ? 'edited' : 'sent');
+  mark.textContent = rec.edited ? '手直し送信' : '送信済み';
+  gutter.append(stamp, mark);
+
+  const text = document.createElement('div');
+  text.className = 'text';
+  text.dataset.raw = rec.text;
+  text.textContent = format(rec.text);
+
+  row.append(gutter, text);
+  el.log.appendChild(row);
+  retally();
+}
+
+function reformatAll() {
+  for (const row of el.log.children) {
+    const t = row.querySelector('.text');
+    t.textContent = format(t.dataset.raw);
+  }
+}
+
+/* ── 通信 ───────────────────────────────── */
+function connect() {
+  const ws = new WebSocket(`ws://${location.host}/ws`);
+
+  ws.onopen = () => refreshState();
+
+  ws.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+
+    if ('partial' in m) {
+      const t = m.partial.trim();
+      el.stream.textContent = t;
+      el.now.classList.toggle('idle', !t);
+
+    } else if ('held' in m) {
+      // 一時停止中の発話。編集中でも壊さないよう末尾に足すだけにする
+      appendHeld(m.held);
+
+    } else {
+      addEntry(m);
+      el.stream.textContent = '';
+      el.now.classList.add('idle');
+    }
+  };
+
+  ws.onclose = () => {
+    setState('down', '切断 — 再接続中');
+    setTimeout(connect, 2000);
+  };
+}
+
+// 内容に合わせて高さを伸ばす（内側スクロールを避ける）
+function grow() {
+  el.draft.style.height = 'auto';
+  el.draft.style.height = el.draft.scrollHeight + 'px';
+}
+
+// 保留発話を末尾に足す。カーソル位置と編集内容は保つ。
+function appendHeld(text) {
+  text = (text || '').trim();
+  if (!text) return;
+  el.tray.hidden = false;
+  const cur = el.draft.value;
+  el.draft.value = cur ? cur.replace(/\s*$/, '') + '\n' + text : text;
+  grow();
+  // 追記直後は末尾が見えるようにする（編集中でなければ）
+  if (document.activeElement !== el.draft) {
+    el.draft.scrollTop = el.draft.scrollHeight;
+  }
+}
+
+function paint() {
+  // マイクを切っているときは、そちらが優先の状態
+  if (muted) {
+    setState('paused', 'マイクを切っています');
+    el.hint.textContent = '話しても記録されません。別の作業をしていても安全です。';
+  } else if (paused) {
+    setState('paused', '手直ししてから送ります');
+    el.hint.textContent = '話した内容は下に溜まります。直してから「送信する」を押してください。';
+  } else {
+    setState('live', '聞いています');
+    el.hint.textContent = '話した内容はそのまま Claude Code に届きます。';
+  }
+
+  el.muteLabel.textContent = muted ? 'マイクを入れる' : 'マイクを切る';
+  el.mute.classList.toggle('off', muted);
+
+  el.hold.textContent = paused ? 'そのまま送るのに戻す' : '手直ししてから送る';
+  el.hold.classList.toggle('armed', paused);
+  el.hold.disabled = muted;         // 切っている間は溜まらないので意味がない
+  el.hold.style.opacity = muted ? .45 : 1;
+
+  el.now.classList.toggle('idle', muted);
+  if (muted) el.stream.textContent = '';
+}
+
+async function refreshState() {
+  try {
+    const s = await (await fetch('/api/state')).json();
+    paused = s.paused;
+    muted = s.muted;
+    paint();
+
+    // 保留モード中はトレイを出しておく（喋った分がここに足されていく）
+    if (paused && !muted) {
+      el.tray.hidden = false;
+      grow();
+    } else if (!el.draft.value.trim()) {
+      el.tray.hidden = true;
+    }
+  } catch {
+    setState('down', '応答なし');
+    el.hint.textContent = '';
+  }
+}
+
+const post = (path, body) =>
+  fetch(path, {method:'POST', headers:{'Content-Type':'application/json'},
+               body: JSON.stringify(body || {})});
+
+/* ── 操作 ───────────────────────────────── */
+el.mute.onclick = async () => {
+  muted = !muted;
+  paint();                                  // 押した瞬間に反映する
+  try {
+    const r = await post('/api/mute', {muted});
+    const got = await r.json();
+    if (got.muted !== muted) {              // 反映されなかった
+      muted = got.muted; paint();
+      el.hint.textContent = 'マイクの切替に失敗しました。';
+      return;
+    }
+  } catch (err) {
+    el.hint.textContent = 'マイクの切替に失敗しました: ' + err.message;
+    return;
+  }
+  refreshState();
+};
+
+el.hold.onclick = async () => {
+  paused = !paused;
+  paint();
+  await post('/api/pause', {paused});
+  refreshState();
+};
+
+el.send.onclick = async () => {
+  const text = el.draft.value.trim();
+  if (!text) return;
+  await post('/api/send', {text});
+  el.draft.value = '';
+  grow();
+  el.tray.hidden = !paused;   // 停止中はトレイを残して次の発話を受ける
+};
+
+el.discard.onclick = async () => {
+  await post('/api/discard');
+  el.draft.value = '';
+  grow();
+  el.tray.hidden = !paused;
+};
+
+el.draft.addEventListener('input', grow);
+
+el.clean.onchange = reformatAll;
+
+/* ── ユーザー辞書 ───────────────────────── */
+// 1件 = 1行のフォーム。矢印や JSON を手で書かせない。
+
+function replaceRow(from = '', to = '') {
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.innerHTML =
+    '<input class="from" placeholder="聞こえた語（例: クロードコード）">' +
+    '<span class="arrow">→</span>' +
+    '<input class="to" placeholder="送る語（例: Claude Code）">' +
+    '<button class="del" title="この行を削除" aria-label="この行を削除">✕</button>';
+  row.querySelector('.from').value = from;
+  row.querySelector('.to').value = to;
+  row.querySelector('.del').onclick = () => row.remove();
+  return row;
+}
+
+function ignoreRow(word = '') {
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.innerHTML =
+    '<input class="word" placeholder="この語だけなら送らない（例: チャンネル登録）">' +
+    '<button class="del" title="この行を削除" aria-label="この行を削除">✕</button>';
+  row.querySelector('.word').value = word;
+  row.querySelector('.del').onclick = () => row.remove();
+  return row;
+}
+
+function renderDict(d) {
+  el.replaceRows.replaceChildren(
+    ...Object.entries(d.replace || {}).map(([k, v]) => replaceRow(k, v)));
+  el.ignoreRows.replaceChildren(
+    ...(d.ignore || []).map(w => ignoreRow(w)));
+
+  // 組み込みで無視している語は編集できないので、見るだけの並びにする
+  if (d.builtin) {
+    el.builtinChips.replaceChildren(...d.builtin.map(w => {
+      const s = document.createElement('span');
+      s.className = 'chip';
+      s.textContent = w;
+      return s;
+    }));
+    el.builtinCount.textContent = d.builtin.length;
+  }
+  // 空なら1行だけ用意しておく（いきなり入力できるように）
+  if (!el.replaceRows.children.length) el.replaceRows.appendChild(replaceRow());
+  if (!el.ignoreRows.children.length) el.ignoreRows.appendChild(ignoreRow());
+}
+
+// 画面の入力欄から辞書データを組み立てる
+function collectDict() {
+  const replace = {};
+  for (const row of el.replaceRows.children) {
+    const from = row.querySelector('.from').value.trim();
+    const to = row.querySelector('.to').value.trim();
+    if (from && to) replace[from] = to;
+  }
+  const ignore = [...el.ignoreRows.children]
+    .map(r => r.querySelector('.word').value.trim()).filter(Boolean);
+  return {ignore, replace};
+}
+
+function showTab(which) {
+  const isReplace = which === 'replace';
+  el.paneReplace.hidden = !isReplace;
+  el.paneIgnore.hidden = isReplace;
+  el.tabReplace.classList.toggle('on', isReplace);
+  el.tabIgnore.classList.toggle('on', !isReplace);
+}
+
+el.tabReplace.onclick = () => showTab('replace');
+el.tabIgnore.onclick = () => showTab('ignore');
+
+el.dictBtn.onclick = async () => {
+  if (el.dict.hidden) {
+    renderDict(await (await fetch('/api/dictionary')).json());
+    el.dict.hidden = false;
+    el.dictNote.textContent = '';
+    showTab('replace');
+  } else {
+    el.dict.hidden = true;
+  }
+};
+
+el.dictClose.onclick = () => { el.dict.hidden = true; };
+el.addReplace.onclick = () => el.replaceRows.appendChild(replaceRow());
+el.addIgnore.onclick = () => el.ignoreRows.appendChild(ignoreRow());
+
+el.dictSave.onclick = async () => {
+  const d = collectDict();
+  await fetch('/api/dictionary', {
+    method: 'PUT', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(d)
+  });
+  el.dictNote.textContent =
+    `保存しました（言い換え ${Object.keys(d.replace).length} 件 / ` +
+    `無視 ${d.ignore.length} 件）。次の発話から効きます。`;
+};
+
+/* ── CSV ─────────────────────────────────
+   1行1件。列は type,from,to
+     replace,クロードコード,Claude Code
+     ignore,チャンネル登録,
+*/
+const csvCell = s => /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+
+el.dictExport.onclick = () => {
+  const d = collectDict();
+  const lines = ['type,from,to'];
+  for (const [k, v] of Object.entries(d.replace)) lines.push(`replace,${csvCell(k)},${csvCell(v)}`);
+  for (const w of d.ignore) lines.push(`ignore,${csvCell(w)},`);
+  // Excel が UTF-8 と分かるよう BOM を付ける
+  const blob = new Blob(['﻿' + lines.join('\n') + '\n'], {type: 'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'voice-shell-dictionary.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+// 引用符つきセルも扱える簡易パーサ
+function parseCsvLine(line) {
+  const out = [];
+  let cur = '', quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quoted) {
+      if (c === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+      else if (c === '"') quoted = false;
+      else cur += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ',') { out.push(cur); cur = ''; }
+    else cur += c;
+  }
+  out.push(cur);
+  return out.map(s => s.trim());
+}
+
+el.dictImport.onclick = () => el.dictFile.click();
+
+el.dictFile.onchange = async ev => {
+  const file = ev.target.files[0];
+  if (!file) return;
+  const text = (await file.text()).replace(/^﻿/, '');
+
+  const replace = {}, ignore = [];
+  let skipped = 0;
+  for (const raw of text.split(/\r?\n/)) {
+    if (!raw.trim()) continue;
+    const [type, from, to] = parseCsvLine(raw);
+    if (/^type$/i.test(type)) continue;            // 見出し行
+    if (type === 'replace' && from && to) replace[from] = to;
+    else if (type === 'ignore' && from) ignore.push(from);
+    else skipped++;
+  }
+
+  renderDict({replace, ignore});
+  el.dictFile.value = '';                          // 同じファイルを選び直せるように
+  el.dictNote.textContent =
+    `読み込みました（言い換え ${Object.keys(replace).length} 件 / 無視 ${ignore.length} 件` +
+    (skipped ? ` / 読めない行 ${skipped} 件` : '') + '）。「保存する」で確定します。';
+};
+
+el.copy.onclick = async ev => {
+  const lines = [...el.log.children].map(r => r.querySelector('.text').textContent);
+  if (!lines.length) return;
+  await navigator.clipboard.writeText(lines.reverse().join('\n'));
+  const b = ev.currentTarget, was = b.textContent;
+  b.textContent = 'コピーしました';
+  setTimeout(() => { b.textContent = was; }, 1300);
+};
+
+// Ctrl+Enter で送信
+el.draft.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); el.send.click(); }
+});
+
+retally();
+connect();
+setInterval(refreshState, 3000);
+</script>
+</body>
+</html>
