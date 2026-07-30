@@ -201,12 +201,24 @@ async def main_async(args):
     pid_file = state / "daemon.pid"
 
     def engine_running() -> bool:
-        """認識プロセスが生きているか。"""
+        """認識の準備ができているか（PID は読み込み完了後に書かれる）。"""
         try:
             os.kill(int(pid_file.read_text()), 0)
             return True
         except (OSError, ValueError):
             return False
+
+    def engine_loading() -> bool:
+        """起動したがまだ読み込み中か。
+
+        PID が出る前でも、デーモンのプロセス自体は動いている。
+        これを見ないと、押した直後に「止まっている」と表示されてしまう。
+        """
+        if engine_running():
+            return False
+        r = subprocess.run(["pgrep", "-f", "voice_daemon.py --language"],
+                           capture_output=True)
+        return bool(r.stdout.strip())
 
     async def handle_state(_req):
         """マイクの入切、保留の有無、保留中の発話を返す。"""
@@ -218,7 +230,8 @@ async def main_async(args):
                     held.append(rec)
         return web.json_response({"muted": mute_file.exists(),
                                   "paused": pause_file.exists(),
-                                  "engine": engine_running(), "held": held})
+                                  "engine": engine_running(),
+                                  "loading": engine_loading(), "held": held})
 
     async def handle_engine(req):
         """認識を止める / 動かす。
