@@ -162,6 +162,16 @@
 
   button.go { border-color:var(--sent); color:var(--sent); font-weight:600; }
 
+  /* 読み込み中。時間がかかるので、止まっていないことを見せる */
+  button.busy {
+    border-color:var(--signal); color:var(--signal);
+    font-variant-numeric:tabular-nums; cursor:progress;
+  }
+  @media (prefers-reduced-motion:no-preference) {
+    button.busy { animation:pulse 1.4s ease-in-out infinite; }
+  }
+  @keyframes pulse { 50% { opacity:.5; } }
+
   .hint {
     margin:.75rem 0 0; font-size:.78rem; color:var(--ink-soft); min-height:1.2em;
   }
@@ -636,12 +646,17 @@ let seeded = false;   // 溜まっていた分をリロード時に一度だけ�
 let engineOn = true;
 let starting = false;
 
+let startedAt = 0;   // 起動を押した時刻。経過を出して「止まっていない」と分かるようにする
+
 function paintPower() {
   if (starting) {
-    el.power.textContent = '起動しています…';
+    const sec = Math.round((Date.now() - startedAt) / 1000);
+    el.power.textContent = `読み込み中… ${sec}秒`;
     el.power.disabled = true;
+    el.power.classList.add('busy');
     return;
   }
+  el.power.classList.remove('busy');
   el.power.disabled = false;
   el.power.textContent = engineOn ? '聞き取りを止める' : '聞き取りを始める';
   el.power.classList.toggle('go', !engineOn);
@@ -652,14 +667,26 @@ function paintPower() {
   }
 }
 
+let tick = null;   // 読み込み中に経過秒を進める
+
 el.power.onclick = async () => {
   const next = !engineOn;
-  if (next) starting = true;
   engineOn = next;
+
+  if (next) {
+    starting = true;
+    startedAt = Date.now();
+    setState('down', '読み込んでいます');
+    el.hint.textContent = 'モデルを読み込んでいます。40秒ほどかかります。';
+    // 1秒ごとに秒数を進める（止まっていないと分かるように）
+    clearInterval(tick);
+    tick = setInterval(() => { if (starting) paintPower(); }, 1000);
+  } else {
+    clearInterval(tick);
+    el.hint.textContent = '止めました。GPU（約12GB）が解放されます。';
+  }
+
   paintPower();
-  el.hint.textContent = next
-    ? '起動しています（モデル読み込みに1〜2分）…'
-    : '止めました。GPU が解放されます。';
   await post('/api/engine', {running: next});
   refreshState();
 };
@@ -670,11 +697,28 @@ async function refreshState() {
     const s = await (await fetch('/api/state')).json();
 
     if (typeof s.engine === 'boolean') {
-      if (s.engine !== engineOn || (starting && s.engine)) {
+      if (s.engine) {
+        // 準備できた
+        if (starting) { clearInterval(tick); el.hint.textContent = HINT[route]; }
         starting = false;
-        engineOn = s.engine;
+        engineOn = true;
+      } else if (s.loading) {
+        // 別のタブで押した場合も読み込み中と分かるように
+        if (!starting) { starting = true; startedAt = Date.now();
+                         clearInterval(tick);
+                         tick = setInterval(() => { if (starting) paintPower(); }, 1000); }
+        engineOn = true;
+      } else {
+        starting = false;
+        clearInterval(tick);
+        engineOn = false;
       }
+
       paintPower();
+      if (starting) {
+        setState('down', '読み込んでいます');
+        return;
+      }
       if (!engineOn) {
         setState('off', '止まっています');
         el.hint.textContent = '「聞き取りを始める」で再開できます。';
