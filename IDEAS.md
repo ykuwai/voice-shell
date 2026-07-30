@@ -2,6 +2,24 @@
 
 このセッションで出た構想。実装はまだしていない。
 
+## 0. いま着手中: クラウド API 対応
+
+**枠組みは入れた**（`--engine` / `VOICE_SHELL_ENGINE`、既定は `local`）。
+`asr_mic.py` の `load_model()` と `stream_utterances()` が `engine != "local"` のとき
+`engines` モジュールに委ねる形になっている。**`engines.py` はまだ書いていない。**
+
+やること:
+
+1. 代表的な4つのリアルタイム音声認識 API を選ぶ（調査中）
+2. `engines.py` に `load(args)` と `stream(model, args, should_stop)` を実装する。
+   yield するイベントは local と同じ（level / partial / final）
+3. API キーの登録場所を決める（環境変数 + ビューアから設定できると親切）
+4. どこに音声が送られるか画面に出す（ローカル完結という利点が消えるため）
+
+候補: OpenAI Realtime / Deepgram / AssemblyAI / Google STT v2 / Azure Speech /
+Soniox / Gladia / Speechmatics。**Japanese のストリーミング対応**と
+**発話区切りを API 側が返すか**（local は RMS で自前判定している）が選定の鍵。
+
 ## 1. 認識エンジンを差し替えられるようにする
 
 いまは Qwen3-ASR に固定で、**NVIDIA GPU が 12GB 必要**。これが使う人を絞っている。
