@@ -168,6 +168,13 @@
   .dict-label {
     display:block; font-size:.78rem; color:var(--ink-soft); margin:0 0 .7rem;
   }
+  /* 共有 / 手元だけ の切替 */
+  .scope-row {
+    display:flex; align-items:center; gap:.7rem; flex-wrap:wrap;
+    padding:.5rem 0 .8rem; border-bottom:1px solid var(--rule); margin-bottom:.8rem;
+  }
+  .scope-note { font-size:.76rem; color:var(--ink-faint); }
+
   .dict-tabs { display:flex; gap:.4rem; margin-bottom:.9rem; }
   .tab {
     font-size:.79rem; padding:.3rem .8rem;
@@ -312,6 +319,14 @@
 
 <!-- ── 辞書 ─────────────────────────────── -->
   <section class="dict" id="dict" hidden>
+    <div class="scope-row">
+      <label class="toggle">
+        <input type="checkbox" id="scopePrivate">
+        手元だけに保存する（公開しない）
+      </label>
+      <span class="scope-note" id="scopeNote"></span>
+    </div>
+
     <div class="dict-tabs" role="tablist">
       <button class="tab on" id="tabReplace" role="tab">言い換え</button>
       <button class="tab" id="tabIgnore" role="tab">無視する発話</button>
@@ -373,7 +388,8 @@ for (const id of ['beacon','stateText','now','stream','tray','draft','send','dis
                   'replaceRows','ignoreRows','addReplace','addIgnore',
                   'dictExport','dictImport','dictFile',
                   'builtinChips','builtinCount',
-                  'newFrom','newTo','newIgnore','filterReplace'])
+                  'newFrom','newTo','newIgnore','filterReplace',
+                  'scopePrivate','scopeNote'])
   el[id] = $(id);
 
 let paused = false;   // 手直ししてから送るモード
@@ -656,11 +672,26 @@ function showTab(which) {
 el.tabReplace.onclick = () => showTab('replace');
 el.tabIgnore.onclick = () => showTab('ignore');
 
+// 共有辞書 / 手元だけの辞書
+const scopeQuery = () => el.scopePrivate.checked ? '?scope=private' : '';
+
+async function loadDict() {
+  renderDict(await (await fetch('/api/dictionary' + scopeQuery())).json());
+  el.scopeNote.textContent = el.scopePrivate.checked
+    ? '~/.config/voice-shell/dictionary.private.json（リポジトリに入りません）'
+    : '~/.config/voice-shell/dictionary.json（既定値として共有できます）';
+}
+
+el.scopePrivate.onchange = async () => {
+  await loadDict();
+  el.dictNote.textContent = '';
+};
+
 // 画面ごと入れ替える（発話 ⇄ 辞書）
 async function showView(which) {
   const dict = which === 'dict';
   if (dict) {
-    renderDict(await (await fetch('/api/dictionary')).json());
+    await loadDict();
     el.dictNote.textContent = '';
     showTab('replace');
     el.newFrom.focus();
@@ -718,12 +749,13 @@ el.filterReplace.addEventListener('input', () => {
 
 el.dictSave.onclick = async () => {
   const d = collectDict();
-  await fetch('/api/dictionary', {
+  await fetch('/api/dictionary' + scopeQuery(), {
     method: 'PUT', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(d)
   });
+  const where = el.scopePrivate.checked ? '手元だけに' : '共有辞書に';
   el.dictNote.textContent =
-    `保存しました（言い換え ${Object.keys(d.replace).length} 件 / ` +
+    `${where}保存しました（言い換え ${Object.keys(d.replace).length} 件 / ` +
     `無視 ${d.ignore.length} 件）。次の発話から効きます。`;
 };
 
