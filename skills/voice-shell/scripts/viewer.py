@@ -285,6 +285,29 @@ async def main_async(args):
         target.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
         return web.json_response({k: v for k, v in data.items() if k != "_seen"})
 
+    mic_file = state / "mic"
+
+    async def handle_mics(_req):
+        """使えるマイクの一覧と、いま選ばれているものを返す。"""
+        sys.path.insert(0, str(Path(__file__).parent))
+        import asr_mic
+        try:
+            current = mic_file.read_text().strip()
+        except OSError:
+            current = ""
+        return web.json_response({"current": current, "mics": asr_mic.list_mics()})
+
+    async def handle_mic_put(req):
+        """使うマイクを変える。デーモンが録音プロセスだけ入れ替える。"""
+        body = await req.json()
+        dev = (body.get("device") or "").strip()
+        if not dev:
+            return web.json_response({"error": "empty"}, status=400)
+        mic_file.write_text(dev)
+        return web.json_response({"current": dev})
+
+    app.router.add_get("/api/mics", handle_mics)
+    app.router.add_put("/api/mics", handle_mic_put)
     app.router.add_get("/api/dictionary", handle_dict_get)
     app.router.add_put("/api/dictionary", handle_dict_put)
     app.router.add_post("/api/mute", handle_mute)

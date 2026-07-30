@@ -46,6 +46,9 @@ HOLD_FILE = STATE_DIR / "held.jsonl"
 # このファイルがあるとマイクを切った扱い。認識結果をどこにも残さず捨てる。
 # デーモンを止めると再起動に1〜2分かかるので、こちらで無視するだけにする。
 MUTE_FILE = STATE_DIR / "muted"
+# 使いたいマイク。ビューアが書き、デーモンが読んで録音だけ差し替える
+# （モデルは載せたままなので待たされない）。
+MIC_FILE = STATE_DIR / "mic"
 
 # 物音や息だけを拾ったときに出やすい定型句。これ単独の発話は指示ではないので捨てる。
 # （モデルが無音に近い入力へ相槌を当ててしまうため）
@@ -386,6 +389,18 @@ def main():
     log_path.write_text("")
 
     save_default_dictionary()
+
+    # ビューアから指定されたマイクを毎回見る（切り替えは録音だけ入れ替える）
+    mic_path = Path(args.log_file).parent / MIC_FILE.name
+    mic_path.write_text(args.device)
+
+    def want_device():
+        try:
+            return mic_path.read_text().strip() or None
+        except OSError:
+            return None
+
+    args.want_device = want_device
 
     print("モデルを読み込み中… (初回は数分かかります)", file=sys.stderr)
     model = asr_mic.load_model(args)
