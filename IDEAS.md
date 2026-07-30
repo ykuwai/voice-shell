@@ -7,14 +7,20 @@
 いまは Qwen3-ASR に固定で、**NVIDIA GPU が 12GB 必要**。これが使う人を絞っている。
 エンジンを選べれば、GPU が無い人・Mac の人も使える。
 
-想定する選択肢:
+**同じ Qwen3-ASR のまま、他の環境でも動かせる**（2026-07 時点で調査済み）:
 
-| エンジン | 動く場所 | 音声の送信先 |
+| 環境 | 実装 | 必要なもの |
 |---|---|---|
-| Qwen3-ASR（いま） | ローカル GPU | 送らない |
-| whisper.cpp / faster-whisper | ローカル CPU・Metal | 送らない |
-| OpenAI Whisper API 等 | クラウド | 送る |
-| 自前のリモート GPU（Fireworks AI 等） | クラウド | 送る |
+| Linux/Windows + NVIDIA | いまの vLLM 版 | VRAM 12GB |
+| **Mac (Apple Silicon)** | `qwen3-asr-mlx`（PyPI）または `mlx-qwen3-asr` | Metal。4/5/8bit 量子化あり。PyTorch 不要 |
+| **GPU なし** | ONNX 版（`Daumee/Qwen3-ASR-0.6B-ONNX-CPU`） | CPU のみ。Intel N100 で RTF 0.71 の報告あり |
+| GPU なし（Rust） | `qwen-asr` crate | Python も ONNX も不要 |
+
+つまり **0.6B + ONNX なら安価なミニPCでもリアルタイムに間に合う**。
+これを実装すればほぼ誰でも使えるので、公開時の価値が大きく変わる。
+
+音声をクラウドに送る選択肢（OpenAI Whisper API、Fireworks AI 等）も同じ境界に
+足せるが、ローカル完結という利点が消えるので既定にはしない。
 
 `asr_mic.py` の `stream_utterances()` がエンジン境界になっているので、
 そこを差し替え可能にすればよい。**ローカル完結という利点を消さないよう、
