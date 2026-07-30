@@ -77,6 +77,21 @@ case "$cmd" in
     pgrep -f "VLLM::EngineCore" | xargs -r kill -9 2>/dev/null || true
     "$0" viewer-stop
     ;;
+  engine-stop)
+    # 認識だけ止めて GPU を解放する。ビューアは残すので、
+    # ブラウザから「聞き取りを再開」で戻せる。
+    "$PY" "$APP" --stop
+    pgrep -f "VLLM::EngineCore" | xargs -r kill -9 2>/dev/null || true
+    ;;
+  engine-start)
+    # 認識だけ立ち上げ直す（ビューアには触らない）
+    if "$PY" "$APP" --status | grep -q 稼働中; then
+      echo "すでに稼働しています。"; exit 0
+    fi
+    mkdir -p "$STATE_DIR"
+    nohup "$PY" "$APP" --language Japanese "$@" > "$BOOT_LOG" 2>&1 &
+    echo "起動中… (モデル読み込みに1〜2分かかります)"
+    ;;
   status)
     "$PY" "$APP" --status
     ;;
