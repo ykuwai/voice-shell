@@ -14,10 +14,10 @@ command -v conda mamba micromamba
 | 環境 | 進む節 |
 |---|---|
 | NVIDIA GPU、VRAM 12GB 以上 | **A** |
-| macOS（Apple Silicon） | **B**（※未実装） |
-| それ以外（GPU なし・VRAM 不足） | **C**（※未実装） |
+| macOS（Apple Silicon） | **B** |
+| それ以外（GPU なし・VRAM 不足） | **C** |
 
-## A. NVIDIA GPU — 動作確認済み
+## A. NVIDIA GPU
 
 ```bash
 conda create -n qwen3-asr python=3.12 -y
@@ -28,31 +28,55 @@ hf download Qwen/Qwen3-ASR-1.7B
 
 録音コマンド: Linux は `sudo apt install alsa-utils`、Windows は `winget install ffmpeg`。
 
-**モデル**: [Qwen/Qwen3-ASR-1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B)（約3.5GB、Apache-2.0）
-VRAM が足りなければ [Qwen/Qwen3-ASR-0.6B](https://huggingface.co/Qwen/Qwen3-ASR-0.6B) を
-`--model` に指定するか、`--max-model-len 8192` を付ける。
+### どのモデルを使うか
 
-**必要 VRAM**: 1.7B + `--max-model-len 16384` で実測 12.3GB（RTX 4080 SUPER で確認）。
-vLLM の既定 65536 では KV キャッシュに 7GiB 要求され 16GB でも起動しないので、
-本スキルは 16384 を明示している。
+モデルページで大きさと対応言語を確認してから決める。要件は更新されるので、
+ここに書いた数字ではなく**ページの記載を見る**:
 
-## B. macOS（Apple Silicon）— エンジン差し替えが未実装
+- [Qwen/Qwen3-ASR-1.7B](https://huggingface.co/Qwen/Qwen3-ASR-1.7B) — 精度重視
+- [Qwen/Qwen3-ASR-0.6B](https://huggingface.co/Qwen/Qwen3-ASR-0.6B) — 軽量
 
-**この環境ではまだ動かない。** 案内する前にそのことを伝える。
+`hf download <モデル名>` のあと、実際に使う VRAM は起動して確認するのが確実:
 
-CUDA が無いので MLX 版を使うことになる:
-[qwen3-asr-mlx](https://pypi.org/project/qwen3-asr-mlx/) または
-[mlx-qwen3-asr](https://github.com/moona3k/mlx-qwen3-asr)。
-どちらも `qwen_asr` とは別 API なので、`asr_mic.py` の `load_model()` と
-`stream_utterances()` を差し替える必要がある（`IDEAS.md` 参照）。
+```bash
+nvidia-smi --query-gpu=memory.used,memory.total --format=csv
+```
 
-## C. GPU なし — エンジン差し替えが未実装
+参考として、この環境では 1.7B + `--max-model-len 16384` で 12.3GB 使った。
+足りなければ `--max-model-len 8192` を付けるか 0.6B に変える。
 
-**この環境ではまだ動かない。** 案内する前にそのことを伝える。
+なお vLLM の `max_model_len` は既定 65536 で、KV キャッシュに 7GiB 要求して
+16GB でも起動しない。本スキルは 16384 を明示している。
 
-ONNX 版の 0.6B が候補:
-[Daumee/Qwen3-ASR-0.6B-ONNX-CPU](https://huggingface.co/Daumee/Qwen3-ASR-0.6B-ONNX-CPU)。
-Intel N100 で RTF 0.71（実時間に間に合う）の報告がある。B と同じく差し替えが必要。
+## B. macOS（Apple Silicon）
+
+CUDA が無いので MLX 版を使う。それぞれのページで対応状況と必要メモリを確認する:
+
+- [qwen3-asr-mlx](https://pypi.org/project/qwen3-asr-mlx/)（PyPI）
+- [mlx-qwen3-asr](https://github.com/moona3k/mlx-qwen3-asr)
+
+```bash
+brew install ffmpeg                      # 録音用
+conda create -n qwen3-asr python=3.12 -y && conda activate qwen3-asr
+pip install -U qwen3-asr-mlx aiohttp soxr
+```
+
+これらは `qwen_asr` と API が違うため、`asr_mic.py` の `load_model()` と
+`stream_utterances()` の差し替えが要る（`IDEAS.md` 参照）。ここは未着手なので、
+案内するときに現状を伝える。
+
+## C. GPU なし（CPU のみ）
+
+ONNX 版を使う。速度が足りるかはページの記載と実機で確認する:
+
+- [Daumee/Qwen3-ASR-0.6B-ONNX-CPU](https://huggingface.co/Daumee/Qwen3-ASR-0.6B-ONNX-CPU)
+
+```bash
+conda create -n qwen3-asr python=3.12 -y && conda activate qwen3-asr
+pip install -U onnxruntime librosa tokenizers aiohttp soxr
+```
+
+B と同じく差し替えが要る。
 
 ## 2. スキルを認識させる
 

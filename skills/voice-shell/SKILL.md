@@ -25,8 +25,8 @@ allowed-tools:
 `start` が「Python が見つかりません」で失敗した場合、またはユーザーが
 「セットアップして」と言った場合は [SETUP.md](SETUP.md) の手順で案内する。
 
-いま動くのは **NVIDIA GPU（VRAM 12GB 以上）の環境だけ**。Apple Silicon と
-CPU のみの環境はエンジン差し替えが未実装なので、その場で正直に伝える。
+環境（NVIDIA GPU / Apple Silicon / CPU のみ）で入れるものが変わるので、
+調べてからどれで進めるか確認する。勝手に全部入れない。
 
 ## 開始する
 
