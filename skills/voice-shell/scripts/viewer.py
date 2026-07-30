@@ -10,6 +10,7 @@ import argparse
 import asyncio
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -197,6 +198,16 @@ async def main_async(args):
     hold_file = state / "held.jsonl"
     mute_file = state / "muted"
 
+    pid_file = state / "daemon.pid"
+
+    def engine_running() -> bool:
+        """認識プロセスが生きているか。"""
+        try:
+            os.kill(int(pid_file.read_text()), 0)
+            return True
+        except (OSError, ValueError):
+            return False
+
     async def handle_state(_req):
         """マイクの入切、保留の有無、保留中の発話を返す。"""
         held = []
@@ -206,7 +217,27 @@ async def main_async(args):
                 if rec:
                     held.append(rec)
         return web.json_response({"muted": mute_file.exists(),
-                                  "paused": pause_file.exists(), "held": held})
+                                  "paused": pause_file.exists(),
+                                  "engine": engine_running(), "held": held})
+
+    async def handle_engine(req):
+        """認識を止める / 動かす。
+
+        止めると GPU（約12GB）が解放される。ビューアは動いたままなので、
+        ここから動かし直せる（モデル読み込みに1〜2分）。
+        """
+        body = await req.json()
+        want = bool(body.get("running"))
+        sh = str(Path(__file__).with_name("voice-shell.sh"))
+
+        if want and not engine_running():
+            subprocess.Popen(["bash", sh, "engine-start"],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif not want and engine_running():
+            subprocess.run(["bash", sh, "engine-stop"],
+                           capture_output=True, timeout=30)
+
+        return web.json_response({"engine": engine_running()})
 
     async def handle_mute(req):
         """マイクを切る / 入れる。切っている間の発話はどこにも残らない。"""
@@ -306,6 +337,7 @@ async def main_async(args):
         mic_file.write_text(dev)
         return web.json_response({"current": dev})
 
+    app.router.add_post("/api/engine", handle_engine)
     app.router.add_get("/api/mics", handle_mics)
     app.router.add_put("/api/mics", handle_mic_put)
     app.router.add_get("/api/dictionary", handle_dict_get)

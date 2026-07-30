@@ -335,6 +335,7 @@
       </button>
     </div>
     <span class="spacer"></span>
+    <button id="power" title="止めると GPU が解放されます">聞き取りを止める</button>
     <select id="mic" class="mic" aria-label="使うマイク"></select>
     <label class="toggle"><input type="checkbox" id="clean">「えーと」を消す</label>
     <span class="tally"><span id="count">0</span> 件</span>
@@ -412,7 +413,7 @@ window.addEventListener('error', e => {
 const $ = id => document.getElementById(id);
 const el = {};
 for (const id of ['beacon','stateText','now','stream','tray','draft','send','discard',
-                  'segLive','segHold','segOff','hint','clean','count','copy','log','none','mic',
+                  'segLive','segHold','segOff','hint','clean','count','copy','log','none','mic','power',
                   'dict','speechView','viewSpeech','viewDict','dictSave','dictNote',
                   'tabReplace','tabIgnore','paneReplace','paneIgnore',
                   'replaceRows','ignoreRows','addReplace','addIgnore',
@@ -631,10 +632,56 @@ el.mic.onchange = async () => {
 
 let seeded = false;   // 溜まっていた分をリロード時に一度だけ復元する
 
+// 認識そのものの入切。止めると GPU（約12GB）が解放される。
+let engineOn = true;
+let starting = false;
+
+function paintPower() {
+  if (starting) {
+    el.power.textContent = '起動しています…';
+    el.power.disabled = true;
+    return;
+  }
+  el.power.disabled = false;
+  el.power.textContent = engineOn ? '聞き取りを止める' : '聞き取りを始める';
+  el.power.classList.toggle('go', !engineOn);
+  // 止まっている間は届け先を選んでも意味がない
+  for (const b of [el.segLive, el.segHold, el.segOff, el.mic]) {
+    b.disabled = !engineOn;
+    b.style.opacity = engineOn ? 1 : .45;
+  }
+}
+
+el.power.onclick = async () => {
+  const next = !engineOn;
+  if (next) starting = true;
+  engineOn = next;
+  paintPower();
+  el.hint.textContent = next
+    ? '起動しています（モデル読み込みに1〜2分）…'
+    : '止めました。GPU が解放されます。';
+  await post('/api/engine', {running: next});
+  refreshState();
+};
+
 async function refreshState() {
   if (inFlight) return;               // 切替中は上書きしない
   try {
     const s = await (await fetch('/api/state')).json();
+
+    if (typeof s.engine === 'boolean') {
+      if (s.engine !== engineOn || (starting && s.engine)) {
+        starting = false;
+        engineOn = s.engine;
+      }
+      paintPower();
+      if (!engineOn) {
+        setState('off', '止まっています');
+        el.hint.textContent = '「聞き取りを始める」で再開できます。';
+        return;
+      }
+    }
+
     route = s.muted ? 'off' : (s.paused ? 'hold' : 'live');
     paint();
 
