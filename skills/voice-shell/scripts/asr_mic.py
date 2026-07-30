@@ -151,20 +151,21 @@ def list_mics() -> list:
                         out.append({"id": f"audio={m.group(1)}", "label": m.group(1)})
 
         else:
-            # arecord -L は「名前」と「説明」が交互に並ぶ
+            # arecord -L は「名前」と「説明」が交互に並ぶ。
+            # default / pulse / pipewire は同じサウンドサーバへの別経路なので、
+            # 「自動」ひとつにまとめる（並べても選ぶ意味がなく紛らわしい）。
+            out.append({"id": "pipewire", "label": "自動（システムの既定）"})
+
             r = subprocess.run(["arecord", "-L"], capture_output=True, timeout=10)
             name = None
             for line in r.stdout.decode(errors="replace").splitlines():
                 if not line.startswith((" ", "\t")):
-                    name = line.strip()
-                    # 環境依存で数が多いので、実用的なものだけ拾う
-                    if name and (name in ("default", "pipewire", "pulse")
-                                 or name.startswith("plughw:")):
+                    name = line.strip() if line.strip().startswith("plughw:") else None
+                    if name:
                         out.append({"id": name, "label": name})
-                    else:
-                        name = None
                 elif name and out and out[-1]["id"] == name:
-                    out[-1]["label"] = f"{name} — {line.strip()}"
+                    # 説明のほうが分かりやすいので、そちらを名前にする
+                    out[-1]["label"] = line.strip()
                     name = None
     except (OSError, subprocess.SubprocessError):
         pass
