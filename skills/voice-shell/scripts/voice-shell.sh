@@ -80,16 +80,23 @@ case "$cmd" in
   engine-stop)
     # 認識だけ止めて GPU を解放する。ビューアは残すので、
     # ブラウザから「聞き取りを再開」で戻せる。
-    "$PY" "$APP" --stop
+    "$PY" "$APP" --stop 2>/dev/null || true
+    # PID ファイルは読み込み完了後に書かれる。起動途中で止めると
+    # ファイルが無いまま本体が残るので、名前でも確実に落とす。
+    pkill -f "voice_daemon\.py --language" 2>/dev/null || true
+    sleep 1
+    pkill -9 -f "voice_daemon\.py --language" 2>/dev/null || true
     pgrep -f "VLLM::EngineCore" | xargs -r kill -9 2>/dev/null || true
     ;;
   engine-start)
-    # 認識だけ立ち上げ直す（ビューアには触らない）
+    # 認識だけ立ち上げ直す（ビューアには触らない）。
+    # setsid で切り離す。デーモンは終了時に自分の子を全部 kill するので、
+    # 呼び出し元（ビューア）にぶら下げると巻き込まれる。
     if "$PY" "$APP" --status | grep -q 稼働中; then
       echo "すでに稼働しています。"; exit 0
     fi
     mkdir -p "$STATE_DIR"
-    nohup "$PY" "$APP" --language Japanese "$@" > "$BOOT_LOG" 2>&1 &
+    setsid nohup "$PY" "$APP" --language Japanese "$@" > "$BOOT_LOG" 2>&1 &
     echo "起動中… (モデル読み込みに1〜2分かかります)"
     ;;
   status)
@@ -104,7 +111,9 @@ case "$cmd" in
       echo "すでに起動しています → http://127.0.0.1:8090"; exit 0
     fi
     mkdir -p "$STATE_DIR"
-    nohup "$PY" "$HERE/viewer.py" "$@" \
+    # setsid で切り離す。デーモンが終了時に自分の子を全部 kill するため、
+    # 同じ系統にいるとデーモンを止めたときビューアまで落ちる。
+    setsid nohup "$PY" "$HERE/viewer.py" "$@" \
       > "$STATE_DIR/viewer.out" 2>&1 &
     sleep 2
     if pgrep -f "voice-shell/scripts/viewer.py" >/dev/null; then

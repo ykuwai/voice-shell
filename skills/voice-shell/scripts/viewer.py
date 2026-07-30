@@ -208,13 +208,17 @@ async def main_async(args):
         except (OSError, ValueError):
             return False
 
+    stopping = {"until": 0.0}   # 停止を指示した直後は「起動中」と誤判定しない
+
     def engine_loading() -> bool:
-        """起動したがまだ読み込み中か。
+        """起動したがまだ準備中か。
 
         PID が出る前でも、デーモンのプロセス自体は動いている。
         これを見ないと、押した直後に「止まっている」と表示されてしまう。
+        逆に停止直後はプロセスが消えきる前に拾えてしまうので、
+        止めた直後の数秒は起動中とみなさない。
         """
-        if engine_running():
+        if engine_running() or time.monotonic() < stopping["until"]:
             return False
         r = subprocess.run(["pgrep", "-f", "voice_daemon.py --language"],
                            capture_output=True)
@@ -243,12 +247,19 @@ async def main_async(args):
         want = bool(body.get("running"))
         sh = str(Path(__file__).with_name("voice-shell.sh"))
 
+        # start_new_session でビューアから切り離す。
+        # デーモンは終了時に自分の子を全部 kill するので、ビューアの系統に
+        # ぶら下げると停止のときビューアまで巻き込まれる。
         if want and not engine_running():
             subprocess.Popen(["bash", sh, "engine-start"],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True)
         elif not want and engine_running():
+            # プロセスが消えきるまで数秒あるので、その間は起動中と見なさない
+            stopping["until"] = time.monotonic() + 8
             subprocess.run(["bash", sh, "engine-stop"],
-                           capture_output=True, timeout=30)
+                           capture_output=True, timeout=30,
+                           start_new_session=True)
 
         return web.json_response({"engine": engine_running()})
 
