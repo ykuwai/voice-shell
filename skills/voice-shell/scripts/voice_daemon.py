@@ -215,6 +215,66 @@ def save_default_dictionary():
     print(f"辞書に既定の項目を {added} 件追加しました", file=sys.stderr)
 
 
+# 漢数字。位取りのある表記（三十二 → 32）を数字に直す。
+_KANJI_DIGIT = {"〇": 0, "零": 0, "一": 1, "二": 2, "三": 3, "四": 4,
+                "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+_KANJI_SMALL = {"十": 10, "百": 100, "千": 1000}
+_KANJI_BIG = {"万": 10**4, "億": 10**8, "兆": 10**12}
+
+# 数として読める並びだけを拾う。「一部」「一気に」を壊さないよう、
+# 直後が助数詞・助詞になっているものは別途 _NOT_NUMBER で除く。
+_KANJI_NUM_RE = re.compile(r"[〇零一二三四五六七八九十百千万億兆]+")
+
+# 数字にすると意味が変わる語（慣用句・熟語）。これらは変換しない。
+_NOT_NUMBER = {
+    "一部", "一気", "一緒", "一応", "一旦", "一度", "一体", "一番", "一通り",
+    "一方", "一見", "一切", "一人", "二人", "三人", "一日", "一言", "一杯",
+    "一瞬", "一生", "一件", "一種", "一定", "一致", "一連", "一覧", "一環",
+    "十分", "百歩", "千差", "万一", "万能", "億劫",
+}
+
+
+def _kanji_to_int(s: str):
+    """漢数字を整数にする。読めなければ None。"""
+    total = 0        # 万・億をまたいだ合計
+    section = 0      # いまの区切り（万未満）の値
+    digit = None     # 直前の一桁
+
+    for ch in s:
+        if ch in _KANJI_DIGIT:
+            digit = _KANJI_DIGIT[ch]
+        elif ch in _KANJI_SMALL:
+            section += (digit if digit is not None else 1) * _KANJI_SMALL[ch]
+            digit = None
+        elif ch in _KANJI_BIG:
+            section += digit or 0
+            if section == 0:
+                section = 1
+            total += section * _KANJI_BIG[ch]
+            section = 0
+            digit = None
+        else:
+            return None
+
+    return total + section + (digit or 0)
+
+
+def kanji_numbers_to_arabic(text: str) -> str:
+    """漢数字をアラビア数字に直す（「三十秒」→「30秒」）。
+
+    熟語や慣用句（一部・十分など）は変えない。単独の「一」「二」も、
+    数として言ったのか判別できないので変えない。
+    """
+    def sub(m):
+        s = m.group(0)
+        if s in _NOT_NUMBER or len(s) == 1:
+            return s
+        n = _kanji_to_int(s)
+        return str(n) if n is not None else s
+
+    return _KANJI_NUM_RE.sub(sub, text)
+
+
 def apply_replacements(text: str, replace: dict) -> str:
     """辞書の置換を適用する。長い語から当てて部分一致の取りこぼしを防ぐ。"""
     for src in sorted(replace, key=len, reverse=True):
@@ -250,6 +310,8 @@ def parse_args():
                    help="この文字数未満の発話は無視する（相槌や雑音よけ）")
     p.add_argument("--keep-noise", action="store_true",
                    help="「はい」「うん」等の相槌も送る（既定では捨てる）")
+    p.add_argument("--keep-kanji-numbers", action="store_true",
+                   help="漢数字をそのまま送る（既定は「三十秒」→「30秒」に直す）")
     p.add_argument("--drop-non-japanese", action="store_true",
                    help="中国語・韓国語等を含む発話を捨てる（既定では送る。"
                         "意図して他言語を話すことがあるため既定は無効）")
@@ -388,6 +450,8 @@ def main():
                     continue
 
                 text = apply_replacements(text, user_dict["replace"])
+                if not args.keep_kanji_numbers:
+                    text = kanji_numbers_to_arabic(text)
                 stamp = time.strftime("%H:%M:%S")
 
                 # 一時停止中は保留ファイルへ。Claude には送られない。

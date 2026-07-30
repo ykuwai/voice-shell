@@ -54,10 +54,12 @@ case "$cmd" in
     mkdir -p "$STATE_DIR"
     # GPU を占有する他のプロセスがいると起動に失敗するので先に知らせる
     if pgrep -f "VLLM::EngineCore" >/dev/null; then
-      echo "警告: 別の音声プロセスが GPU を使用中です。" >&2
-      echo "  webapp.py / realtime.py / dictate.py を止めてから再実行してください。" >&2
+      echo "警告: 別のプロセスが GPU を使用中です。" >&2
+      echo "  同じ GPU を使う音声プロセスを止めてから再実行してください。" >&2
       exit 1
     fi
+    # 古いパスで動いているビューアを片付ける（構成を変えたときの取り残し）
+    pkill -f "voice-shell/scripts/viewer\.py" 2>/dev/null || true
     # 日本語に固定する。自動判定だと物音を中国語などに誤認識しやすい（実測）。
     # 英語を話しても認識自体は追従する（単語間に入る読点はビューア側で除去）。
     # 別言語を主に使うなら `voice-shell.sh start --language English` のように渡す。
@@ -65,11 +67,15 @@ case "$cmd" in
     echo "起動中… (モデル読み込みに1〜2分かかります)"
     echo "  発話ログ: $LOG_FILE"
     echo "  起動ログ: $BOOT_LOG"
+    # ビューアも一緒に立ち上げる（毎回 viewer を打つのを忘れないように）。
+    # GPU もマイクも使わないので、常駐と同時に動いてよい。
+    "$0" viewer
     ;;
   stop)
     "$PY" "$APP" --stop
     # vLLM ワーカーが残ることがあるので確実に落とす
     pgrep -f "VLLM::EngineCore" | xargs -r kill -9 2>/dev/null || true
+    "$0" viewer-stop
     ;;
   status)
     "$PY" "$APP" --status

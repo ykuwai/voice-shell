@@ -49,7 +49,10 @@ def add_common_args(p):
     p.add_argument("--silence-duration", type=float, default=1.5,
                    help="この秒数だけ無音が続いたら発話を確定する")
     p.add_argument("--max-utterance-sec", type=float, default=30.0,
-                   help="1発話の最大長。超えたら強制確定（推論の重さを抑える）")
+                   help="1発話の目安の上限。超えても喋っている間は切らず、"
+                        "息継ぎを待って区切る（この2倍で強制確定）")
+    p.add_argument("--pause-sec", type=float, default=0.4,
+                   help="上限を超えたあと、この秒数の息継ぎがあれば区切る")
     return p
 
 
@@ -170,7 +173,8 @@ def stream_utterances(model, args, should_stop=lambda: False):
         {"type": "partial", "text": str, "language": str}     認識途中
         {"type": "final",   "text": str, "language": str}     発話確定
 
-    無音が silence_duration 続くか、発話が max_utterance_sec を超えると確定する。
+    無音が silence_duration 続いたら確定する。max_utterance_sec を超えた場合も
+    喋っている最中には切らず、息継ぎ（pause_sec）を待ってから区切る。
     ライブラリ側に発話区切り（VAD）は無いため、ここで RMS を見て判定している。
     """
     def new_state():
@@ -216,7 +220,16 @@ def stream_utterances(model, args, should_stop=lambda: False):
                 yield {"type": "partial", "text": state.text, "language": state.language}
 
         accum_sec = len(state.audio_accum) / SAMPLE_RATE
-        if silence_run >= args.silence_duration or accum_sec >= args.max_utterance_sec:
+
+        # 話し終わった（無音が続いた）なら確定する
+        done_talking = silence_run >= args.silence_duration
+        # 長すぎる発話は打ち切るが、喋っている最中には切らない。
+        # 上限を超えたら、ごく短い息継ぎでも区切りとして扱う。
+        too_long = accum_sec >= args.max_utterance_sec and silence_run >= args.pause_sec
+        # それでも延び続けるときの歯止め（推論が重くなりすぎるのを防ぐ）
+        way_too_long = accum_sec >= args.max_utterance_sec * 2
+
+        if done_talking or too_long or way_too_long:
             done = finish()
             if done:
                 yield done
