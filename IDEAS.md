@@ -2,23 +2,22 @@
 
 このセッションで出た構想。実装はまだしていない。
 
-## 0. いま着手中: クラウド API 対応
+## 0. クラウド API 対応（実装済み・未検証）
 
-**枠組みは入れた**（`--engine` / `VOICE_SHELL_ENGINE`、既定は `local`）。
-`asr_mic.py` の `load_model()` と `stream_utterances()` が `engine != "local"` のとき
-`engines` モジュールに委ねる形になっている。**`engines.py` はまだ書いていない。**
+`--engine deepgram / soniox / assemblyai / openai` で使える（`engines.py`）。
+GPU が無い PC でも動かせる。**実際の API につないで確かめていない** ので、
+最初に使うときは短い発話で試すこと。
 
-やること:
+残っていること:
 
-1. 代表的な4つのリアルタイム音声認識 API を選ぶ（調査中）
-2. `engines.py` に `load(args)` と `stream(model, args, should_stop)` を実装する。
-   yield するイベントは local と同じ（level / partial / final）
-3. API キーの登録場所を決める（環境変数 + ビューアから設定できると親切）
-4. どこに音声が送られるか画面に出す（ローカル完結という利点が消えるため）
+- 実機での確認（キーを入れて短く試す）
+- API キーをビューアから設定できるようにする（いまは環境変数のみ）
+- どこに音声が送られているか画面に出す（ローカル完結でなくなるため）
 
-候補: OpenAI Realtime / Deepgram / AssemblyAI / Google STT v2 / Azure Speech /
-Soniox / Gladia / Speechmatics。**Japanese のストリーミング対応**と
-**発話区切りを API 側が返すか**（local は RMS で自前判定している）が選定の鍵。
+選定の理由: 一日中マイクを開ける使い方なので、**接続時間で課金する会社**
+（AssemblyAI は公式に明記、Deepgram も同様とされる）は不利。OpenAI は
+音声の長さだけで課金するため、この用途に構造的に向いている。
+Soniox は $0.12/時と安いが、日本語の精度は自社公表値しか無いので要検証。
 
 ## 1. 認識エンジンを差し替えられるようにする
 

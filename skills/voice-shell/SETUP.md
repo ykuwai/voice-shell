@@ -78,6 +78,31 @@ pip install -U onnxruntime librosa tokenizers aiohttp soxr
 
 B と同じく差し替えが要る。
 
+## D. クラウドの API を使う（GPU 不要）
+
+モデルを手元で動かさず、音声を API に送って認識させる。GPU が無くても使える。
+**音声はその会社に送られる**ので、ローカル完結ではなくなる点は伝えること。
+
+```bash
+pip install websockets soxr aiohttp     # モデルも vLLM も要らない
+export DEEPGRAM_API_KEY=...             # 使う会社のキーだけでよい
+voice-shell.sh start --engine deepgram
+```
+
+| `--engine` | キーの環境変数 | 特徴 |
+|---|---|---|
+| `deepgram` | `DEEPGRAM_API_KEY` | 音声認識専業。速い。日本語と英語の混在に対応 |
+| `soniox` | `SONIOX_API_KEY` | $0.12/時と安い。16kHz をそのまま送れる |
+| `assemblyai` | `ASSEMBLYAI_API_KEY` | 日本語は上位モデル限定。接続時間で課金される |
+| `openai` | `OPENAI_API_KEY` | 課金は音声の長さのみ。一日中開けておく用途に向く |
+
+**課金の形に注意**: 接続している時間で課金する会社がある（AssemblyAI は
+公式に明記）。voice-shell はマイクを開けっぱなしにするため、黙っている間は
+接続しない実装にしてあるが、料金は最初に短く試して確かめてほしい。
+
+**未検証**: この経路は API キーが手元に無いため実際に接続して確かめていない。
+各社のドキュメントに沿って書いてある。最初に使うときは短い発話で試すこと。
+
 ## 2. スキルを認識させる
 
 ```bash
