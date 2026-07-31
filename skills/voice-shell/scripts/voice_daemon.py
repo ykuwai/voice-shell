@@ -14,6 +14,7 @@ Claude Code 側は Monitor でこのログを tail し、行が来たらプロ�
     python voice_daemon.py --stop      # 停止する
 """
 import argparse
+import fcntl
 import json
 import os
 import re
@@ -383,6 +384,18 @@ def main():
         sys.exit("すでに動いています。停止するには --stop を使ってください。")
 
     STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+    # 二重起動を確実に防ぐ。PID ファイルは読み込みが終わってから書かれるので、
+    # 起動中（1分ほど）は上の確認をすり抜けてしまう。GPU を 12GB 使うため
+    # 二つ動くと両方とも中途半端に壊れる。ロックは起動の瞬間から効き、
+    # 異常終了しても OS が解放するので取り残しの心配がない。
+    _lock = open(STATE_DIR / "daemon.lock", "w")
+    try:
+        fcntl.flock(_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        sys.exit("すでに起動しています（読み込み中かもしれません）。")
+    globals()["_daemon_lock"] = _lock   # 閉じると解放されるので握り続ける
+
     log_path = Path(args.log_file)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     # 起動のたびに空にする（前回の発話を拾わせない）
