@@ -209,17 +209,26 @@ async def main_async(args):
             return False
 
     stopping = {"until": 0.0}   # 停止を指示した直後は「起動中」と誤判定しない
+    starting = {"until": 0.0}   # 開始を指示した直後はプロセスがまだ見えない
 
     def engine_loading() -> bool:
         """起動したがまだ準備中か。
 
         PID が出る前でも、デーモンのプロセス自体は動いている。
         これを見ないと、押した直後に「止まっている」と表示されてしまう。
+
+        ただし起動は切り離して行うので、指示してから pgrep に映るまで
+        0.1〜0.3秒ある。ブラウザはその窓で状態を訊きにくるため、
+        プロセスの有無だけを見ていると一度「止まっている」に戻ってしまう。
+        指示した事実を数秒だけ覚えておいて、この窓を埋める。
+
         逆に停止直後はプロセスが消えきる前に拾えてしまうので、
         止めた直後の数秒は起動中とみなさない。
         """
         if engine_running() or time.monotonic() < stopping["until"]:
             return False
+        if time.monotonic() < starting["until"]:
+            return True
         r = subprocess.run(["pgrep", "-f", "voice_daemon.py --language"],
                            capture_output=True)
         return bool(r.stdout.strip())
@@ -251,11 +260,16 @@ async def main_async(args):
         # デーモンは終了時に自分の子を全部 kill するので、ビューアの系統に
         # ぶら下げると停止のときビューアまで巻き込まれる。
         if want and not engine_running():
+            # 起動を指示した事実を覚えておく。切り離して起動するので
+            # pgrep に映るまでの一瞬、プロセスが見えない時間がある。
+            stopping["until"] = 0.0
+            starting["until"] = time.monotonic() + 10
             subprocess.Popen(["bash", sh, "engine-start"],
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                              start_new_session=True)
         elif not want and engine_running():
             # プロセスが消えきるまで数秒あるので、その間は起動中と見なさない
+            starting["until"] = 0.0
             stopping["until"] = time.monotonic() + 8
             subprocess.run(["bash", sh, "engine-stop"],
                            capture_output=True, timeout=30,
