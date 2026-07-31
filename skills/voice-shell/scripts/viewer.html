@@ -722,6 +722,9 @@ async function refreshState() {
           clearInterval(tick);
           tick = setInterval(() => { if (engine === 'booting') paintPower(); }, 1000);
         }
+      } else if (engine === 'booting' && Date.now() - startedAt < 12000) {
+        // 押した直後はまだプロセスが見えないことがある。
+        // ここで 'off' に落とすとラベルが「聞き取りを始める」に戻ってしまう。
       } else {
         clearInterval(tick);
         engine = 'off';
