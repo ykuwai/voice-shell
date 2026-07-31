@@ -93,8 +93,12 @@ voice-shell.sh start --engine deepgram
 |---|---|---|
 | `deepgram` | `DEEPGRAM_API_KEY` | 音声認識専業。速い。日本語と英語の混在に対応 |
 | `soniox` | `SONIOX_API_KEY` | $0.12/時と安い。16kHz をそのまま送れる |
-| `assemblyai` | `ASSEMBLYAI_API_KEY` | 日本語は上位モデル限定。接続時間で課金される |
+| `assemblyai` | `ASSEMBLYAI_API_KEY` | **日本語では使えない**（下記） |
 | `openai` | `OPENAI_API_KEY` | 課金は音声の長さのみ。一日中開けておく用途に向く |
+
+**AssemblyAI は日本語で使えない**: リアルタイム認識が対応するのは英語・
+スペイン語・ドイツ語・フランス語・ポルトガル語・イタリア語だけで、日本語は
+録音済みの音声にしか対応していない。日本語で話すなら他の三つを使うこと。
 
 **課金の形に注意**: 接続している時間で課金する会社がある（AssemblyAI は
 公式に明記）。voice-shell はマイクを開けっぱなしにするため、黙っている間は

@@ -55,7 +55,10 @@ ENGINES = {
     "assemblyai": {
         "env": "ASSEMBLYAI_API_KEY",
         "model": "universal-3-5-pro",
-        "note": "日本語は上位モデル限定。接続時間で課金される点に注意",
+        "note": "日本語では使えない（英・西・独・仏・葡・伊のみ）。接続時間で課金",
+        # リアルタイム認識が対応するのは上記6言語だけで、日本語は録音済みの
+        # 音声にしか対応していない。日本語で選ぶと空の結果が返り続ける。
+        "languages": {"en", "es", "de", "fr", "pt", "it"},
     },
     "openai": {
         "env": "OPENAI_API_KEY",
@@ -89,11 +92,21 @@ def load(args):
         sys.exit("websockets が必要です:  pip install websockets")
 
     spec = ENGINES[name]
+    lang = (args.language or "ja").lower()[:2]
+
+    # 対応していない言語で始めると、つながるのに何も返ってこない。
+    # 原因が分かりにくいので、起動の時点で止める。
+    ok = spec.get("languages")
+    if ok and lang not in ok:
+        sys.exit(f"{name} は {args.language} に対応していません"
+                 f"（対応: {' / '.join(sorted(ok))}）。"
+                 f"\n  他のエンジンを使ってください。")
+
     conf = {
         "name": name,
         "key": _key(name),
         "model": args.model or spec["model"],
-        "language": (args.language or "ja").lower()[:2],
+        "language": lang,
     }
     print(f"認識エンジン: {name}（{spec['note']}）", file=sys.stderr)
     print("  音声はこの API に送られます。ローカルでは処理しません。",
