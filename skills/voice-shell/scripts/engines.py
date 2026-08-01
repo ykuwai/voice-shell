@@ -49,8 +49,9 @@ ENGINES = {
         "env": "VOICE_SHELL_TOKEN",
         "model": "qwen3-asr",
         "note": "家の LAN にある GPU 機に認識だけ任せる（課金なし）",
-        "url": os.environ.get("VOICE_SHELL_SERVER",
-                              "ws://192.168.0.15:8091/v1/realtime"),
+        # 接続先は環境ごとに違うので既定値を置かない。
+        # VOICE_SHELL_SERVER か --server で渡す。
+        "url": None,
     },
     "deepgram": {
         "env": "DEEPGRAM_API_KEY",
@@ -112,12 +113,23 @@ def load(args):
                  f"（対応: {' / '.join(sorted(ok))}）。"
                  f"\n  他のエンジンを使ってください。")
 
+    url = getattr(args, "server", None) or spec.get("url")
+    if name == "home-lan" and not url:
+        sys.exit(
+            "接続先が分かりません。GPU 機のアドレスを教えてください。\n"
+            "  export VOICE_SHELL_SERVER=ws://192.168.0.10:8091/v1/realtime\n"
+            "  （--server でも渡せます）\n"
+            "\n"
+            "  GPU 機側で `voice-shell.sh remote` を動かし、そこで出る\n"
+            "  「待ち受け: ws://...」のアドレスをそのまま指定します。"
+        )
+
     conf = {
         "name": name,
         "key": _key(name),
         "model": args.model or spec["model"],
         "language": lang,
-        "url": getattr(args, "server", None) or spec.get("url"),
+        "url": url,
     }
     print(f"認識エンジン: {name}（{spec['note']}）", file=sys.stderr)
     if name == "home-lan":
