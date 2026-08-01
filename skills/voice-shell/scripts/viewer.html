@@ -76,6 +76,18 @@
     color:var(--ink); font-weight:600; border-bottom-color:var(--focus);
   }
 
+  /* 拾えている音量。文字が出なくてもここが振れていれば
+     マイクは生きている。 */
+  .meter {
+    grid-column: 2; height: 3px; margin-top: .5rem; border-radius: 2px;
+    background: var(--rule); overflow: hidden;
+  }
+  .meter-fill {
+    height: 100%; width: 0; border-radius: 2px;
+    background: var(--ink-faint); transition: width .1s linear, background .2s;
+  }
+  .meter-fill.on { background: var(--signal); }
+
   /* ── 認識中 ───────────────────────────── */
   .now {
     display:grid; grid-template-columns:5.5rem 1fr; gap:1rem;
@@ -318,6 +330,11 @@
   <section class="now idle" id="now" aria-live="polite">
     <div class="gutter">認識中</div>
     <div class="stream"><span id="stream"></span><span class="caret"></span><span class="quiet" id="quiet">（無音）</span></div>
+    <!-- 拾えている音量。文字が出ないとき、マイクが死んでいるのか
+         黙っているだけなのかをここで見分ける。 -->
+    <div class="meter" id="meter" title="マイクが拾っている音量">
+      <div class="meter-fill" id="meterFill"></div>
+    </div>
   </section>
 
   <section class="tray" id="tray" hidden>
@@ -421,6 +438,7 @@ const $ = id => document.getElementById(id);
 const el = {};
 for (const id of ['beacon','stateText','now','stream','tray','draft','send','discard',
                   'segLive','segHold','segOff','hint','clean','count','copy','log','none','mic','power',
+                  'meterFill',
                   'dict','speechView','viewSpeech','viewDict','dictSave','dictNote',
                   'tabReplace','tabIgnore','paneReplace','paneIgnore',
                   'replaceRows','ignoreRows','addReplace','addIgnore',
@@ -498,6 +516,11 @@ function connect() {
   ws.onmessage = ev => {
     const m = JSON.parse(ev.data);
 
+    if ('level' in m) {
+      // 0.05 くらいで振り切る想定。小さい声でも動きが見えるようにする
+      el.meterFill.style.width = Math.min(100, m.level * 2000) + '%';
+      el.meterFill.classList.toggle('on', m.speaking);
+    }
     if ('partial' in m) {
       const t = m.partial.trim();
       el.stream.textContent = t;

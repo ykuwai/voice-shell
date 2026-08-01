@@ -140,6 +140,26 @@ class Tail:
                 await self.broadcast({"partial": text})
             await asyncio.sleep(0.2)
 
+    async def watch_level(self):
+        """いま拾えている音量を流す。
+
+        文字が出ないとき、マイクが死んでいるのか黙っているだけなのかを
+        見分けたい。デーモンが書く level.txt は「音量 喋っているか」の
+        2 つの数値だけで、音声そのものは残らない。
+        """
+        path = self.path.parent / "level.txt"
+        last = None
+        while True:
+            try:
+                rms, speaking = path.read_text().split()
+                cur = (round(float(rms), 3), speaking == "1")
+            except (FileNotFoundError, OSError, ValueError):
+                cur = (0.0, False)
+            if cur != last:
+                last = cur
+                await self.broadcast({"level": cur[0], "speaking": cur[1]})
+            await asyncio.sleep(0.1)      # バーが滑らかに見える程度
+
     async def watch_held(self):
         """一時停止中に確定した発話を、増えた分だけ流す。
 
@@ -394,6 +414,7 @@ async def main_async(args):
 
     tasks = [asyncio.create_task(tail.watch()),
              asyncio.create_task(tail.watch_partial()),
+             asyncio.create_task(tail.watch_level()),
              asyncio.create_task(tail.watch_held())]
     try:
         await asyncio.Event().wait()
