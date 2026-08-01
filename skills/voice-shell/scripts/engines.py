@@ -42,6 +42,16 @@ from asr_mic import SAMPLE_RATE
 
 # 各エンジンの既定モデルと、キーを読む環境変数
 ENGINES = {
+    "home-lan": {
+        # 家の LAN にいる GPU 機（voice_daemon.py --remote）に繋ぐ。
+        # ノート PC のように GPU が非力な端末で、認識だけ任せるための口。
+        # 自前のサーバなので従量課金が無い。
+        "env": "VOICE_SHELL_TOKEN",
+        "model": "qwen3-asr",
+        "note": "家の LAN にある GPU 機に認識だけ任せる（課金なし）",
+        "url": os.environ.get("VOICE_SHELL_SERVER",
+                              "ws://192.168.0.15:8091/v1/realtime"),
+    },
     "deepgram": {
         "env": "DEEPGRAM_API_KEY",
         "model": "nova-3",
@@ -107,10 +117,15 @@ def load(args):
         "key": _key(name),
         "model": args.model or spec["model"],
         "language": lang,
+        "url": getattr(args, "server", None) or spec.get("url"),
     }
     print(f"認識エンジン: {name}（{spec['note']}）", file=sys.stderr)
-    print("  音声はこの API に送られます。ローカルでは処理しません。",
-          file=sys.stderr, flush=True)
+    if name == "home-lan":
+        # 自分のサーバなので、外に出ていく話とは分けて書く
+        print(f"  音声は {conf['url']} に送られます。", file=sys.stderr, flush=True)
+    else:
+        print("  音声はこの API に送られます。ローカルでは処理しません。",
+              file=sys.stderr, flush=True)
     return conf
 
 
@@ -179,6 +194,30 @@ def _connect(conf):
             return d.get("transcript", ""), bool(d.get("end_of_turn"))
 
         finish = lambda: ws.send(json.dumps({"type": "Terminate"}))  # noqa: E731
+
+    elif name == "home-lan":
+        # 家の LAN の GPU 機（voice_daemon.py --remote）。OpenAI Realtime に
+        # 合わせてあるので、下の openai とほぼ同じやりとりで済む。
+        ws = ws_connect(conf["url"],
+                        additional_headers={"Authorization": f"Bearer {conf['key']}"})
+        ws.send(json.dumps({
+            "type": "transcription_session.update",
+            "session": {
+                "input_audio_format": "pcm16",
+                "input_audio_transcription": {"model": conf["model"],
+                                              "language": lang},
+                "turn_detection": None,
+            },
+        }))
+
+        def parse(msg):
+            d = json.loads(msg)
+            t = d.get("type", "")
+            if t.endswith("transcription.completed"):
+                return d.get("transcript", ""), True
+            return "", False
+
+        finish = lambda: ws.send(json.dumps({"type": "input_audio_buffer.commit"}))  # noqa: E731
 
     elif name == "openai":
         ws = ws_connect(

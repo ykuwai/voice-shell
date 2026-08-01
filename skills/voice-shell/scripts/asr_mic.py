@@ -31,8 +31,12 @@ else:
 def add_common_args(p):
     """各スクリプトで共通の引数を登録する。"""
     p.add_argument("--engine", default=os.environ.get("VOICE_SHELL_ENGINE", "local"),
-                   help="認識エンジン。local（Qwen3-ASR をこの PC の GPU で動かす）か、"
+                   help="認識エンジン。local（Qwen3-ASR をこの PC の GPU で動かす）、"
+                        "home-lan（家の LAN にある GPU 機に任せる）、"
                         "クラウドの API 名。VOICE_SHELL_ENGINE でも指定できる")
+    p.add_argument("--server", default=os.environ.get("VOICE_SHELL_SERVER"),
+                   help="--engine home-lan のときの接続先。"
+                        "VOICE_SHELL_SERVER でも指定できる")
     p.add_argument("--model", default=None,
                    help="モデル名。省略するとエンジンごとの既定値を使う")
     p.add_argument("--language", default=None,
