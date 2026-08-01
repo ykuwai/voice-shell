@@ -304,6 +304,46 @@ def kanji_numbers_to_arabic(text: str) -> str:
     return _KANJI_NUM_RE.sub(sub, text)
 
 
+# 大文字で書かれても略語ではないもの。「A vs B」を「A VS B」にしない。
+# e.g. / i.e. / a.m. のような小文字の略記は大文字判定で弾かれるので入れない。
+_NOT_ACRONYM = {"vs"}
+
+# 1文字ずつ区切られたアルファベットの並び。「G.U.I.」「G U I」「T.T.S」を捉える。
+# 各文字の直後の区切りはピリオドか空白。最後の1文字だけ区切りが無くてもよい。
+# 2文字以上を条件にして、単独の「I」や「a」を巻き込まないようにする。
+_SPELLED_RE = re.compile(
+    r"(?<![A-Za-z])"              # 直前が英字なら別の語の一部なので触らない
+    r"((?:[A-Za-z][.　 ]){1,}[A-Za-z]\.?)"
+    r"(?![A-Za-z])"               # 直後が英字でも同様
+)
+
+
+def collapse_letter_acronyms(text: str) -> str:
+    """1文字ずつ読み上げられた略語を詰める（「G.U.I.」「S S H」→「GUI」「SSH」）。
+
+    音声認識は略語を一文字ずつ区切って返すことがある。辞書でも直せるが、
+    未登録の語（AWS, JWT など）には効かないので、形で機械的に潰す。
+
+    「Node.js」のような正当なドット付きの語や、文末のピリオドには触れない。
+    区切りが2つ以上連続する並びだけを対象にするため、「I.」単独や
+    「it. Some」のような普通の文は影響を受けない。
+    """
+    def sub(m):
+        s = m.group(1)
+        letters = re.sub(r"[.　 ]", "", s)
+        # 音声認識が返す略語は大文字。小文字の並び（「a b c」「e.g.」）は
+        # 普通の文章か略記なので触らない。この判定だけで e.g. / i.e. /
+        # a.m. は守れる（大文字の「A M 三時」は AM に詰めてよい）。
+        if not letters.isupper():
+            return s
+        # 大文字でも略語でないもの（「A vs B」の V S など）は残す
+        if letters.lower() in _NOT_ACRONYM:
+            return s
+        return letters
+
+    return _SPELLED_RE.sub(sub, text)
+
+
 def apply_replacements(text: str, replace: dict) -> str:
     """辞書の置換を適用する。長い語から当てて部分一致の取りこぼしを防ぐ。"""
     for src in sorted(replace, key=len, reverse=True):
@@ -502,6 +542,9 @@ def main():
                     drop("日本語以外")
                     continue
 
+                # 「G.U.I.」「G P U」を先に詰めてから辞書を当てる。
+                # 辞書は完全一致なので、未登録の略語（AWS 等）はここで拾う。
+                text = collapse_letter_acronyms(text)
                 text = apply_replacements(text, user_dict["replace"])
                 if not args.keep_kanji_numbers:
                     text = kanji_numbers_to_arabic(text)
