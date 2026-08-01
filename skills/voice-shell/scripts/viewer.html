@@ -520,6 +520,7 @@ function connect() {
       // 0.05 くらいで振り切る想定。小さい声でも動きが見えるようにする
       el.meterFill.style.width = Math.min(100, m.level * 2000) + '%';
       el.meterFill.classList.toggle('on', m.speaking);
+      return;      // 下の else まで落とすと、発話として扱われて壊れる
     }
     if ('partial' in m) {
       const t = m.partial.trim();
