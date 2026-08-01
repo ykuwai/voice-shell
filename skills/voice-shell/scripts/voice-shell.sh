@@ -31,6 +31,20 @@ find_python() {
   done
 }
 
+# 残った vLLM ワーカーを落とす。kill -9 を撃つので誤爆は許されない:
+#   - パターンを [V] と書いて pgrep 自身のコマンドラインに当たらないようにする
+#   - 呼び出し元のシェル（自分の親やプロセスグループ）は明示的に除外する
+# 素の `pgrep -f "VLLM::EngineCore" | xargs kill -9` はこの行を含むシェルに
+# マッチしうるため、自分自身を撃って停止処理ごと落ちることがある。
+kill_engine_cores() {
+  local pid
+  for pid in $(pgrep -f "[V]LLM::EngineCore" 2>/dev/null); do
+    [[ "$pid" == "$$" || "$pid" == "$PPID" ]] && continue
+    kill -9 "$pid" 2>/dev/null || true
+  done
+  return 0
+}
+
 PY="$(find_python || true)"
 APP="$HERE/voice_daemon.py"
 
@@ -52,18 +66,22 @@ case "$cmd" in
       echo "すでに稼働しています。"; exit 0
     fi
     mkdir -p "$STATE_DIR"
-    # GPU を占有する他のプロセスがいると起動に失敗するので先に知らせる
-    if pgrep -f "VLLM::EngineCore" >/dev/null; then
+    # GPU を占有する他のプロセスがいると起動に失敗するので先に知らせる。
+    # パターンを [V] と書くのは自己マッチ避け。pgrep -f はコマンドライン全体を
+    # 見るため、素で書くとこの行を実行しているシェル自身に当たって誤検知する。
+    if pgrep -f "[V]LLM::EngineCore" >/dev/null; then
       echo "警告: 別のプロセスが GPU を使用中です。" >&2
       echo "  同じ GPU を使う音声プロセスを止めてから再実行してください。" >&2
       exit 1
     fi
     # 古いパスで動いているビューアを片付ける（構成を変えたときの取り残し）
-    pkill -f "voice-shell/scripts/viewer\.py" 2>/dev/null || true
+    pkill -f "voice-shell/scripts/viewer\.p[y]" 2>/dev/null || true
     # 日本語に固定する。自動判定だと物音を中国語などに誤認識しやすい（実測）。
     # 英語を話しても認識自体は追従する（単語間に入る読点はビューア側で除去）。
     # 別言語を主に使うなら `voice-shell.sh start --language English` のように渡す。
-    nohup "$PY" "$APP" --language Japanese "$@" > "$BOOT_LOG" 2>&1 &
+    # setsid で切り離す。付けないと呼び出し元と同じプロセスグループに残り、
+    # このスクリプトの終了時に一緒に片付けられてしまう（ビューアだけ残る）。
+    setsid nohup "$PY" "$APP" --language Japanese "$@" > "$BOOT_LOG" 2>&1 &
     echo "起動中… (モデル読み込みに1〜2分かかります)"
     echo "  発話ログ: $LOG_FILE"
     echo "  起動ログ: $BOOT_LOG"
@@ -74,7 +92,7 @@ case "$cmd" in
   stop)
     "$PY" "$APP" --stop
     # vLLM ワーカーが残ることがあるので確実に落とす
-    pgrep -f "VLLM::EngineCore" | xargs -r kill -9 2>/dev/null || true
+    kill_engine_cores
     "$0" viewer-stop
     ;;
   engine-stop)
@@ -83,10 +101,10 @@ case "$cmd" in
     "$PY" "$APP" --stop 2>/dev/null || true
     # PID ファイルは読み込み完了後に書かれる。起動途中で止めると
     # ファイルが無いまま本体が残るので、名前でも確実に落とす。
-    pkill -f "voice_daemon\.py --language" 2>/dev/null || true
+    pkill -f "voice_daemon\.p[y] --language" 2>/dev/null || true
     sleep 1
-    pkill -9 -f "voice_daemon\.py --language" 2>/dev/null || true
-    pgrep -f "VLLM::EngineCore" | xargs -r kill -9 2>/dev/null || true
+    pkill -9 -f "voice_daemon\.p[y] --language" 2>/dev/null || true
+    kill_engine_cores
     ;;
   engine-start)
     # 認識だけ立ち上げ直す（ビューアには触らない）。
@@ -110,7 +128,7 @@ case "$cmd" in
     ;;
   viewer)
     # ログを追尾するだけのビューア。GPU もマイクも使わないので常駐と共存できる。
-    if pgrep -f "voice-shell/scripts/viewer.py" >/dev/null; then
+    if pgrep -f "voice-shell/scripts/viewer\.p[y]" >/dev/null; then
       echo "すでに起動しています → http://127.0.0.1:8090"; exit 0
     fi
     mkdir -p "$STATE_DIR"
@@ -119,14 +137,14 @@ case "$cmd" in
     setsid nohup "$PY" "$HERE/viewer.py" "$@" \
       > "$STATE_DIR/viewer.out" 2>&1 &
     sleep 2
-    if pgrep -f "voice-shell/scripts/viewer.py" >/dev/null; then
+    if pgrep -f "voice-shell/scripts/viewer\.p[y]" >/dev/null; then
       echo "ビューアを起動しました → http://127.0.0.1:8090"
     else
       echo "起動に失敗しました:" >&2; tail -5 "$STATE_DIR/viewer.out" >&2; exit 1
     fi
     ;;
   viewer-stop)
-    pkill -f "voice-shell/scripts/viewer.py" && echo "ビューアを停止しました" \
+    pkill -f "voice-shell/scripts/viewer\.p[y]" && echo "ビューアを停止しました" \
       || echo "動いていません"
     ;;
   wait-ready)
