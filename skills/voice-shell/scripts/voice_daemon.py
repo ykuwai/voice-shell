@@ -20,6 +20,7 @@ import os
 import re
 import signal
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -344,12 +345,95 @@ def collapse_letter_acronyms(text: str) -> str:
     return _SPELLED_RE.sub(sub, text)
 
 
+class LockedModel:
+    """モデルへの呼び出しを1つずつに並べる。
+
+    streaming_transcribe は共有の vllm.LLM を素で呼んでおり、ロックが無い。
+    ローカルマイクと LAN からの接続が同時に触ると壊れるので、モデルに
+    触る経路をここへ集める。asr_mic 側は元のモデルと同じ顔で使える。
+
+    推論は1発話 0.1〜0.5 秒で、人は喋り続けない（GPU 利用率は 1% 程度）。
+    数人であれば直列でも待ちは体感できない。
+    """
+
+    def __init__(self, model):
+        self._model = model
+        self._lock = threading.Lock()
+
+    def __getattr__(self, name):
+        """包んでいないメソッドはそのまま通す（設定値の参照など）。"""
+        return getattr(self._model, name)
+
+    def init_streaming_state(self, *a, **kw):
+        with self._lock:
+            return self._model.init_streaming_state(*a, **kw)
+
+    def streaming_transcribe(self, *a, **kw):
+        with self._lock:
+            return self._model.streaming_transcribe(*a, **kw)
+
+    def finish_streaming_transcribe(self, *a, **kw):
+        with self._lock:
+            return self._model.finish_streaming_transcribe(*a, **kw)
+
+    def transcribe(self, *a, **kw):
+        with self._lock:
+            return self._model.transcribe(*a, **kw)
+
+
 def apply_replacements(text: str, replace: dict) -> str:
     """辞書の置換を適用する。長い語から当てて部分一致の取りこぼしを防ぐ。"""
     for src in sorted(replace, key=len, reverse=True):
         if src:
             text = text.replace(src, replace[src])
     return text
+
+
+def polish(text: str, user_dict: dict, keep_kanji_numbers: bool = False) -> str:
+    """認識したテキストを読みやすく整える。ローカルと LAN の両方で通す。
+
+    辞書はクラウドの API に対するこちらの取り柄なので、リモートでも効かせる。
+    略語を先に詰めるのは、辞書が完全一致で当たるため。「G P U」のまま
+    だと登録済みの「G.P.U.」に当たらない。
+    """
+    text = collapse_letter_acronyms(text)
+    text = apply_replacements(text, user_dict["replace"])
+    if not keep_kanji_numbers:
+        text = kanji_numbers_to_arabic(text)
+    return text
+
+
+def start_remote_server(model, args) -> None:
+    """LAN からの接続を受けるサーバを別スレッドで立てる。
+
+    認識はこのプロセスのモデルを使う。GPU に載るモデルは1つだけなので、
+    別プロセスにはできない（voice-shell.sh の二重起動ガードにも掛かる）。
+    """
+    import remote_server
+
+    conf = remote_server.load_conf()
+
+    def transcribe(pcm):
+        """溜まった音声を一括で認識する。
+
+        ローカルマイクは喋っている途中から streaming_transcribe を回すが、
+        こちらは commit で発話の切れ目が明示されるので、まとめて渡せる。
+        """
+        out = model.transcribe((pcm, remote_server.SAMPLE_RATE),
+                               language=args.language)
+        text = (out[0].text if out else "").strip()
+        if not text:
+            return ""
+        # ローカルと同じ後処理を通す。辞書は毎回読むので編集が即効く。
+        return polish(text, load_dictionary(), args.keep_kanji_numbers)
+
+    ready = threading.Event()
+    t = threading.Thread(
+        target=lambda: remote_server.serve(conf, transcribe, ready=ready),
+        name="remote-server", daemon=True)
+    t.start()
+    # 待ち受けに入るまで待つ。失敗しても本体は動かしたいので通す。
+    ready.wait(timeout=10)
 
 
 def is_noise(text: str, extra=()) -> bool:
@@ -384,6 +468,9 @@ def parse_args():
     p.add_argument("--drop-non-japanese", action="store_true",
                    help="中国語・韓国語等を含む発話を捨てる（既定では送る。"
                         "意図して他言語を話すことがあるため既定は無効）")
+    p.add_argument("--remote", action="store_true",
+                   help="LAN の端末から音声を受ける（~/.config/voice-shell/"
+                        "remote.json の設定で待ち受ける）")
     p.add_argument("--status", action="store_true", help="稼働状況を表示して終了")
     p.add_argument("--stop", action="store_true", help="常駐プロセスを停止して終了")
     return p.parse_args()
@@ -457,6 +544,14 @@ def main():
 
     print("モデルを読み込み中… (初回は数分かかります)", file=sys.stderr)
     model = asr_mic.load_model(args)
+
+    # LAN からの接続とローカルマイクが同じモデルを触るので、ロックで並べる。
+    # クラウドのエンジンを使うときは接続情報しか持たないので包まない。
+    if args.remote and args.engine == "local":
+        model = LockedModel(model)
+
+    if args.remote:
+        start_remote_server(model, args)
 
     PID_FILE.write_text(str(os.getpid()))
     print(f"\n  聞いています — 喋ると {log_path} に追記します"
@@ -542,12 +637,7 @@ def main():
                     drop("日本語以外")
                     continue
 
-                # 「G.U.I.」「G P U」を先に詰めてから辞書を当てる。
-                # 辞書は完全一致なので、未登録の略語（AWS 等）はここで拾う。
-                text = collapse_letter_acronyms(text)
-                text = apply_replacements(text, user_dict["replace"])
-                if not args.keep_kanji_numbers:
-                    text = kanji_numbers_to_arabic(text)
+                text = polish(text, user_dict, args.keep_kanji_numbers)
                 stamp = time.strftime("%H:%M:%S")
 
                 # 一時停止中は保留ファイルへ。Claude には送られない。
