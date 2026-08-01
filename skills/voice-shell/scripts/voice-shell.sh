@@ -7,6 +7,9 @@
 #   voice-shell.sh status
 #   voice-shell.sh viewer / viewer-stop
 #   voice-shell.sh log-path / wait-ready
+#   voice-shell.sh remote                 LAN の端末からも受ける
+#   voice-shell.sh remote-conf            設定ファイルの場所
+#   voice-shell.sh remote-log             届いた発話の置き場
 
 set -euo pipefail
 
@@ -120,6 +123,19 @@ case "$cmd" in
     setsid nohup "$PY" "$APP" --language Japanese "$@" > "$BOOT_LOG" 2>&1 &
     echo "起動中… (モデル読み込みに1〜2分かかります)"
     ;;
+  remote)
+    # LAN の端末からも音声を受ける形で立ち上げる。
+    # 設定は ~/.config/voice-shell/remote.json（無ければ雛形を作って止まる）。
+    "$0" start --remote "$@"
+    ;;
+  remote-conf)
+    # 設定ファイルの場所を教える（編集しやすいように）
+    echo "${XDG_CONFIG_HOME:-$HOME/.config}/voice-shell/remote.json"
+    ;;
+  remote-log)
+    # LAN から届いた発話の置き場。Monitor で追うときに使う。
+    echo "${XDG_STATE_HOME:-$HOME/.local/state}/voice-shell/remote"
+    ;;
   status)
     "$PY" "$APP" --status
     ;;
@@ -159,7 +175,8 @@ case "$cmd" in
     echo TIMEOUT; exit 1
     ;;
   *)
-    echo "使い方: voice-daemon.sh {start|stop|status|log-path|wait-ready}" >&2
+    echo "使い方: voice-shell.sh {start|stop|status|log-path|wait-ready}" >&2
+    echo "        voice-shell.sh {remote|remote-conf|remote-log}" >&2
     exit 1
     ;;
 esac
