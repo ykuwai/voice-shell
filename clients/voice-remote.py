@@ -76,7 +76,12 @@ def main():
         stop = threading.Event()
 
         def listen():
-            """返ってきた認識結果を出す。"""
+            """返ってきたものを出す。
+
+            喋っている最中は delta が届くので、行を書き換えながら伸ばす。
+            確定したらその行を残して次へ進む。
+            """
+            live = ""
             while not stop.is_set():
                 try:
                     m = json.loads(ws.recv(timeout=1))
@@ -84,12 +89,25 @@ def main():
                     continue
                 except Exception:
                     break
-                if m.get("type", "").endswith("transcription.completed"):
+                kind = m.get("type", "")
+
+                if kind.endswith("transcription.delta"):
+                    live += m.get("delta", "")
+                    # 同じ行を上書きして伸ばす（末尾の空白で消し残りを消す）
+                    print(f"\r  … {live[-70:]:<72}", end="", flush=True)
+
+                elif kind.endswith("transcription.completed"):
                     text = m.get("transcript", "")
+                    print("\r" + " " * 78 + "\r", end="")   # 途中経過を消す
                     if text:
                         print(f"[{time.strftime('%H:%M:%S')}] {text}", flush=True)
-                elif m.get("type") == "error":
-                    print(f"  エラー: {m.get('error', {}).get('message')}",
+                    live = ""
+
+                elif kind == "input_audio_buffer.level":
+                    pass          # 音量は下のバーで出すのでここでは捨てる
+
+                elif kind == "error":
+                    print(f"\n  エラー: {m.get('error', {}).get('message')}",
                           file=sys.stderr)
 
         t = threading.Thread(target=listen, daemon=True)
@@ -110,6 +128,14 @@ def main():
 
                     rms = float(np.sqrt(block.dot(block) / block.size))
                     dur = len(block) / SR
+
+                    # 拾えているかが目で分かるようにする。
+                    # 送っているのに振れないならマイクの選択を疑う。
+                    if not spoke or rms < args.threshold:
+                        n = min(20, int(rms * 400))
+                        bar = "█" * n + "·" * (20 - n)
+                        mark = "●" if rms >= args.threshold else " "
+                        print(f"\r  {mark} [{bar}]", end="", flush=True)
                     if rms >= args.threshold:
                         spoke, silent = True, 0.0
                     elif spoke:

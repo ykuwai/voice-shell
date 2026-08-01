@@ -4,8 +4,12 @@
 OpenAI Realtime の transcription intent に合わせてある。engines.py の
 `openai` クライアントは接続先を差し替えるだけでそのまま繋がる。
 
-認識そのものは transcribe 引数に渡す。デーモンに組み込むときは
-モデルを触る関数を渡し、単体で試すときは省略すればオウム返しになる。
+認識は make_session 引数に渡す。接続ごとに (feed, finish) を作らせる形で、
+喋っている最中も feed が返したぶんを delta として流す。溜めてから一度に
+認識すると、喋り終わるまで手元に何も返らず届いているか分からない。
+
+デーモンに組み込むときはモデルを触る関数を渡し、単体で試すときは
+省略すればオウム返しになる。
 
     python remote_server.py --port 8091        # スタブで起動
 """
@@ -84,42 +88,74 @@ def _token_from(ws) -> Optional[str]:
     return None
 
 
-def echo_transcribe(pcm: np.ndarray) -> str:
-    """認識の代わり。長さだけ返して、配線が通っているか確かめる。"""
-    return f"[{len(pcm) / SAMPLE_RATE:.1f}秒 の音声を受け取りました]"
+def echo_session():
+    """認識の代わり。受け取った長さを返して、配線が通っているか確かめる。
+
+    デーモンから渡されるものと同じく (feed, finish) を返す。
+    """
+    got = [0]
+
+    def feed(pcm):
+        got[0] += len(pcm)
+        return f"[{got[0] / SAMPLE_RATE:.1f}秒]"
+
+    def finish():
+        n = got[0]
+        got[0] = 0
+        return f"[{n / SAMPLE_RATE:.1f}秒 の音声を受け取りました]" if n else ""
+
+    return feed, finish
 
 
 class Session:
     """接続1本。話者ごとに音声を溜めて、commit で認識に回す。"""
 
-    def __init__(self, name: str, transcribe: Callable[[np.ndarray], str],
+    def __init__(self, name: str, make_session: Callable[[], tuple],
                  out_dir: Path):
         self.name = name
-        self.transcribe = transcribe
+        # feed(pcm) -> 現時点のテキスト / finish() -> 確定テキスト
+        self.feed, self.finish = make_session()
         self.buf: list = []
+        self.said = ""            # ここまでに返した分（差分を出すため）
         self.out = out_dir / f"{name}.jsonl"
         self.out.parent.mkdir(parents=True, exist_ok=True)
 
-    def append_pcm(self, raw: bytes) -> None:
-        """16bit PCM をそのまま溜める。"""
+    def append_pcm(self, raw: bytes) -> tuple:
+        """16bit PCM を受けて認識を進める。
+
+        戻り値は (伸びた分のテキスト, 音量)。喋っている最中に少しずつ
+        返せるよう、届いたそばから認識に回す。溜めてから一度に投げると
+        喋り終わるまで何も返せない。
+        """
         pcm = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
         self.buf.append(pcm)
+        rms = float(np.sqrt(pcm.dot(pcm) / pcm.size)) if pcm.size else 0.0
 
-    def append(self, b64: str) -> None:
-        """base64 に包まれた 16bit PCM を溜める。"""
-        self.append_pcm(base64.b64decode(b64))
+        text = self.feed(pcm)
+        delta = ""
+        if text and text != self.said:
+            # 伸びた分だけ返す。認識は前を言い直すことがあるので、
+            # 共通の頭を除いた残りを差分とする。
+            delta = text[len(self.said):] if text.startswith(self.said) else text
+            self.said = text
+        return delta, rms
+
+    def append(self, b64: str) -> tuple:
+        """base64 に包まれた 16bit PCM を受ける。"""
+        return self.append_pcm(base64.b64decode(b64))
 
     @property
     def seconds(self) -> float:
         return sum(len(b) for b in self.buf) / SAMPLE_RATE
 
     def commit(self) -> str:
-        """溜めた音声を認識して、溜めていたものを捨てる。"""
+        """発話の終わりを受けて確定させる。"""
         if not self.buf:
             return ""
-        pcm = np.concatenate(self.buf)
+        text = self.finish()
         self.buf.clear()
-        return self.transcribe(pcm)
+        self.said = ""
+        return text
 
     def record(self, text: str) -> None:
         """認識結果を書き出す。ローカルの utterances.jsonl とは分ける。
@@ -131,7 +167,7 @@ class Session:
             f.write(json.dumps({"text": text}, ensure_ascii=False) + "\n")
 
 
-def handle(ws, conf: dict, transcribe: Callable[[np.ndarray], str],
+def handle(ws, conf: dict, make_session: Callable[[], tuple],
            out_dir: Path) -> None:
     """接続1本を最後まで面倒みる。"""
     token = _token_from(ws)
@@ -142,11 +178,26 @@ def handle(ws, conf: dict, transcribe: Callable[[np.ndarray], str],
         print("  認証されない接続を切りました", file=sys.stderr, flush=True)
         return
 
-    sess = Session(name, transcribe, out_dir)
+    sess = Session(name, make_session, out_dir)
     print(f"  {name} が接続しました", file=sys.stderr, flush=True)
 
     def send(obj: dict) -> None:
         ws.send(json.dumps(obj, ensure_ascii=False))
+
+    last_level = [0.0]
+
+    def emit(delta: str, rms: float) -> None:
+        """認識が伸びた分と音量を返す。
+
+        音量は喋るたびに変わるので、少しでも動いたときだけ送る。
+        毎回送ると 1 秒に何十回も流れて帯域の無駄になる。
+        """
+        if delta:
+            send({"type": "conversation.item.input_audio_transcription.delta",
+                  "delta": delta})
+        if abs(rms - last_level[0]) > 0.003:
+            last_level[0] = rms
+            send({"type": "input_audio_buffer.level", "rms": round(rms, 4)})
 
     try:
         for raw in ws:
@@ -154,7 +205,8 @@ def handle(ws, conf: dict, transcribe: Callable[[np.ndarray], str],
             # JSON に包むのはブラウザ向けの経路なので、両方受ける。
             if isinstance(raw, (bytes, bytearray)):
                 if sess.seconds <= MAX_UTTERANCE_SEC:
-                    sess.append_pcm(raw)
+                    delta, rms = sess.append_pcm(raw)
+                    emit(delta, rms)
                 continue
 
             try:
@@ -174,7 +226,8 @@ def handle(ws, conf: dict, transcribe: Callable[[np.ndarray], str],
                     send({"type": "error",
                           "error": {"message": "音声が長すぎます"}})
                     continue
-                sess.append(msg.get("audio", ""))
+                delta, rms = sess.append(msg.get("audio", ""))
+                emit(delta, rms)
 
             elif kind == "input_audio_buffer.commit":
                 text = sess.commit()
@@ -197,7 +250,7 @@ def handle(ws, conf: dict, transcribe: Callable[[np.ndarray], str],
         print(f"  {name} が切れました", file=sys.stderr, flush=True)
 
 
-def serve(conf: dict, transcribe: Callable[[np.ndarray], str] = echo_transcribe,
+def serve(conf: dict, make_session: Callable[[], tuple] = echo_session,
           out_dir: Path = REMOTE_DIR, ready: threading.Event = None):
     """サーバを立てて待ち受ける。デーモンからはスレッドで呼ぶ。"""
     from websockets.sync.server import serve as ws_serve
@@ -209,7 +262,7 @@ def serve(conf: dict, transcribe: Callable[[np.ndarray], str] = echo_transcribe,
         # OpenAI と同じく "realtime" を選んで返す。
         return "realtime" if "realtime" in protos else None
 
-    with ws_serve(lambda ws: handle(ws, conf, transcribe, out_dir),
+    with ws_serve(lambda ws: handle(ws, conf, make_session, out_dir),
                   host, port, select_subprotocol=select_subprotocol) as server:
         print(f"待ち受け: ws://{host}:{port}/v1/realtime", file=sys.stderr)
         print(f"  書き出し先: {out_dir}/<名前>.jsonl", file=sys.stderr)
