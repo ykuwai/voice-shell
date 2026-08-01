@@ -41,6 +41,9 @@ PID_FILE = STATE_DIR / "daemon.pid"
 LOG_FILE = STATE_DIR / "utterances.jsonl"
 # 認識途中のテキスト。上書きし続けるだけで履歴は残さない（ビューアの表示用）。
 PARTIAL_FILE = STATE_DIR / "partial.txt"
+# いま拾えている音量。ビューアがバーとして出す。
+# 文字が出ないとき、マイクが死んでいるのか黙っているだけなのかを見分ける。
+LEVEL_FILE = STATE_DIR / "level.txt"
 # このファイルがあると発話を保留する。認識は続くが Claude には送らず、
 # 保留トレイに溜めて手直ししてから送れる。
 PAUSE_FILE = STATE_DIR / "paused"
@@ -609,10 +612,12 @@ def main():
 
     try:
         partial_path = log_path.parent / PARTIAL_FILE.name
+        level_path = log_path.parent / LEVEL_FILE.name
         pause_path = log_path.parent / PAUSE_FILE.name
         hold_path = log_path.parent / HOLD_FILE.name
         mute_path = log_path.parent / MUTE_FILE.name
         partial_path.write_text("")
+        level_path.write_text("0 0")
         pause_path.unlink(missing_ok=True)   # 起動時は必ず送信状態から
         mute_path.unlink(missing_ok=True)
         hold_path.write_text("")
@@ -637,6 +642,10 @@ def main():
 
                 # 発話の始まりを捉える（無音から声に変わった瞬間）
                 if ev["type"] == "level":
+                    # 音量をビューアに渡す。文字が出ないとき、マイクが
+                    # 死んでいるのか黙っているだけなのかを見分けたい。
+                    level_path.write_text(
+                        f"{ev.get('rms', 0):.4f} {int(bool(ev.get('speaking')))}")
                     if ev.get("speaking") and speaking_since is None:
                         speaking_since = mute_generation
                     if muted_now:
