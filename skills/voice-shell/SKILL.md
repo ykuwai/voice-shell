@@ -129,9 +129,25 @@ ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh stop
 実体は `~/.config/voice-shell/dictionary.json`。CSV の読み込み・書き出しもできる。
 ユーザーが同じ誤認識を繰り返し直しているようなら、辞書への登録を提案してよい。
 
+## 家の GPU 機に認識だけ任せる
+
+手元に GPU が無くても、同じ LAN に GPU 機があればそちらで認識できる。
+Claude Code とこのスキルは手元で動いたまま、音声だけが飛ぶ。
+
+```bash
+export VOICE_SHELL_ENGINE=home-lan
+export VOICE_SHELL_SERVER=ws://<GPU機のIP>:8091/v1/realtime
+export VOICE_SHELL_TOKEN=<GPU機の remote.json に書いたトークン>
+```
+
+環境変数を入れておけば、あとは `start` するだけで普段どおり使える。
+GPU 機の側は `voice-shell.sh remote` で待ち受ける。手順は
+[SETUP.md](SETUP.md) の **E** に書いてある。
+
 ## 制約
 
 - **GPU を約12GB使う** — 同じ GPU を使う別の音声プロセスとは同時に動かせない
+  （`--engine home-lan` で他機に任せる場合は手元の GPU を使わない）
 - マイクは `arecord`（Linux）または `ffmpeg`（macOS / Windows）経由で取得する
 - セットアップが済んでいない環境では `start` が「Python が見つかりません」で
   失敗する。その場合はリポジトリの README のセットアップ手順を案内する

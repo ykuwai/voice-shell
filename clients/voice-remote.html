@@ -1,0 +1,198 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>音声を送る — voice-shell</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: system-ui, "Segoe UI", "Yu Gothic UI", sans-serif;
+    max-width: 40rem; margin: 0 auto; padding: 1.5rem; line-height: 1.7;
+  }
+  h1 { font-size: 1.3rem; margin: 0 0 1rem; }
+  .row { display: flex; gap: .5rem; align-items: center; margin: .5rem 0; }
+  label { min-width: 6rem; font-size: .9rem; opacity: .8; }
+  input {
+    flex: 1; padding: .45rem .6rem; font: inherit; border-radius: .4rem;
+    border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+    background: transparent; color: inherit;
+  }
+  button {
+    padding: .6rem 1.2rem; font: inherit; border-radius: .4rem; cursor: pointer;
+    border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+    background: color-mix(in srgb, currentColor 8%, transparent); color: inherit;
+  }
+  button:disabled { opacity: .4; cursor: default; }
+  #talk { font-size: 1.05rem; padding: .8rem 1.6rem; }
+  #talk.on { background: #c0392b; color: #fff; border-color: #c0392b; }
+  #state { margin-left: .6rem; opacity: .75; font-size: .9rem; }
+  #level {
+    height: .5rem; border-radius: .25rem; margin: .8rem 0;
+    background: color-mix(in srgb, currentColor 12%, transparent);
+  }
+  #bar { height: 100%; width: 0; border-radius: .25rem; background: #27ae60;
+         transition: width .08s linear; }
+  #log { margin-top: 1rem; }
+  #log div {
+    padding: .5rem .7rem; margin: .35rem 0; border-radius: .4rem;
+    background: color-mix(in srgb, currentColor 7%, transparent);
+  }
+  #log time { opacity: .5; font-size: .8rem; margin-right: .5rem; }
+  details { margin-top: 1.5rem; font-size: .9rem; opacity: .8; }
+  code { font-family: ui-monospace, Consolas, monospace; }
+</style>
+
+<h1>音声を送る</h1>
+
+<div class="row">
+  <label for="url">サーバ</label>
+  <input id="url" placeholder="ws://GPU機のIP:8091/v1/realtime">
+</div>
+<div class="row">
+  <label for="token">トークン</label>
+  <input id="token" type="password" placeholder="remote.json のトークン">
+</div>
+
+<div class="row" style="margin-top:1rem">
+  <button id="talk">話す</button>
+  <span id="state">待機中</span>
+</div>
+
+<div id="level"><div id="bar"></div></div>
+<div id="log"></div>
+
+<details>
+  <summary>うまく繋がらないとき</summary>
+  <ul>
+    <li>マイクの許可には <code>https://</code> か <code>localhost</code> が要ります。
+      LAN の IP を直接開くと Chrome がマイクを拒みます。その場合は
+      <code>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code> に
+      このページの URL を登録してください。</li>
+    <li>母艦の ufw で 8091 が開いているか確認してください。</li>
+    <li>母艦とこの端末が同じ 192.168.0.x にいるか確認してください。</li>
+  </ul>
+</details>
+
+<script>
+const $ = id => document.getElementById(id);
+const SR = 16000;
+let ws, ctx, stream, node, talking = false, silent = 0, spoke = false;
+
+// 認識の区切りはこちら側で決める（サーバは turn_detection を持たない）
+const THRESH = 0.012;     // これ未満を無音とみなす
+const TAIL   = 0.8;       // 無音がこれだけ続いたら区切る（秒）
+
+const say = (text, dim) => {
+  const d = document.createElement('div');
+  const t = new Date().toTimeString().slice(0, 8);
+  d.innerHTML = `<time>${t}</time>`;
+  d.appendChild(document.createTextNode(text));
+  if (dim) d.style.opacity = .55;
+  $('log').prepend(d);
+};
+
+function connect() {
+  const token = $('token').value.trim();
+  if (!token) { say('トークンを入れてください', true); return null; }
+  // ブラウザの WebSocket はヘッダを付けられないので、
+  // トークンはサブプロトコルに載せる（OpenAI と同じやり方）
+  const sock = new WebSocket($('url').value.trim(),
+    ['realtime', 'openai-insecure-api-key.' + token]);
+
+  sock.onopen = () => {
+    $('state').textContent = '接続しました';
+    sock.send(JSON.stringify({
+      type: 'transcription_session.update',
+      session: {
+        input_audio_format: 'pcm16',
+        input_audio_transcription: { model: 'qwen3-asr', language: 'ja' },
+        turn_detection: null,
+      },
+    }));
+  };
+  sock.onmessage = e => {
+    const m = JSON.parse(e.data);
+    if (m.type.endsWith('transcription.completed')) {
+      if (m.transcript) say(m.transcript);
+      else say('（聞き取れませんでした）', true);
+    } else if (m.type === 'error') {
+      say('エラー: ' + (m.error?.message ?? ''), true);
+    }
+  };
+  sock.onclose = e => {
+    $('state').textContent = e.code === 1008 ? 'トークンが違います' : '切れました';
+    stop();
+  };
+  sock.onerror = () => $('state').textContent = '繋がりません';
+  return sock;
+}
+
+async function start() {
+  ws = connect();
+  if (!ws) return;
+
+  stream = await navigator.mediaDevices.getUserMedia({
+    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+  });
+  ctx = new AudioContext({ sampleRate: SR });
+  const src = ctx.createMediaStreamSource(stream);
+  node = ctx.createScriptProcessor(4096, 1, 1);
+
+  node.onaudioprocess = ev => {
+    if (!talking || ws?.readyState !== WebSocket.OPEN) return;
+    const buf = ev.inputBuffer.getChannelData(0);
+
+    let sum = 0;
+    for (const v of buf) sum += v * v;
+    const rms = Math.sqrt(sum / buf.length);
+    $('bar').style.width = Math.min(100, rms * 900) + '%';
+
+    // 16bit PCM に落として送る
+    const pcm = new Int16Array(buf.length);
+    for (let i = 0; i < buf.length; i++) {
+      pcm[i] = Math.max(-1, Math.min(1, buf[i])) * 32767;
+    }
+    let bin = '';
+    const bytes = new Uint8Array(pcm.buffer);
+    for (const b of bytes) bin += String.fromCharCode(b);
+    ws.send(JSON.stringify({
+      type: 'input_audio_buffer.append', audio: btoa(bin),
+    }));
+
+    // 喋り終わりを見て区切る
+    const dur = buf.length / SR;
+    if (rms >= THRESH) { spoke = true; silent = 0; }
+    else if (spoke) {
+      silent += dur;
+      if (silent >= TAIL) {
+        ws.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
+        spoke = false; silent = 0;
+      }
+    }
+  };
+
+  src.connect(node);
+  node.connect(ctx.destination);
+  talking = true;
+  $('talk').textContent = '止める';
+  $('talk').classList.add('on');
+  $('state').textContent = '聞いています';
+}
+
+function stop() {
+  talking = false;
+  node?.disconnect();
+  stream?.getTracks().forEach(t => t.stop());
+  ctx?.close();
+  ws?.close();
+  $('talk').textContent = '話す';
+  $('talk').classList.remove('on');
+  $('bar').style.width = 0;
+}
+
+$('talk').onclick = () => talking ? stop() : start();
+
+// トークンとサーバは覚えておく（同じ端末で開き直したとき用）
+for (const id of ['url', 'token']) {
+  $(id).value = localStorage.getItem('vs-' + id) || $(id).value;
+  $(id).onchange = () => localStorage.setItem('vs-' + id, $(id).value);
+}
+</script>

@@ -146,7 +146,7 @@ kanji_numbers_to_arabic()    漢数字（三十秒 → 30秒）
 ```jsonc
 // ~/.config/voice-shell/remote.json
 {
-  "bind": "192.168.0.15",     // 0.0.0.0 は届く範囲が広すぎるので既定にしない
+  "bind": "192.168.0.10",     // 0.0.0.0 は届く範囲が広すぎるので既定にしない
   "port": 8091,
   "tokens": {
     "<token>": "windows-pc"   // 値が書き出し先のファイル名になる
