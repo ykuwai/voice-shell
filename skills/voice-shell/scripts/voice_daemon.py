@@ -435,29 +435,46 @@ def start_remote_server(model, args) -> None:
 
     conf = remote_server.load_conf()
 
-    def transcribe(pcm):
-        """溜まった音声を一括で認識する。
+    def make_session():
+        """接続1本ぶんの認識係を作る。
 
-        ローカルマイクは喋っている途中から streaming_transcribe を回すが、
-        こちらは commit で発話の切れ目が明示されるので、まとめて渡せる。
-
-        まとめて渡すぶん、生成するトークン数も伸びる。モデルは
-        max_new_tokens=64 で読み込んでおり（ローカルは 2 秒ごとに区切る
-        ので足りる）、そのままだと長い発話が 100 文字あたりで切れる。
-        この経路だけ上限を上げる。
+        ローカルマイクと同じく streaming_transcribe を回す。溜めてから
+        一度に投げると喋り終わるまで何も返せず、届いているのかどうかが
+        手元で分からない。state は接続ごとに持つので混ざらない。
         """
-        with _remote_tokens(model, args.remote_max_tokens):
-            out = model.transcribe((pcm, remote_server.SAMPLE_RATE),
-                                   language=args.language)
-        text = (out[0].text if out else "").strip()
-        if not text:
-            return ""
-        # ローカルと同じ後処理を通す。辞書は毎回読むので編集が即効く。
-        return polish(text, load_dictionary(), args.keep_kanji_numbers)
+        state = model.init_streaming_state(
+            language=args.language,
+            unfixed_chunk_num=args.unfixed_chunk_num,
+            unfixed_token_num=args.unfixed_token_num,
+            chunk_size_sec=args.chunk_size_sec,
+        )
+
+        def feed(pcm):
+            """届いた音を認識に流して、現時点のテキストを返す。"""
+            model.streaming_transcribe(pcm, state)
+            return state.text or ""
+
+        def finish():
+            """発話の終わり。確定させて後処理を通す。"""
+            model.finish_streaming_transcribe(state)
+            text = (state.text or "").strip()
+            # 次の発話のために作り直す（state は使い回せない）
+            state.__dict__.update(model.init_streaming_state(
+                language=args.language,
+                unfixed_chunk_num=args.unfixed_chunk_num,
+                unfixed_token_num=args.unfixed_token_num,
+                chunk_size_sec=args.chunk_size_sec,
+            ).__dict__)
+            if not text:
+                return ""
+            # ローカルと同じ後処理を通す。辞書は毎回読むので編集が即効く。
+            return polish(text, load_dictionary(), args.keep_kanji_numbers)
+
+        return feed, finish
 
     ready = threading.Event()
     t = threading.Thread(
-        target=lambda: remote_server.serve(conf, transcribe, ready=ready),
+        target=lambda: remote_server.serve(conf, make_session, ready=ready),
         name="remote-server", daemon=True)
     t.start()
     # 待ち受けに入るまで待つ。失敗しても本体は動かしたいので通す。

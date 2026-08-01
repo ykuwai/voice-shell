@@ -30,6 +30,12 @@
   }
   #bar { height: 100%; width: 0; border-radius: .25rem; background: #27ae60;
          transition: width .08s linear; }
+  #live {
+    margin-top: .8rem; padding: .5rem .7rem; border-radius: .4rem;
+    background: color-mix(in srgb, #27ae60 12%, transparent);
+    border: 1px dashed color-mix(in srgb, #27ae60 40%, transparent);
+    min-height: 1.2em;
+  }
   #log { margin-top: 1rem; }
   #log div {
     padding: .5rem .7rem; margin: .35rem 0; border-radius: .4rem;
@@ -57,6 +63,7 @@
 </div>
 
 <div id="level"><div id="bar"></div></div>
+<div id="live" hidden></div>
 <div id="log"></div>
 
 <details>
@@ -75,6 +82,7 @@
 const $ = id => document.getElementById(id);
 const SR = 16000;
 let ws, ctx, stream, node, talking = false, silent = 0, spoke = false;
+let live = '';
 
 // 認識の区切りはこちら側で決める（サーバは turn_detection を持たない）
 const THRESH = 0.012;     // これ未満を無音とみなす
@@ -110,9 +118,19 @@ function connect() {
   };
   sock.onmessage = e => {
     const m = JSON.parse(e.data);
-    if (m.type.endsWith('transcription.completed')) {
+    if (m.type.endsWith('transcription.delta')) {
+      // 喋っている最中。同じ行を伸ばしていく
+      live += m.delta ?? '';
+      $('live').textContent = live;
+      $('live').hidden = false;
+    } else if (m.type.endsWith('transcription.completed')) {
+      $('live').hidden = true;
+      live = '';
       if (m.transcript) say(m.transcript);
       else say('（聞き取れませんでした）', true);
+    } else if (m.type === 'input_audio_buffer.level') {
+      // 母艦が受け取った音量。手元のバーと合っていれば届いている
+      $('bar').style.width = Math.min(100, m.rms * 900) + '%';
     } else if (m.type === 'error') {
       say('エラー: ' + (m.error?.message ?? ''), true);
     }
