@@ -100,11 +100,14 @@ class Session:
         self.out = out_dir / f"{name}.jsonl"
         self.out.parent.mkdir(parents=True, exist_ok=True)
 
-    def append(self, b64: str) -> None:
-        """base64 の 16bit PCM を溜める。"""
-        raw = base64.b64decode(b64)
+    def append_pcm(self, raw: bytes) -> None:
+        """16bit PCM をそのまま溜める。"""
         pcm = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
         self.buf.append(pcm)
+
+    def append(self, b64: str) -> None:
+        """base64 に包まれた 16bit PCM を溜める。"""
+        self.append_pcm(base64.b64decode(b64))
 
     @property
     def seconds(self) -> float:
@@ -147,6 +150,13 @@ def handle(ws, conf: dict, transcribe: Callable[[np.ndarray], str],
 
     try:
         for raw in ws:
+            # 生の PCM がそのまま来ることがある（engines.py はこの形で送る）。
+            # JSON に包むのはブラウザ向けの経路なので、両方受ける。
+            if isinstance(raw, (bytes, bytearray)):
+                if sess.seconds <= MAX_UTTERANCE_SEC:
+                    sess.append_pcm(raw)
+                continue
+
             try:
                 msg = json.loads(raw)
             except (ValueError, TypeError):
