@@ -459,8 +459,10 @@ def parse_args():
     asr_mic.add_common_args(p)
     p.add_argument("--log-file", default=str(LOG_FILE),
                    help="発話を書き出す JSONL のパス")
-    p.add_argument("--min-chars", type=int, default=2,
-                   help="この文字数未満の発話は無視する（相槌や雑音よけ）")
+    p.add_argument("--min-chars", type=int, default=15,
+                   help="この文字数未満の発話は無視する（相槌や雑音よけ）。"
+                        "短い発話はほとんどが物音の誤認識なので厚めに切る。"
+                        "本当に短く指示したいときはビューアから送る")
     p.add_argument("--keep-noise", action="store_true",
                    help="「はい」「うん」等の相槌も送る（既定では捨てる）")
     p.add_argument("--keep-kanji-numbers", action="store_true",
