@@ -118,9 +118,9 @@ function connect() {
   };
   sock.onmessage = e => {
     const m = JSON.parse(e.data);
-    if (m.type.endsWith('transcription.delta')) {
-      // 喋っている最中。同じ行を伸ばしていく
-      live += m.delta ?? '';
+    if (m.type.endsWith('transcription.partial')) {
+      // 喋っている最中。全文が来るので置き換える
+      live = m.text ?? '';
       $('live').textContent = live;
       $('live').hidden = false;
     } else if (m.type.endsWith('transcription.completed')) {

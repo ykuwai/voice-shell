@@ -91,9 +91,9 @@ def main():
                     break
                 kind = m.get("type", "")
 
-                if kind.endswith("transcription.delta"):
-                    live += m.get("delta", "")
-                    # 同じ行を上書きして伸ばす（末尾の空白で消し残りを消す）
+                if kind.endswith("transcription.partial"):
+                    # 全文が来るので置き換える（差分ではない）
+                    live = m.get("text", "")
                     print(f"\r  … {live[-70:]:<72}", end="", flush=True)
 
                 elif kind.endswith("transcription.completed"):

@@ -132,13 +132,10 @@ class Session:
         rms = float(np.sqrt(pcm.dot(pcm) / pcm.size)) if pcm.size else 0.0
 
         text = self.feed(pcm)
-        delta = ""
-        if text and text != self.said:
-            # 伸びた分だけ返す。認識は前を言い直すことがあるので、
-            # 共通の頭を除いた残りを差分とする。
-            delta = text[len(self.said):] if text.startswith(self.said) else text
-            self.said = text
-        return delta, rms
+        if text == self.said:
+            return "", rms
+        self.said = text
+        return text, rms
 
     def append(self, b64: str) -> tuple:
         """base64 に包まれた 16bit PCM を受ける。"""
@@ -186,15 +183,22 @@ def handle(ws, conf: dict, make_session: Callable[[], tuple],
 
     last_level = [0.0]
 
-    def emit(delta: str, rms: float) -> None:
-        """認識が伸びた分と音量を返す。
+    def emit(text: str, rms: float) -> None:
+        """認識の途中経過と音量を返す。
+
+        送るのは差分ではなく**その時点の全文**。streaming_transcribe は
+        2 秒ごとに溜まった音声を最初から読み直し、末尾の数トークンを
+        巻き戻して生成し直す（言い直しが起きる）。差分を計算しようと
+        すると、言い直しのたびに全文が「新しい差分」として流れてしまう。
+
+        受け取る側は、この文字列で表示を置き換えればよい。
 
         音量は喋るたびに変わるので、少しでも動いたときだけ送る。
         毎回送ると 1 秒に何十回も流れて帯域の無駄になる。
         """
-        if delta:
-            send({"type": "conversation.item.input_audio_transcription.delta",
-                  "delta": delta})
+        if text:
+            send({"type": "conversation.item.input_audio_transcription.partial",
+                  "text": text})
         if abs(rms - last_level[0]) > 0.003:
             last_level[0] = rms
             send({"type": "input_audio_buffer.level", "rms": round(rms, 4)})
