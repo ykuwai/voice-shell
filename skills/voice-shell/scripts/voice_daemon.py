@@ -14,6 +14,7 @@ Claude Code 側は Monitor でこのログを tail し、行が来たらプロ�
     python voice_daemon.py --stop      # 停止する
 """
 import argparse
+import contextlib
 import fcntl
 import json
 import os
@@ -403,6 +404,27 @@ def polish(text: str, user_dict: dict, keep_kanji_numbers: bool = False) -> str:
     return text
 
 
+@contextlib.contextmanager
+def _remote_tokens(model, limit: int):
+    """この中だけ生成トークンの上限を伸ばす。
+
+    モデルは max_new_tokens=64 で読み込んである。ローカルは 2 秒ごとに
+    区切って認識するので足りるが、LAN 経由は発話をまとめて渡すため
+    100 文字あたりで頭打ちになる。ロックの内側で呼ぶので、差し替えて
+    いる間に他のスレッドが割り込むことはない。
+    """
+    sp = getattr(model, "sampling_params", None)
+    if sp is None or getattr(sp, "max_tokens", None) is None:
+        yield                      # 触れないなら何もしない
+        return
+    before = sp.max_tokens
+    sp.max_tokens = limit
+    try:
+        yield
+    finally:
+        sp.max_tokens = before
+
+
 def start_remote_server(model, args) -> None:
     """LAN からの接続を受けるサーバを別スレッドで立てる。
 
@@ -418,9 +440,15 @@ def start_remote_server(model, args) -> None:
 
         ローカルマイクは喋っている途中から streaming_transcribe を回すが、
         こちらは commit で発話の切れ目が明示されるので、まとめて渡せる。
+
+        まとめて渡すぶん、生成するトークン数も伸びる。モデルは
+        max_new_tokens=64 で読み込んでおり（ローカルは 2 秒ごとに区切る
+        ので足りる）、そのままだと長い発話が 100 文字あたりで切れる。
+        この経路だけ上限を上げる。
         """
-        out = model.transcribe((pcm, remote_server.SAMPLE_RATE),
-                               language=args.language)
+        with _remote_tokens(model, args.remote_max_tokens):
+            out = model.transcribe((pcm, remote_server.SAMPLE_RATE),
+                                   language=args.language)
         text = (out[0].text if out else "").strip()
         if not text:
             return ""
@@ -470,6 +498,9 @@ def parse_args():
     p.add_argument("--drop-non-japanese", action="store_true",
                    help="中国語・韓国語等を含む発話を捨てる（既定では送る。"
                         "意図して他言語を話すことがあるため既定は無効）")
+    p.add_argument("--remote-max-tokens", type=int, default=512,
+                   help="LAN 経由の認識で生成するトークンの上限。"
+                        "既定の 64 だと長い発話が 100 文字ほどで切れる")
     p.add_argument("--remote", action="store_true",
                    help="LAN の端末から音声を受ける（~/.config/voice-shell/"
                         "remote.json の設定で待ち受ける）")
