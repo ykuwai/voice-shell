@@ -32,8 +32,13 @@ def add_common_args(p):
     """各スクリプトで共通の引数を登録する。"""
     p.add_argument("--engine", default=os.environ.get("VOICE_SHELL_ENGINE", "local"),
                    help="認識エンジン。local（Qwen3-ASR をこの PC の GPU で動かす）、"
+                        "whisper（Whisper を GPU で動かす。固有名詞に強い）、"
                         "home-lan（家の LAN にある GPU 機に任せる）、"
                         "クラウドの API 名。VOICE_SHELL_ENGINE でも指定できる")
+    p.add_argument("--whisper-compute", default=None,
+                   help="Whisper の精度と VRAM の兼ね合い（float16 / int8）")
+    p.add_argument("--whisper-device", default=None,
+                   help="Whisper を動かす場所（cuda / cpu）")
     p.add_argument("--server", default=os.environ.get("VOICE_SHELL_SERVER"),
                    help="--engine home-lan のときの接続先。"
                         "VOICE_SHELL_SERVER でも指定できる")
@@ -72,9 +77,13 @@ def add_common_args(p):
 def load_model(args):
     """認識エンジンを用意する。
 
-    engine が local なら Qwen3-ASR をこの PC の GPU で動かす。
-    それ以外はクラウドの API を使う（GPU が無い PC でも動かせる）。
+    local なら Qwen3-ASR、whisper なら Whisper をこの PC の GPU で動かす。
+    それ以外はクラウドの API か、家の GPU 機を使う。
     """
+    if args.engine == "whisper":
+        import whisper_engine
+        return whisper_engine.load(args)
+
     if args.engine != "local":
         import engines
         return engines.load(args)
@@ -272,8 +281,9 @@ def stream_utterances(model, args, should_stop=lambda: False):
     喋っている最中には切らず、息継ぎ（pause_sec）を待ってから区切る。
     ライブラリ側に発話区切り（VAD）は無いため、ここで RMS を見て判定している。
     """
-    # クラウドの API は自前でストリームを持つので、そちらに任せる
-    if args.engine != "local":
+    # クラウドの API と家の GPU 機は自前でストリームを持つので、そちらに任せる。
+    # local と whisper はこの下の共通処理を通る（どちらも同じ 3 メソッドを持つ）。
+    if args.engine not in ("local", "whisper"):
         import engines
         yield from engines.stream(model, args, should_stop)
         return
