@@ -39,6 +39,9 @@ def add_common_args(p):
                    help="Whisper の精度と VRAM の兼ね合い（float16 / int8）")
     p.add_argument("--whisper-device", default=None,
                    help="Whisper を動かす場所（cuda / cpu）")
+    p.add_argument("--whisper-language", default=None,
+                   help="Whisper の言語を固定する（ja / en）。既定は自動判定。"
+                        "固定すると、その言語に訳されて出るので普段は指定しない")
     p.add_argument("--server", default=os.environ.get("VOICE_SHELL_SERVER"),
                    help="--engine home-lan のときの接続先。"
                         "VOICE_SHELL_SERVER でも指定できる")

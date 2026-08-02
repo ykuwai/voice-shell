@@ -34,6 +34,16 @@ def _lang_code(name):
     s = str(name).strip().lower()
     return _LANG.get(s, s.split("-")[0][:2])
 
+# 日本語と英語が混ざった発話を、混ざったまま書き起こさせるための例文。
+# Whisper は言語トークンを 1 つしか持てないため、放っておくと発話ごとに
+# どちらか一方へ寄る（実測: 英語で話したぶんが日本語になって届いた）。
+# こういう文が普通に出てくる、と先に見せておくと寄りが弱まる。
+MIXED_PROMPT = (
+    "これは日本語と English が混ざった会話です。"
+    "Claude Code で GitHub の pull request を確認しました。"
+    "That's fine. じゃあ deploy しておきます。"
+)
+
 # 認識をやり直す間隔。短いほど早く文字が出るが、そのぶん推論が増える。
 # 溜まった音声を毎回まるごと読み直すので、長い発話ほど 1 回が重くなる。
 REFRESH_SEC = 0.7
@@ -66,7 +76,11 @@ class WhisperModel:
         print(f"Whisper ({name} / {compute_type}) を読み込んでいます…",
               file=sys.stderr, flush=True)
         self._m = FW(name, device=device, compute_type=compute_type)
-        self._lang = _lang_code(language) or "ja"
+        # None のままにして自動判定させる。voice-shell は Qwen3-ASR の
+        # 都合で --language Japanese を常に渡してくるが、それをそのまま
+        # 効かせると英語が日本語に訳されて届く。言語を固定したいときは
+        # --whisper-language で明示する。
+        self._lang = _lang_code(language)
 
     # ── Qwen3-ASR と同じ 3 つ ──────────────────────
 
@@ -106,12 +120,22 @@ class WhisperModel:
         beam_size=1 と condition_on_previous_text=False は、途中経過が
         コロコロ変わるのを抑えるため。前の推測を引きずらせると、認識を
         やり直すたびに文が書き換わって読みにくい。
+
+        language は既定で渡さない。Whisper は指定した言語で書き出そうと
+        するので、"ja" に固定すると英語で話したぶんまで日本語に訳されて
+        しまう（実測: "I found that..." が日本語になって届いた）。
+        自動判定なら話した言語のまま出る。
         """
         if audio.size < SAMPLE_RATE * 0.3:      # 短すぎると誤認識しやすい
             return ""
         segments, info = self._m.transcribe(
             audio,
-            language=_lang_code(state.language) or self._lang,
+            language=self._lang,                # None なら自動判定
+            task="transcribe",                  # translate にはしない
+            # 言語トークンは 1 つしか持てず、発話ごとに 1 言語へ寄る。
+            # 日本語に混ざった英語まで日本語で書こうとするので、
+            # 混在があると分かる例文を先に読ませて引っぱる。
+            initial_prompt=MIXED_PROMPT,
             beam_size=1,
             condition_on_previous_text=False,
             vad_filter=True,                    # 無音を捨てて幻聴を減らす
@@ -122,10 +146,15 @@ class WhisperModel:
 
 
 def load(args):
-    """asr_mic.load_model から呼ばれる。"""
+    """asr_mic.load_model から呼ばれる。
+
+    --language は見ない。voice-shell は Qwen3-ASR に合わせて常に
+    Japanese を渡してくるが、Whisper でそれを効かせると英語で話した
+    ぶんまで日本語に訳される。固定したいときは --whisper-language。
+    """
     return WhisperModel(
         name=getattr(args, "model", None) or "large-v3-turbo",
         device=getattr(args, "whisper_device", None) or "cuda",
         compute_type=getattr(args, "whisper_compute", None) or "float16",
-        language=getattr(args, "language", None),
+        language=getattr(args, "whisper_language", None),
     )
