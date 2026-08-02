@@ -7,6 +7,7 @@
 #   voice-shell.sh status
 #   voice-shell.sh viewer / viewer-stop
 #   voice-shell.sh log-path / wait-ready
+#   voice-shell.sh whisper                Whisper で認識する（固有名詞に強い）
 #   voice-shell.sh remote                 LAN の端末からも受ける
 #   voice-shell.sh remote-conf            設定ファイルの場所
 #   voice-shell.sh remote-log             届いた発話の置き場
@@ -48,6 +49,14 @@ kill_engine_cores() {
   return 0
 }
 
+# 前回どのエンジンで起動したかを覚えておく。ビューアの「聞き取りを
+# 始める」は engine-start を呼ぶが、そちらは元のコマンドを知らない。
+# 覚えていないと whisper で立ち上げたのに Qwen3-ASR が載ってしまう。
+engine_args() {
+  local f="${XDG_RUNTIME_DIR:-/tmp}/qwen-voice/engine"
+  [[ -s "$f" ]] && echo "--engine $(cat "$f")"
+}
+
 PY="$(find_python || true)"
 APP="$HERE/voice_daemon.py"
 
@@ -65,6 +74,8 @@ cmd="${1:-status}"; shift || true
 
 case "$cmd" in
   start)
+    # --engine を明示せずに start したら Qwen3-ASR に戻す
+    [[ "$*" == *--engine* ]] || rm -f "$STATE_DIR/engine"
     if "$PY" "$APP" --status | grep -q 稼働中; then
       echo "すでに稼働しています。"; exit 0
     fi
@@ -84,7 +95,8 @@ case "$cmd" in
     # 別言語を主に使うなら `voice-shell.sh start --language English` のように渡す。
     # setsid で切り離す。付けないと呼び出し元と同じプロセスグループに残り、
     # このスクリプトの終了時に一緒に片付けられてしまう（ビューアだけ残る）。
-    setsid nohup "$PY" "$APP" --language Japanese "$@" > "$BOOT_LOG" 2>&1 &
+    setsid nohup "$PY" "$APP" --language Japanese $(engine_args) "$@" \
+      > "$BOOT_LOG" 2>&1 &
     echo "起動中… (モデル読み込みに1〜2分かかります)"
     echo "  発話ログ: $LOG_FILE"
     echo "  起動ログ: $BOOT_LOG"
@@ -120,8 +132,15 @@ case "$cmd" in
       echo "すでに稼働しています。"; exit 0
     fi
     mkdir -p "$STATE_DIR"
-    setsid nohup "$PY" "$APP" --language Japanese "$@" > "$BOOT_LOG" 2>&1 &
+    setsid nohup "$PY" "$APP" --language Japanese $(engine_args) "$@" \
+      > "$BOOT_LOG" 2>&1 &
     echo "起動中… (モデル読み込みに1〜2分かかります)"
+    ;;
+  whisper)
+    # Qwen3-ASR の代わりに Whisper を使う。固有名詞に強い。
+    mkdir -p "$STATE_DIR"
+    echo whisper > "$STATE_DIR/engine"
+    "$0" start --engine whisper "$@"
     ;;
   remote)
     # LAN の端末からも音声を受ける形で立ち上げる。
@@ -176,7 +195,7 @@ case "$cmd" in
     ;;
   *)
     echo "使い方: voice-shell.sh {start|stop|status|log-path|wait-ready}" >&2
-    echo "        voice-shell.sh {remote|remote-conf|remote-log}" >&2
+    echo "        voice-shell.sh {whisper|remote|remote-conf|remote-log}" >&2
     exit 1
     ;;
 esac
