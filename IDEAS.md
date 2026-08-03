@@ -45,7 +45,8 @@ GPU 無し・Mac でも動かせるほうが、この道具の売りに合う。
 | 環境 | 実装 | 必要なもの |
 |---|---|---|
 | Linux/Windows + NVIDIA | いまの vLLM 版 | VRAM 12GB |
-| **Mac (Apple Silicon)** | `qwen3-asr-mlx`（PyPI）または `mlx-qwen3-asr` | Metal。4/5/8bit 量子化あり。PyTorch 不要 |
+| **Mac (macOS 26 以降)** | **実装済み** — OS 付属の `SpeechAnalyzer`（`engine_apple.py`、macOS では既定） | 追加ダウンロードもメモリ確保も無し |
+| **Mac (macOS 25 以前)** | **実装済み** — `mlx-qwen3-asr`（`engine_mlx.py`） | Metal。メモリ約4GB |
 | **GPU なし** | ONNX 版（`Daumee/Qwen3-ASR-0.6B-ONNX-CPU`） | CPU のみ。Intel N100 で RTF 0.71 の報告あり |
 | GPU なし（Rust） | `qwen-asr` crate | Python も ONNX も不要 |
 
@@ -53,7 +54,10 @@ GPU 無し・Mac でも動かせるほうが、この道具の売りに合う。
 これを実装すればほぼ誰でも使えるので、公開時の価値が大きく変わる。
 
 差し替え口は `asr_mic.py` の `load_model()` / `stream_utterances()` に
-用意済み（`engines.py` と同じ形で足せる）。
+用意済み（`engines.py` と同じ形で足せる）。Mac 版はこの口に
+`engine_mlx.py` を挿した（vLLM 版と同じ3メソッドを持つアダプタ。
+KV キャッシュを使い回す増分デコードなので全音声の再投入も無い）。
+残りは ONNX 版。
 
 ## 2. サービスとして提供する
 

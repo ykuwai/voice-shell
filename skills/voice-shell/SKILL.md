@@ -119,7 +119,9 @@ ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh status
 ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh stop
 ```
 
-停止したら Monitor も TaskStop で止める。GPU メモリ（約12GB）が解放される。
+停止したら Monitor も TaskStop で止める。GPU メモリ（vLLM 版は約12GB、
+macOS の MLX 版は約4GB）が解放される。macOS 既定の apple エンジンは
+OS 側が認識するので、そもそも確保しない。
 
 ## ユーザー辞書
 
@@ -146,8 +148,11 @@ GPU 機の側は `voice-shell.sh remote` で待ち受ける。手順は
 
 ## 制約
 
-- **GPU を約12GB使う** — 同じ GPU を使う別の音声プロセスとは同時に動かせない
+- **GPU を約12GB使う**（vLLM 版。macOS の MLX 版はメモリ約4GB）—
+  同じ GPU を使う別の音声プロセスとは同時に動かせない
   （`--engine home-lan` で他機に任せる場合は手元の GPU を使わない）
+  - macOS の既定 `--engine apple`（macOS 26 以降・OS 付属の認識）は
+    GPU メモリを確保しないので、この制約に当たらない
 - マイクは `arecord`（Linux）または `ffmpeg`（macOS / Windows）経由で取得する
 - セットアップが済んでいない環境では `start` が「Python が見つかりません」で
   失敗する。その場合はリポジトリの README のセットアップ手順を案内する

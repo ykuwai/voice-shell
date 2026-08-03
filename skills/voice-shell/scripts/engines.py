@@ -95,7 +95,9 @@ def load(args):
     """接続に必要な情報をまとめて返す（実際の接続は発話ごとに行う）。"""
     name = args.engine
     if name not in ENGINES:
-        sys.exit(f"--engine は {' / '.join(['local'] + list(ENGINES))} のいずれかです")
+        sys.exit("--engine は "
+                 f"{' / '.join(['local', 'apple', 'mlx', 'whisper'] + list(ENGINES))} "
+                 "のいずれかです")
 
     try:
         import websockets  # noqa: F401

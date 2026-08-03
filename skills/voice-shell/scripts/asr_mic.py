@@ -19,6 +19,12 @@ SAMPLE_RATE = 16000
 
 BLOCK_SEC = 0.1  # マイクを読む単位
 
+# 無音とみなす RMS の既定値。マイクごとに違うので実測して決める値だが、
+# 開発機の値をそのまま持ってくると別の環境で「全く反応しない」になる。
+# Linux 機の 0.054 は Mac の USB マイク（Samson Go Mic）には高すぎ、
+# 普通の声量では一度も超えなかった（環境ノイズは 0.003 だった）。
+DEFAULT_SILENCE_THRESHOLD = 0.015 if sys.platform == "darwin" else 0.054
+
 # 既定の録音デバイス。OS ごとに指定の仕方が違う。
 if sys.platform == "darwin":
     DEFAULT_DEVICE = ":0"              # avfoundation の音声デバイス番号
@@ -28,13 +34,21 @@ else:
     DEFAULT_DEVICE = "pipewire"        # ALSA 経由（PipeWire プラグイン）
 
 
+# macOS には CUDA が無く vLLM 版は動かない。MLX 版(mlx)も動くが約4GB 積むので、
+# OS 付属のオンデバイス認識(apple)を既定にする。
+_DEFAULT_ENGINE = "apple" if sys.platform == "darwin" else "local"
+
+
 def add_common_args(p):
     """各スクリプトで共通の引数を登録する。"""
-    p.add_argument("--engine", default=os.environ.get("VOICE_SHELL_ENGINE", "local"),
-                   help="認識エンジン。local（Qwen3-ASR をこの PC の GPU で動かす）、"
+    p.add_argument("--engine", default=os.environ.get("VOICE_SHELL_ENGINE", _DEFAULT_ENGINE),
+                   help="認識エンジン。local（Qwen3-ASR を NVIDIA GPU + vLLM で動かす）、"
+                        "apple（macOS 26 付属のオンデバイス認識。軽い）、"
+                        "mlx（Qwen3-ASR を Apple Silicon の GPU で動かす）、"
                         "whisper（Whisper を GPU で動かす。固有名詞に強い）、"
                         "home-lan（家の LAN にある GPU 機に任せる）、"
-                        "クラウドの API 名。VOICE_SHELL_ENGINE でも指定できる")
+                        "クラウドの API 名。macOS の既定は apple。"
+                        "VOICE_SHELL_ENGINE でも指定できる")
     p.add_argument("--whisper-compute", default=None,
                    help="Whisper の精度と VRAM の兼ね合い（float16 / int8）")
     p.add_argument("--whisper-device", default=None,
@@ -65,7 +79,7 @@ def add_common_args(p):
                    help="vLLM の最大シーケンス長。VRAM が少ない場合は下げる")
     p.add_argument("--gpu-memory-utilization", type=float, default=0.85,
                    help="vLLM が使う VRAM の割合")
-    p.add_argument("--silence-threshold", type=float, default=0.054,
+    p.add_argument("--silence-threshold", type=float, default=DEFAULT_SILENCE_THRESHOLD,
                    help="この RMS 未満を無音とみなす（マイクのノイズフロアに合わせる）")
     p.add_argument("--silence-duration", type=float, default=1.5,
                    help="この秒数だけ無音が続いたら発話を確定する")
@@ -80,12 +94,22 @@ def add_common_args(p):
 def load_model(args):
     """認識エンジンを用意する。
 
-    local なら Qwen3-ASR、whisper なら Whisper をこの PC の GPU で動かす。
+    local なら Qwen3-ASR を vLLM で、mlx なら Qwen3-ASR を MLX（Apple
+    Silicon）で、whisper なら Whisper を、それぞれこの PC の GPU で動かす。
+    apple は macOS 26 付属のオンデバイス認識（GPU メモリを積まない）。
     それ以外はクラウドの API か、家の GPU 機を使う。
     """
+    if args.engine == "apple":
+        import engine_apple
+        return engine_apple.load(args)
+
     if args.engine == "whisper":
         import whisper_engine
         return whisper_engine.load(args)
+
+    if args.engine == "mlx":
+        import engine_mlx
+        return engine_mlx.load(args)
 
     if args.engine != "local":
         import engines
@@ -285,8 +309,8 @@ def stream_utterances(model, args, should_stop=lambda: False):
     ライブラリ側に発話区切り（VAD）は無いため、ここで RMS を見て判定している。
     """
     # クラウドの API と家の GPU 機は自前でストリームを持つので、そちらに任せる。
-    # local と whisper はこの下の共通処理を通る（どちらも同じ 3 メソッドを持つ）。
-    if args.engine not in ("local", "whisper"):
+    # local / apple / mlx / whisper はこの下の共通処理を通る（同じ 3 メソッドを持つ）。
+    if args.engine not in ("local", "apple", "mlx", "whisper"):
         import engines
         yield from engines.stream(model, args, should_stop)
         return

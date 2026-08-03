@@ -1,6 +1,9 @@
 __pycache__/
 *.pyc
 *.log
+.venv/
+# speech_helper.swift のビルド結果（初回起動時に作り直せる）
+skills/voice-shell/scripts/build/
 # 検証用に落としたサンプル音声（README の手順で再取得できる）
 sample_*.wav
 sample_*.flac
