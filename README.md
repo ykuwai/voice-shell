@@ -43,17 +43,22 @@ Claude Code で `/voice-shell` と打つか、「音声モードにして」と�
 - **NVIDIA GPU（VRAM 12GB 以上）** — Qwen3-ASR-1.7B の実測使用量が 12.3GB。
   それ未満なら `--max-model-len` を下げる（8192 など）か、より軽い
   `Qwen/Qwen3-ASR-0.6B` を `--model` に指定する
-- **Python 3.12** と conda（miniforge 等）
+- **または macOS 26 以降の Mac** — OS 付属の音声認識（`--engine apple`、
+  macOS では既定）で動く。モデルの追加ダウンロードも GPU メモリも要らない
+- **または Apple Silicon Mac（macOS 25 以前）** — MLX 版（`--engine mlx`）で動く。
+  ユニファイドメモリを約4GB使う
+- **Python 3.12**（macOS は 3.10〜3.13）と conda または venv
 - **Claude Code**
 
-動作確認したのは下記の環境。macOS / Windows 向けのコードは書いてあるが未検証。
+動作確認したのは下記の環境。Windows 向けのコードは書いてあるが未検証。
 
-| 項目 | 値 |
-|---|---|
-| GPU | RTX 4080 SUPER (16GB) — VRAM 使用 12.3GB |
-| OS | Ubuntu (GNOME / Wayland / PipeWire) |
-| 主要パッケージ | `qwen-asr` 0.0.6, vLLM 0.14.0, PyTorch 2.9.1+cu128 |
-| 認識速度 | RTF 0.30（実時間の 1/3 で処理） |
+| 項目 | Linux + NVIDIA | macOS（apple） | macOS（mlx） |
+|---|---|---|---|
+| 機種 | RTX 4080 SUPER (16GB) — VRAM 12.3GB | Mac mini (M4 Pro, 24GB) — OS 側 | 同左 — 約4GB |
+| OS | Ubuntu (GNOME / Wayland / PipeWire) | macOS 26.5.2 | macOS 26 |
+| 主要パッケージ | `qwen-asr` 0.0.6, vLLM 0.14.0, PyTorch 2.9.1+cu128 | OS 付属（Speech.framework） | `mlx-qwen3-asr` 0.3.5, MLX 0.32.0 |
+| 認識速度 | RTF 0.30 | RTF 0.03 | RTF 0.31（確定の一括認識） |
+| 起動 | 1〜2 分 | 1 秒未満 | 1〜2 分 |
 
 ## セットアップ
 
@@ -64,12 +69,32 @@ pip install -U "qwen-asr[vllm]" aiohttp soxr
 hf download Qwen/Qwen3-ASR-1.7B          # 約3.5GB
 ```
 
+macOS 26 以降は OS 付属の音声認識を使う（`--engine apple` が既定）。
+認識モデルの追加ダウンロードは要らず、Swift のヘルパを初回起動時に
+自動でビルドする（Xcode か `xcode-select --install` が必要）:
+
+```bash
+cd voice-shell
+python3 -m venv .venv                    # 3.10〜3.13
+.venv/bin/pip install -U numpy aiohttp soxr
+```
+
+macOS 25 以前は `SpeechTranscriber` が無いので MLX 版を入れる
+（`--engine mlx` を明示する）:
+
+```bash
+cd voice-shell
+python3 -m venv .venv                    # 3.10〜3.13
+.venv/bin/pip install -U mlx-qwen3-asr aiohttp soxr
+.venv/bin/hf download Qwen/Qwen3-ASR-1.7B    # 約3.4GB
+```
+
 録音に使うコマンドを入れる（OS ごとに違う）:
 
 | OS | 必要なもの | 備考 |
 |---|---|---|
 | Linux | `alsa-utils`（`arecord`） | PipeWire がマイクを占有していても取れる |
-| macOS | `brew install ffmpeg` | avfoundation 経由。未検証 |
+| macOS | `brew install ffmpeg` | avfoundation 経由。初回にマイク許可のダイアログが出る |
 | Windows | `winget install ffmpeg` | dshow 経由。未検証 |
 
 スキルを Claude Code に認識させる（実体はこのリポジトリのまま、リンクを張る）:
@@ -110,6 +135,10 @@ skills/voice-shell/       Claude Code スキル（~/.claude/skills/ からリン
    ├─ voice-shell.sh      起動・停止・状態確認・ビューア
    ├─ voice_daemon.py     マイクを聞いて JSONL に書く常駐プロセス
    ├─ asr_mic.py          録音・無音判定・認識ループ
+   ├─ engine_apple.py     macOS 26 付属の認識を使うエンジン（ローカル完結）
+   ├─ speech_helper.swift 同上の Swift ヘルパ（初回起動時に自動ビルド）
+   ├─ engine_mlx.py       Apple Silicon 用エンジン（MLX、ローカル完結）
+   ├─ engines.py          クラウド API エンジン（Deepgram 等、GPU 不要）
    ├─ viewer.py           JSONL を追尾してブラウザに流す（GPU 不使用）
    └─ viewer.html         ビューアの画面
 ```
@@ -141,6 +170,57 @@ $S stop           # 停止（VRAM 解放）
 # 実装メモ
 
 同じ調査を繰り返さないための記録。すべて実測で確認したもの。
+
+## macOS は OS 付属の認識を既定にした（Qwen3-ASR は重すぎた）
+
+Mac では `--engine apple`（`engine_apple.py`）を既定にしている。macOS 26 の
+`SpeechAnalyzer` / `SpeechTranscriber` を使うので、モデルの追加ダウンロードも
+GPU メモリの確保も要らない。実測（M4 Pro / macOS 26.5.2）で 3.1 秒の日本語音声が
+0.10 秒、句読点まで含めて正しく出た（RTF 0.03）。起動も 0.83 秒で、MLX 版の
+1〜2 分と比べ物にならない。音声はこの Mac の中だけで処理される。
+
+Swift の API しか無いので、`speech_helper.swift` を常駐させて WAV のパスを
+渡し、結果を JSON で受け取る形にした。ヘルパは初回起動時に `swiftc` で
+自動ビルドする（`scripts/build/` に置く。git には入れない）。
+
+### ストリーム給餌ではなくファイル渡しにした
+
+`SpeechAnalyzer` には `start(inputSequence:)` で `AsyncStream` に音声を流す
+API もあるが、署名なしの CLI から呼ぶと `nilError` で落ちた（`.app` 化して
+いる `LiveDictation` では動く）。`analyzeSequence(from: AVAudioFile)` は
+同じ条件で問題なく動くので、発話 1 つ分を WAV に書いて渡している。
+RTF 0.03 なので、途中経過のために全体を何度も認識し直しても間に合う。
+
+### マイクは Python 側が持つ
+
+ヘルパは音声を受け取って文字にするだけで、マイクには触らない。そのため
+TCC の許可も `.app` 化も要らず、`swiftc` で作った素の実行ファイルのまま動く。
+録音と発話の区切り（VAD）は従来どおり `asr_mic.py` の担当。
+
+（この構成は同じ Mac で先に検証した
+[live-dictation](https://github.com/ykuwai/live-dictation) の知見を使っている。）
+
+## macOS 25 以前は MLX 版で動かす（partial も確定も全体を認識し直す）
+
+`SpeechTranscriber` が使えない Apple Silicon には CUDA も無いので
+[mlx-qwen3-asr](https://github.com/moona3k/mlx-qwen3-asr) を使う
+（`engine_mlx.py`、`--engine mlx`）。vLLM 版と同じ3メソッドを持つ
+アダプタなので、認識ループは共通のまま。
+
+同ライブラリの増分デコード（KV キャッシュ再利用）も試したが、チャンク境界
+ごとに読点が入り語も割れる（実測で「くだ。ください」）。vLLM 版の
+「毎秒すべてを認識し直す」表示と比べて明らかに見劣りするため、
+**partial も確定も、溜めた音声全体の一括認識**にした。1回の認識は
+RTF 約0.31 なので、partial の更新間隔は発話長×0.3 で自然に伸びる
+（5秒の発話なら約1.5秒ごと）。確定も同じだけ待つ。
+
+partial の認識はワーカースレッドでやる。メインループで認識すると、
+その間マイクを読めず ffmpeg のパイプ（約0.7秒分）が溢れて録音を
+取りこぼす。スレッド化で feed は 15ms 以下になった（増分デコードを
+メインループで回していたときは毎チャンク約500ms 止まっていた）。
+
+確定文の品質は一括認識のほうが明確に良い（partial で「修復の方針を立案」と
+崩れた 20 秒の発話が、確定では「修正の方針を提案」と正しく出た）。
 
 ## vLLM のデフォルト設定では 16GB GPU に載らない
 

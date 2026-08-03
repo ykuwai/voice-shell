@@ -14,7 +14,7 @@ command -v conda mamba micromamba
 | 環境 | 進む節 |
 |---|---|
 | NVIDIA GPU、VRAM 12GB 以上 | **A** |
-| macOS（Apple Silicon） | **B** |
+| macOS | **B**（26 以降は OS 付属の認識で軽く動く） |
 | それ以外（GPU なし・VRAM 不足） | **C** |
 | 同じ LAN に GPU 機がある | **E**（そちらに認識だけ任せる。手元は軽いまま） |
 
@@ -52,22 +52,69 @@ nvidia-smi --query-gpu=memory.used,memory.total --format=csv
 なお vLLM の `max_model_len` は既定 65536 で、KV キャッシュに 7GiB 要求して
 16GB でも起動しない。本スキルは 16384 を明示している。
 
-## B. macOS（Apple Silicon）
+## B. macOS
 
-CUDA が無いので MLX 版を使う。それぞれのページで対応状況と必要メモリを確認する:
+macOS には 2 つある。**B-1 を勧める**（軽くて速い）。
 
-- [qwen3-asr-mlx](https://pypi.org/project/qwen3-asr-mlx/)（PyPI）
-- [mlx-qwen3-asr](https://github.com/moona3k/mlx-qwen3-asr)
+| | B-1 apple | B-2 mlx |
+|---|---|---|
+| 認識モデル | OS 付属（macOS 26 以降） | Qwen3-ASR 1.7B |
+| メモリ | OS 側が持つ | 約3.4GB |
+| 起動 | 1 秒未満 | 1〜2 分 |
+| 追加の pip | 不要（numpy のみ） | mlx-qwen3-asr |
+| 3.5 秒の発話の認識 | 約0.1 秒 | 約1 秒 |
+
+どちらも音声はこの Mac の中だけで処理される（クラウドには送らない）。
+
+### B-1. apple（macOS 26 以降・既定）
+
+`SpeechAnalyzer` / `SpeechTranscriber` を使う（`engine_apple.py`）。
+`--engine apple` で動き、**macOS では既定**なので指定は不要。
 
 ```bash
 brew install ffmpeg                      # 録音用
-conda create -n qwen3-asr python=3.12 -y && conda activate qwen3-asr
-pip install -U qwen3-asr-mlx aiohttp soxr
+cd <このリポジトリ>
+python3 -m venv .venv                    # Python 3.10〜3.13
+.venv/bin/pip install -U numpy aiohttp soxr
 ```
 
-これらは `qwen_asr` と API が違うため、`asr_mic.py` の `load_model()` と
-`stream_utterances()` の差し替えが要る（`IDEAS.md` 参照）。ここは未着手なので、
-案内するときに現状を伝える。
+Swift のヘルパ（`speech_helper.swift`）を初回起動時に自動でビルドするので、
+Xcode か Command Line Tools が要る:
+
+```bash
+xcode-select --install                   # 入っていなければ
+swiftc --version                         # macOS 26 SDK が見えるか確認
+```
+
+日本語の音声認識モデルは OS が初回に自動で落としてくる（数十秒）。
+2 回目以降は端末に残るので待ち時間はない。
+
+macOS 25 以前だと `SpeechTranscriber` が無いので B-2 に進む。
+
+### B-2. mlx（Qwen3-ASR を Apple Silicon で動かす）
+
+MLX 版（[mlx-qwen3-asr](https://github.com/moona3k/mlx-qwen3-asr)）を使う
+（`engine_mlx.py`）。`--engine mlx` を明示して起動する。
+
+```bash
+brew install ffmpeg                      # 録音用
+cd <このリポジトリ>
+python3 -m venv .venv                    # Python 3.10〜3.13（conda でもよい）
+.venv/bin/pip install -U mlx-qwen3-asr aiohttp soxr
+.venv/bin/hf download Qwen/Qwen3-ASR-1.7B    # 約3.4GB
+```
+
+モデルは float16 で約3.4GB をユニファイドメモリに載せる。メモリが厳しければ
+`--model Qwen/Qwen3-ASR-0.6B` に変える（`hf download` も 0.6B にする）。
+
+### 共通
+
+`voice-shell.sh` はリポジトリ直下の `.venv` を自動で見つけるので、
+`VOICE_SHELL_PYTHON` の設定は不要。
+
+初回起動時、ターミナルにマイクへのアクセス許可を求めるダイアログが出るので
+許可してもらう（ffmpeg が avfoundation 経由で録音するため）。認識そのものは
+マイクを触らないので、追加の許可は要らない。
 
 ## C. GPU なし（CPU のみ）
 

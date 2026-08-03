@@ -8,6 +8,7 @@
 #   voice-shell.sh viewer / viewer-stop
 #   voice-shell.sh log-path / wait-ready
 #   voice-shell.sh whisper                Whisper で認識する（固有名詞に強い）
+#   voice-shell.sh apple                  macOS 26 付属の認識で動かす（軽い）
 #   voice-shell.sh remote                 LAN の端末からも受ける
 #   voice-shell.sh remote-conf            設定ファイルの場所
 #   voice-shell.sh remote-log             届いた発話の置き場
@@ -20,6 +21,10 @@ HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # Python 環境を探す。VOICE_SHELL_PYTHON で明示指定できる。
 find_python() {
   if [[ -n "${VOICE_SHELL_PYTHON:-}" ]]; then echo "$VOICE_SHELL_PYTHON"; return; fi
+  # リポジトリ直下の .venv（conda を使わない構成。macOS はこちらが標準）
+  if [[ -x "$HERE/../../../.venv/bin/python" ]]; then
+    echo "$HERE/../../../.venv/bin/python"; return
+  fi
   # conda / mamba の qwen3-asr 環境を各所から探す
   for base in "$HOME/miniforge3" "$HOME/miniconda3" "$HOME/anaconda3" \
               "$HOME/mambaforge" "/opt/homebrew/Caskroom/miniforge/base" "/opt/conda"; do
@@ -27,9 +32,13 @@ find_python() {
       [[ -x "$base/envs/$env/bin/python" ]] && { echo "$base/envs/$env/bin/python"; return; }
     done
   done
-  # 見つからなければ、qwen_asr が入っている python を使う
+  # 見つからなければ、認識エンジンが入っている python を使う。
+  # apple エンジン（macOS 26 付属）は OS 側が認識するので numpy だけあればよい。
   for c in python3 python; do
-    if command -v "$c" >/dev/null && "$c" -c "import qwen_asr" 2>/dev/null; then
+    command -v "$c" >/dev/null || continue
+    if "$c" -c "import qwen_asr" 2>/dev/null || \
+       "$c" -c "import mlx_qwen3_asr" 2>/dev/null || \
+       { [[ "$(uname)" == Darwin ]] && "$c" -c "import numpy" 2>/dev/null; }; then
       command -v "$c"; return
     fi
   done
@@ -59,6 +68,17 @@ engine_args() {
 
 PY="$(find_python || true)"
 APP="$HERE/voice_daemon.py"
+
+# プロセスを呼び出し元の系統から切り離して起動する。
+# macOS には setsid が無いので、その場合は nohup だけで済ませる
+# （デーモンの子 kill は pgrep -P による直接の子だけなので、これで足りる）。
+detach() {
+  if command -v setsid >/dev/null; then
+    setsid nohup "$@"
+  else
+    nohup "$@"
+  fi
+}
 
 if [[ -z "$PY" ]]; then
   echo "Qwen3-ASR が入った Python が見つかりません。" >&2
@@ -95,7 +115,7 @@ case "$cmd" in
     # 別言語を主に使うなら `voice-shell.sh start --language English` のように渡す。
     # setsid で切り離す。付けないと呼び出し元と同じプロセスグループに残り、
     # このスクリプトの終了時に一緒に片付けられてしまう（ビューアだけ残る）。
-    setsid nohup "$PY" "$APP" --language Japanese $(engine_args) "$@" \
+    detach "$PY" "$APP" --language Japanese $(engine_args) "$@" \
       > "$BOOT_LOG" 2>&1 &
     echo "起動中… (モデル読み込みに1〜2分かかります)"
     echo "  発話ログ: $LOG_FILE"
@@ -132,7 +152,7 @@ case "$cmd" in
       echo "すでに稼働しています。"; exit 0
     fi
     mkdir -p "$STATE_DIR"
-    setsid nohup "$PY" "$APP" --language Japanese $(engine_args) "$@" \
+    detach "$PY" "$APP" --language Japanese $(engine_args) "$@" \
       > "$BOOT_LOG" 2>&1 &
     echo "起動中… (モデル読み込みに1〜2分かかります)"
     ;;
@@ -141,6 +161,12 @@ case "$cmd" in
     mkdir -p "$STATE_DIR"
     echo whisper > "$STATE_DIR/engine"
     "$0" start --engine whisper "$@"
+    ;;
+  apple)
+    # macOS 26 付属のオンデバイス認識を使う。GPU メモリを積まないので Mac 向け。
+    mkdir -p "$STATE_DIR"
+    echo apple > "$STATE_DIR/engine"
+    "$0" start --engine apple "$@"
     ;;
   remote)
     # LAN の端末からも音声を受ける形で立ち上げる。
@@ -169,7 +195,7 @@ case "$cmd" in
     mkdir -p "$STATE_DIR"
     # setsid で切り離す。デーモンが終了時に自分の子を全部 kill するため、
     # 同じ系統にいるとデーモンを止めたときビューアまで落ちる。
-    setsid nohup "$PY" "$HERE/viewer.py" "$@" \
+    detach "$PY" "$HERE/viewer.py" "$@" \
       > "$STATE_DIR/viewer.out" 2>&1 &
     sleep 2
     if pgrep -f "voice-shell/scripts/viewer\.p[y]" >/dev/null; then
@@ -195,7 +221,7 @@ case "$cmd" in
     ;;
   *)
     echo "使い方: voice-shell.sh {start|stop|status|log-path|wait-ready}" >&2
-    echo "        voice-shell.sh {whisper|remote|remote-conf|remote-log}" >&2
+    echo "        voice-shell.sh {apple|whisper|remote|remote-conf|remote-log}" >&2
     exit 1
     ;;
 esac
