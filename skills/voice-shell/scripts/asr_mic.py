@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 import sys
+from collections import deque
 from typing import Iterator, Tuple
 
 import numpy as np
@@ -18,6 +19,13 @@ import numpy as np
 SAMPLE_RATE = 16000
 
 BLOCK_SEC = 0.1  # マイクを読む単位
+
+# 発話の頭に付ける「しきい値を超える直前」の長さ。
+# 子音の立ち上がりは RMS が低く、超えた瞬間から渡すと語頭が欠ける
+# （実測: 「反応がなかったので」が「なかったので」に、
+#  「Apple の認識が」が「の認識が」になった）。0.3 秒では足りず 0.6 秒にした。
+# 無音を余分に渡すことになるが、認識側は無音を無視するので実害はない。
+PREROLL_SEC = 0.6
 
 # 無音とみなす RMS の既定値。マイクごとに違うので実測して決める値だが、
 # 開発機の値をそのまま持ってくると別の環境で「全く反応しない」になる。
@@ -327,6 +335,8 @@ def stream_utterances(model, args, should_stop=lambda: False):
     silence_run = 0.0    # 連続無音の秒数
     speech_seen = False  # 現発話中に音声を検出したか
     last_text = ""
+    # しきい値を超える直前のブロックを溜めておき、発話の頭に付け足す
+    preroll = deque(maxlen=max(1, round(PREROLL_SEC / BLOCK_SEC)))
 
     def finish():
         model.finish_streaming_transcribe(state)
@@ -347,9 +357,14 @@ def stream_utterances(model, args, should_stop=lambda: False):
         else:
             silence_run += dur
 
-        # 発話が始まる前の無音は推論に回さない
+        # 発話が始まる前の無音は推論に回さない（ただし直前の分だけは取っておく）
         if not speech_seen:
+            preroll.append(block)
             continue
+
+        # 発話の1ブロック目なら、しきい値を超える直前の音も一緒に渡す
+        while preroll:
+            model.streaming_transcribe(preroll.popleft(), state)
 
         model.streaming_transcribe(block, state)
 
