@@ -293,16 +293,17 @@
   .sheet-inner { max-width:460px; margin:0 auto; padding-bottom:2rem; }
   .sheet-head {
     position:sticky; top:0; z-index:1;
-    display:flex; align-items:center; gap:.5rem;
-    padding:.85rem 1rem; background:var(--panel);
+    display:flex; align-items:center; gap:.4rem;
+    padding:.7rem 1rem .7rem .5rem; background:var(--panel);
     border-bottom:1px solid var(--line);
   }
-  .sheet-head h2 { margin:0; font-size:.9rem; font-weight:600; margin-right:auto; }
+  .sheet-head .icon::after { display:none; }   /* 状態を示す点は要らない */
+  .sheet-head h2 { margin:0; font-size:1rem; font-weight:600; margin-right:auto; }
 
-  .group { padding:.9rem 1rem; border-bottom:1px solid var(--line-soft); }
+  .group { padding:1.1rem 1rem; border-bottom:1px solid var(--line-soft); }
   .group > h3 {
     display:flex; align-items:center; gap:.4rem;
-    margin:0 0 .7rem; font-size:.7rem; font-weight:600; letter-spacing:.06em;
+    margin:0 0 .8rem; font-size:.75rem; font-weight:700; letter-spacing:.06em;
     text-transform:uppercase; color:var(--faint);
   }
   /* 項目名にも小さな絵を添える。文字だけの一覧にしない。 */
@@ -311,15 +312,15 @@
   }
   .field { display:flex; align-items:center; gap:.6rem; margin-bottom:.6rem; }
   .field:last-child { margin-bottom:0; }
-  .field > label { font-size:.8rem; color:var(--dim); flex:none; min-width:6.5rem; }
+  .field > label { font-size:.875rem; color:var(--text); flex:none; min-width:7rem; }
   .field .val {
-    margin-left:auto; font-size:.75rem; color:var(--text); text-align:right;
+    margin-left:auto; font-size:.8rem; color:var(--text); text-align:right;
     font-variant-numeric:tabular-nums; flex:none; min-width:3.2rem;
   }
   select, input[type=text], input[type=file] {
-    flex:1; min-width:0; padding:.4rem .75rem;
+    flex:1; min-width:0; padding:.45rem .85rem;
     background:var(--panel-2); border:1px solid var(--line); border-radius:var(--pill);
-    font-size:.8rem;
+    font-size:.85rem;
   }
   select:focus, input:focus, textarea:focus { outline:none; border-color:var(--accent); }
 
@@ -332,7 +333,7 @@
     background:var(--accent); box-shadow:var(--glow) color-mix(in srgb, var(--accent) 50%, transparent);
     cursor:pointer;
   }
-  .range-note { font-size:.68rem; color:var(--faint); margin:-.25rem 0 .6rem; }
+  .range-note { font-size:.75rem; line-height:1.5; color:var(--faint); margin:-.1rem 0 .8rem; }
 
   /* 感度を決めるための実測メーター。しきい値の位置に印を出す。 */
   .gauge {
@@ -352,55 +353,76 @@
 
   .seg-row { display:flex; flex:1; gap:.2rem; background:var(--panel-2); padding:3px; border-radius:var(--pill); }
   .seg-row button {
-    flex:1; white-space:nowrap; font-size:.75rem; padding:.35rem .5rem;
+    flex:1; white-space:nowrap; font-size:.8rem; padding:.4rem .5rem;
     border-radius:var(--pill); color:var(--faint);
     transition:background .15s, color .15s;
   }
   .seg-row button.on { background:var(--raise); color:var(--text); }
 
-  .toggle { display:flex; align-items:center; gap:.5rem; font-size:.8rem; color:var(--dim); }
+  .toggle { display:flex; align-items:center; gap:.55rem; font-size:.875rem; color:var(--text); }
   .toggle input { accent-color:var(--accent); width:15px; height:15px; }
 
+  /* 3段に分ける。塗り＝その画面で確定させたい操作、淡い塗り＝補助、
+     輪郭＝それ以外。ひとつの区画に塗りは1つだけにする。 */
   .btn {
-    display:inline-flex; align-items:center; gap:.35rem;
-    padding:.4rem .9rem; border-radius:var(--pill); font-size:.78rem;
-    border:1.5px solid var(--line); background:var(--panel-2); color:var(--dim);
-    transition:border-color .15s, color .15s;
+    display:inline-flex; align-items:center; gap:.4rem;
+    padding:.45rem 1rem; border-radius:var(--pill); font-size:.82rem; font-weight:500;
+    border:1.5px solid var(--line); background:transparent; color:var(--dim);
+    transition:border-color .15s, color .15s, background .15s;
   }
   .btn:hover:not(:disabled) { color:var(--text); border-color:var(--dim); }
-  .btn.go { border-color:var(--accent); color:var(--accent); }
+  /* 塗り */
+  .btn.go {
+    border-color:transparent; color:var(--panel); font-weight:600;
+    background:linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, var(--accent-2)));
+    box-shadow:0 2px 10px color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+  .btn.go:hover:not(:disabled) {
+    color:var(--panel);
+    box-shadow:0 2px 16px color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+  /* 淡い塗り */
+  .btn.tonal {
+    border-color:transparent; color:var(--accent);
+    background:color-mix(in srgb, var(--accent) 15%, transparent);
+  }
+  .btn.tonal:hover:not(:disabled) {
+    color:var(--accent);
+    background:color-mix(in srgb, var(--accent) 24%, transparent);
+  }
   .btn.busy { opacity:.6; }
+  .btn:disabled { opacity:.45; }
   .btn-row { display:flex; align-items:center; gap:.4rem; flex-wrap:wrap; }
   .btn-row .spacer { flex:1; }
 
   /* 辞書 */
   .dict-tabs { display:flex; gap:.2rem; background:var(--panel-2); padding:3px; border-radius:var(--pill); margin-bottom:.6rem; }
   .dict-tabs button {
-    display:inline-flex; align-items:center; justify-content:center; gap:.3rem;
-    flex:1; white-space:nowrap; font-size:.75rem; padding:.35rem;
+    display:inline-flex; align-items:center; justify-content:center; gap:.35rem;
+    flex:1; white-space:nowrap; font-size:.8rem; padding:.4rem;
     border-radius:var(--pill); color:var(--faint);
   }
   .dict-tabs button.on { background:var(--raise); color:var(--text); }
-  .dict-label { margin:0 0 .5rem; font-size:.72rem; color:var(--faint); }
+  .dict-label { margin:0 0 .6rem; font-size:.78rem; color:var(--faint); }
   .new-row { display:flex; align-items:center; gap:.3rem; margin-bottom:.5rem; }
-  .new-row input { flex:1; min-width:0; padding:.4rem .75rem;
-    background:var(--panel-2); border:1px solid var(--line); border-radius:var(--pill); font-size:.78rem; }
+  .new-row input { flex:1; min-width:0; padding:.45rem .85rem;
+    background:var(--panel-2); border:1px solid var(--line); border-radius:var(--pill); font-size:.83rem; }
   .arrow { color:var(--faint); font-size:.8rem; flex:none; }
-  .filter { width:100%; margin-bottom:.5rem; padding:.4rem .75rem;
-    background:var(--panel-2); border:1px solid var(--line); border-radius:var(--pill); font-size:.78rem; }
+  .filter { width:100%; margin-bottom:.5rem; padding:.45rem .85rem;
+    background:var(--panel-2); border:1px solid var(--line); border-radius:var(--pill); font-size:.83rem; }
   .rows { display:flex; flex-direction:column; gap:.25rem; max-height:15rem; overflow-y:auto; }
   .row { display:flex; align-items:center; gap:.3rem; }
   .row.hit input { border-color:var(--accent); }
-  .row input { flex:1; min-width:0; padding:.35rem .7rem;
-    background:var(--panel-2); border:1px solid var(--line); border-radius:var(--pill); font-size:.78rem; }
+  .row input { flex:1; min-width:0; padding:.4rem .8rem;
+    background:var(--panel-2); border:1px solid var(--line); border-radius:var(--pill); font-size:.83rem; }
   .row .del { display:grid; place-items:center; width:28px; height:28px;
     color:var(--faint); border-radius:50%; flex:none; }
   .row .del:hover { color:var(--danger); background:var(--raise); }
   .chips { display:flex; flex-wrap:wrap; gap:.25rem; }
-  .chip { font-size:.68rem; padding:.1rem .55rem; border-radius:var(--pill);
+  .chip { font-size:.75rem; padding:.15rem .6rem; border-radius:var(--pill);
     background:var(--panel-2); color:var(--faint); border:1px solid var(--line-soft); }
   .builtin-head { margin-top:.7rem; }
-  .dict-note, .scope-note { font-size:.68rem; color:var(--faint); margin:.5rem 0 0; }
+  .dict-note, .scope-note { font-size:.75rem; line-height:1.5; color:var(--faint); margin:.5rem 0 0; }
 
   [hidden] { display:none !important; }
 </style>
@@ -514,14 +536,19 @@
 <section class="sheet" id="sheet" hidden>
  <div class="sheet-inner">
   <div class="sheet-head">
+    <button class="icon" id="closeSettings" data-i18n-title="back">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1"
+           stroke-linecap="round" stroke-linejoin="round">
+        <path d="M15 4.5 7.5 12l7.5 7.5"/>
+      </svg>
+    </button>
     <h2 data-i18n="settings">Settings</h2>
-    <button class="btn" id="floatBtn" data-icon="float" data-icon-size="13" data-i18n="floatBtn" hidden>Float on top</button>
-    <button class="btn go" id="closeSettings" data-icon="check" data-icon-size="13" data-i18n="done">Done</button>
+    <button class="btn tonal" id="floatBtn" data-icon="float" data-icon-size="14" data-i18n="floatBtn" hidden>Float on top</button>
   </div>
 
   <!-- 入力 -->
   <div class="group">
-    <h3 data-icon="mic" data-icon-size="13" data-i18n="grpInput">Input</h3>
+    <h3 data-icon="mic" data-icon-size="14" data-i18n="grpInput">Input</h3>
     <div class="field">
       <label for="mic" data-icon="mic" data-icon-size="13" data-i18n="micDevice">Microphone</label>
       <select id="mic"></select>
@@ -552,14 +579,14 @@
     <p class="range-note" data-i18n="minCharsNote"></p>
     <label class="toggle"><input type="checkbox" id="clean"><span data-i18n="stripFillers">Strip filler words</span></label>
     <div class="btn-row" style="margin-top:.7rem">
-      <button class="btn go" id="calibBtn" data-icon="sparkle" data-i18n="calibrate">Auto-tune</button>
+      <button class="btn go" id="calibBtn" data-icon="sparkle" data-icon-size="14" data-i18n="calibrate">Auto-tune</button>
     </div>
     <p class="range-note" id="calibNote" style="margin-top:.5rem"></p>
   </div>
 
   <!-- 見た目 -->
   <div class="group">
-    <h3 data-icon="palette" data-icon-size="13" data-i18n="grpLook">Appearance</h3>
+    <h3 data-icon="palette" data-icon-size="14" data-i18n="grpLook">Appearance</h3>
     <div class="field">
       <label data-icon="eye" data-icon-size="13" data-i18n="theme">Theme</label>
       <div class="seg-row" id="themeRow">
@@ -589,7 +616,7 @@
 
   <!-- 辞書 -->
   <div class="group">
-    <h3 data-icon="book" data-icon-size="13" data-i18n="grpDict">Dictionary</h3>
+    <h3 data-icon="book" data-icon-size="14" data-i18n="grpDict">Dictionary</h3>
     <label class="toggle" style="margin-bottom:.5rem">
       <input type="checkbox" id="scopePrivate"><span data-i18n="dictPrivate">Keep on this machine only</span>
     </label>
@@ -606,7 +633,7 @@
         <input id="newFrom" data-i18n-ph="dictHeard">
         <span class="arrow">→</span>
         <input id="newTo" data-i18n-ph="dictSendAs">
-        <button class="btn" id="addReplace" data-icon="plus" data-icon-size="13" data-i18n="add">Add</button>
+        <button class="btn tonal" id="addReplace" data-icon="plus" data-icon-size="14" data-i18n="add">Add</button>
       </div>
       <input class="filter" id="filterReplace" data-i18n-ph="dictFilter">
       <div class="rows" id="replaceRows"></div>
@@ -616,7 +643,7 @@
       <p class="dict-label" data-i18n="dictIgnoreHelp"></p>
       <div class="new-row">
         <input id="newIgnore" data-i18n-ph="dictIgnorePh">
-        <button class="btn" id="addIgnore" data-icon="plus" data-icon-size="13" data-i18n="add">Add</button>
+        <button class="btn tonal" id="addIgnore" data-icon="plus" data-icon-size="14" data-i18n="add">Add</button>
       </div>
       <div class="rows" id="ignoreRows"></div>
       <p class="dict-label builtin-head">
@@ -626,10 +653,10 @@
     </div>
 
     <div class="btn-row" style="margin-top:.6rem">
-      <button class="btn go" id="dictSave" data-icon="check" data-icon-size="13" data-i18n="save">Save</button>
+      <button class="btn go" id="dictSave" data-icon="check" data-icon-size="14" data-i18n="save">Save</button>
       <span class="spacer"></span>
-      <button class="btn" id="dictExport" data-icon="download" data-icon-size="13" data-i18n="exportCsv">Export CSV</button>
-      <button class="btn" id="dictImport" data-icon="upload" data-icon-size="13" data-i18n="importCsv">Import CSV</button>
+      <button class="btn" id="dictExport" data-icon="download" data-icon-size="14" data-i18n="exportCsv">Export CSV</button>
+      <button class="btn" id="dictImport" data-icon="upload" data-icon-size="14" data-i18n="importCsv">Import CSV</button>
       <input type="file" id="dictFile" accept=".csv,text/csv" hidden>
     </div>
     <p class="dict-note" id="dictNote"></p>
@@ -637,11 +664,11 @@
 
   <!-- ログ -->
   <div class="group">
-    <h3 data-icon="list" data-icon-size="13" data-i18n="grpLog">Transcript</h3>
+    <h3 data-icon="list" data-icon-size="14" data-i18n="grpLog">Transcript</h3>
     <div class="btn-row">
       <span class="val" style="margin:0"><span id="count">0</span> <span data-i18n="items">items</span></span>
       <span class="spacer"></span>
-      <button class="btn" id="copy" data-icon="copy" data-icon-size="13" data-i18n="copyAll">Copy all</button>
+      <button class="btn" id="copy" data-icon="copy" data-icon-size="14" data-i18n="copyAll">Copy all</button>
     </div>
   </div>
  </div>
@@ -680,7 +707,7 @@ const I18N = {
     pauseTitle:'Pause — stop listening', resumeTitle:'Resume listening',
     settingsTitle:'Settings',
     powerTitle:'Stop / start listening',
-    settings:'Settings', done:'Done', floatBtn:'Float on top',
+    settings:'Settings', back:'Back', floatBtn:'Float on top',
     grpInput:'Input', micDevice:'Microphone',
     sensitivity:'Sensitivity',
     sensitivityNote:'Bar shows the live level, the marker is the threshold. Speech is detected past the marker.',
@@ -746,7 +773,7 @@ const I18N = {
     pauseTitle:'一時停止 — 聞き取りをやめる', resumeTitle:'聞き取りを再開する',
     settingsTitle:'設定',
     powerTitle:'聞き取りを止める / 始める',
-    settings:'設定', done:'閉じる', floatBtn:'手前に浮かせる',
+    settings:'設定', back:'戻る', floatBtn:'手前に浮かせる',
     grpInput:'入力', micDevice:'マイク',
     sensitivity:'感度',
     sensitivityNote:'バーが今の音量、印がしきい値です。印を超えた分が発話として拾われます。',
