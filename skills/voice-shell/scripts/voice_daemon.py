@@ -37,6 +37,9 @@ DICT_FILE = CONFIG_DIR / "dictionary.json"
 # 手元だけに置く辞書。社名・取引先・個人的な語など、公開したくないものを入れる。
 # リポジトリには入らない（.gitignore で除外）。
 PRIVATE_DICT_FILE = CONFIG_DIR / "dictionary.private.json"
+# マイクの感度と「何秒黙ったら確定するか」。辞書と同じく設定ディレクトリに
+# 置き、ビューアから変えられる。デーモンが 0.5 秒おきに読み直すので再起動は要らない。
+TUNING_FILE = CONFIG_DIR / "tuning.json"
 PID_FILE = STATE_DIR / "daemon.pid"
 LOG_FILE = STATE_DIR / "utterances.jsonl"
 # 認識途中のテキスト。上書きし続けるだけで履歴は残さない（ビューアの表示用）。
@@ -393,7 +396,30 @@ def apply_replacements(text: str, replace: dict) -> str:
     return text
 
 
-def polish(text: str, user_dict: dict, keep_kanji_numbers: bool = False) -> str:
+# 意味を持たないつなぎ言葉。ビューアの設定で入切する。
+# ここで消すことで、画面の見た目だけでなく Claude に渡る本文からも消える。
+FILLERS = ["えーと", "えっと", "ええと", "あのー", "あの", "えー", "えっ",
+           "まあ", "なんか", "そのー", "うーん", "んー"]
+# 長いものから当てる（「あのー」を「あの」で先に食われないように）
+_FILLER_RE = re.compile("|".join(re.escape(w) for w in
+                                 sorted(FILLERS, key=len, reverse=True)))
+
+
+def strip_fillers(text: str) -> str:
+    """つなぎ言葉を落として、句読点の乱れを整える。"""
+    text = _FILLER_RE.sub("", text)
+    text = re.sub("、{2,}", "、", text)
+    text = re.sub(r"^[、。\s]+", "", text)
+    return re.sub(r"\s{2,}", " ", text).strip()
+
+
+def fix_latin_commas(text: str) -> str:
+    """日本語モードで英語を話すと単語ごとに読点が入るのを戻す。"""
+    return re.sub(r"([A-Za-z])、(?=[A-Za-z])", r"\1 ", text)
+
+
+def polish(text: str, user_dict: dict, keep_kanji_numbers: bool = False,
+           drop_fillers: bool = False) -> str:
     """認識したテキストを読みやすく整える。ローカルと LAN の両方で通す。
 
     辞書はクラウドの API に対するこちらの取り柄なので、リモートでも効かせる。
@@ -404,6 +430,9 @@ def polish(text: str, user_dict: dict, keep_kanji_numbers: bool = False) -> str:
     text = apply_replacements(text, user_dict["replace"])
     if not keep_kanji_numbers:
         text = kanji_numbers_to_arabic(text)
+    text = fix_latin_commas(text)
+    if drop_fillers:
+        text = strip_fillers(text)
     return text
 
 
@@ -471,7 +500,8 @@ def start_remote_server(model, args) -> None:
             if not text:
                 return ""
             # ローカルと同じ後処理を通す。辞書は毎回読むので編集が即効く。
-            return polish(text, load_dictionary(), args.keep_kanji_numbers)
+            return polish(text, load_dictionary(), args.keep_kanji_numbers,
+                          getattr(args, "strip_fillers", False))
 
         return feed, finish
 
@@ -507,6 +537,8 @@ def parse_args():
     asr_mic.add_common_args(p)
     p.add_argument("--log-file", default=str(LOG_FILE),
                    help="発話を書き出す JSONL のパス")
+    p.add_argument("--strip-fillers", action="store_true",
+                   help="「えーと」などのつなぎ言葉を送る前に落とす")
     p.add_argument("--min-chars", type=int, default=15,
                    help="この文字数未満の発話は無視する（相槌や雑音よけ）。"
                         "短い発話はほとんどが物音の誤認識なので厚めに切る。"
@@ -594,6 +626,36 @@ def main():
             return None
 
     args.want_device = want_device
+
+    # マイク感度と確定までの無音秒数もビューアから触れる。録音の入れ替えすら
+    # 要らず、次に読み直した時点から効く。ファイルが無ければ今の値で作る。
+    def want_tuning():
+        try:
+            return json.loads(TUNING_FILE.read_text())
+        except (OSError, ValueError):
+            return None      # 書き換え途中で読んだだけ。次の周期で拾い直す
+
+    args.want_tuning = want_tuning
+
+    # 保存済みの値があれば、起動時点から反映しておく
+    saved = want_tuning() or {}
+    for key in ("silence_threshold", "silence_duration"):
+        if isinstance(saved.get(key), (int, float)):
+            setattr(args, key, float(saved[key]))
+    if isinstance(saved.get("min_chars"), (int, float)):
+        args.min_chars = int(saved["min_chars"])
+    if isinstance(saved.get("strip_fillers"), bool):
+        args.strip_fillers = saved["strip_fillers"]
+
+    # 足りない項目を今の値で埋める。ファイルが既にある人にも新しい項目が
+    # 行き渡るようにする（無いままだとビューアのつまみが効かない）。
+    filled = dict(saved)
+    for key in ("silence_threshold", "silence_duration", "min_chars",
+                "strip_fillers"):
+        filled.setdefault(key, getattr(args, key))
+    if filled != saved:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        TUNING_FILE.write_text(json.dumps(filled, indent=2) + "\n")
 
     print("モデルを読み込み中… (初回は数分かかります)", file=sys.stderr)
     model = asr_mic.load_model(args)
@@ -696,7 +758,8 @@ def main():
                     drop("日本語以外")
                     continue
 
-                text = polish(text, user_dict, args.keep_kanji_numbers)
+                text = polish(text, user_dict, args.keep_kanji_numbers,
+                              args.strip_fillers)
                 stamp = time.strftime("%H:%M:%S")
 
                 # 一時停止中は保留ファイルへ。Claude には送られない。
