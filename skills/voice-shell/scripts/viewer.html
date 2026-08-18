@@ -17,8 +17,8 @@
     --line:#1d2735;
     --line-soft:#151d29;
     --text:#e8eef7;
-    --dim:#8593a8;
-    --faint:#525f74;
+    --dim:#a3b0c4;      /* 8.6:1  項目名 */
+    --faint:#7d8ca4;    /* 5.4:1  説明・見出し。小さい文字の下限 4.5:1 を満たす */
     --accent:#22d3ee;         /* 即時・認識中 */
     --accent-2:#a855f7;       /* 手直し */
     --ok:#34d399;             /* 送信済み */
@@ -37,8 +37,8 @@
     --line:#dce2ec;
     --line-soft:#e8ecf3;
     --text:#101826;
-    --dim:#5a6779;
-    --faint:#8b97a9;
+    --dim:#4d5a6c;      /* 7.2:1 */
+    --faint:#6b7889;    /* 4.6:1  小さい文字の下限を満たす */
     --accent:#0891b2;
     --accent-2:#7c3aed;
     --ok:#059669;
@@ -51,7 +51,7 @@
       color-scheme: light;
       --bg:#eef1f6; --panel:#ffffff; --panel-2:#f4f6fa; --raise:#e9edf4;
       --line:#dce2ec; --line-soft:#e8ecf3;
-      --text:#101826; --dim:#5a6779; --faint:#8b97a9;
+      --text:#101826; --dim:#4d5a6c; --faint:#6b7889;
       --accent:#0891b2; --accent-2:#7c3aed; --ok:#059669; --warn:#d97706;
       --danger:#dc2626; --glow:0 0 0;
     }
@@ -253,6 +253,15 @@
     font-size:.66rem; color:var(--faint); margin-bottom:.25rem;
     font-variant-numeric:tabular-nums;
   }
+  .draft-card .gutter .spacer { flex:1; }
+  /* この一言だけ手直しに回す。即時のまま使えるようにしておく。 */
+  .tiny {
+    display:grid; place-items:center; width:24px; height:24px;
+    border-radius:50%; color:var(--faint);
+  }
+  .tiny:hover { color:var(--accent); background:var(--raise); }
+  /* 認識中の文字も、押せば直しに回せると分かるようにする */
+  .draft-card:not(.holding) .stream { cursor:text; }
   .draft-card .mark {
     padding:.05rem .4rem; border-radius:5px; font-size:.64rem; font-weight:600;
     color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, transparent);
@@ -489,6 +498,9 @@
     <div class="gutter">
       <span class="mark" data-i18n="unsent">Unsent</span>
       <span id="draftTime"></span>
+      <span class="spacer"></span>
+      <button class="tiny" id="editOnce" data-icon="edit" data-icon-size="15"
+              data-i18n-title="editOnce"></button>
     </div>
     <div class="stream"><span id="stream" data-i18n-quiet="quiet"></span><span class="caret"></span></div>
     <textarea id="draft" data-i18n-ph="draftPlaceholder" hidden></textarea>
@@ -683,6 +695,8 @@ const I18N = {
     sent:'Sent', edited:'Edited',
     draftPlaceholder:'Fix it here, then send.',
     sendTitle:'Send to Claude', discardTitle:'Discard',
+    editOnce:'Edit this one before sending',
+    hintOnce:'Holding this one. Fix it, then send — back to instant after.',
     pauseTitle:'Pause — stop listening', resumeTitle:'Resume listening',
     settingsTitle:'Settings',
     powerTitle:'Stop / start listening',
@@ -750,6 +764,8 @@ const I18N = {
     sent:'送信済み', edited:'手直し送信',
     draftPlaceholder:'ここで直してから送れます。',
     sendTitle:'Claude に送る', discardTitle:'消す',
+    editOnce:'この一言だけ直してから送る',
+    hintOnce:'この一言だけ溜めます。直して送ると、即時に戻ります。',
     pauseTitle:'一時停止 — 聞き取りをやめる', resumeTitle:'聞き取りを再開する',
     settingsTitle:'設定',
     powerTitle:'聞き取りを止める / 始める',
@@ -845,6 +861,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'power','openSettings','sheet','closeSettings','floatBtn','page',
                   'viz','meter','meterFill','meterMark','logoMark',
                   'tray','stream','draft','draftTime','draftActions','send','discard',
+                  'editOnce',
                   'hint','log','none','count','copy',
                   'filterAll','filterSent','filterEdited',
                   'mic','thresh','threshVal','gaugeFill','gaugeMark',
@@ -1062,7 +1079,7 @@ function bandsFromLevel() {
 let floorDb = -60;
 
 // 流れる波形の高さ。こちらも感度からの超過分をそのまま使う。
-function levelNow() { return amplitudeOverThreshold(); }
+function levelNow() { return amplitudeNow(); }
 
 // （参考）ブラウザ側の音量。今は形の算出にだけ使っている。
 function browserLevel() {
@@ -1107,15 +1124,39 @@ function pushHistory(now) {
   history.push(env);
 }
 
-// 感度のしきい値を 0 とし、そこから何 dB 出たかを 0〜1 にする。
-// デーモンが実際に判定に使っている音量をそのまま物差しにするので、
-// つまみを動かすと波の起点が動き、「動いている ＝ 拾われている」が成り立つ。
-const OVER_DB = 20;      // しきい値より何 dB 上で振り切るか
-function amplitudeOverThreshold() {
-  const thr = 20 * Math.log10(Math.max(tuning.silence_threshold, 1e-5));
-  const now = 20 * Math.log10(Math.max(daemonLevel, 1e-5));
-  return Math.min(1, Math.max(0, (now - thr) / OVER_DB));
+// 音量は dB で見る。そのうえで、しきい値より下は急に小さくする
+// （エキスパンダー）。ゼロにはしないので「もう録れていないのでは」とは
+// ならず、それでいて静かなときにうろうろ動かない。
+//
+//   しきい値より上 : そのまま
+//   しきい値より下 : 下がった分を EXPAND 倍にして落とす
+//
+// 折れ目をそのまま繋ぐと段差が見えるので、KNEE_DB の幅でなめらかにする。
+const EXPAND = 5;        // しきい値より下で何倍の速さで落とすか
+const KNEE_DB = 6;       // 折れ目をなめらかにする幅
+const BELOW_DB = 4;      // しきい値の何 dB 下を底とするか
+const SPAN_DB = 18;      // しきい値から何 dB 上で振り切るか
+
+function expand(db, kneeDb) {
+  const d = db - kneeDb;
+  if (d >= KNEE_DB / 2) return db;                       // 上はそのまま
+  if (d <= -KNEE_DB / 2) return kneeDb + d * EXPAND;     // 下は急に落とす
+  return db - (EXPAND - 1) * Math.pow(d - KNEE_DB / 2, 2) / (2 * KNEE_DB);
 }
+
+// 目盛りはしきい値を基準に取る。感度を変えると割り当ても一緒に動くので、
+// どの環境でも「普通の声で7割くらい」に収まる。
+//   暗騒音・物音     → 0%（棒は最小の太さで残るので、消えたようには見えない）
+//   しきい値ちょうど → 5% 前後
+//   普通の声         → 65% 前後
+//   大きい声         → 100%
+const levelToUnit = v => {
+  const db = 20 * Math.log10(Math.max(v, 1e-5));
+  const knee = 20 * Math.log10(Math.max(tuning.silence_threshold, 1e-5));
+  const out = expand(db, knee);
+  return Math.min(1, Math.max(0, (out - (knee - BELOW_DB)) / (SPAN_DB + BELOW_DB)));
+};
+const amplitudeNow = () => levelToUnit(daemonLevel);
 
 // 急に立ち上がると点滅して見えるので、下がるときだけ緩やかにする
 const smooth = new Array(BARS).fill(0);
@@ -1124,7 +1165,7 @@ function currentBands() {
   // 形だけを取り出すため、いちばん大きい帯で割って山の形にそろえる。
   const shape = (analyser && !vizFailed) ? bandsFromFreq() : bandsFromLevel();
   const peak = Math.max(...shape, 0.001);
-  const amp = amplitudeOverThreshold();
+  const amp = amplitudeNow();
 
   for (let i = 0; i < BARS; i++) {
     const raw = (shape[i] / peak) * amp;
@@ -1463,6 +1504,8 @@ function paint() {
   // 手元で作業している間はタブのタイトルだけが手がかりになる
   document.title = t(off ? 'titleOff' : route === 'hold' ? 'titleHold' : 'titleLive') + ' — voice-shell';
 
+  el.tray.classList.toggle('holding', route === 'hold');
+  el.editOnce.hidden = route !== 'live';
   el.tray.classList.toggle('idle', off);
   if (off) el.stream.textContent = '';
   paintDraft();
@@ -1674,6 +1717,7 @@ el.send.onclick = async () => {
   el.draft.value = '';
   grow();
   paintDraft();
+  endOneShot();
 };
 
 // 消したものは一度だけ戻せるようにする（確認ダイアログは毎回だと煩わしい）
@@ -1697,7 +1741,32 @@ el.discard.onclick = async () => {
     };
     el.hint.appendChild(undo);
   }
+  endOneShot();
 };
+
+/* 即時のまま、この一言だけ手直しに回す。
+   誤字を見つけたときや、今回だけ直したいときのため。
+   デーモンは確定の瞬間に保留かどうかを見るので、話している最中に
+   押せば、いま喋っている分から捕まえられる。 */
+let oneShot = false;
+
+async function editThisOne() {
+  if (route === 'hold') return;          // すでに手直しモード
+  oneShot = true;
+  await setRoute('hold');
+  el.hint.textContent = t('hintOnce');
+}
+
+el.editOnce.onclick = editThisOne;
+// 認識中の文字そのものを押しても同じ
+el.stream.onclick = () => { if (route === 'live') editThisOne(); };
+
+// 送るか消したら、元のモードへ戻す
+async function endOneShot() {
+  if (!oneShot) return;
+  oneShot = false;
+  await setRoute('live');
+}
 
 el.draft.addEventListener('input', () => { grow(); });
 // Ctrl+Enter で送信
@@ -1924,6 +1993,8 @@ async function runCalibration() {
   }));
   if (wasRoute === 'off') setRoute('off');
 }
+
+el.calibBtn.onclick = runCalibration;
 
 /* ── フローティング表示 ─────────────────
    ブラウザを横に並べずに済むよう、常に手前へ浮く小窓へ引っ越す。
