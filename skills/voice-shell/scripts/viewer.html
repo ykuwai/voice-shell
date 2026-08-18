@@ -140,14 +140,21 @@
   #viz { display:block; width:100%; height:124px; }
   /* デーモンが拾えている音量。ブラウザ側の波形とは別の経路なので、
      ここが動かないのに波形が動いていれば認識側が死んでいると分かる。 */
+  /* 掴みやすいよう、線そのものより広い範囲で受ける */
+  .meter-hit { padding:10px 1rem; cursor:ew-resize; touch-action:none; }
   .meter {
-    position:relative; height:3px; margin:0 1rem;
+    position:relative; height:3px;
     border-radius:var(--pill); background:var(--line);
+  }
+  .meter-hit:hover .meter-mark, .meter-hit.dragging .meter-mark {
+    height:14px; top:-5.5px; width:3px;
   }
   /* しきい値の位置。ここを超えた分が発話として拾われる。 */
   .meter-mark {
-    position:absolute; top:-3px; width:2px; height:9px; border-radius:1px;
+    position:absolute; top:-3px; width:2px; height:9px; border-radius:var(--pill);
     background:var(--warn); box-shadow:var(--glow) var(--warn);
+    transform:translateX(-50%);
+    transition:height .12s, width .12s, top .12s;
   }
   .meter-fill {
     height:100%; width:0; border-radius:2px; background:var(--faint);
@@ -502,9 +509,13 @@
     <canvas id="viz"></canvas>
     <!-- デーモンが拾えている音量。ブラウザの波形とは別経路なので、
          波形が動くのにここが動かなければ認識側が落ちていると分かる。 -->
-    <div class="meter" id="meter">
-      <div class="meter-fill" id="meterFill"></div>
-      <div class="meter-mark" id="meterMark" data-i18n-title="thresholdMark"></div>
+    <!-- 印をつまむと感度が変わる。細い線のままでは掴めないので、
+         見た目より広い当たり判定を親に持たせている。 -->
+    <div class="meter-hit" id="meterHit" data-i18n-title="thresholdMark">
+      <div class="meter" id="meter">
+        <div class="meter-fill" id="meterFill"></div>
+        <div class="meter-mark" id="meterMark"></div>
+      </div>
     </div>
   </div>
 
@@ -723,7 +734,8 @@ const I18N = {
     modeLive:'Instant', modeHold:'Review',
     unsent:'Unsent', history:'History', quiet:'(silence)',
     uiUpdated:'Updated — tap to reload',
-    thresholdMark:'Speech is picked up past this mark',
+    thresholdMark:'Drag to set sensitivity — speech past this mark is picked up',
+    sensitivitySet:'Sensitivity {n}',
     filterAll:'All', filterSent:'Sent', filterEdited:'Edited',
     empty:'Nothing sent yet. Speak and it shows up here.',
     sent:'Sent', edited:'Edited',
@@ -794,7 +806,8 @@ const I18N = {
     modeLive:'即時', modeHold:'手直し',
     unsent:'未送信', history:'送信履歴', quiet:'（無音）',
     uiUpdated:'画面が新しくなりました — 押すと反映',
-    thresholdMark:'この印を超えた分が発話として拾われます',
+    thresholdMark:'つまんで感度を変えられます（この印を超えた分が拾われます）',
+    sensitivitySet:'感度 {n}',
     filterAll:'すべて', filterSent:'送信済み', filterEdited:'手直し',
     empty:'まだ何も送っていません。話すとここに出ます。',
     sent:'送信済み', edited:'手直し送信',
@@ -896,7 +909,7 @@ const $ = id => document.getElementById(id);
 const el = {};
 for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'power','openSettings','sheet','closeSettings','floatBtn','page',
-                  'viz','meter','meterFill','meterMark','logoMark',
+                  'viz','meter','meterHit','meterFill','meterMark','logoMark',
                   'tray','stream','draft','draftTime','draftActions','send','discard',
                   'editOnce','draftMark',
                   'hint','note','log','none','count','copy','fresh',
@@ -2059,6 +2072,38 @@ async function runCalibration() {
 }
 
 el.calibBtn.onclick = runCalibration;
+
+/* メーターの印をつまんで感度を変える。
+   設定を開かずに済むほうが早いので、本画面からも触れるようにする。
+   設定側のつまみとは同じ値を見ているので、どちらを動かしても揃う。 */
+function threshFromX(clientX) {
+  const r = el.meter.getBoundingClientRect();
+  if (!r.width) return;
+  const pos = Math.min(1000, Math.max(0, ((clientX - r.left) / r.width) * 1000));
+  tuning.silence_threshold = posToThresh(pos);
+  paintTuning();
+  el.hint.textContent = t('sensitivitySet', {n: Math.round(pos / 10)});
+  queueTuning();
+}
+
+let draggingThresh = false;
+el.meterHit.addEventListener('pointerdown', e => {
+  draggingThresh = true;
+  el.meterHit.classList.add('dragging');
+  el.meterHit.setPointerCapture(e.pointerId);
+  threshFromX(e.clientX);
+});
+el.meterHit.addEventListener('pointermove', e => {
+  if (draggingThresh) threshFromX(e.clientX);
+});
+for (const ev of ['pointerup', 'pointercancel']) {
+  el.meterHit.addEventListener(ev, () => {
+    if (!draggingThresh) return;
+    draggingThresh = false;
+    el.meterHit.classList.remove('dragging');
+    setTimeout(() => { if (!draggingThresh) paint(); }, 1500);
+  });
+}
 
 /* ── フローティング表示 ─────────────────
    ブラウザを横に並べずに済むよう、常に手前へ浮く小窓へ引っ越す。
