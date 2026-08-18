@@ -279,6 +279,15 @@
   }
   @keyframes blink { 50% { opacity:0; } }
   .draft-card.idle .caret { display:none; }
+  /* 「今回だけ直す」を押した状態。送り先は即時のままなので、
+     ここの色だけで「この一言は止めてある」と示す。 */
+  .draft-card.editing {
+    border-color:var(--accent-2);
+    box-shadow:0 0 0 1px color-mix(in srgb, var(--accent-2) 22%, transparent);
+  }
+  .draft-card.editing .mark {
+    color:var(--accent-2); background:color-mix(in srgb, var(--accent-2) 16%, transparent);
+  }
 
   #draft {
     display:block; width:100%; margin-top:.5rem; padding:.6rem .75rem;
@@ -507,7 +516,7 @@
   <!-- 未送信カード。認識中のテキストと手直し欄をここにまとめる。 -->
   <section class="draft-card idle" id="tray" aria-live="polite">
     <div class="gutter">
-      <span class="mark" data-i18n="unsent">Unsent</span>
+      <span class="mark" id="draftMark" data-i18n="unsent">Unsent</span>
       <span id="draftTime"></span>
       <span class="spacer"></span>
       <button class="tiny" id="editOnce" data-icon="edit" data-icon-size="15"
@@ -711,6 +720,7 @@ const I18N = {
     draftPlaceholder:'Fix it here, then send.',
     sendTitle:'Send to Claude', discardTitle:'Discard',
     editOnce:'Edit this one before sending',
+    editingOne:'Editing',
     hintOnce:'Holding this one. Fix it, then send — back to instant after.',
     pauseTitle:'Pause — stop listening', resumeTitle:'Resume listening',
     settingsTitle:'Settings',
@@ -781,6 +791,7 @@ const I18N = {
     draftPlaceholder:'ここで直してから送れます。',
     sendTitle:'Claude に送る', discardTitle:'消す',
     editOnce:'この一言だけ直してから送る',
+    editingOne:'編集中',
     hintOnce:'この一言だけ溜めます。直して送ると、即時に戻ります。',
     pauseTitle:'一時停止 — 聞き取りをやめる', resumeTitle:'聞き取りを再開する',
     settingsTitle:'設定',
@@ -877,7 +888,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'power','openSettings','sheet','closeSettings','floatBtn','page',
                   'viz','meter','meterFill','meterMark','logoMark',
                   'tray','stream','draft','draftTime','draftActions','send','discard',
-                  'editOnce',
+                  'editOnce','draftMark',
                   'hint','log','none','count','copy','fresh',
                   'filterAll','filterSent','filterEdited',
                   'mic','thresh','threshVal','gaugeFill','gaugeMark',
@@ -1498,12 +1509,17 @@ const ROUTE = {
 
 let route = 'live';
 let lastMode = 'live';   // 一時停止を解いたとき、直前のモードに戻す
+let oneShot = false;     // この一言だけ手直しに回している最中か
 let inFlight = false;    // 切替中はポーリングに巻き戻されないようにする
 
 function paint() {
+  // 「今回だけ直す」の間は即時のまま見せる。中では保留にしているが、
+  // モードを切り替えたわけではないので、表示まで変えると別物に見える。
+  const shown = oneShot ? 'live' : route;
+
   for (const [k, b] of [['live', el.segLive], ['hold', el.segHold]]) {
-    b.classList.toggle('on', route === k);
-    b.setAttribute('aria-checked', String(route === k));
+    b.classList.toggle('on', shown === k);
+    b.setAttribute('aria-checked', String(shown === k));
   }
   const off = route === 'off';
   el.modes.classList.toggle('muted', off);
@@ -1515,13 +1531,17 @@ function paint() {
   el.segOff.title = t(off ? 'resumeTitle' : 'pauseTitle');
   el.segOff.setAttribute('aria-label', el.segOff.title);
 
-  setState(route, t(off ? 'statusOff' : route === 'hold' ? 'statusHold' : 'statusLive'));
-  el.hint.textContent = t(off ? 'hintOff' : route === 'hold' ? 'hintHold' : 'hintLive');
+  setState(shown, t(off ? 'statusOff' : shown === 'hold' ? 'statusHold' : 'statusLive'));
+  if (!oneShot) {
+    el.hint.textContent = t(off ? 'hintOff' : shown === 'hold' ? 'hintHold' : 'hintLive');
+  }
   // 手元で作業している間はタブのタイトルだけが手がかりになる
-  document.title = t(off ? 'titleOff' : route === 'hold' ? 'titleHold' : 'titleLive') + ' — voice-shell';
+  document.title = t(off ? 'titleOff' : shown === 'hold' ? 'titleHold' : 'titleLive') + ' — voice-shell';
 
   el.tray.classList.toggle('holding', route === 'hold');
-  el.editOnce.hidden = route !== 'live';
+  el.tray.classList.toggle('editing', oneShot);
+  el.draftMark.textContent = t(oneShot ? 'editingOne' : 'unsent');
+  el.editOnce.hidden = route !== 'live' || oneShot;
   el.tray.classList.toggle('idle', off);
   if (off) el.stream.textContent = '';
   paintDraft();
@@ -1559,8 +1579,9 @@ async function setRoute(next) {
   refreshState();
 }
 
-el.segLive.onclick = () => setRoute('live');
-el.segHold.onclick = () => setRoute('hold');
+// 自分でモードを選んだら「今回だけ」は解除する
+el.segLive.onclick = () => { oneShot = false; setRoute('live'); };
+el.segHold.onclick = () => { oneShot = false; setRoute('hold'); };
 el.segOff.onclick = () => setRoute(route === 'off' ? lastMode : 'off');
 
 /* ── 通信 ───────────────────────────────── */
@@ -1778,8 +1799,6 @@ el.discard.onclick = async () => {
    誤字を見つけたときや、今回だけ直したいときのため。
    デーモンは確定の瞬間に保留かどうかを見るので、話している最中に
    押せば、いま喋っている分から捕まえられる。 */
-let oneShot = false;
-
 async function editThisOne() {
   if (route === 'hold') return;          // すでに手直しモード
   oneShot = true;
