@@ -107,6 +107,12 @@ def load_model(args):
     apple は macOS 26 付属のオンデバイス認識（GPU メモリを積まない）。
     それ以外はクラウドの API か、家の GPU 機を使う。
     """
+    # 後片付けはどのエンジンでも要る。録音の ffmpeg / arecord はエンジンに
+    # 関係なく子プロセスとして走るため、分岐に入る前に登録する。
+    # （ここが local の中にあった頃、macOS の apple / mlx は登録を通らず、
+    #   stop のたびに録音プロセスだけが孤児として残り続けていた）
+    _kill_engine_on_exit()
+
     if args.engine == "apple":
         import engine_apple
         return engine_apple.load(args)
@@ -133,15 +139,20 @@ def load_model(args):
         max_model_len=args.max_model_len,
         max_new_tokens=64,
     )
-    _kill_engine_on_exit()
     return model
 
 
 def _kill_engine_on_exit():
-    """終了時に vLLM のワーカープロセスを確実に落とす。
+    """終了時に子プロセスを確実に落とす。
 
-    Ctrl-C や kill で親が終わっても VLLM::EngineCore が残り、VRAM を
-    12GB 掴んだままになることがあるため、自分の子プロセスを始末する。
+    Ctrl-C や kill で親が終わっても、子が残って資源を掴んだままになる:
+
+    - 録音の ffmpeg / arecord がマイクを開けっぱなしにする（全エンジン共通）
+    - vLLM の VLLM::EngineCore が VRAM を 12GB 掴む（local）
+    - 認識ヘルパが残る（apple）
+
+    SIGTERM は既定で atexit を通らないため、sys.exit に変換してから
+    自分の直接の子を始末する。voice-shell.sh stop は SIGTERM を送る。
     """
     import atexit
     import os
