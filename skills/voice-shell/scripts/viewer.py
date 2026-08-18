@@ -273,10 +273,17 @@ async def main_async(args):
                 rec = Tail._parse(line)
                 if rec:
                     held.append(rec)
+        # 画面ファイルの更新時刻も返す。手を入れたときに、開いている
+        # 画面が古いままだと気づけない（特に浮かせた小窓は再読み込みしにくい）。
+        try:
+            ui = int(page.stat().st_mtime)
+        except OSError:
+            ui = 0
         return web.json_response({"muted": mute_file.exists(),
                                   "paused": pause_file.exists(),
                                   "engine": engine_running(),
-                                  "loading": engine_loading(), "held": held})
+                                  "loading": engine_loading(),
+                                  "ui": ui, "held": held})
 
     async def handle_engine(req):
         """認識を止める / 動かす。

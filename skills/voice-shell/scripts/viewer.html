@@ -301,6 +301,17 @@
 
   .none { padding:1.5rem 1rem; text-align:center; font-size:.78rem; color:var(--faint); }
 
+  /* 画面そのものが更新されたときだけ出る。常設のボタンは置かない。
+     浮かせた小窓には再読み込みの手立てが無いので、ここから促す。 */
+  .fresh {
+    position:fixed; left:50%; bottom:1rem; transform:translateX(-50%);
+    display:flex; align-items:center; gap:.4rem; z-index:30;
+    padding:.45rem .9rem; border-radius:var(--pill);
+    background:var(--accent); color:var(--panel);
+    font-size:.78rem; font-weight:600;
+    box-shadow:0 4px 18px color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+
   /* ── 設定パネル ───────────────────────── */
   .sheet {
     position:fixed; inset:0; z-index:20; overflow-y:auto;
@@ -525,6 +536,9 @@
   <div id="log"></div>
   <p class="none" id="none" data-i18n="empty">Nothing sent yet. Speak and it shows up here.</p>
 
+  <button class="fresh" id="fresh" data-icon="auto_awesome" data-icon-size="15"
+          data-i18n="uiUpdated" hidden>Updated — tap to reload</button>
+
 </div><!-- /page -->
 
 <!-- ── 設定 ─────────────────────────────── -->
@@ -689,6 +703,7 @@ const I18N = {
     hintNoMic:'No microphone access — the meter still shows the daemon level.',
     modeLive:'Instant', modeHold:'Review',
     unsent:'Unsent', history:'History', quiet:'(silence)',
+    uiUpdated:'Updated — tap to reload',
     thresholdMark:'Speech is picked up past this mark',
     filterAll:'All', filterSent:'Sent', filterEdited:'Edited',
     empty:'Nothing sent yet. Speak and it shows up here.',
@@ -758,6 +773,7 @@ const I18N = {
     hintNoMic:'マイクを使えないため、波形はデーモンの音量で動かしています。',
     modeLive:'即時', modeHold:'手直し',
     unsent:'未送信', history:'送信履歴', quiet:'（無音）',
+    uiUpdated:'画面が新しくなりました — 押すと反映',
     thresholdMark:'この印を超えた分が発話として拾われます',
     filterAll:'すべて', filterSent:'送信済み', filterEdited:'手直し',
     empty:'まだ何も送っていません。話すとここに出ます。',
@@ -862,7 +878,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'viz','meter','meterFill','meterMark','logoMark',
                   'tray','stream','draft','draftTime','draftActions','send','discard',
                   'editOnce',
-                  'hint','log','none','count','copy',
+                  'hint','log','none','count','copy','fresh',
                   'filterAll','filterSent','filterEdited',
                   'mic','thresh','threshVal','gaugeFill','gaugeMark',
                   'silence','silenceVal','minChars','minCharsVal','clean',
@@ -1656,11 +1672,25 @@ el.power.onclick = async () => {
 };
 
 let seeded = false;   // 溜まっていた分をリロード時に一度だけ復元する
+let uiStamp = 0;      // 読み込んだ時点の画面ファイルの更新時刻
+
+// 浮かせている間は、小窓を閉じてから元のタブで読み直す
+el.fresh.onclick = () => {
+  if (documentPictureInPicture?.window) documentPictureInPicture.window.close();
+  location.reload();
+};
 
 async function refreshState() {
   if (inFlight) return;               // 切替中は上書きしない
   try {
     const s = await (await fetch('/api/state')).json();
+
+    // 画面ファイルが差し替わったら知らせる。浮かせた小窓は
+    // 再読み込みの手立てが無いので、ここから戻せるようにする。
+    if (s.ui) {
+      if (uiStamp === 0) uiStamp = s.ui;
+      else if (s.ui !== uiStamp) el.fresh.hidden = false;
+    }
 
     if (typeof s.engine === 'boolean') {
       if (s.engine) {
