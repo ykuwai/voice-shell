@@ -1380,6 +1380,15 @@ function drawGrid(b) {
 function frame(now) {
   requestAnimationFrame(frame);
   if (!cw || !ch) return;
+  try { paintFrame(now); } catch (err) {
+    // 一コマ失敗しても止めない。次のコマで描き直す。
+    cx.setTransform(window.devicePixelRatio || 1, 0, 0, window.devicePixelRatio || 1, 0, 0);
+    cx.globalAlpha = 1;
+    cx.globalCompositeOperation = 'source-over';
+  }
+}
+
+function paintFrame(now) {
   cx.clearRect(0, 0, cw, ch);
 
   const dead = route === 'off' || engine === 'off';
@@ -2078,31 +2087,41 @@ el.calibBtn.onclick = runCalibration;
    設定側のつまみとは同じ値を見ているので、どちらを動かしても揃う。 */
 function threshFromX(clientX) {
   const r = el.meter.getBoundingClientRect();
-  if (!r.width) return;
+  if (!r.width || !Number.isFinite(clientX)) return;
   const pos = Math.min(1000, Math.max(0, ((clientX - r.left) / r.width) * 1000));
-  tuning.silence_threshold = posToThresh(pos);
+  const next = posToThresh(pos);
+  if (!Number.isFinite(next) || next <= 0) return;   // 変な値で描画を壊さない
+  tuning.silence_threshold = next;
   paintTuning();
   el.hint.textContent = t('sensitivitySet', {n: Math.round(pos / 10)});
   queueTuning();
 }
 
 let draggingThresh = false;
+
+function endThreshDrag() {
+  if (!draggingThresh) return;
+  draggingThresh = false;
+  el.meterHit.classList.remove('dragging');
+  setTimeout(() => { if (!draggingThresh) paint(); }, 1500);
+}
+
 el.meterHit.addEventListener('pointerdown', e => {
   draggingThresh = true;
   el.meterHit.classList.add('dragging');
-  el.meterHit.setPointerCapture(e.pointerId);
+  try { el.meterHit.setPointerCapture(e.pointerId); } catch {}
   threshFromX(e.clientX);
 });
 el.meterHit.addEventListener('pointermove', e => {
   if (draggingThresh) threshFromX(e.clientX);
 });
+// 画面の外で指を離す・別の窓へ移るなどで pointerup を取り逃すことがある。
+// 掴んだままになると、その後カーソルを乗せるだけで値が変わってしまうので、
+// 受け口を広く取っておく。
+el.meterHit.addEventListener('lostpointercapture', endThreshDrag);
 for (const ev of ['pointerup', 'pointercancel']) {
-  el.meterHit.addEventListener(ev, () => {
-    if (!draggingThresh) return;
-    draggingThresh = false;
-    el.meterHit.classList.remove('dragging');
-    setTimeout(() => { if (!draggingThresh) paint(); }, 1500);
-  });
+  el.meterHit.addEventListener(ev, endThreshDrag);
+  addEventListener(ev, endThreshDrag);
 }
 
 /* ── フローティング表示 ─────────────────
