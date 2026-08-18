@@ -103,7 +103,12 @@
   }
   .icon:hover:not(:disabled) { background:var(--raise); color:var(--text); }
   .icon:disabled { opacity:.35; }
-  .icon svg { width:19px; height:19px; stroke-width:2.1; }
+  /* Material Symbols は塗りのパス。既定では輪郭の方だけ見せ、
+     状態が「入っている」ものだけ塗りに差し替える。 */
+  svg .solid { display:none; }
+  .lit > svg .solid, .on .ring svg .solid { display:inline; }
+  .lit > svg .line, .on .ring svg .line { display:none; }
+  .icon > span { display:grid; place-items:center; }
   /* アイコンの下の点で入切を示す（モックと同じ作法） */
   .icon::after {
     content:""; position:absolute; bottom:4px; left:50%; transform:translateX(-50%);
@@ -166,23 +171,17 @@
     background:var(--panel-2);
     transition:border-color .18s, box-shadow .18s, background .18s, transform .12s;
   }
-  .mode .ring svg { width:27px; height:27px; stroke-width:2.1; }
+
   .mode span { font-size:.8rem; font-weight:600; }
   .mode:hover:not(:disabled) .ring { transform:translateY(-1px); }
   .mode:disabled { opacity:.4; }
   .sep { width:1px; align-self:stretch; margin:.5rem .2rem; background:var(--line); flex:none; }
 
-  /* 選んでいる方は中身を塗る（輪郭のままだと今どちらか分かりにくい）。
-     .solid は塗り用、.line は輪郭用の絵で、状態で入れ替える。 */
-  .mode .ring svg .solid { display:none; }
-  .mode.on .ring svg .line { display:none; }
-  .mode.on .ring svg .solid { display:inline; fill:currentColor; stroke:none; }
-  .icon svg .solid { display:none; }
-  .icon.lit svg .solid { display:inline; fill:currentColor; stroke:none; }
-  .icon.lit svg .line { display:none; }
   /* 一時停止のボタンは、押したら何が起きるかを絵で示す。
      聞いている間は「止める」、止めている間は「再開する」。 */
   #segOff.warn { background:color-mix(in srgb, var(--warn) 16%, transparent); }
+  #segOff.warn > span > svg .solid { display:inline; }
+  #segOff.warn > span > svg .line { display:none; }
 
   #segLive.on { color:var(--accent); }
   #segLive.on .ring {
@@ -445,26 +444,15 @@
     </div>
     <div class="icons">
       <button class="icon lit" id="segOff" aria-pressed="false">
-        <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor"
-             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <g class="glyph-pause">
-            <rect x="7.8" y="4.5" width="3.2" height="15" rx="1.6"/>
-            <rect x="13" y="4.5" width="3.2" height="15" rx="1.6"/>
-          </g>
-          <g class="glyph-play" hidden><path d="M8.2 5.6 18.6 12 8.2 18.4z"/></g>
-        </svg>
+        <span class="glyph-pause" data-icon="pause" data-icon-size="20"></span>
+        <span class="glyph-play" data-icon="play_arrow" data-icon-size="20" hidden></span>
       </button>
-      <button class="icon" id="openSettings" data-i18n-title="settingsTitle">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M4 5.5h9.2M16.8 5.5H20M4 12h3.2M10.8 12H20M4 18.5h9.2M16.8 18.5H20"/>
-          <circle cx="15" cy="5.5" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="18.5" r="1.8"/>
-        </svg>
-      </button>
-      <button class="icon" id="power" data-i18n-title="powerTitle">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 4.2v7.3"/><path d="M17.3 7.7a7.5 7.5 0 1 1-10.6 0"/>
-        </svg>
-      </button>
+      <button class="icon" id="floatBtn" data-icon="picture_in_picture" data-icon-size="20"
+              data-i18n-title="floatBtn" hidden></button>
+      <button class="icon" id="openSettings" data-icon="tune" data-icon-size="20"
+              data-i18n-title="settingsTitle"></button>
+      <button class="icon" id="power" data-icon="power_settings_new" data-icon-size="20"
+              data-i18n-title="powerTitle"></button>
     </div>
   </header>
 
@@ -484,22 +472,12 @@
 
   <div class="modes" id="modes">
     <button class="mode on" id="segLive" role="radio" aria-checked="true">
-      <span class="ring">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
-          <path class="line" d="M13.2 3.5 5 13.8h6l-.9 6.7 8.2-10.3h-6l.9-6.7z"/>
-          <path class="solid" d="M13.2 3.5 5 13.8h6l-.9 6.7 8.2-10.3h-6l.9-6.7z"/>
-        </svg>
-      </span>
+      <span class="ring" data-icon="bolt" data-icon-size="28"></span>
       <span data-i18n="modeLive">Instant</span>
     </button>
     <span class="sep" aria-hidden="true"></span>
     <button class="mode" id="segHold" role="radio" aria-checked="false">
-      <span class="ring">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
-          <path class="line" d="M16.6 4.4a2.1 2.1 0 0 1 3 3L8.6 18.4l-4 1 1-4L16.6 4.4z"/>
-          <path class="solid" d="M16.6 4.4a2.1 2.1 0 0 1 3 3L8.6 18.4l-4 1 1-4L16.6 4.4z"/>
-        </svg>
-      </span>
+      <span class="ring" data-icon="edit" data-icon-size="28"></span>
       <span data-i18n="modeHold">Review</span>
     </button>
   </div>
@@ -516,16 +494,10 @@
     <textarea id="draft" data-i18n-ph="draftPlaceholder" hidden></textarea>
     <div class="draft-actions" id="draftActions" hidden>
       <span class="spacer"></span>
-      <button class="round" id="discard" data-i18n-title="discardTitle">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M4 6.5h16M9 6.5v-2h6v2M18.2 6.5 17.3 20H6.7L5.8 6.5"/>
-        </svg>
-      </button>
-      <button class="round go" id="send" data-i18n-title="sendTitle">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M4.5 12 19.5 4.5 13.9 19.5l-2-5.6-7.4-1.9z"/>
-        </svg>
-      </button>
+      <button class="round" id="discard" data-icon="delete" data-icon-size="20"
+              data-i18n-title="discardTitle"></button>
+      <button class="round go" id="send" data-icon="send" data-icon-size="20"
+              data-i18n-title="sendTitle"></button>
     </div>
   </section>
 
@@ -547,25 +519,20 @@
 <section class="sheet" id="sheet" hidden>
  <div class="sheet-inner">
   <div class="sheet-head">
-    <button class="icon" id="closeSettings" data-i18n-title="back">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1"
-           stroke-linecap="round" stroke-linejoin="round">
-        <path d="M15 4.5 7.5 12l7.5 7.5"/>
-      </svg>
-    </button>
+    <button class="icon" id="closeSettings" data-icon="arrow_back_ios_new"
+            data-icon-size="18" data-i18n-title="back"></button>
     <h2 data-i18n="settings">Settings</h2>
-    <button class="btn tonal" id="floatBtn" data-icon="float" data-icon-size="14" data-i18n="floatBtn" hidden>Float on top</button>
   </div>
 
   <!-- 入力 -->
   <div class="group">
-    <h3 data-icon="mic" data-icon-size="14" data-i18n="grpInput">Input</h3>
+    <h3 data-icon="mic" data-icon-size="16" data-i18n="grpInput">Input</h3>
     <div class="field">
-      <label for="mic" data-icon="mic" data-icon-size="13" data-i18n="micDevice">Microphone</label>
+      <label for="mic" data-icon="mic" data-icon-size="17" data-i18n="micDevice">Microphone</label>
       <select id="mic"></select>
     </div>
     <div class="field">
-      <label for="thresh" data-icon="slider" data-icon-size="13" data-i18n="sensitivity">Sensitivity</label>
+      <label for="thresh" data-icon="graphic_eq" data-icon-size="17" data-i18n="sensitivity">Sensitivity</label>
       <input type="range" id="thresh" min="0" max="1000" step="1">
       <span class="val" id="threshVal"></span>
     </div>
@@ -577,29 +544,29 @@
     </div>
     <p class="range-note" data-i18n="sensitivityNote"></p>
     <div class="field">
-      <label for="silence" data-icon="timer" data-icon-size="13" data-i18n="silence">Pause to send</label>
+      <label for="silence" data-icon="timer" data-icon-size="17" data-i18n="silence">Pause to send</label>
       <input type="range" id="silence" min="0.5" max="3" step="0.1">
       <span class="val" id="silenceVal"></span>
     </div>
     <p class="range-note" data-i18n="silenceNote"></p>
     <div class="field">
-      <label for="minChars" data-icon="text" data-icon-size="13" data-i18n="minChars">Min length</label>
+      <label for="minChars" data-icon="short_text" data-icon-size="17" data-i18n="minChars">Min length</label>
       <input type="range" id="minChars" min="1" max="40" step="1">
       <span class="val" id="minCharsVal"></span>
     </div>
     <p class="range-note" data-i18n="minCharsNote"></p>
     <label class="toggle"><input type="checkbox" id="clean"><span data-i18n="stripFillers">Strip filler words</span></label>
     <div class="btn-row" style="margin-top:.7rem">
-      <button class="btn go" id="calibBtn" data-icon="sparkle" data-icon-size="14" data-i18n="calibrate">Auto-tune</button>
+      <button class="btn go" id="calibBtn" data-icon="auto_awesome" data-icon-size="17" data-i18n="calibrate">Auto-tune</button>
     </div>
     <p class="range-note" id="calibNote" style="margin-top:.5rem"></p>
   </div>
 
   <!-- 見た目 -->
   <div class="group">
-    <h3 data-icon="palette" data-icon-size="14" data-i18n="grpLook">Appearance</h3>
+    <h3 data-icon="palette" data-icon-size="16" data-i18n="grpLook">Appearance</h3>
     <div class="field">
-      <label data-icon="eye" data-icon-size="13" data-i18n="theme">Theme</label>
+      <label data-icon="contrast" data-icon-size="17" data-i18n="theme">Theme</label>
       <div class="seg-row" id="themeRow">
         <button data-theme-choice="auto" data-i18n="themeAuto">Auto</button>
         <button data-theme-choice="dark" data-i18n="themeDark">Dark</button>
@@ -607,7 +574,7 @@
       </div>
     </div>
     <div class="field">
-      <label data-icon="sparkle" data-icon-size="13" data-i18n="vizStyle">Visualizer</label>
+      <label data-icon="equalizer" data-icon-size="17" data-i18n="vizStyle">Visualizer</label>
       <div class="seg-row" id="vizRow">
         <button data-viz-choice="bar" data-i18n="vizBar">Bar</button>
         <button data-viz-choice="wave" data-i18n="vizWave">Wave</button>
@@ -616,7 +583,7 @@
       </div>
     </div>
     <div class="field">
-      <label data-icon="globe" data-icon-size="13" data-i18n="language">Language</label>
+      <label data-icon="language" data-icon-size="17" data-i18n="language">Language</label>
       <div class="seg-row" id="langRow">
         <button data-lang-choice="auto" data-i18n="themeAuto">Auto</button>
         <button data-lang-choice="en">English</button>
@@ -627,15 +594,15 @@
 
   <!-- 辞書 -->
   <div class="group">
-    <h3 data-icon="book" data-icon-size="14" data-i18n="grpDict">Dictionary</h3>
+    <h3 data-icon="menu_book" data-icon-size="16" data-i18n="grpDict">Dictionary</h3>
     <label class="toggle" style="margin-bottom:.5rem">
       <input type="checkbox" id="scopePrivate"><span data-i18n="dictPrivate">Keep on this machine only</span>
     </label>
     <p class="scope-note" id="scopeNote"></p>
 
     <div class="dict-tabs" role="tablist">
-      <button class="on" id="tabReplace" data-icon="swap" data-icon-size="13" data-i18n="dictReplace">Replace</button>
-      <button id="tabIgnore" data-icon="mute" data-icon-size="13" data-i18n="dictIgnore">Ignore</button>
+      <button class="on" id="tabReplace" data-icon="swap_horiz" data-icon-size="17" data-i18n="dictReplace">Replace</button>
+      <button id="tabIgnore" data-icon="voice_over_off" data-icon-size="17" data-i18n="dictIgnore">Ignore</button>
     </div>
 
     <div id="paneReplace">
@@ -644,7 +611,7 @@
         <input id="newFrom" data-i18n-ph="dictHeard">
         <span class="arrow">→</span>
         <input id="newTo" data-i18n-ph="dictSendAs">
-        <button class="btn tonal" id="addReplace" data-icon="plus" data-icon-size="14" data-i18n="add">Add</button>
+        <button class="btn tonal" id="addReplace" data-icon="add" data-icon-size="17" data-i18n="add">Add</button>
       </div>
       <input class="filter" id="filterReplace" data-i18n-ph="dictFilter">
       <div class="rows" id="replaceRows"></div>
@@ -654,7 +621,7 @@
       <p class="dict-label" data-i18n="dictIgnoreHelp"></p>
       <div class="new-row">
         <input id="newIgnore" data-i18n-ph="dictIgnorePh">
-        <button class="btn tonal" id="addIgnore" data-icon="plus" data-icon-size="14" data-i18n="add">Add</button>
+        <button class="btn tonal" id="addIgnore" data-icon="add" data-icon-size="17" data-i18n="add">Add</button>
       </div>
       <div class="rows" id="ignoreRows"></div>
       <p class="dict-label builtin-head">
@@ -664,10 +631,10 @@
     </div>
 
     <div class="btn-row" style="margin-top:.6rem">
-      <button class="btn go" id="dictSave" data-icon="check" data-icon-size="14" data-i18n="save">Save</button>
+      <button class="btn go" id="dictSave" data-icon="check" data-icon-size="17" data-i18n="save">Save</button>
       <span class="spacer"></span>
-      <button class="btn" id="dictExport" data-icon="download" data-icon-size="14" data-i18n="exportCsv">Export CSV</button>
-      <button class="btn" id="dictImport" data-icon="upload" data-icon-size="14" data-i18n="importCsv">Import CSV</button>
+      <button class="btn" id="dictExport" data-icon="download" data-icon-size="17" data-i18n="exportCsv">Export CSV</button>
+      <button class="btn" id="dictImport" data-icon="upload" data-icon-size="17" data-i18n="importCsv">Import CSV</button>
       <input type="file" id="dictFile" accept=".csv,text/csv" hidden>
     </div>
     <p class="dict-note" id="dictNote"></p>
@@ -675,11 +642,11 @@
 
   <!-- ログ -->
   <div class="group">
-    <h3 data-icon="list" data-icon-size="14" data-i18n="grpLog">Transcript</h3>
+    <h3 data-icon="list_alt" data-icon-size="16" data-i18n="grpLog">Transcript</h3>
     <div class="btn-row">
       <span class="val" style="margin:0"><span id="count">0</span> <span data-i18n="items">items</span></span>
       <span class="spacer"></span>
-      <button class="btn" id="copy" data-icon="copy" data-icon-size="14" data-i18n="copyAll">Copy all</button>
+      <button class="btn" id="copy" data-icon="content_copy" data-icon-size="17" data-i18n="copyAll">Copy all</button>
     </div>
   </div>
  </div>
@@ -900,51 +867,94 @@ const putJSON = (path, body) =>
                body: JSON.stringify(body || {})});
 
 /* ── アイコン ───────────────────────────
-   同じ絵を何度も書かないよう、名前で引けるようにしておく。 */
+   Material Symbols Rounded（Google, Apache-2.0）。
+   輪郭と塗りの2つ組で持ち、状態で入れ替える。
+   viewBox は 0 -960 960 960 で、どちらも塗りのパス。線幅の調整は要らない。 */
 const ICON = {
-  check:'M19.5 6.5 9.5 18 4.5 12.6',
-  plus:'M12 4.5v15M4.5 12h15',
-  trash:'M4 6.5h16M9 6.5v-2h6v2M18.2 6.5 17.3 20H6.7L5.8 6.5',
-  download:'M12 4v10.5M7.5 10.5 12 15l4.5-4.5M4.5 19.5h15',
-  upload:'M12 20V9.5M7.5 14 12 9.5l4.5 4.5M4.5 4.5h15',
-  copy:'M9.5 9.5h10v10h-10zM5.5 14.5h-1v-10h10v1',
-  swap:'M4.5 8.5h14l-3.4-3.4M19.5 15.5h-14l3.4 3.4',
-  mute:'M4 4l16 16M9 5a3 3 0 0 1 6 0v5M15 15a3 3 0 0 1-5-2V9M19 11v1a7 7 0 0 1-9 6.7M12 19v3',
-  slider:'M4 6h10M18 6h2M4 12h2M10 12h10M4 18h10M18 18h2',
-  mic:'M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM19 10v2a7 7 0 0 1-14 0v-2M12 19v3',
-  timer:'M12 8v5l3 2M12 21a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM9 2h6',
-  text:'M4 6h16M4 12h10M4 18h7',
-  eye:'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z',
-  palette:'M12 3a9 9 0 1 0 0 18h2a2 2 0 0 0 0-4 2 2 0 0 1 2-2h1a4 4 0 0 0 4-4c0-4.4-4-8-9-8z',
-  book:'M4 4h11a3 3 0 0 1 3 3v13H7a3 3 0 0 0-3 3V4zM18 7h2v16H7',
-  list:'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
-  globe:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3 12h18M12 3c2.5 2.6 2.5 15.4 0 18M12 3c-2.5 2.6-2.5 15.4 0 18',
-  float:'M4 5h10v8H4zM10 11h10v8H10',
-  sparkle:'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3z',
+  pause: ['M600-200q-33 0-56.5-23.5T520-280v-400q0-33 23.5-56.5T600-760h80q33 0 56.5 23.5T760-680v400q0 33-23.5 56.5T680-200h-80Zm-320 0q-33 0-56.5-23.5T200-280v-400q0-33 23.5-56.5T280-760h80q33 0 56.5 23.5T440-680v400q0 33-23.5 56.5T360-200h-80Zm320-80h80v-400h-80v400Zm-320 0h80v-400h-80v400Zm0-400v400-400Zm320 0v400-400Z',
+         'M640-200q-33 0-56.5-23.5T560-280v-400q0-33 23.5-56.5T640-760q33 0 56.5 23.5T720-680v400q0 33-23.5 56.5T640-200Zm-320 0q-33 0-56.5-23.5T240-280v-400q0-33 23.5-56.5T320-760q33 0 56.5 23.5T400-680v400q0 33-23.5 56.5T320-200Z'],
+  play_arrow: ['M320-273v-414q0-17 12-28.5t28-11.5q5 0 10.5 1.5T381-721l326 207q9 6 13.5 15t4.5 19q0 10-4.5 19T707-446L381-239q-5 3-10.5 4.5T360-233q-16 0-28-11.5T320-273Zm80-207Zm0 134 210-134-210-134v268Z',
+              'M320-273v-414q0-17 12-28.5t28-11.5q5 0 10.5 1.5T381-721l326 207q9 6 13.5 15t4.5 19q0 10-4.5 19T707-446L381-239q-5 3-10.5 4.5T360-233q-16 0-28-11.5T320-273Z'],
+  tune: ['M451.5-131.5Q440-143 440-160v-160q0-17 11.5-28.5T480-360q17 0 28.5 11.5T520-320v40h280q17 0 28.5 11.5T840-240q0 17-11.5 28.5T800-200H520v40q0 17-11.5 28.5T480-120q-17 0-28.5-11.5ZM160-200q-17 0-28.5-11.5T120-240q0-17 11.5-28.5T160-280h160q17 0 28.5 11.5T360-240q0 17-11.5 28.5T320-200H160Zm131.5-171.5Q280-383 280-400v-40H160q-17 0-28.5-11.5T120-480q0-17 11.5-28.5T160-520h120v-40q0-17 11.5-28.5T320-600q17 0 28.5 11.5T360-560v160q0 17-11.5 28.5T320-360q-17 0-28.5-11.5ZM480-440q-17 0-28.5-11.5T440-480q0-17 11.5-28.5T480-520h320q17 0 28.5 11.5T840-480q0 17-11.5 28.5T800-440H480Zm131.5-171.5Q600-623 600-640v-160q0-17 11.5-28.5T640-840q17 0 28.5 11.5T680-800v40h120q17 0 28.5 11.5T840-720q0 17-11.5 28.5T800-680H680v40q0 17-11.5 28.5T640-600q-17 0-28.5-11.5ZM160-680q-17 0-28.5-11.5T120-720q0-17 11.5-28.5T160-760h320q17 0 28.5 11.5T520-720q0 17-11.5 28.5T480-680H160Z',
+        'M451.5-131.5Q440-143 440-160v-160q0-17 11.5-28.5T480-360q17 0 28.5 11.5T520-320v40h280q17 0 28.5 11.5T840-240q0 17-11.5 28.5T800-200H520v40q0 17-11.5 28.5T480-120q-17 0-28.5-11.5ZM160-200q-17 0-28.5-11.5T120-240q0-17 11.5-28.5T160-280h160q17 0 28.5 11.5T360-240q0 17-11.5 28.5T320-200H160Zm131.5-171.5Q280-383 280-400v-40H160q-17 0-28.5-11.5T120-480q0-17 11.5-28.5T160-520h120v-40q0-17 11.5-28.5T320-600q17 0 28.5 11.5T360-560v160q0 17-11.5 28.5T320-360q-17 0-28.5-11.5ZM480-440q-17 0-28.5-11.5T440-480q0-17 11.5-28.5T480-520h320q17 0 28.5 11.5T840-480q0 17-11.5 28.5T800-440H480Zm131.5-171.5Q600-623 600-640v-160q0-17 11.5-28.5T640-840q17 0 28.5 11.5T680-800v40h120q17 0 28.5 11.5T840-720q0 17-11.5 28.5T800-680H680v40q0 17-11.5 28.5T640-600q-17 0-28.5-11.5ZM160-680q-17 0-28.5-11.5T120-720q0-17 11.5-28.5T160-760h320q17 0 28.5 11.5T520-720q0 17-11.5 28.5T480-680H160Z'],
+  power_settings_new: ['M480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-73 24.5-138.5T172-736q11-14 26.5-13t26.5 11q11 10 14.5 26T229-679q-32 41-50.5 91.5T160-480q0 134 93 227t227 93q134 0 227-93t93-227q0-57-18.5-107.5T731-679q-14-17-10.5-33t14.5-26q11-10 26.5-11t26.5 13q43 52 67.5 117.5T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm-28.5-371.5Q440-463 440-480v-360q0-17 11.5-28.5T480-880q17 0 28.5 11.5T520-840v360q0 17-11.5 28.5T480-440q-17 0-28.5-11.5Z',
+                      'M480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-73 24.5-138.5T172-736q11-14 26.5-13t26.5 11q11 10 14.5 26T229-679q-32 41-50.5 91.5T160-480q0 134 93 227t227 93q134 0 227-93t93-227q0-57-18.5-107.5T731-679q-14-17-10.5-33t14.5-26q11-10 26.5-11t26.5 13q43 52 67.5 117.5T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm-28.5-371.5Q440-463 440-480v-360q0-17 11.5-28.5T480-880q17 0 28.5 11.5T520-840v360q0 17-11.5 28.5T480-440q-17 0-28.5-11.5Z'],
+  bolt: ['m422-232 207-248H469l29-227-185 267h139l-30 208Zm-62-128H236q-24 0-35.5-21.5T203-423l299-430q10-14 26-19.5t33 .5q17 6 25 21t6 32l-32 259h155q26 0 36.5 23t-6.5 43L416-100q-11 13-27 17t-31-3q-15-7-23.5-21.5T328-139l32-221Zm111-110Z',
+        'M360-360H236q-24 0-35.5-21.5T203-423l299-430q10-14 26-19.5t33 .5q17 6 25 21t6 32l-32 259h155q26 0 36.5 23t-6.5 43L416-100q-11 13-27 17t-31-3q-15-7-23.5-21.5T328-139l32-221Z'],
+  edit: ['M200-200h57l391-391-57-57-391 391v57Zm-40 80q-17 0-28.5-11.5T120-160v-97q0-16 6-30.5t17-25.5l505-504q12-11 26.5-17t30.5-6q16 0 31 6t26 18l55 56q12 11 17.5 26t5.5 30q0 16-5.5 30.5T817-647L313-143q-11 11-25.5 17t-30.5 6h-97Zm600-584-56-56 56 56Zm-141 85-28-29 57 57-29-28Z',
+        'M160-120q-17 0-28.5-11.5T120-160v-97q0-16 6-30.5t17-25.5l505-504q12-11 26.5-17t30.5-6q16 0 31 6t26 18l55 56q12 11 17.5 26t5.5 30q0 16-5.5 30.5T817-647L313-143q-11 11-25.5 17t-30.5 6h-97Zm544-528 56-56-56-56-56 56 56 56Z'],
+  send: ['M792-443 176-183q-20 8-38-3.5T120-220v-520q0-22 18-33.5t38-3.5l616 260q25 11 25 37t-25 37ZM200-280l474-200-474-200v140l240 60-240 60v140Zm0 0v-400 400Z',
+        'M176-183q-20 8-38-3.5T120-220v-180l320-80-320-80v-180q0-22 18-33.5t38-3.5l616 260q25 11 25 37t-25 37L176-183Z'],
+  delete: ['M280-120q-33 0-56.5-23.5T200-200v-520q-17 0-28.5-11.5T160-760q0-17 11.5-28.5T200-800h160q0-17 11.5-28.5T400-840h160q17 0 28.5 11.5T600-800h160q17 0 28.5 11.5T800-760q0 17-11.5 28.5T760-720v520q0 33-23.5 56.5T680-120H280Zm400-600H280v520h400v-520ZM428.5-291.5Q440-303 440-320v-280q0-17-11.5-28.5T400-640q-17 0-28.5 11.5T360-600v280q0 17 11.5 28.5T400-280q17 0 28.5-11.5Zm160 0Q600-303 600-320v-280q0-17-11.5-28.5T560-640q-17 0-28.5 11.5T520-600v280q0 17 11.5 28.5T560-280q17 0 28.5-11.5ZM280-720v520-520Z',
+          'M280-120q-33 0-56.5-23.5T200-200v-520q-17 0-28.5-11.5T160-760q0-17 11.5-28.5T200-800h160q0-17 11.5-28.5T400-840h160q17 0 28.5 11.5T600-800h160q17 0 28.5 11.5T800-760q0 17-11.5 28.5T760-720v520q0 33-23.5 56.5T680-120H280Zm148.5-171.5Q440-303 440-320v-280q0-17-11.5-28.5T400-640q-17 0-28.5 11.5T360-600v280q0 17 11.5 28.5T400-280q17 0 28.5-11.5Zm160 0Q600-303 600-320v-280q0-17-11.5-28.5T560-640q-17 0-28.5 11.5T520-600v280q0 17 11.5 28.5T560-280q17 0 28.5-11.5Z'],
+  mic: ['M395-435q-35-35-35-85v-240q0-50 35-85t85-35q50 0 85 35t35 85v240q0 50-35 85t-85 35q-50 0-85-35Zm85-205Zm-40 480v-83q-92-13-157.5-78T203-479q-2-17 9-29t28-12q17 0 28.5 11.5T284-480q14 70 69.5 115T480-320q72 0 127-45.5T676-480q4-17 15.5-28.5T720-520q17 0 28 12t9 29q-14 91-79 157t-158 79v83q0 17-11.5 28.5T480-120q-17 0-28.5-11.5T440-160Zm68.5-331.5Q520-503 520-520v-240q0-17-11.5-28.5T480-800q-17 0-28.5 11.5T440-760v240q0 17 11.5 28.5T480-480q17 0 28.5-11.5Z',
+       'M395-435q-35-35-35-85v-240q0-50 35-85t85-35q50 0 85 35t35 85v240q0 50-35 85t-85 35q-50 0-85-35Zm45 275v-83q-92-13-157.5-78T203-479q-2-17 9-29t28-12q17 0 28.5 11.5T284-480q14 70 69.5 115T480-320q72 0 127-45.5T676-480q4-17 15.5-28.5T720-520q17 0 28 12t9 29q-14 91-79 157t-158 79v83q0 17-11.5 28.5T480-120q-17 0-28.5-11.5T440-160Z'],
+  graphic_eq: ['M280-280v-400q0-17 11.5-28.5T320-720q17 0 28.5 11.5T360-680v400q0 17-11.5 28.5T320-240q-17 0-28.5-11.5T280-280Zm160 160v-720q0-17 11.5-28.5T480-880q17 0 28.5 11.5T520-840v720q0 17-11.5 28.5T480-80q-17 0-28.5-11.5T440-120ZM120-440v-80q0-17 11.5-28.5T160-560q17 0 28.5 11.5T200-520v80q0 17-11.5 28.5T160-400q-17 0-28.5-11.5T120-440Zm480 160v-400q0-17 11.5-28.5T640-720q17 0 28.5 11.5T680-680v400q0 17-11.5 28.5T640-240q-17 0-28.5-11.5T600-280Zm160-160v-80q0-17 11.5-28.5T800-560q17 0 28.5 11.5T840-520v80q0 17-11.5 28.5T800-400q-17 0-28.5-11.5T760-440Z',
+              'M280-280v-400q0-17 11.5-28.5T320-720q17 0 28.5 11.5T360-680v400q0 17-11.5 28.5T320-240q-17 0-28.5-11.5T280-280Zm160 160v-720q0-17 11.5-28.5T480-880q17 0 28.5 11.5T520-840v720q0 17-11.5 28.5T480-80q-17 0-28.5-11.5T440-120ZM120-440v-80q0-17 11.5-28.5T160-560q17 0 28.5 11.5T200-520v80q0 17-11.5 28.5T160-400q-17 0-28.5-11.5T120-440Zm480 160v-400q0-17 11.5-28.5T640-720q17 0 28.5 11.5T680-680v400q0 17-11.5 28.5T640-240q-17 0-28.5-11.5T600-280Zm160-160v-80q0-17 11.5-28.5T800-560q17 0 28.5 11.5T840-520v80q0 17-11.5 28.5T800-400q-17 0-28.5-11.5T760-440Z'],
+  timer: ['M400-840q-17 0-28.5-11.5T360-880q0-17 11.5-28.5T400-920h160q17 0 28.5 11.5T600-880q0 17-11.5 28.5T560-840H400Zm108.5 428.5Q520-423 520-440v-160q0-17-11.5-28.5T480-640q-17 0-28.5 11.5T440-600v160q0 17 11.5 28.5T480-400q17 0 28.5-11.5Zm-168 303Q275-137 226-186t-77.5-114.5Q120-366 120-440t28.5-139.5Q177-645 226-694t114.5-77.5Q406-800 480-800q62 0 119 20t107 58l28-28q11-11 28-11t28 11q11 11 11 28t-11 28l-28 28q38 50 58 107t20 119q0 74-28.5 139.5T734-186q-49 49-114.5 77.5T480-80q-74 0-139.5-28.5ZM678-242q82-82 82-198t-82-198q-82-82-198-82t-198 82q-82 82-82 198t82 198q82 82 198 82t198-82ZM480-440Z',
+         'M400-840q-17 0-28.5-11.5T360-880q0-17 11.5-28.5T400-920h160q17 0 28.5 11.5T600-880q0 17-11.5 28.5T560-840H400Zm108.5 428.5Q520-423 520-440v-160q0-17-11.5-28.5T480-640q-17 0-28.5 11.5T440-600v160q0 17 11.5 28.5T480-400q17 0 28.5-11.5Zm-168 303Q275-137 226-186t-77.5-114.5Q120-366 120-440t28.5-139.5Q177-645 226-694t114.5-77.5Q406-800 480-800q62 0 119 20t107 58l28-28q11-11 28-11t28 11q11 11 11 28t-11 28l-28 28q38 50 58 107t20 119q0 74-28.5 139.5T734-186q-49 49-114.5 77.5T480-80q-74 0-139.5-28.5Z'],
+  short_text: ['M200-360q-17 0-28.5-11.5T160-400q0-17 11.5-28.5T200-440h320q17 0 28.5 11.5T560-400q0 17-11.5 28.5T520-360H200Zm0-160q-17 0-28.5-11.5T160-560q0-17 11.5-28.5T200-600h560q17 0 28.5 11.5T800-560q0 17-11.5 28.5T760-520H200Z',
+              'M200-360q-17 0-28.5-11.5T160-400q0-17 11.5-28.5T200-440h320q17 0 28.5 11.5T560-400q0 17-11.5 28.5T520-360H200Zm0-160q-17 0-28.5-11.5T160-560q0-17 11.5-28.5T200-600h560q17 0 28.5 11.5T800-560q0 17-11.5 28.5T760-520H200Z'],
+  palette: ['M480-80q-82 0-155-31.5t-127.5-86Q143-252 111.5-325T80-480q0-83 32.5-156t88-127Q256-817 330-848.5T488-880q80 0 151 27.5t124.5 76q53.5 48.5 85 115T880-518q0 115-70 176.5T640-280h-74q-9 0-12.5 5t-3.5 11q0 12 15 34.5t15 51.5q0 50-27.5 74T480-80Zm0-400Zm-177 23q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17Zm120-160q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17Zm200 0q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17Zm120 160q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17ZM480-160q9 0 14.5-5t5.5-13q0-14-15-33t-15-57q0-42 29-67t71-25h70q66 0 113-38.5T800-518q0-121-92.5-201.5T488-800q-136 0-232 93t-96 227q0 133 93.5 226.5T480-160Z',
+           'M480-80q-82 0-155-31.5t-127.5-86Q143-252 111.5-325T80-480q0-83 32.5-156t88-127Q256-817 330-848.5T488-880q80 0 151 27.5t124.5 76q53.5 48.5 85 115T880-518q0 115-70 176.5T640-280h-74q-9 0-12.5 5t-3.5 11q0 12 15 34.5t15 51.5q0 50-27.5 74T480-80ZM303-457q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17Zm120-160q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17Zm200 0q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17Zm120 160q17-17 17-43t-17-43q-17-17-43-17t-43 17q-17 17-17 43t17 43q17 17 43 17t43-17Z'],
+  contrast: ['M324-111.5Q251-143 197-197t-85.5-127Q80-397 80-480t31.5-156Q143-709 197-763t127-85.5Q397-880 480-880t156 31.5Q709-817 763-763t85.5 127Q880-563 880-480t-31.5 156Q817-251 763-197t-127 85.5Q563-80 480-80t-156-31.5ZM520-163q119-15 199.5-104.5T800-480q0-123-80.5-212.5T520-797v634Z',
+            'M324-111.5Q251-143 197-197t-85.5-127Q80-397 80-480t31.5-156Q143-709 197-763t127-85.5Q397-880 480-880t156 31.5Q709-817 763-763t85.5 127Q880-563 880-480t-31.5 156Q817-251 763-197t-127 85.5Q563-80 480-80t-156-31.5ZM520-163q119-15 199.5-104.5T800-480q0-123-80.5-212.5T520-797v634Z'],
+  equalizer: ['M183.5-183.5Q160-207 160-240v-160q0-33 23.5-56.5T240-480q33 0 56.5 23.5T320-400v160q0 33-23.5 56.5T240-160q-33 0-56.5-23.5ZM480-160q-33 0-56.5-23.5T400-240v-480q0-33 23.5-56.5T480-800q33 0 56.5 23.5T560-720v480q0 33-23.5 56.5T480-160Zm183.5-23.5Q640-207 640-240v-280q0-33 23.5-56.5T720-600q33 0 56.5 23.5T800-520v280q0 33-23.5 56.5T720-160q-33 0-56.5-23.5Z',
+             'M183.5-183.5Q160-207 160-240v-160q0-33 23.5-56.5T240-480q33 0 56.5 23.5T320-400v160q0 33-23.5 56.5T240-160q-33 0-56.5-23.5ZM480-160q-33 0-56.5-23.5T400-240v-480q0-33 23.5-56.5T480-800q33 0 56.5 23.5T560-720v480q0 33-23.5 56.5T480-160Zm183.5-23.5Q640-207 640-240v-280q0-33 23.5-56.5T720-600q33 0 56.5 23.5T800-520v280q0 33-23.5 56.5T720-160q-33 0-56.5-23.5Z'],
+  language: ['M325-111.5q-73-31.5-127.5-86t-86-127.5Q80-398 80-480.5t31.5-155q31.5-72.5 86-127t127.5-86Q398-880 480.5-880t155 31.5q72.5 31.5 127 86t86 127Q880-563 880-480.5T848.5-325q-31.5 73-86 127.5t-127 86Q563-80 480.5-80T325-111.5ZM480-162q26-36 45-75t31-83H404q12 44 31 83t45 75Zm-104-16q-18-33-31.5-68.5T322-320H204q29 50 72.5 87t99.5 55Zm208 0q56-18 99.5-55t72.5-87H638q-9 38-22.5 73.5T584-178ZM170-400h136q-3-20-4.5-39.5T300-480q0-21 1.5-40.5T306-560H170q-5 20-7.5 39.5T160-480q0 21 2.5 40.5T170-400Zm216 0h188q3-20 4.5-39.5T580-480q0-21-1.5-40.5T574-560H386q-3 20-4.5 39.5T380-480q0 21 1.5 40.5T386-400Zm268 0h136q5-20 7.5-39.5T800-480q0-21-2.5-40.5T790-560H654q3 20 4.5 39.5T660-480q0 21-1.5 40.5T654-400Zm-16-240h118q-29-50-72.5-87T584-782q18 33 31.5 68.5T638-640Zm-234 0h152q-12-44-31-83t-45-75q-26 36-45 75t-31 83Zm-200 0h118q9-38 22.5-73.5T376-782q-56 18-99.5 55T204-640Z',
+            'M325-111.5q-73-31.5-127.5-86t-86-127.5Q80-398 80-480.5t31.5-155q31.5-72.5 86-127t127.5-86Q398-880 480.5-880t155 31.5q72.5 31.5 127 86t86 127Q880-563 880-480.5T848.5-325q-31.5 73-86 127.5t-127 86Q563-80 480.5-80T325-111.5ZM480-162q26-36 45-75t31-83H404q12 44 31 83t45 75Zm-104-16q-18-33-31.5-68.5T322-320H204q29 50 72.5 87t99.5 55Zm208 0q56-18 99.5-55t72.5-87H638q-9 38-22.5 73.5T584-178ZM170-400h136q-3-20-4.5-39.5T300-480q0-21 1.5-40.5T306-560H170q-5 20-7.5 39.5T160-480q0 21 2.5 40.5T170-400Zm216 0h188q3-20 4.5-39.5T580-480q0-21-1.5-40.5T574-560H386q-3 20-4.5 39.5T380-480q0 21 1.5 40.5T386-400Zm268 0h136q5-20 7.5-39.5T800-480q0-21-2.5-40.5T790-560H654q3 20 4.5 39.5T660-480q0 21-1.5 40.5T654-400Zm-16-240h118q-29-50-72.5-87T584-782q18 33 31.5 68.5T638-640Zm-234 0h152q-12-44-31-83t-45-75q-26 36-45 75t-31 83Zm-200 0h118q9-38 22.5-73.5T376-782q-56 18-99.5 55T204-640Z'],
+  menu_book: ['M260-320q47 0 91.5 10.5T440-278v-394q-41-24-87-36t-93-12q-36 0-71.5 7T120-692v396q35-12 69.5-18t70.5-6Zm260 42q44-21 88.5-31.5T700-320q36 0 70.5 6t69.5 18v-396q-33-14-68.5-21t-71.5-7q-47 0-93 12t-87 36v394Zm-66.5 93.5Q441-188 430-194q-39-23-82-34.5T260-240q-42 0-82.5 11T100-198q-21 11-40.5-1T40-234v-482q0-11 5.5-21T62-752q46-24 96-36t102-12q58 0 113.5 15T480-740q51-30 106.5-45T700-800q52 0 102 12t96 36q11 5 16.5 15t5.5 21v482q0 23-19.5 35t-40.5 1q-37-20-77.5-31T700-240q-45 0-88 11.5T530-194q-11 6-23.5 9.5T480-181q-14 0-26.5-3.5ZM280-494Zm280-115q0-9 6.5-18.5T581-640q29-10 58-15t61-5q20 0 39.5 2.5T778-651q9 2 15.5 10t6.5 18q0 17-11 25t-28 4q-14-3-29.5-4.5T700-600q-26 0-51 5t-48 13q-18 7-29.5-1T560-609Zm0 220q0-9 6.5-18.5T581-420q29-10 58-15t61-5q20 0 39.5 2.5T778-431q9 2 15.5 10t6.5 18q0 17-11 25t-28 4q-14-3-29.5-4.5T700-380q-26 0-51 4.5T601-363q-18 7-29.5-.5T560-389Zm0-110q0-9 6.5-18.5T581-530q29-10 58-15t61-5q20 0 39.5 2.5T778-541q9 2 15.5 10t6.5 18q0 17-11 25t-28 4q-14-3-29.5-4.5T700-490q-26 0-51 5t-48 13q-18 7-29.5-1T560-499Z',
+             'M520-278q44-21 88.5-31.5T700-320q36 0 70.5 6t69.5 18v-396q-33-14-68.5-21t-71.5-7q-47 0-93 12t-87 36v394Zm-66.5 93.5Q441-188 430-194q-39-23-82-34.5T260-240q-42 0-82.5 11T100-198q-21 11-40.5-1T40-234v-482q0-11 5.5-21T62-752q47-23 96.5-35.5T260-800q58 0 113.5 15T480-740q51-30 106.5-45T700-800q52 0 101.5 12.5T898-752q11 5 16.5 15t5.5 21v482q0 23-19.5 35t-40.5 1q-37-20-77.5-31T700-240q-45 0-88 11.5T530-194q-11 6-23.5 9.5T480-181q-14 0-26.5-3.5ZM560-609q0-9 6.5-18.5T581-640q29-10 58-15t61-5q20 0 39.5 2.5T778-651q9 2 15.5 10t6.5 18q0 17-11 25t-28 4q-14-3-29.5-4.5T700-600q-26 0-51 5t-48 13q-18 7-29.5-1T560-609Zm0 220q0-9 6.5-18.5T581-420q29-10 58-15t61-5q20 0 39.5 2.5T778-431q9 2 15.5 10t6.5 18q0 17-11 25t-28 4q-14-3-29.5-4.5T700-380q-26 0-51 4.5T601-363q-18 7-29.5-.5T560-389Zm0-110q0-9 6.5-18.5T581-530q29-10 58-15t61-5q20 0 39.5 2.5T778-541q9 2 15.5 10t6.5 18q0 17-11 25t-28 4q-14-3-29.5-4.5T700-490q-26 0-51 5t-48 13q-18 7-29.5-1T560-499Z'],
+  list_alt: ['M348.5-291.5Q360-303 360-320t-11.5-28.5Q337-360 320-360t-28.5 11.5Q280-337 280-320t11.5 28.5Q303-280 320-280t28.5-11.5Zm0-160Q360-463 360-480t-11.5-28.5Q337-520 320-520t-28.5 11.5Q280-497 280-480t11.5 28.5Q303-440 320-440t28.5-11.5Zm0-160Q360-623 360-640t-11.5-28.5Q337-680 320-680t-28.5 11.5Q280-657 280-640t11.5 28.5Q303-600 320-600t28.5-11.5ZM480-280h160q17 0 28.5-11.5T680-320q0-17-11.5-28.5T640-360H480q-17 0-28.5 11.5T440-320q0 17 11.5 28.5T480-280Zm0-160h160q17 0 28.5-11.5T680-480q0-17-11.5-28.5T640-520H480q-17 0-28.5 11.5T440-480q0 17 11.5 28.5T480-440Zm0-160h160q17 0 28.5-11.5T680-640q0-17-11.5-28.5T640-680H480q-17 0-28.5 11.5T440-640q0 17 11.5 28.5T480-600ZM200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h560q33 0 56.5 23.5T840-760v560q0 33-23.5 56.5T760-120H200Zm0-80h560v-560H200v560Zm0-560v560-560Z',
+            'M348.5-291.5Q360-303 360-320t-11.5-28.5Q337-360 320-360t-28.5 11.5Q280-337 280-320t11.5 28.5Q303-280 320-280t28.5-11.5Zm0-160Q360-463 360-480t-11.5-28.5Q337-520 320-520t-28.5 11.5Q280-497 280-480t11.5 28.5Q303-440 320-440t28.5-11.5Zm0-160Q360-623 360-640t-11.5-28.5Q337-680 320-680t-28.5 11.5Q280-657 280-640t11.5 28.5Q303-600 320-600t28.5-11.5ZM480-280h160q17 0 28.5-11.5T680-320q0-17-11.5-28.5T640-360H480q-17 0-28.5 11.5T440-320q0 17 11.5 28.5T480-280Zm0-160h160q17 0 28.5-11.5T680-480q0-17-11.5-28.5T640-520H480q-17 0-28.5 11.5T440-480q0 17 11.5 28.5T480-440Zm0-160h160q17 0 28.5-11.5T680-640q0-17-11.5-28.5T640-680H480q-17 0-28.5 11.5T440-640q0 17 11.5 28.5T480-600ZM200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h560q33 0 56.5 23.5T840-760v560q0 33-23.5 56.5T760-120H200Z'],
+  check: ['m382-354 339-339q12-12 28-12t28 12q12 12 12 28.5T777-636L410-268q-12 12-28 12t-28-12L182-440q-12-12-11.5-28.5T183-497q12-12 28.5-12t28.5 12l142 143Z',
+         'm382-354 339-339q12-12 28-12t28 12q12 12 12 28.5T777-636L410-268q-12 12-28 12t-28-12L182-440q-12-12-11.5-28.5T183-497q12-12 28.5-12t28.5 12l142 143Z'],
+  add: ['M440-440H240q-17 0-28.5-11.5T200-480q0-17 11.5-28.5T240-520h200v-200q0-17 11.5-28.5T480-760q17 0 28.5 11.5T520-720v200h200q17 0 28.5 11.5T760-480q0 17-11.5 28.5T720-440H520v200q0 17-11.5 28.5T480-200q-17 0-28.5-11.5T440-240v-200Z',
+       'M440-440H240q-17 0-28.5-11.5T200-480q0-17 11.5-28.5T240-520h200v-200q0-17 11.5-28.5T480-760q17 0 28.5 11.5T520-720v200h200q17 0 28.5 11.5T760-480q0 17-11.5 28.5T720-440H520v200q0 17-11.5 28.5T480-200q-17 0-28.5-11.5T440-240v-200Z'],
+  download: ['M465-339.5q-7-2.5-13-8.5L308-492q-12-12-11.5-28t11.5-28q12-12 28.5-12.5T365-549l75 75v-286q0-17 11.5-28.5T480-800q17 0 28.5 11.5T520-760v286l75-75q12-12 28.5-11.5T652-548q11 12 11.5 28T652-492L508-348q-6 6-13 8.5t-15 2.5q-8 0-15-2.5ZM240-160q-33 0-56.5-23.5T160-240v-80q0-17 11.5-28.5T200-360q17 0 28.5 11.5T240-320v80h480v-80q0-17 11.5-28.5T760-360q17 0 28.5 11.5T800-320v80q0 33-23.5 56.5T720-160H240Z',
+            'M465-339.5q-7-2.5-13-8.5L308-492q-12-12-11.5-28t11.5-28q12-12 28.5-12.5T365-549l75 75v-286q0-17 11.5-28.5T480-800q17 0 28.5 11.5T520-760v286l75-75q12-12 28.5-11.5T652-548q11 12 11.5 28T652-492L508-348q-6 6-13 8.5t-15 2.5q-8 0-15-2.5ZM240-160q-33 0-56.5-23.5T160-240v-80q0-17 11.5-28.5T200-360q17 0 28.5 11.5T240-320v80h480v-80q0-17 11.5-28.5T760-360q17 0 28.5 11.5T800-320v80q0 33-23.5 56.5T720-160H240Z'],
+  upload: ['M240-160q-33 0-56.5-23.5T160-240v-80q0-17 11.5-28.5T200-360q17 0 28.5 11.5T240-320v80h480v-80q0-17 11.5-28.5T760-360q17 0 28.5 11.5T800-320v80q0 33-23.5 56.5T720-160H240Zm200-486-75 75q-12 12-28.5 11.5T308-572q-11-12-11.5-28t11.5-28l144-144q6-6 13-8.5t15-2.5q8 0 15 2.5t13 8.5l144 144q12 12 11.5 28T652-572q-12 12-28.5 12.5T595-571l-75-75v286q0 17-11.5 28.5T480-320q-17 0-28.5-11.5T440-360v-286Z',
+          'M240-160q-33 0-56.5-23.5T160-240v-80q0-17 11.5-28.5T200-360q17 0 28.5 11.5T240-320v80h480v-80q0-17 11.5-28.5T760-360q17 0 28.5 11.5T800-320v80q0 33-23.5 56.5T720-160H240Zm200-486-75 75q-12 12-28.5 11.5T308-572q-11-12-11.5-28t11.5-28l144-144q6-6 13-8.5t15-2.5q8 0 15 2.5t13 8.5l144 144q12 12 11.5 28T652-572q-12 12-28.5 12.5T595-571l-75-75v286q0 17-11.5 28.5T480-320q-17 0-28.5-11.5T440-360v-286Z'],
+  content_copy: ['M360-240q-33 0-56.5-23.5T280-320v-480q0-33 23.5-56.5T360-880h360q33 0 56.5 23.5T800-800v480q0 33-23.5 56.5T720-240H360Zm0-80h360v-480H360v480ZM200-80q-33 0-56.5-23.5T120-160v-520q0-17 11.5-28.5T160-720q17 0 28.5 11.5T200-680v520h400q17 0 28.5 11.5T640-120q0 17-11.5 28.5T600-80H200Zm160-240v-480 480Z',
+                'M360-240q-33 0-56.5-23.5T280-320v-480q0-33 23.5-56.5T360-880h360q33 0 56.5 23.5T800-800v480q0 33-23.5 56.5T720-240H360ZM200-80q-33 0-56.5-23.5T120-160v-520q0-17 11.5-28.5T160-720q17 0 28.5 11.5T200-680v520h400q17 0 28.5 11.5T640-120q0 17-11.5 28.5T600-80H200Z'],
+  swap_horiz: ['m233-320 75 75q11 11 11 27.5T308-189q-12 12-28.5 12T251-189L108-332q-6-6-8.5-13T97-360q0-8 2.5-15t8.5-13l144-144q12-12 28-11.5t28 12.5q11 12 11.5 28T308-475l-75 75h247q17 0 28.5 11.5T520-360q0 17-11.5 28.5T480-320H233Zm494-240H480q-17 0-28.5-11.5T440-600q0-17 11.5-28.5T480-640h247l-75-75q-11-11-11-27.5t11-28.5q12-12 28.5-12t28.5 12l143 143q6 6 8.5 13t2.5 15q0 8-2.5 15t-8.5 13L708-428q-12 12-28 11.5T652-429q-11-12-11.5-28t11.5-28l75-75Z',
+              'm233-320 75 75q11 11 11 27.5T308-189q-12 12-28.5 12T251-189L108-332q-6-6-8.5-13T97-360q0-8 2.5-15t8.5-13l144-144q12-12 28-11.5t28 12.5q11 12 11.5 28T308-475l-75 75h247q17 0 28.5 11.5T520-360q0 17-11.5 28.5T480-320H233Zm494-240H480q-17 0-28.5-11.5T440-600q0-17 11.5-28.5T480-640h247l-75-75q-11-11-11-27.5t11-28.5q12-12 28.5-12t28.5 12l143 143q6 6 8.5 13t2.5 15q0 8-2.5 15t-8.5 13L708-428q-12 12-28 11.5T652-429q-11-12-11.5-28t11.5-28l75-75Z'],
+  voice_over_off: ['M514-556 320-752q9-3 19-5.5t21-2.5q66 0 113 47t47 113q0 11-1.5 22t-4.5 22ZM40-200v-32q0-33 17-62t47-44q51-26 115-44t141-18q26 0 49.5 2.5T456-392l-56-54q-9 3-19 4.5t-21 1.5q-66 0-113-47t-47-113q0-11 1.5-21t4.5-19L84-764q-11-11-11-28t11-28q12-12 28.5-12t27.5 12l675 685q11 11 11.5 27.5T816-80q-11 13-28 12.5T759-80L641-200h39q0 33-23.5 56.5T600-120H120q-33 0-56.5-23.5T40-200Zm80 0h480v-32q0-14-4.5-19.5T580-266q-36-18-92.5-36T360-320q-71 0-127.5 18T140-266q-9 5-14.5 14t-5.5 20v32Zm240 0Zm560-400q0 69-24.5 131.5T829-355q-12 14-30 15t-32-13q-13-13-12-31t12-33q30-38 46.5-85t16.5-98q0-51-16.5-97T767-781q-12-15-12.5-33t12.5-32q13-14 31.5-13.5T829-845q42 51 66.5 113.5T920-600Zm-182 0q0 32-10 61.5T700-484q-11 15-29.5 15.5T638-482q-13-13-13.5-31.5T633-549q6-11 9.5-24t3.5-27q0-14-3.5-27t-9.5-25q-9-17-8.5-35t13.5-31q14-14 32.5-13.5T700-716q18 25 28 54.5t10 61.5Z',
+                  'M514-556 320-752q9-3 19-5.5t21-2.5q66 0 113 47t47 113q0 11-1.5 22t-4.5 22ZM40-200v-32q0-33 17-62t47-44q51-26 115-44t141-18q26 0 49.5 2.5T456-392l-56-54q-9 3-19 4.5t-21 1.5q-66 0-113-47t-47-113q0-11 1.5-21t4.5-19L84-764q-11-11-11-28t11-28q12-12 28.5-12t27.5 12l675 685q11 11 11.5 27.5T816-80q-11 13-28 12.5T759-80L641-200h39q0 33-23.5 56.5T600-120H120q-33 0-56.5-23.5T40-200Zm880-400q0 69-24.5 131.5T829-355q-12 14-30 15t-32-13q-13-13-12-31t12-33q30-38 46.5-85t16.5-98q0-51-16.5-97T767-781q-12-15-12.5-33t12.5-32q13-14 31.5-13.5T829-845q42 51 66.5 113.5T920-600Zm-182 0q0 32-10 61.5T700-484q-11 15-29.5 15.5T638-482q-13-13-13.5-31.5T633-549q6-11 9.5-24t3.5-27q0-14-3.5-27t-9.5-25q-9-17-8.5-35t13.5-31q14-14 32.5-13.5T700-716q18 25 28 54.5t10 61.5Z'],
+  auto_awesome: ['m706-706-70-32q-6-3-8.5-8t-2.5-10q0-5 2.5-10t8.5-8l70-32 32-70q3-6 8-9t10-3q5 0 10 3t8 9l32 70 70 32q6 3 9 8t3 10q0 5-3 10t-9 8l-70 32-32 70q-3 6-8 8.5t-10 2.5q-5 0-10-2.5t-8-8.5l-32-70ZM260-380l-160-73q-9-4-13-11.5T83-480q0-8 4-15.5t13-11.5l160-73 73-160q4-9 11.5-13t15.5-4q8 0 15.5 4t11.5 13l73 160 160 73q9 4 13 11.5t4 15.5q0 8-4 15.5T620-453l-160 73-73 160q-4 9-11.5 13t-15.5 4q-8 0-15.5-4T333-220l-73-160Zm100 26 40-86 86-40-86-40-40-86-40 86-86 40 86 40 40 86Zm350 204-70-32q-6-3-9-8t-3-10q0-5 3-10t9-8l70-32 32-70q3-6 8-9t10-3q5 0 10 3t8 9l32 70 70 32q6 3 9 8t3 10q0 5-3 10t-9 8l-70 32-32 70q-3 6-8 9t-10 3q-5 0-10-3t-8-9l-32-70ZM360-480Z',
+                'm706-706-70-32q-6-3-8.5-8t-2.5-10q0-5 2.5-10t8.5-8l70-32 32-70q3-6 8-9t10-3q5 0 10 3t8 9l32 70 70 32q6 3 9 8t3 10q0 5-3 10t-9 8l-70 32-32 70q-3 6-8 8.5t-10 2.5q-5 0-10-2.5t-8-8.5l-32-70ZM260-380l-160-73q-9-4-13-11.5T83-480q0-8 4-15.5t13-11.5l160-73 73-160q4-9 11.5-13t15.5-4q8 0 15.5 4t11.5 13l73 160 160 73q9 4 13 11.5t4 15.5q0 8-4 15.5T620-453l-160 73-73 160q-4 9-11.5 13t-15.5 4q-8 0-15.5-4T333-220l-73-160Zm450 230-70-32q-6-3-9-8t-3-10q0-5 3-10t9-8l70-32 32-70q3-6 8-9t10-3q5 0 10 3t8 9l32 70 70 32q6 3 9 8t3 10q0 5-3 10t-9 8l-70 32-32 70q-3 6-8 9t-10 3q-5 0-10-3t-8-9l-32-70Z'],
+  picture_in_picture: ['M160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h640q33 0 56.5 23.5T880-720v480q0 33-23.5 56.5T800-160H160Zm0-80h640v-480H160v480Zm0 0v-480 480Zm320-200h240q17 0 28.5-11.5T760-480v-160q0-17-11.5-28.5T720-680H480q-17 0-28.5 11.5T440-640v160q0 17 11.5 28.5T480-440Zm40-80v-80h160v80H520Z',
+                      'M160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h640q33 0 56.5 23.5T880-720v480q0 33-23.5 56.5T800-160H160Zm320-280h240q17 0 28.5-11.5T760-480v-160q0-17-11.5-28.5T720-680H480q-17 0-28.5 11.5T440-640v160q0 17 11.5 28.5T480-440Zm120-120Z'],
+  close: ['M480-424 284-228q-11 11-28 11t-28-11q-11-11-11-28t11-28l196-196-196-196q-11-11-11-28t11-28q11-11 28-11t28 11l196 196 196-196q11-11 28-11t28 11q11 11 11 28t-11 28L536-480l196 196q11 11 11 28t-11 28q-11 11-28 11t-28-11L480-424Z',
+         'M480-424 284-228q-11 11-28 11t-28-11q-11-11-11-28t11-28l196-196-196-196q-11-11-11-28t11-28q11-11 28-11t28 11l196 196 196-196q11-11 28-11t28 11q11 11 11 28t-11 28L536-480l196 196q11 11 11 28t-11 28q-11 11-28 11t-28-11L480-424Z'],
+  arrow_back_ios_new: ['m382-480 294 294q15 15 14.5 35T675-116q-15 15-35 15t-35-15L297-423q-12-12-18-27t-6-30q0-15 6-30t18-27l308-308q15-15 35.5-14.5T676-844q15 15 15 35t-15 35L382-480Z',
+                      'm382-480 294 294q15 15 14.5 35T675-116q-15 15-35 15t-35-15L297-423q-12-12-18-27t-6-30q0-15 6-30t18-27l308-308q15-15 35.5-14.5T676-844q15 15 15 35t-15 35L382-480Z'],
 };
 
-// 見出しやボタンの頭に付ける小さなアイコン
-function iconSvg(name, size = 15) {
-  const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  s.setAttribute('viewBox', '0 0 24 24');
-  s.setAttribute('fill', 'none');
-  s.setAttribute('stroke', 'currentColor');
-  s.setAttribute('stroke-width', '2.1');
-  s.setAttribute('stroke-linecap', 'round');
-  s.setAttribute('stroke-linejoin', 'round');
-  s.style.width = s.style.height = size + 'px';
-  s.style.flex = 'none';
-  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  p.setAttribute('d', ICON[name] || ICON.sparkle);
-  s.appendChild(p);
-  return s;
+// 輪郭と塗りを両方入れた svg を作る。どちらを見せるかは CSS が決める。
+function iconSvg(name, size = 18) {
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 -960 960 960');
+  svg.setAttribute('fill', 'currentColor');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.style.width = svg.style.height = size + 'px';
+  svg.style.flex = 'none';
+  const pair = ICON[name] || ICON.auto_awesome;
+  for (const [i, cls] of [[0, 'line'], [1, 'solid']]) {
+    const path = document.createElementNS(NS, 'path');
+    path.setAttribute('d', pair[i]);
+    path.setAttribute('class', cls);
+    svg.appendChild(path);
+  }
+  return svg;
 }
 
-// data-icon が付いている要素の先頭にアイコンを差し込む（文字だけの画面にしない）
+// data-icon が付いている要素の先頭に絵を入れる。文字だけの画面にしない。
 function decorateIcons(root = document) {
   for (const n of root.querySelectorAll('[data-icon]:not([data-iconed])')) {
     n.dataset.iconed = '1';
-    n.prepend(iconSvg(n.dataset.icon, n.dataset.iconSize || 15));
+    n.prepend(iconSvg(n.dataset.icon, Number(n.dataset.iconSize) || 18));
   }
 }
 
@@ -967,7 +977,7 @@ let wave = null;
 // 周波数の絵は低い方だけが立って右半分が寝たままになりやすく、
 // 喋っている実感が出ない。
 const history = new Array(BARS).fill(0);
-const bandFloor = new Array(BARS).fill(0.2);
+const bandFloor = new Array(BARS).fill(-60);   // dB
 
 const canvas = el.viz, cx = canvas.getContext('2d');
 let cw = 0, ch = 0;
@@ -992,6 +1002,18 @@ const color = (hex, alpha) => {
   return `rgba(${n >> 16 & 255}, ${n >> 8 & 255}, ${n & 255}, ${alpha})`;
 };
 
+// 音の大きさは対数（dB）で扱う。振幅そのままだと、静かなところの
+// わずかな差が潰れ、大きいところだけが伸びる。
+// getByteFrequencyData の 0〜255 は minDecibels〜maxDecibels を等分した
+// 目盛りなので、そのまま dB に戻せる。
+const DB_MIN = -85, DB_MAX = -25;
+const DB_SPAN = DB_MAX - DB_MIN;
+const toDb = byte => DB_MIN + (byte / 255) * DB_SPAN;
+
+// 暗騒音より何 dB 上から描き始めるか / 何 dB で振り切るか。
+// 静かな部屋の暗騒音は数 dB ゆらぐので、そのぶん余裕を取る。
+const GATE_DB = 7, RANGE_DB = 26;
+
 // 声の帯域に寄せて対数っぽく間引く。素直に等分すると高音側が
 // ほとんど無音の帯ばかりになり、右半分が死んで見える。
 function bandsFromFreq() {
@@ -1003,16 +1025,17 @@ function bandsFromFreq() {
     const b = Math.max(a + 1, Math.floor(Math.pow((i + 1) / BARS, 1.7) * top));
     let sum = 0;
     for (let k = a; k < b && k < n; k++) sum += freq[k];
-    const v = sum / (b - a) / 255;
+    const db = toDb(sum / (b - a));
 
-    // 帯ごとに、静かなときの値へゆっくり寄せた基準を持つ。
+    // 帯ごとに、静かなときの値へゆっくり寄せた基準（dB）を持つ。
     // これを引かないと、空調やファンの低い音で左側が立ちっぱなしになる。
-    bandFloor[i] = v < bandFloor[i] ? bandFloor[i] * 0.9 + v * 0.1
-                                    : bandFloor[i] * 0.999 + v * 0.001;
+    bandFloor[i] = db < bandFloor[i] ? bandFloor[i] * 0.9 + db * 0.1
+                                     : bandFloor[i] * 0.999 + db * 0.001;
 
     // 声の力は低い方に寄っているので、高い帯ほど持ち上げて釣り合わせる
     const tilt = 0.85 + 1.15 * Math.pow(i / BARS, 0.7);
-    out[i] = Math.min(1, Math.max(0, (v - bandFloor[i] - 0.02) / 0.26) * tilt);
+    const over = db - bandFloor[i] - GATE_DB;      // 暗騒音から何 dB 出たか
+    out[i] = Math.min(1, Math.max(0, over / RANGE_DB) * tilt);
   }
   return out;
 }
@@ -1033,14 +1056,14 @@ function bandsFromLevel() {
   return out;
 }
 
-// 部屋の暗騒音。静かなときの値にゆっくり寄せていく。
+// 部屋の暗騒音（dB）。静かなときの値にゆっくり寄せていく。
 // 固定のしきい値だと、静かな部屋では空調やファンの音にまで反応し、
 // 騒がしい部屋では逆に振り切ったままになる。
-let floorLv = 0.15;
+let floorDb = -60;
 
 // いまの声の大きさ。波形が使えないときはデーモンの音量で代える。
 function levelNow() {
-  let v;
+  let db;
   if (analyser && !vizFailed) {
     // 全帯域の実効値を見ると、「さ行」の擦れ音だけで振り切ってしまう。
     // 擦れ音は 4kHz より上に強く出るので、声の基音とフォルマントが乗る
@@ -1051,18 +1074,28 @@ function levelNow() {
     const hi = Math.max(lo + 1, Math.min(freq.length, Math.round(2600 / hz)));
     let sum = 0;
     for (let k = lo; k < hi; k++) sum += freq[k];
-    v = sum / (hi - lo) / 255;
+    db = toDb(sum / (hi - lo));
   } else {
-    v = Math.min(1, Math.sqrt(daemonLevel * 6));
+    // デーモンが出すのは振幅の実効値なので、こちらは自分で dB に直す
+    db = 20 * Math.log10(Math.max(daemonLevel, 1e-5));
   }
 
   // 下がるときは速く、上がるときはごく緩やかに追従させる
   // （喋っている間に暗騒音の推定が引き上げられないように）
-  floorLv = v < floorLv ? floorLv * 0.92 + v * 0.08
-                        : floorLv * 0.9995 + v * 0.0005;
+  floorDb = db < floorDb ? floorDb * 0.92 + db * 0.08
+                         : floorDb * 0.9995 + db * 0.0005;
 
-  // 暗騒音の少し上を起点にする。ここを下回る音は絵にしない。
-  return Math.min(1, Math.max(0, (v - floorLv - 0.03) / 0.30));
+  // 暗騒音から何 dB 出たか。ここを下回る音は絵にしない。
+  return Math.min(1, Math.max(0, (db - floorDb - GATE_DB) / RANGE_DB));
+}
+
+// デーモンが「発話ではない」と判断している間は大きく沈める。
+// 波が動いている ＝ いま拾われている、と読めるようにするため。
+// 切り替わった瞬間に跳ねないよう、少しずつ寄せる。
+let gateEnv = 0;
+function gate() {
+  gateEnv += ((daemonSpeaking ? 1 : 0.08) - gateEnv) * 0.18;
+  return gateEnv;
 }
 
 // 生の音量はコマごとに大きく上下するので、そのまま並べるとちらついて
@@ -1072,6 +1105,7 @@ let lastPush = 0;
 function pushHistory(now) {
   const v = levelNow();
   env = v > env ? env * 0.55 + v * 0.45 : env * 0.86 + v * 0.14;
+  env *= gate();      // 拾われていない音では流れる波も伸ばさない
   if (now - lastPush < 70) return;
   lastPush = now;
   history.shift();
@@ -1250,8 +1284,9 @@ function frame(now) {
   if (analyser && !vizFailed) analyser.getByteFrequencyData(freq);
 
   // 一時停止中は動かさない。見た目で「録っていない」と分かるようにする。
-  if (dead) { history.fill(0); smooth.fill(0); } else { pushHistory(now); }
-  const bands = dead ? smooth : currentBands();
+  if (dead) { history.fill(0); smooth.fill(0); gateEnv = 0; } else { pushHistory(now); }
+  const g = dead ? 0 : gate();
+  const bands = dead ? smooth : currentBands().map(v => v * g);
 
   if (vizStyle === 'radial') drawRadial(bands);
   else if (vizStyle === 'grid') drawGrid(bands);
@@ -1918,7 +1953,7 @@ function replaceRow(from = '', to = '') {
   b.placeholder = t('dictSendAs');
   const del = document.createElement('button');
   del.className = 'del'; del.title = t('remove');
-  del.appendChild(iconSvg('trash', 14));
+  del.appendChild(iconSvg('close', 17));
   del.onclick = () => row.remove();
   row.append(a, arrow, b, del);
   return row;
@@ -1931,7 +1966,7 @@ function ignoreRow(word = '') {
   a.placeholder = t('dictIgnorePh');
   const del = document.createElement('button');
   del.className = 'del'; del.title = t('remove');
-  del.appendChild(iconSvg('trash', 14));
+  del.appendChild(iconSvg('close', 17));
   del.onclick = () => row.remove();
   row.append(a, del);
   return row;
