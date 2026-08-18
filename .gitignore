@@ -10,3 +10,6 @@ sample_*.flac
 
 # 手元だけの辞書（社名・取引先など公開したくない語）は入れない
 dictionary.private.json
+
+# swiftc の出力
+build/
