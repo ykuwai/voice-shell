@@ -135,7 +135,15 @@
   #viz { display:block; width:100%; height:124px; }
   /* デーモンが拾えている音量。ブラウザ側の波形とは別の経路なので、
      ここが動かないのに波形が動いていれば認識側が死んでいると分かる。 */
-  .meter { height:3px; margin:0 1rem; border-radius:2px; background:var(--line); overflow:hidden; }
+  .meter {
+    position:relative; height:3px; margin:0 1rem;
+    border-radius:var(--pill); background:var(--line);
+  }
+  /* しきい値の位置。ここを超えた分が発話として拾われる。 */
+  .meter-mark {
+    position:absolute; top:-3px; width:2px; height:9px; border-radius:1px;
+    background:var(--warn); box-shadow:var(--glow) var(--warn);
+  }
   .meter-fill {
     height:100%; width:0; border-radius:2px; background:var(--faint);
     transition:width .1s linear, background .2s;
@@ -468,7 +476,10 @@
     <canvas id="viz"></canvas>
     <!-- デーモンが拾えている音量。ブラウザの波形とは別経路なので、
          波形が動くのにここが動かなければ認識側が落ちていると分かる。 -->
-    <div class="meter" id="meter"><div class="meter-fill" id="meterFill"></div></div>
+    <div class="meter" id="meter">
+      <div class="meter-fill" id="meterFill"></div>
+      <div class="meter-mark" id="meterMark" data-i18n-title="thresholdMark"></div>
+    </div>
   </div>
 
   <div class="modes" id="modes">
@@ -699,6 +710,7 @@ const I18N = {
     hintNoMic:'No microphone access — the meter still shows the daemon level.',
     modeLive:'Instant', modeHold:'Review',
     unsent:'Unsent', history:'History', quiet:'(silence)',
+    thresholdMark:'Speech is picked up past this mark',
     filterAll:'All', filterSent:'Sent', filterEdited:'Edited',
     empty:'Nothing sent yet. Speak and it shows up here.',
     sent:'Sent', edited:'Edited',
@@ -765,6 +777,7 @@ const I18N = {
     hintNoMic:'マイクを使えないため、波形はデーモンの音量で動かしています。',
     modeLive:'即時', modeHold:'手直し',
     unsent:'未送信', history:'送信履歴', quiet:'（無音）',
+    thresholdMark:'この印を超えた分が発話として拾われます',
     filterAll:'すべて', filterSent:'送信済み', filterEdited:'手直し',
     empty:'まだ何も送っていません。話すとここに出ます。',
     sent:'送信済み', edited:'手直し送信',
@@ -863,7 +876,7 @@ const $ = id => document.getElementById(id);
 const el = {};
 for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'power','openSettings','sheet','closeSettings','floatBtn','page',
-                  'viz','meter','meterFill','logoMark',
+                  'viz','meter','meterFill','meterMark','logoMark',
                   'tray','stream','draft','draftTime','draftActions','send','discard',
                   'hint','log','none','count','copy',
                   'filterAll','filterSent','filterEdited',
@@ -1457,8 +1470,6 @@ function connect() {
 
     if ('level' in m) {
       daemonLevel = m.level; daemonSpeaking = m.speaking;
-      // 0.05 くらいで振り切る想定。小さい声でも動きが見えるようにする
-      el.meterFill.style.width = Math.min(100, m.level * 2000) + '%';
       el.meterFill.classList.toggle('on', m.speaking);
       paintGauge();
       onCalibSample(m.level);
@@ -1758,9 +1769,14 @@ function paintTuning() {
 function paintGauge() {
   // メーターもつまみと同じ目盛りにする。ここが揃っていないと、
   // 印の位置と実際の音量を見比べられない。
-  el.gaugeFill.style.width = Math.min(100, threshToPos(daemonLevel) / 10) + '%';
+  const lvl = Math.min(100, threshToPos(daemonLevel) / 10);
+  const mark = Math.min(100, threshToPos(tuning.silence_threshold) / 10);
+  el.gaugeFill.style.width = lvl + '%';
   el.gaugeFill.classList.toggle('on', daemonSpeaking);
-  el.gaugeMark.style.left = Math.min(100, Number(el.thresh.value) / 10) + '%';
+  el.gaugeMark.style.left = mark + '%';
+  // 本画面の細いメーターにも同じ目盛りで出す
+  el.meterFill.style.width = lvl + '%';
+  el.meterMark.style.left = mark + '%';
 }
 
 async function loadTuning() {
