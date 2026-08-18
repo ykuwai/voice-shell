@@ -202,6 +202,15 @@
     margin:0; padding:0 1rem .6rem; min-height:1.4em;
     font-size:.72rem; color:var(--faint);
   }
+  /* Claude 側で送り先を切り替えたときの一言。
+     自分で押していない変更は、理由が無いと戸惑うだけになる。 */
+  .note {
+    margin:0 1rem .6rem; padding:.5rem .75rem;
+    border-radius:12px; font-size:.76rem; line-height:1.5;
+    color:var(--accent-2);
+    background:color-mix(in srgb, var(--accent-2) 12%, transparent);
+    border:1px solid color-mix(in srgb, var(--accent-2) 30%, transparent);
+  }
   .hint button {
     margin-left:.4rem; color:var(--accent); text-decoration:underline;
     font-size:.72rem;
@@ -511,6 +520,7 @@
     </button>
   </div>
 
+  <p class="note" id="note" hidden></p>
   <p class="hint" id="hint"></p>
 
   <!-- 未送信カード。認識中のテキストと手直し欄をここにまとめる。 -->
@@ -728,7 +738,7 @@ const I18N = {
     settings:'Settings', back:'Back', floatBtn:'Float on top',
     grpInput:'Input', micDevice:'Microphone',
     sensitivity:'Sensitivity',
-    sensitivityNote:'Bar shows the live level, the marker is the threshold. Speech is detected past the marker.',
+    sensitivityNote:'0 picks up the faintest sound, 100 only loud speech. The bar is the live level, the marker is where the line sits.',
     silence:'Pause to send',
     silenceNote:'How long a silence ends an utterance.',
     minChars:'Min length',
@@ -799,7 +809,7 @@ const I18N = {
     settings:'設定', back:'戻る', floatBtn:'手前に浮かせる',
     grpInput:'入力', micDevice:'マイク',
     sensitivity:'感度',
-    sensitivityNote:'バーが今の音量、印がしきい値です。印を超えた分が発話として拾われます。',
+    sensitivityNote:'0 に近いほど小さな音まで拾い、100 に近いほど大きな声だけを拾います。バーが今の音量、印が今の設定です。',
     silence:'確定までの無音',
     silenceNote:'これだけ黙ると、ひと区切りとして確定します。',
     minChars:'最小文字数',
@@ -889,7 +899,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'viz','meter','meterFill','meterMark','logoMark',
                   'tray','stream','draft','draftTime','draftActions','send','discard',
                   'editOnce','draftMark',
-                  'hint','log','none','count','copy','fresh',
+                  'hint','note','log','none','count','copy','fresh',
                   'filterAll','filterSent','filterEdited',
                   'mic','thresh','threshVal','gaugeFill','gaugeMark',
                   'silence','silenceVal','minChars','minCharsVal','clean',
@@ -1579,9 +1589,9 @@ async function setRoute(next) {
   refreshState();
 }
 
-// 自分でモードを選んだら「今回だけ」は解除する
-el.segLive.onclick = () => { oneShot = false; setRoute('live'); };
-el.segHold.onclick = () => { oneShot = false; setRoute('hold'); };
+// 自分でモードを選んだら「今回だけ」も、Claude からの一言も片付ける
+el.segLive.onclick = () => { oneShot = false; el.note.hidden = true; setRoute('live'); };
+el.segHold.onclick = () => { oneShot = false; el.note.hidden = true; setRoute('hold'); };
 el.segOff.onclick = () => setRoute(route === 'off' ? lastMode : 'off');
 
 /* ── 通信 ───────────────────────────────── */
@@ -1741,6 +1751,10 @@ async function refreshState() {
         return;
       }
     }
+
+    // Claude が切り替えたときの一言。自分で押したときは付かない。
+    el.note.textContent = s.note || '';
+    el.note.hidden = !s.note;
 
     route = s.muted ? 'off' : (s.paused ? 'hold' : 'live');
     if (route !== 'off') lastMode = route;
@@ -1921,7 +1935,7 @@ function paintTuning() {
   el.thresh.value = threshToPos(tuning.silence_threshold);
   el.silence.value = tuning.silence_duration;
   el.minChars.value = tuning.min_chars;
-  el.threshVal.textContent = Number(tuning.silence_threshold).toFixed(3);
+  el.threshVal.textContent = Math.round(threshToPos(tuning.silence_threshold) / 10);
   el.silenceVal.textContent = Number(tuning.silence_duration).toFixed(1) + 's';
   el.minCharsVal.textContent = tuning.min_chars;
   el.clean.checked = !!tuning.strip_fillers;
@@ -1965,7 +1979,7 @@ function queueTuning() {
 
 el.thresh.oninput = () => {
   tuning.silence_threshold = posToThresh(Number(el.thresh.value));
-  el.threshVal.textContent = tuning.silence_threshold.toFixed(3);
+  el.threshVal.textContent = Math.round(Number(el.thresh.value) / 10);
   paintGauge();
   queueTuning();
 };
@@ -2037,8 +2051,9 @@ async function runCalibration() {
   paintTuning();
   await putJSON('/api/tuning', tuning);
   calibSay(t('calibDone', {
-    noise: noise.toFixed(4), voice: voice.toFixed(4),
-    thr: tuning.silence_threshold.toFixed(3),
+    noise: Math.round(threshToPos(noise) / 10),
+    voice: Math.round(threshToPos(voice) / 10),
+    thr: Math.round(threshToPos(tuning.silence_threshold) / 10),
   }));
   if (wasRoute === 'off') setRoute('off');
 }

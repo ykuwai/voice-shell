@@ -265,6 +265,9 @@ async def main_async(args):
                            capture_output=True)
         return bool(r.stdout.strip())
 
+    # Claude が切り替えたときの理由。画面に出すだけで、発話には混ぜない。
+    note_file = Path(args.log_file).parent / "pause-note.txt"
+
     async def handle_state(_req):
         """マイクの入切、保留の有無、保留中の発話を返す。"""
         held = []
@@ -283,7 +286,9 @@ async def main_async(args):
                                   "paused": pause_file.exists(),
                                   "engine": engine_running(),
                                   "loading": engine_loading(),
-                                  "ui": ui, "held": held})
+                                  "ui": ui, "held": held,
+                                  "note": note_file.read_text()
+                                          if note_file.exists() else ""})
 
     async def handle_engine(req):
         """認識を止める / 動かす。
@@ -326,13 +331,21 @@ async def main_async(args):
         return web.json_response({"muted": mute_file.exists()})
 
     async def handle_pause(req):
-        """発話を保留する / 直接送るのに戻す。"""
+        """発話を保留する / 直接送るのに戻す。
+
+        Claude 自身が切り替えることもある（雑談や通話が続いているとき）。
+        自分で押していないモード変更は理由が無いと戸惑うだけなので、
+        note を添えられるようにして画面に出す。
+        """
         body = await req.json()
+        note = (body.get("note") or "").strip()[:200]
         if body.get("paused"):
             pause_file.touch()
+            note_file.write_text(note)
         else:
             pause_file.unlink(missing_ok=True)
-        return web.json_response({"paused": pause_file.exists()})
+            note_file.unlink(missing_ok=True)
+        return web.json_response({"paused": pause_file.exists(), "note": note})
 
     async def handle_send(req):
         """手直ししたテキストをログに書いて Claude に送る。"""
