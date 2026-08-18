@@ -371,9 +371,12 @@ def stream_utterances(model, args, should_stop=lambda: False):
                 for key in ("silence_threshold", "silence_duration"):
                     if isinstance(tuned.get(key), (int, float)):
                         setattr(args, key, float(tuned[key]))
-                # 最小文字数は voice_daemon.py が同じ args を見て捨てる判定に使う
+                # 最小文字数とつなぎ言葉の除去は voice_daemon.py が
+                # 同じ args を見るので、ここで入れておけばそちらにも効く
                 if isinstance(tuned.get("min_chars"), (int, float)):
                     args.min_chars = int(tuned["min_chars"])
+                if isinstance(tuned.get("strip_fillers"), bool):
+                    args.strip_fillers = tuned["strip_fillers"]
 
         speaking = rms >= args.silence_threshold
         yield {"type": "level", "rms": rms, "speaking": speaking}
