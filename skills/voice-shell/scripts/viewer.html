@@ -4,464 +4,1284 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>voice-shell — 音声プロンプト</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%20%3Cdefs%3E%20%3ClinearGradient%20id%3D%22g%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%221%22%20y2%3D%221%22%3E%20%3Cstop%20offset%3D%220%22%20stop-color%3D%22%2322d3ee%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%23a855f7%22%2F%3E%20%3C%2FlinearGradient%3E%20%3C%2Fdefs%3E%20%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2216%22%20fill%3D%22%230b111c%22%2F%3E%20%3Cg%20fill%3D%22url%28%23g%29%22%3E%20%3Crect%20x%3D%2214%22%20y%3D%2226%22%20width%3D%226%22%20height%3D%2212%22%20rx%3D%223%22%2F%3E%20%3Crect%20x%3D%2224%22%20y%3D%2216%22%20width%3D%226%22%20height%3D%2232%22%20rx%3D%223%22%2F%3E%20%3Crect%20x%3D%2234%22%20y%3D%2221%22%20width%3D%226%22%20height%3D%2222%22%20rx%3D%223%22%2F%3E%20%3Crect%20x%3D%2244%22%20y%3D%2229%22%20width%3D%226%22%20height%3D%226%22%20rx%3D%223%22%2F%3E%20%3C%2Fg%3E%20%3C%2Fsvg%3E">
 <style>
+  /* 画面の前提: 横に並べず、手前に浮かせて使う細長い板。
+     幅 340〜460px を基準に組み、広い画面でも中央で細いまま置く。 */
   :root {
-    --paper:#faf9f7;
-    --ink:#14161a;
-    --ink-soft:#5a6068;
-    --ink-faint:#8d939b;
-    --rule:#e2e0dc;
-    --field:#f2f0ec;
-    --signal:#a8770c;      /* 認識中 */
-    --sent:#3d6b4a;        /* 送信済み */
-    --hold:#8a5a3c;        /* 保留中 */
-    --focus:#2b5c8a;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --paper:#131519; --ink:#e8e6e1; --ink-soft:#9aa0a8; --ink-faint:#666c74;
-      --rule:#262a30; --field:#1b1e23;
-      --signal:#d4a437; --sent:#7fae8b; --hold:#c99871; --focus:#6ba3d8;
-    }
-  }
-  :root[data-theme="dark"] {
-    --paper:#131519; --ink:#e8e6e1; --ink-soft:#9aa0a8; --ink-faint:#666c74;
-    --rule:#262a30; --field:#1b1e23;
-    --signal:#d4a437; --sent:#7fae8b; --hold:#c99871; --focus:#6ba3d8;
+    color-scheme: dark;
+    --bg:#070a10;
+    --panel:#0d121b;
+    --panel-2:#121927;
+    --raise:#18202f;
+    --line:#1d2735;
+    --line-soft:#151d29;
+    --text:#e8eef7;
+    --dim:#8593a8;
+    --faint:#525f74;
+    --accent:#22d3ee;         /* 即時・認識中 */
+    --accent-2:#a855f7;       /* 手直し */
+    --ok:#34d399;             /* 送信済み */
+    --warn:#fb923c;           /* 一時停止 */
+    --danger:#f87171;
+    --glow:0 0 14px;
+    --radius:20px;
+  --pill:999px;
   }
   :root[data-theme="light"] {
-    --paper:#faf9f7; --ink:#14161a; --ink-soft:#5a6068; --ink-faint:#8d939b;
-    --rule:#e2e0dc; --field:#f2f0ec;
-    --signal:#a8770c; --sent:#3d6b4a; --hold:#8a5a3c; --focus:#2b5c8a;
+    color-scheme: light;
+    --bg:#eef1f6;
+    --panel:#ffffff;
+    --panel-2:#f4f6fa;
+    --raise:#e9edf4;
+    --line:#dce2ec;
+    --line-soft:#e8ecf3;
+    --text:#101826;
+    --dim:#5a6779;
+    --faint:#8b97a9;
+    --accent:#0891b2;
+    --accent-2:#7c3aed;
+    --ok:#059669;
+    --warn:#d97706;
+    --danger:#dc2626;
+    --glow:0 0 0;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      color-scheme: light;
+      --bg:#eef1f6; --panel:#ffffff; --panel-2:#f4f6fa; --raise:#e9edf4;
+      --line:#dce2ec; --line-soft:#e8ecf3;
+      --text:#101826; --dim:#5a6779; --faint:#8b97a9;
+      --accent:#0891b2; --accent-2:#7c3aed; --ok:#059669; --warn:#d97706;
+      --danger:#dc2626; --glow:0 0 0;
+    }
   }
 
   * { box-sizing:border-box; }
   html { -webkit-text-size-adjust:100%; }
   body {
-    margin:0; background:var(--paper); color:var(--ink);
-    font-family:"Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
-    font-size:16px; line-height:1.75;
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:"Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
+    font-size:14px; line-height:1.6;
+    -webkit-font-smoothing:antialiased;
   }
-  .page { max-width:53rem; margin:0 auto; padding:2.5rem 1.5rem 4rem; }
+  button, input, select, textarea { font:inherit; color:inherit; }
+  button { cursor:pointer; background:none; border:none; padding:0; }
+  button:disabled { cursor:default; }
+
+  .page {
+    max-width:460px; margin:0 auto; min-height:100vh;
+    background:var(--panel);
+    border-left:1px solid var(--line-soft); border-right:1px solid var(--line-soft);
+    display:flex; flex-direction:column;
+  }
 
   /* ── ヘッダ ───────────────────────────── */
-  header { border-bottom:1px solid var(--rule); padding-bottom:1rem; margin-bottom:1.75rem; }
-  .title-row { display:flex; align-items:baseline; gap:.9rem; flex-wrap:wrap; }
-  h1 { margin:0; font-size:1.05rem; font-weight:600; letter-spacing:.01em; }
-  .state {
-    display:flex; align-items:center; gap:.45rem;
-    font-size:.75rem; color:var(--ink-soft); font-variant-numeric:tabular-nums;
+  header {
+    display:flex; align-items:center; gap:.6rem;
+    padding:.85rem 1rem .7rem;
+    border-bottom:1px solid var(--line);
   }
-  /* 状態ごとに色を分ける。以前は「ためる」「送らない」「切断」が
-     すべて同じ褐色で、見ても区別がつかなかった */
-  .beacon { width:7px; height:7px; border-radius:50%; background:var(--ink-faint); flex:none; }
-  .beacon.live { background:var(--sent); }                                    /* 届いている */
-  .beacon.hold { background:var(--hold); }                                    /* 溜めている */
-  .beacon.off  { background:transparent; box-shadow:inset 0 0 0 1.5px var(--ink-faint); }
-  .beacon.down { background:transparent; box-shadow:inset 0 0 0 1.5px var(--signal); }
+  .brand { display:flex; align-items:center; gap:.55rem; margin-right:auto; min-width:0; }
+  .brand h1 {
+    margin:0; font-size:.95rem; font-weight:600; letter-spacing:.01em;
+    white-space:nowrap;
+  }
+  /* ロゴの波。拾えている音量でわずかに動く */
+  .mark { display:flex; align-items:center; gap:2px; height:18px; flex:none; }
+  .mark i {
+    display:block; width:2.5px; border-radius:2px; height:30%;
+    background:linear-gradient(180deg,var(--accent),var(--accent-2));
+    transition:height .12s ease-out;
+  }
+
+  .icons { display:flex; align-items:center; gap:.15rem; flex:none; }
+  .icon {
+    position:relative; width:36px; height:36px; border-radius:50%;
+    display:grid; place-items:center; color:var(--dim);
+    transition:background .15s, color .15s;
+  }
+  .icon:hover:not(:disabled) { background:var(--raise); color:var(--text); }
+  .icon:disabled { opacity:.35; }
+  .icon svg { width:19px; height:19px; stroke-width:2.1; }
+  /* アイコンの下の点で入切を示す（モックと同じ作法） */
+  .icon::after {
+    content:""; position:absolute; bottom:4px; left:50%; transform:translateX(-50%);
+    width:4px; height:4px; border-radius:50%; background:transparent;
+  }
+  .icon.lit { color:var(--text); }
+  .icon.lit::after { background:var(--ok); box-shadow:var(--glow) var(--ok); }
+  .icon.warn { color:var(--warn); }
+  .icon.warn::after { background:var(--warn); box-shadow:var(--glow) var(--warn); }
+  .icon.busy { color:var(--warn); }
+
+  /* 状態 */
+  .status {
+    display:flex; align-items:center; gap:.45rem;
+    padding:.5rem 1rem .3rem; font-size:.75rem; color:var(--dim);
+  }
+  .beacon { width:8px; height:8px; border-radius:50%; background:var(--faint); flex:none; }
+  .beacon.live { background:var(--ok); box-shadow:var(--glow) var(--ok); }
+  .beacon.hold { background:var(--accent-2); box-shadow:var(--glow) var(--accent-2); }
+  .beacon.off  { background:var(--warn); box-shadow:var(--glow) var(--warn); }
+  .beacon.down { background:transparent; box-shadow:inset 0 0 0 1.5px var(--danger); }
   @media (prefers-reduced-motion:no-preference) {
     .beacon.live { animation:breathe 2.4s ease-in-out infinite; }
   }
   @keyframes breathe { 50% { opacity:.35; } }
-  /* 画面切替タブ（発話 / 辞書） */
-  .views { display:flex; gap:.2rem; margin:.8rem 0 -1rem; }
-  .view-tab {
-    font-size:.85rem; padding:.35rem .95rem;
-    background:transparent; color:var(--ink-faint);
-    border:1px solid transparent; border-bottom:2px solid transparent;
-    border-radius:0;
-  }
-  .view-tab:hover { color:var(--ink-soft); border-color:transparent; }
-  .view-tab.on {
-    color:var(--ink); font-weight:600; border-bottom-color:var(--focus);
-  }
 
-  /* 拾えている音量。文字が出なくてもここが振れていれば
-     マイクは生きている。 */
-  .meter {
-    grid-column: 2; height: 3px; margin-top: .5rem; border-radius: 2px;
-    background: var(--rule); overflow: hidden;
-  }
+  /* ── ビジュアライザ ───────────────────── */
+  .viz { position:relative; padding:.4rem 0 .1rem; }
+  #viz { display:block; width:100%; height:124px; }
+  /* デーモンが拾えている音量。ブラウザ側の波形とは別の経路なので、
+     ここが動かないのに波形が動いていれば認識側が死んでいると分かる。 */
+  .meter { height:3px; margin:0 1rem; border-radius:2px; background:var(--line); overflow:hidden; }
   .meter-fill {
-    height: 100%; width: 0; border-radius: 2px;
-    background: var(--ink-faint); transition: width .1s linear, background .2s;
+    height:100%; width:0; border-radius:2px; background:var(--faint);
+    transition:width .1s linear, background .2s;
   }
-  .meter-fill.on { background: var(--signal); }
+  .meter-fill.on { background:var(--accent); box-shadow:var(--glow) var(--accent); }
 
-  /* ── 認識中 ───────────────────────────── */
-  .now {
-    display:grid; grid-template-columns:5.5rem 1fr; gap:1rem;
-    padding:1rem 0; min-height:4.5rem; align-items:start;
-    border-bottom:1px solid var(--rule);
+  /* ── 送り先（即時 / 手直し） ───────────── */
+  .modes {
+    display:flex; align-items:center; justify-content:center; gap:0;
+    padding:1rem 1rem .9rem;
   }
-  .now .gutter {
-    font-family:ui-monospace, "SF Mono", Menlo, monospace;
-    font-size:.68rem; letter-spacing:.08em; text-transform:uppercase;
-    color:var(--signal); padding-top:.35rem;
+  .mode {
+    flex:1; display:flex; flex-direction:column; align-items:center; gap:.5rem;
+    color:var(--faint); transition:color .18s;
   }
-  .now .stream { font-size:1.06rem; }
-  .now.idle .stream { color:var(--ink-faint); }
+  .mode .ring {
+    width:64px; height:64px; border-radius:50%;
+    display:grid; place-items:center;
+    border:2px solid var(--line);
+    background:var(--panel-2);
+    transition:border-color .18s, box-shadow .18s, background .18s, transform .12s;
+  }
+  .mode .ring svg { width:27px; height:27px; stroke-width:2.1; }
+  .mode span { font-size:.8rem; font-weight:600; }
+  .mode:hover:not(:disabled) .ring { transform:translateY(-1px); }
+  .mode:disabled { opacity:.4; }
+  .sep { width:1px; align-self:stretch; margin:.5rem .2rem; background:var(--line); flex:none; }
+
+  /* 選んでいる方は中身を塗る（輪郭のままだと今どちらか分かりにくい）。
+     .solid は塗り用、.line は輪郭用の絵で、状態で入れ替える。 */
+  .mode .ring svg .solid { display:none; }
+  .mode.on .ring svg .line { display:none; }
+  .mode.on .ring svg .solid { display:inline; fill:currentColor; stroke:none; }
+  .icon svg .solid { display:none; }
+  .icon.lit svg .solid { display:inline; fill:currentColor; stroke:none; }
+  .icon.lit svg .line { display:none; }
+  /* 一時停止のボタンは、押したら何が起きるかを絵で示す。
+     聞いている間は「止める」、止めている間は「再開する」。 */
+  #segOff.warn { background:color-mix(in srgb, var(--warn) 16%, transparent); }
+
+  #segLive.on { color:var(--accent); }
+  #segLive.on .ring {
+    border-color:transparent; color:var(--panel);
+    background:linear-gradient(145deg, var(--accent), color-mix(in srgb, var(--accent) 55%, var(--accent-2)));
+    box-shadow:0 0 22px color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+  #segHold.on { color:var(--accent-2); }
+  #segHold.on .ring {
+    border-color:transparent; color:var(--panel);
+    background:linear-gradient(145deg, color-mix(in srgb, var(--accent-2) 70%, var(--accent)), var(--accent-2));
+    box-shadow:0 0 22px color-mix(in srgb, var(--accent-2) 55%, transparent);
+  }
+  /* 一時停止中は送り先の選択自体が意味を失うので、まとめて沈める */
+  .modes.muted .mode { opacity:.3; }
+
+  .hint {
+    margin:0; padding:0 1rem .6rem; min-height:1.4em;
+    font-size:.72rem; color:var(--faint);
+  }
+  .hint button {
+    margin-left:.4rem; color:var(--accent); text-decoration:underline;
+    font-size:.72rem;
+  }
+
+  /* ── 履歴 ─────────────────────────────── */
+  .log-head {
+    display:flex; align-items:center; gap:.5rem;
+    padding:.7rem 1rem .55rem; border-top:1px solid var(--line);
+  }
+  .log-head h2 { margin:0; font-size:.8rem; font-weight:600; margin-right:auto; }
+  .filters { display:flex; gap:.15rem; background:var(--panel-2); padding:3px; border-radius:var(--pill); }
+  .filters button {
+    font-size:.7rem; padding:.25rem .7rem; border-radius:var(--pill); color:var(--faint);
+    transition:background .15s, color .15s;
+  }
+  .filters button.on { background:var(--raise); color:var(--text); }
+
+  #log { padding:0 .75rem .5rem; display:flex; flex-direction:column; gap:.4rem; }
+
+  .entry {
+    background:var(--panel-2); border:1px solid var(--line-soft);
+    border-radius:var(--radius); padding:.6rem .75rem;
+  }
+  .entry .gutter {
+    display:flex; align-items:center; gap:.4rem;
+    font-size:.66rem; color:var(--faint); margin-bottom:.2rem;
+    font-variant-numeric:tabular-nums;
+  }
+  .entry .mark {
+    display:inline-flex; align-items:center; gap:.25rem;
+    padding:.05rem .4rem; border-radius:5px; font-size:.64rem; font-weight:600;
+  }
+  .entry .mark::before { content:"✓"; font-size:.7em; }
+  .entry .mark.sent   { color:var(--ok);       background:color-mix(in srgb, var(--ok) 14%, transparent); }
+  .entry .mark.edited { color:var(--accent-2); background:color-mix(in srgb, var(--accent-2) 14%, transparent); }
+  .entry .text { font-size:.88rem; line-height:1.65; word-break:break-word; }
+
+  /* 未送信カード。認識中のテキストもここに出る（一等地に置く） */
+  .draft-card {
+    margin:0 .75rem .4rem;
+    background:var(--panel-2);
+    border:1.5px solid color-mix(in srgb, var(--accent) 55%, var(--line));
+    border-radius:var(--radius); padding:.6rem .75rem;
+    box-shadow:0 0 0 1px color-mix(in srgb, var(--accent) 10%, transparent);
+  }
+  .draft-card .gutter {
+    display:flex; align-items:center; gap:.4rem;
+    font-size:.66rem; color:var(--faint); margin-bottom:.25rem;
+    font-variant-numeric:tabular-nums;
+  }
+  .draft-card .mark {
+    padding:.05rem .4rem; border-radius:5px; font-size:.64rem; font-weight:600;
+    color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, transparent);
+  }
+  /* 認識中の生テキスト。編集欄とは別に置き、確定した分だけ下へ落とす。
+     ここを編集欄に直接流し込むと、手直し中の文字を上書きしてしまう。 */
+  .stream { font-size:.88rem; line-height:1.65; color:var(--text); min-height:1.5em; }
+  #stream:empty::after { content:attr(data-quiet); color:var(--faint); font-size:.8rem; }
   .caret {
-    display:inline-block; width:1px; height:1.05em; background:var(--signal);
-    margin-left:2px; vertical-align:-.14em;
+    display:inline-block; width:1.5px; height:1em; background:var(--accent);
+    margin-left:2px; vertical-align:-.12em; box-shadow:var(--glow) var(--accent);
   }
   @media (prefers-reduced-motion:no-preference) {
     .caret { animation:blink 1.1s step-end infinite; }
   }
   @keyframes blink { 50% { opacity:0; } }
-  .now.idle .caret { display:none; }
-  /* 何も聞こえていないときに空行に見えないようにする */
-  .quiet { display:none; color:var(--ink-faint); font-size:.9rem; }
-  .now.idle .quiet { display:inline; }
+  .draft-card.idle .caret { display:none; }
 
-  /* ── 保留トレイ ───────────────────────── */
-  .tray { padding:1.25rem 0; border-bottom:1px solid var(--rule); }
-  .tray-head {
-    font-family:ui-monospace, "SF Mono", Menlo, monospace;
-    font-size:.68rem; letter-spacing:.09em; text-transform:uppercase;
-    color:var(--hold); margin-bottom:.7rem;
+  #draft {
+    display:block; width:100%; margin-top:.5rem; padding:.6rem .75rem;
+    background:var(--panel); border:1px solid var(--line); border-radius:16px;
+    font-size:.88rem; line-height:1.65; resize:none; overflow:hidden;
+    min-height:3.4em;
   }
-  textarea {
-    display:block; width:100%; min-height:6.5rem; padding:.85rem .95rem;
-    font:inherit; font-size:.98rem; line-height:1.7;
-    color:var(--ink); background:var(--field);
-    border:1px solid var(--rule); border-radius:2px;
-    resize:none;        /* 内容に合わせて自動で伸ばすので手動リサイズは不要 */
-    overflow:hidden;    /* 内側にスクロールバーを出さない */
+  #draft:focus { outline:none; border-color:var(--accent-2); }
+  .draft-actions { display:flex; align-items:center; gap:.4rem; margin-top:.5rem; }
+  .draft-actions .spacer { flex:1; }
+  .round {
+    width:38px; height:38px; border-radius:50%; display:grid; place-items:center;
+    border:2px solid var(--line); color:var(--dim);
+    transition:border-color .15s, color .15s, box-shadow .15s;
   }
-  textarea:focus-visible { outline:2px solid var(--focus); outline-offset:1px; }
-  .tray-actions { display:flex; gap:.5rem; margin-top:.7rem; }
+  .round svg { width:17px; height:17px; stroke-width:2.1; }
+  .round:hover { color:var(--text); border-color:var(--dim); }
+  .round.go { border-color:var(--accent); color:var(--accent); }
+  .round.go:hover { box-shadow:var(--glow) color-mix(in srgb, var(--accent) 50%, transparent); }
 
-  /* ── 操作 ─────────────────────────────── */
-  .bar {
-    display:flex; align-items:center; gap:.6rem; flex-wrap:wrap;
-    padding:1rem 0; border-bottom:1px solid var(--rule);
-  }
-  .bar .spacer { flex:1; }
-  .tally {
-    font-family:ui-monospace, "SF Mono", Menlo, monospace;
-    font-size:.72rem; color:var(--ink-faint); font-variant-numeric:tabular-nums;
-  }
-  button {
-    font:inherit; font-size:.82rem; line-height:1.4; cursor:pointer;
-    padding:.42rem .9rem; border-radius:3px;
-    color:var(--ink); background:var(--field); border:1px solid var(--rule);
-    transition:background .12s, border-color .12s, color .12s;
-  }
-  button:hover { border-color:var(--ink-faint); }
-  button:focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+  .none { padding:1.5rem 1rem; text-align:center; font-size:.78rem; color:var(--faint); }
 
-  /* 音声の届け先。3つは排他なので、選択中の位置で状態が分かる。
-     （2つのトグルだと「切りつつ溜める」という存在しない状態が見えてしまう） */
-  .route { display:flex; gap:.15rem; }
-  .seg {
-    display:inline-flex; align-items:center; gap:.4rem;
-    font-size:.82rem; padding:.35rem .85rem;
-    background:transparent; color:var(--ink-faint);
-    border:1px solid transparent; border-bottom:2px solid transparent;
-    border-radius:0;
+  /* ── 設定パネル ───────────────────────── */
+  .sheet {
+    position:fixed; inset:0; z-index:20; overflow-y:auto;
+    background:var(--panel);
   }
-  .seg:hover { color:var(--ink-soft); border-color:transparent; }
-  .seg .seg-dot {
-    width:7px; height:7px; border-radius:50%; flex:none;
-    box-shadow:inset 0 0 0 1.5px currentColor;   /* 非選択は輪だけ */
+  .sheet-inner { max-width:460px; margin:0 auto; padding-bottom:2rem; }
+  .sheet-head {
+    position:sticky; top:0; z-index:1;
+    display:flex; align-items:center; gap:.5rem;
+    padding:.85rem 1rem; background:var(--panel);
+    border-bottom:1px solid var(--line);
   }
-  .seg.on { color:var(--ink); font-weight:600; }
-  .seg.on .seg-dot { background:currentColor; box-shadow:none; }
-  #segLive.on { color:var(--sent); border-bottom-color:var(--sent); }
-  #segHold.on { color:var(--hold); border-bottom-color:var(--hold); }
-  #segOff.on  { color:var(--ink-soft); border-bottom-color:var(--ink-faint); }
+  .sheet-head h2 { margin:0; font-size:.9rem; font-weight:600; margin-right:auto; }
 
-  button.go { border-color:var(--sent); color:var(--sent); font-weight:600; }
+  .group { padding:.9rem 1rem; border-bottom:1px solid var(--line-soft); }
+  .group > h3 {
+    display:flex; align-items:center; gap:.4rem;
+    margin:0 0 .7rem; font-size:.7rem; font-weight:600; letter-spacing:.06em;
+    text-transform:uppercase; color:var(--faint);
+  }
+  /* 項目名にも小さな絵を添える。文字だけの一覧にしない。 */
+  .field > label {
+    display:flex; align-items:center; gap:.35rem;
+  }
+  .field { display:flex; align-items:center; gap:.6rem; margin-bottom:.6rem; }
+  .field:last-child { margin-bottom:0; }
+  .field > label { font-size:.8rem; color:var(--dim); flex:none; min-width:6.5rem; }
+  .field .val {
+    margin-left:auto; font-size:.75rem; color:var(--text); text-align:right;
+    font-variant-numeric:tabular-nums; flex:none; min-width:3.2rem;
+  }
+  select, input[type=text], input[type=file] {
+    flex:1; min-width:0; padding:.4rem .75rem;
+    background:var(--panel-2); border:1px solid var(--line); border-radius:var(--pill);
+    font-size:.8rem;
+  }
+  select:focus, input:focus, textarea:focus { outline:none; border-color:var(--accent); }
 
-  /* 起動中。背景が左から埋まって進み具合を示す（点滅は重ねない） */
-  button.busy {
-    border-color:var(--signal); color:var(--signal);
-    font-variant-numeric:tabular-nums; cursor:progress;
-    background-color:transparent;
+  input[type=range] {
+    flex:1; min-width:0; -webkit-appearance:none; appearance:none;
+    height:4px; border-radius:3px; background:var(--line);
   }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance:none; width:17px; height:17px; border-radius:50%;
+    background:var(--accent); box-shadow:var(--glow) color-mix(in srgb, var(--accent) 50%, transparent);
+    cursor:pointer;
+  }
+  .range-note { font-size:.68rem; color:var(--faint); margin:-.25rem 0 .6rem; }
 
-  .hint {
-    margin:.75rem 0 0; font-size:.78rem; color:var(--ink-soft); min-height:1.2em;
+  /* 感度を決めるための実測メーター。しきい値の位置に印を出す。 */
+  .gauge {
+    position:relative; height:6px; border-radius:var(--pill);
+    background:var(--line); overflow:visible;
+    margin:.1rem 0 .5rem calc(6.5rem + .6rem);
   }
-  .toggle {
-    display:inline-flex; align-items:center; gap:.4rem;
-    font-size:.79rem; color:var(--ink-soft); cursor:pointer;
+  .gauge-fill {
+    height:100%; width:0; border-radius:var(--pill); background:var(--dim);
+    transition:width .1s linear, background .2s;
   }
-  .toggle input { accent-color:var(--focus); cursor:pointer; margin:0; }
-
-  /* 使うマイク。切り替えても録音だけ入れ替わるので待たされない */
-  .mic {
-    font:inherit; font-size:.79rem; max-width:14rem;
-    padding:.3rem .5rem; border-radius:2px;
-    color:var(--ink-soft); background:var(--field); border:1px solid var(--rule);
-  }
-  .mic:focus-visible { outline:2px solid var(--focus); outline-offset:1px; }
-
-  /* ── ユーザー辞書 ─────────────────────── */
-  /* 開くとログと入れ替わる（重ねない・浮かせない） */
-  .dict { padding:.5rem 0 1.25rem; }
-  .dict-head {
-    font-family:ui-monospace, "SF Mono", Menlo, monospace;
-    font-size:.68rem; letter-spacing:.09em; text-transform:uppercase;
-    color:var(--focus); margin-bottom:.9rem;
-  }
-  .dict-label {
-    display:block; font-size:.78rem; color:var(--ink-soft); margin:0 0 .7rem;
-  }
-  /* 共有 / 手元だけ の切替 */
-  .scope-row {
-    display:flex; align-items:center; gap:.7rem; flex-wrap:wrap;
-    padding:.5rem 0 .8rem; border-bottom:1px solid var(--rule); margin-bottom:.8rem;
-  }
-  .scope-note { font-size:.76rem; color:var(--ink-faint); }
-
-  .dict-tabs { display:flex; gap:.4rem; margin-bottom:.9rem; }
-  .tab {
-    font-size:.79rem; padding:.3rem .8rem;
-    background:transparent; color:var(--ink-soft); border-color:transparent;
-    border-bottom:2px solid transparent; border-radius:0;
-  }
-  .tab.on { color:var(--ink); border-bottom-color:var(--focus); font-weight:600; }
-
-  /* 追加欄は上に固定。長い一覧を下までスクロールしなくてよい */
-  .new-row {
-    display:flex; align-items:center; gap:.5rem; margin-bottom:.5rem;
-    padding-bottom:.6rem; border-bottom:1px dashed var(--rule);
-  }
-  .new-row input {
-    flex:1; min-width:0; font:inherit; font-size:.92rem;
-    padding:.4rem .6rem; border-radius:2px;
-    color:var(--ink); background:var(--field); border:1px solid var(--focus);
-  }
-  .new-row button { flex:none; border-color:var(--sent); color:var(--sent); font-weight:600; }
-
-  .filter {
-    display:block; width:100%; font:inherit; font-size:.85rem;
-    padding:.3rem .55rem; margin-bottom:.5rem; border-radius:2px;
-    color:var(--ink); background:var(--field); border:1px solid var(--rule);
+  .gauge-fill.on { background:var(--accent); }
+  .gauge-mark {
+    position:absolute; top:-3px; width:2px; height:12px; border-radius:1px;
+    background:var(--warn); box-shadow:var(--glow) var(--warn);
   }
 
-  /* 1件 = 1行。行数が多いので詰めて、一覧側だけスクロールさせる */
-  .rows {
-    display:flex; flex-direction:column; gap:.15rem;
-    max-height:15rem; overflow-y:auto;
+  .seg-row { display:flex; flex:1; gap:.2rem; background:var(--panel-2); padding:3px; border-radius:var(--pill); }
+  .seg-row button {
+    flex:1; white-space:nowrap; font-size:.75rem; padding:.35rem .5rem;
+    border-radius:var(--pill); color:var(--faint);
+    transition:background .15s, color .15s;
   }
-  .row { display:flex; align-items:center; gap:.4rem; }
-  .row input {
-    flex:1; min-width:0; font:inherit; font-size:.88rem;
-    padding:.2rem .45rem; border-radius:2px;
-    color:var(--ink); background:transparent; border:1px solid transparent;
-  }
-  .row input:hover { border-color:var(--rule); }
-  .row input:focus { background:var(--field); border-color:var(--rule); }
-  .row.hit input { background:var(--field); }
-  .row input:focus-visible { outline:2px solid var(--focus); outline-offset:1px; }
-  .row .arrow { color:var(--ink-faint); font-size:.9rem; flex:none; }
-  .row .del {
-    flex:none; padding:.25rem .5rem; font-size:.8rem; line-height:1;
-    color:var(--ink-faint); border-color:transparent; background:transparent;
-  }
-  .row .del:hover { color:var(--hold); border-color:var(--rule); }
-  .add {
-    margin-top:.6rem; font-size:.79rem;
-    background:transparent; color:var(--ink-soft); border-style:dashed;
-  }
-  /* 組み込みで無視している語。編集できないので淡く出す */
-  .builtin-head { margin-top:1.3rem; padding-top:1rem; border-top:1px solid var(--rule); }
-  .chips { display:flex; flex-wrap:wrap; gap:.3rem; }
-  .chip {
-    font-size:.78rem; padding:.15rem .5rem; border-radius:2px;
-    color:var(--ink-soft); background:var(--field); border:1px solid var(--rule);
-  }
+  .seg-row button.on { background:var(--raise); color:var(--text); }
 
-  .dict-actions {
-    display:flex; gap:.5rem; align-items:center; margin-top:1rem; flex-wrap:wrap;
-  }
-  .dict-actions .spacer { flex:1; }
-  .dict-note { margin:.6rem 0 0; font-size:.76rem; color:var(--ink-soft); min-height:1.2em; }
+  .toggle { display:flex; align-items:center; gap:.5rem; font-size:.8rem; color:var(--dim); }
+  .toggle input { accent-color:var(--accent); width:15px; height:15px; }
 
-  /* ── 発話ログ ─────────────────────────── */
-  #log { display:flex; flex-direction:column-reverse; }
-  .entry {
-    display:grid; grid-template-columns:5.5rem 1fr; gap:1rem;
-    padding:.85rem 0; border-bottom:1px solid var(--rule);
+  .btn {
+    display:inline-flex; align-items:center; gap:.35rem;
+    padding:.4rem .9rem; border-radius:var(--pill); font-size:.78rem;
+    border:1.5px solid var(--line); background:var(--panel-2); color:var(--dim);
+    transition:border-color .15s, color .15s;
   }
-  @media (prefers-reduced-motion:no-preference) {
-    .entry { animation:settle .3s ease-out; }
-  }
-  @keyframes settle { from { opacity:0; transform:translateY(-3px); } }
-  .entry .gutter {
-    font-family:ui-monospace, "SF Mono", Menlo, monospace;
-    font-size:.7rem; color:var(--ink-faint);
-    font-variant-numeric:tabular-nums; padding-top:.3rem;
-    display:flex; flex-direction:column; gap:.2rem;
-  }
-  .mark { font-size:.62rem; letter-spacing:.07em; }
-  .mark.sent { color:var(--sent); }
-  .mark.edited { color:var(--focus); }
-  .entry .text { white-space:pre-wrap; overflow-wrap:anywhere; }
+  .btn:hover:not(:disabled) { color:var(--text); border-color:var(--dim); }
+  .btn.go { border-color:var(--accent); color:var(--accent); }
+  .btn.busy { opacity:.6; }
+  .btn-row { display:flex; align-items:center; gap:.4rem; flex-wrap:wrap; }
+  .btn-row .spacer { flex:1; }
 
-  .none { padding:1.5rem 0; color:var(--ink-faint); font-size:.86rem; }
-
-  @media (max-width:34rem) {
-    .now, .entry { grid-template-columns:1fr; gap:.25rem; }
-    .entry .gutter, .now .gutter { flex-direction:row; gap:.6rem; padding-top:0; }
+  /* 辞書 */
+  .dict-tabs { display:flex; gap:.2rem; background:var(--panel-2); padding:3px; border-radius:var(--pill); margin-bottom:.6rem; }
+  .dict-tabs button {
+    display:inline-flex; align-items:center; justify-content:center; gap:.3rem;
+    flex:1; white-space:nowrap; font-size:.75rem; padding:.35rem;
+    border-radius:var(--pill); color:var(--faint);
   }
+  .dict-tabs button.on { background:var(--raise); color:var(--text); }
+  .dict-label { margin:0 0 .5rem; font-size:.72rem; color:var(--faint); }
+  .new-row { display:flex; align-items:center; gap:.3rem; margin-bottom:.5rem; }
+  .new-row input { flex:1; min-width:0; padding:.4rem .75rem;
+    background:var(--panel-2); border:1px solid var(--line); border-radius:var(--pill); font-size:.78rem; }
+  .arrow { color:var(--faint); font-size:.8rem; flex:none; }
+  .filter { width:100%; margin-bottom:.5rem; padding:.4rem .75rem;
+    background:var(--panel-2); border:1px solid var(--line); border-radius:var(--pill); font-size:.78rem; }
+  .rows { display:flex; flex-direction:column; gap:.25rem; max-height:15rem; overflow-y:auto; }
+  .row { display:flex; align-items:center; gap:.3rem; }
+  .row.hit input { border-color:var(--accent); }
+  .row input { flex:1; min-width:0; padding:.35rem .7rem;
+    background:var(--panel-2); border:1px solid var(--line); border-radius:var(--pill); font-size:.78rem; }
+  .row .del { display:grid; place-items:center; width:28px; height:28px;
+    color:var(--faint); border-radius:50%; flex:none; }
+  .row .del:hover { color:var(--danger); background:var(--raise); }
+  .chips { display:flex; flex-wrap:wrap; gap:.25rem; }
+  .chip { font-size:.68rem; padding:.1rem .55rem; border-radius:var(--pill);
+    background:var(--panel-2); color:var(--faint); border:1px solid var(--line-soft); }
+  .builtin-head { margin-top:.7rem; }
+  .dict-note, .scope-note { font-size:.68rem; color:var(--faint); margin:.5rem 0 0; }
+
+  [hidden] { display:none !important; }
 </style>
 </head>
 <body>
-<div class="page">
+<div class="page" id="page">
 
   <header>
-    <div class="title-row">
-      <h1>voice-shell</h1>
-      <span class="state"><span class="beacon" id="beacon"></span><span id="stateText">接続中</span></span>
+    <div class="brand">
+      <div class="mark" id="logoMark" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+      <h1>VoiceShell</h1>
     </div>
-    <nav class="views" role="tablist">
-      <button class="view-tab on" id="viewSpeech" role="tab">発話</button>
-      <button class="view-tab" id="viewDict" role="tab">辞書</button>
-    </nav>
+    <div class="icons">
+      <button class="icon lit" id="segOff" aria-pressed="false">
+        <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <g class="glyph-pause">
+            <rect x="7.8" y="4.5" width="3.2" height="15" rx="1.6"/>
+            <rect x="13" y="4.5" width="3.2" height="15" rx="1.6"/>
+          </g>
+          <g class="glyph-play" hidden><path d="M8.2 5.6 18.6 12 8.2 18.4z"/></g>
+        </svg>
+      </button>
+      <button class="icon" id="openSettings" data-i18n-title="settingsTitle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 5.5h9.2M16.8 5.5H20M4 12h3.2M10.8 12H20M4 18.5h9.2M16.8 18.5H20"/>
+          <circle cx="15" cy="5.5" r="1.8"/><circle cx="9" cy="12" r="1.8"/><circle cx="15" cy="18.5" r="1.8"/>
+        </svg>
+      </button>
+      <button class="icon" id="power" data-i18n-title="powerTitle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 4.2v7.3"/><path d="M17.3 7.7a7.5 7.5 0 1 1-10.6 0"/>
+        </svg>
+      </button>
+    </div>
   </header>
 
-<!-- ── 発話 ─────────────────────────────── -->
-<div id="speechView">
-
-  <section class="now idle" id="now" aria-live="polite">
-    <div class="gutter">認識中</div>
-    <div class="stream"><span id="stream"></span><span class="caret"></span><span class="quiet" id="quiet">（無音）</span></div>
-    <!-- 拾えている音量。文字が出ないとき、マイクが死んでいるのか
-         黙っているだけなのかをここで見分ける。 -->
-    <div class="meter" id="meter" title="マイクが拾っている音量">
-      <div class="meter-fill" id="meterFill"></div>
-    </div>
-  </section>
-
-  <section class="tray" id="tray" hidden>
-    <div class="tray-head">ためています — 送る前に直せます</div>
-    <textarea id="draft" aria-label="送る前のテキスト"></textarea>
-    <div class="tray-actions">
-      <button class="go" id="send">Claude に送る</button>
-      <button id="discard">消す</button>
-    </div>
-  </section>
-
-  <div class="bar">
-    <div class="route" role="radiogroup" aria-label="音声の届け先">
-      <button class="seg on" id="segLive" role="radio" aria-checked="true">
-        <span class="seg-dot" aria-hidden="true"></span>直接送る
-      </button>
-      <button class="seg" id="segHold" role="radio" aria-checked="false">
-        <span class="seg-dot" aria-hidden="true"></span>ためて送る
-      </button>
-      <button class="seg" id="segOff" role="radio" aria-checked="false">
-        <span class="seg-dot" aria-hidden="true"></span>送らない
-      </button>
-    </div>
-    <span class="spacer"></span>
-    <button id="power" title="止めると GPU が解放されます">聞き取りを止める</button>
-    <select id="mic" class="mic" aria-label="使うマイク"></select>
-    <label class="toggle"><input type="checkbox" id="clean">「えーと」を消す</label>
-    <span class="tally"><span id="count">0</span> 件</span>
-    <button id="copy">全部コピー</button>
+  <div class="status">
+    <span class="beacon" id="beacon"></span><span id="stateText" data-i18n="connecting">Connecting…</span>
   </div>
+
+  <div class="viz">
+    <canvas id="viz"></canvas>
+    <!-- デーモンが拾えている音量。ブラウザの波形とは別経路なので、
+         波形が動くのにここが動かなければ認識側が落ちていると分かる。 -->
+    <div class="meter" id="meter"><div class="meter-fill" id="meterFill"></div></div>
+  </div>
+
+  <div class="modes" id="modes">
+    <button class="mode on" id="segLive" role="radio" aria-checked="true">
+      <span class="ring">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+          <path class="line" d="M13.2 3.5 5 13.8h6l-.9 6.7 8.2-10.3h-6l.9-6.7z"/>
+          <path class="solid" d="M13.2 3.5 5 13.8h6l-.9 6.7 8.2-10.3h-6l.9-6.7z"/>
+        </svg>
+      </span>
+      <span data-i18n="modeLive">Instant</span>
+    </button>
+    <span class="sep" aria-hidden="true"></span>
+    <button class="mode" id="segHold" role="radio" aria-checked="false">
+      <span class="ring">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+          <path class="line" d="M16.6 4.4a2.1 2.1 0 0 1 3 3L8.6 18.4l-4 1 1-4L16.6 4.4z"/>
+          <path class="solid" d="M16.6 4.4a2.1 2.1 0 0 1 3 3L8.6 18.4l-4 1 1-4L16.6 4.4z"/>
+        </svg>
+      </span>
+      <span data-i18n="modeHold">Review</span>
+    </button>
+  </div>
+
   <p class="hint" id="hint"></p>
 
-  <div id="log"></div>
-  <p class="none" id="none">まだ何も送っていません。話すとここに出ます。</p>
-
-</div><!-- /speechView -->
-
-<!-- ── 辞書 ─────────────────────────────── -->
-  <section class="dict" id="dict" hidden>
-    <div class="scope-row">
-      <label class="toggle">
-        <input type="checkbox" id="scopePrivate">
-        手元だけに保存する（公開しない）
-      </label>
-      <span class="scope-note" id="scopeNote"></span>
+  <!-- 未送信カード。認識中のテキストと手直し欄をここにまとめる。 -->
+  <section class="draft-card idle" id="tray" aria-live="polite">
+    <div class="gutter">
+      <span class="mark" data-i18n="unsent">Unsent</span>
+      <span id="draftTime"></span>
     </div>
+    <div class="stream"><span id="stream" data-i18n-quiet="quiet"></span><span class="caret"></span></div>
+    <textarea id="draft" data-i18n-ph="draftPlaceholder" hidden></textarea>
+    <div class="draft-actions" id="draftActions" hidden>
+      <span class="spacer"></span>
+      <button class="round" id="discard" data-i18n-title="discardTitle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 6.5h16M9 6.5v-2h6v2M18.2 6.5 17.3 20H6.7L5.8 6.5"/>
+        </svg>
+      </button>
+      <button class="round go" id="send" data-i18n-title="sendTitle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4.5 12 19.5 4.5 13.9 19.5l-2-5.6-7.4-1.9z"/>
+        </svg>
+      </button>
+    </div>
+  </section>
+
+  <div class="log-head">
+    <h2 data-i18n="history">History</h2>
+    <div class="filters" role="tablist">
+      <button class="on" id="filterAll" data-i18n="filterAll">All</button>
+      <button id="filterSent" data-i18n="filterSent">Sent</button>
+      <button id="filterEdited" data-i18n="filterEdited">Edited</button>
+    </div>
+  </div>
+
+  <div id="log"></div>
+  <p class="none" id="none" data-i18n="empty">Nothing sent yet. Speak and it shows up here.</p>
+
+</div><!-- /page -->
+
+<!-- ── 設定 ─────────────────────────────── -->
+<section class="sheet" id="sheet" hidden>
+ <div class="sheet-inner">
+  <div class="sheet-head">
+    <h2 data-i18n="settings">Settings</h2>
+    <button class="btn" id="floatBtn" data-icon="float" data-icon-size="13" data-i18n="floatBtn" hidden>Float on top</button>
+    <button class="btn go" id="closeSettings" data-icon="check" data-icon-size="13" data-i18n="done">Done</button>
+  </div>
+
+  <!-- 入力 -->
+  <div class="group">
+    <h3 data-icon="mic" data-icon-size="13" data-i18n="grpInput">Input</h3>
+    <div class="field">
+      <label for="mic" data-icon="mic" data-icon-size="13" data-i18n="micDevice">Microphone</label>
+      <select id="mic"></select>
+    </div>
+    <div class="field">
+      <label for="thresh" data-icon="slider" data-icon-size="13" data-i18n="sensitivity">Sensitivity</label>
+      <input type="range" id="thresh" min="0" max="1000" step="1">
+      <span class="val" id="threshVal"></span>
+    </div>
+    <!-- 実際に拾えている音量としきい値を並べて出す。
+         数字だけでは「いくつが自分に合うか」を決めようがない。 -->
+    <div class="gauge" id="gauge">
+      <div class="gauge-fill" id="gaugeFill"></div>
+      <div class="gauge-mark" id="gaugeMark"></div>
+    </div>
+    <p class="range-note" data-i18n="sensitivityNote"></p>
+    <div class="field">
+      <label for="silence" data-icon="timer" data-icon-size="13" data-i18n="silence">Pause to send</label>
+      <input type="range" id="silence" min="0.5" max="3" step="0.1">
+      <span class="val" id="silenceVal"></span>
+    </div>
+    <p class="range-note" data-i18n="silenceNote"></p>
+    <div class="field">
+      <label for="minChars" data-icon="text" data-icon-size="13" data-i18n="minChars">Min length</label>
+      <input type="range" id="minChars" min="1" max="40" step="1">
+      <span class="val" id="minCharsVal"></span>
+    </div>
+    <p class="range-note" data-i18n="minCharsNote"></p>
+    <label class="toggle"><input type="checkbox" id="clean"><span data-i18n="stripFillers">Strip filler words</span></label>
+    <div class="btn-row" style="margin-top:.7rem">
+      <button class="btn go" id="calibBtn" data-icon="sparkle" data-i18n="calibrate">Auto-tune</button>
+    </div>
+    <p class="range-note" id="calibNote" style="margin-top:.5rem"></p>
+  </div>
+
+  <!-- 見た目 -->
+  <div class="group">
+    <h3 data-icon="palette" data-icon-size="13" data-i18n="grpLook">Appearance</h3>
+    <div class="field">
+      <label data-icon="eye" data-icon-size="13" data-i18n="theme">Theme</label>
+      <div class="seg-row" id="themeRow">
+        <button data-theme-choice="auto" data-i18n="themeAuto">Auto</button>
+        <button data-theme-choice="dark" data-i18n="themeDark">Dark</button>
+        <button data-theme-choice="light" data-i18n="themeLight">Light</button>
+      </div>
+    </div>
+    <div class="field">
+      <label data-icon="sparkle" data-icon-size="13" data-i18n="vizStyle">Visualizer</label>
+      <div class="seg-row" id="vizRow">
+        <button data-viz-choice="bar" data-i18n="vizBar">Bar</button>
+        <button data-viz-choice="wave" data-i18n="vizWave">Wave</button>
+        <button data-viz-choice="radial" data-i18n="vizRadial">Orb</button>
+        <button data-viz-choice="grid" data-i18n="vizGrid">Grid</button>
+      </div>
+    </div>
+    <div class="field">
+      <label data-icon="globe" data-icon-size="13" data-i18n="language">Language</label>
+      <div class="seg-row" id="langRow">
+        <button data-lang-choice="auto" data-i18n="themeAuto">Auto</button>
+        <button data-lang-choice="en">English</button>
+        <button data-lang-choice="ja">日本語</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 辞書 -->
+  <div class="group">
+    <h3 data-icon="book" data-icon-size="13" data-i18n="grpDict">Dictionary</h3>
+    <label class="toggle" style="margin-bottom:.5rem">
+      <input type="checkbox" id="scopePrivate"><span data-i18n="dictPrivate">Keep on this machine only</span>
+    </label>
+    <p class="scope-note" id="scopeNote"></p>
 
     <div class="dict-tabs" role="tablist">
-      <button class="tab on" id="tabReplace" role="tab">言い換え</button>
-      <button class="tab" id="tabIgnore" role="tab">無視する発話</button>
+      <button class="on" id="tabReplace" data-icon="swap" data-icon-size="13" data-i18n="dictReplace">Replace</button>
+      <button id="tabIgnore" data-icon="mute" data-icon-size="13" data-i18n="dictIgnore">Ignore</button>
     </div>
 
-    <!-- 言い換え -->
-    <div class="pane" id="paneReplace">
-      <p class="dict-label">送る前に置き換えます。</p>
+    <div id="paneReplace">
+      <p class="dict-label" data-i18n="dictReplaceHelp"></p>
       <div class="new-row">
-        <input id="newFrom" placeholder="聞こえた語">
+        <input id="newFrom" data-i18n-ph="dictHeard">
         <span class="arrow">→</span>
-        <input id="newTo" placeholder="送る語">
-        <button id="addReplace">追加</button>
+        <input id="newTo" data-i18n-ph="dictSendAs">
+        <button class="btn" id="addReplace" data-icon="plus" data-icon-size="13" data-i18n="add">Add</button>
       </div>
-      <input class="filter" id="filterReplace" placeholder="絞り込み（登録済みを探す）">
+      <input class="filter" id="filterReplace" data-i18n-ph="dictFilter">
       <div class="rows" id="replaceRows"></div>
     </div>
 
-    <!-- 無視する発話 -->
-    <div class="pane" id="paneIgnore" hidden>
-      <p class="dict-label">この語だけの発話は送りません。</p>
+    <div id="paneIgnore" hidden>
+      <p class="dict-label" data-i18n="dictIgnoreHelp"></p>
       <div class="new-row">
-        <input id="newIgnore" placeholder="この語だけなら送らない">
-        <button id="addIgnore">追加</button>
+        <input id="newIgnore" data-i18n-ph="dictIgnorePh">
+        <button class="btn" id="addIgnore" data-icon="plus" data-icon-size="13" data-i18n="add">Add</button>
       </div>
       <div class="rows" id="ignoreRows"></div>
-
       <p class="dict-label builtin-head">
-        最初から無視している語（<span id="builtinCount">0</span>）— 登録は不要です
+        <span data-i18n="dictBuiltin"></span>（<span id="builtinCount">0</span>）
       </p>
       <div class="chips" id="builtinChips"></div>
     </div>
 
-    <div class="dict-actions">
-      <button class="go" id="dictSave">保存する</button>
+    <div class="btn-row" style="margin-top:.6rem">
+      <button class="btn go" id="dictSave" data-icon="check" data-icon-size="13" data-i18n="save">Save</button>
       <span class="spacer"></span>
-      <button id="dictExport">CSV で保存</button>
-      <button id="dictImport">CSV を読み込む</button>
+      <button class="btn" id="dictExport" data-icon="download" data-icon-size="13" data-i18n="exportCsv">Export CSV</button>
+      <button class="btn" id="dictImport" data-icon="upload" data-icon-size="13" data-i18n="importCsv">Import CSV</button>
       <input type="file" id="dictFile" accept=".csv,text/csv" hidden>
     </div>
     <p class="dict-note" id="dictNote"></p>
-  </section>
+  </div>
 
-</div>
-
+  <!-- ログ -->
+  <div class="group">
+    <h3 data-icon="list" data-icon-size="13" data-i18n="grpLog">Transcript</h3>
+    <div class="btn-row">
+      <span class="val" style="margin:0"><span id="count">0</span> <span data-i18n="items">items</span></span>
+      <span class="spacer"></span>
+      <button class="btn" id="copy" data-icon="copy" data-icon-size="13" data-i18n="copyAll">Copy all</button>
+    </div>
+  </div>
+ </div>
+</section>
 <script>
 // 画面に出ない不具合を見えるようにする（読み込み失敗はボタンが無反応になるだけなので）
 window.addEventListener('error', e => {
   const box = document.getElementById('hint');
-  if (box) box.textContent = '画面の読み込みでエラー: ' + e.message;
+  if (box) box.textContent = 'Script error: ' + e.message;
 });
+
+/* ── ことば ─────────────────────────────
+   英語を基準に置き、足りない語だけ各言語で上書きする。
+   語を足すときは en に必ず入れること（他は無ければ en に落ちる）。 */
+const I18N = {
+  en: {
+    connecting:'Connecting…',
+    statusLive:'Going to Claude', statusHold:'Holding', statusOff:'Paused',
+    statusDown:'Disconnected — reconnecting', statusBooting:'Starting up',
+    statusStopped:'Stopped',
+    titleLive:'● live', titleHold:'◐ holding', titleOff:'○ paused',
+    hintLive:'Whatever you say goes straight to Claude Code.',
+    hintHold:'Speech collects below. Edit it, then send.',
+    hintOff:'Nothing is recorded while paused.',
+    hintBooting:'Loading the model. This takes about 40 seconds.',
+    hintStopping:'Releasing the GPU.',
+    hintStopped:'Press the power icon to start listening again.',
+    hintNoMic:'No microphone access — the meter still shows the daemon level.',
+    modeLive:'Instant', modeHold:'Review',
+    unsent:'Unsent', history:'History', quiet:'(silence)',
+    filterAll:'All', filterSent:'Sent', filterEdited:'Edited',
+    empty:'Nothing sent yet. Speak and it shows up here.',
+    sent:'Sent', edited:'Edited',
+    draftPlaceholder:'Fix it here, then send.',
+    sendTitle:'Send to Claude', discardTitle:'Discard',
+    pauseTitle:'Pause — stop listening', resumeTitle:'Resume listening',
+    settingsTitle:'Settings',
+    powerTitle:'Stop / start listening',
+    settings:'Settings', done:'Done', floatBtn:'Float on top',
+    grpInput:'Input', micDevice:'Microphone',
+    sensitivity:'Sensitivity',
+    sensitivityNote:'Bar shows the live level, the marker is the threshold. Speech is detected past the marker.',
+    silence:'Pause to send',
+    silenceNote:'How long a silence ends an utterance.',
+    minChars:'Min length',
+    minCharsNote:'Shorter results are dropped as noise.',
+    stripFillers:'Strip filler words',
+    calibrate:'Auto-tune',
+    calibSpeaking:'Keep talking… {n}s',
+    calibQuiet:'Now stay quiet… {n}s',
+    calibNoData:'No level data arrived. Is the daemon running?',
+    calibTooNoisy:'Your voice barely rises above the room. Move the mic closer or raise the input volume, then try again.',
+    calibDone:'Set to {thr} (room {noise} / voice {voice}).',
+    remove:'Remove',
+    grpLook:'Appearance', theme:'Theme',
+    themeAuto:'Auto', themeDark:'Dark', themeLight:'Light',
+    vizStyle:'Visualizer', vizBar:'Bar', vizWave:'Wave', vizRadial:'Orb', vizGrid:'Grid',
+    language:'Language',
+    grpDict:'Dictionary',
+    dictPrivate:'Keep on this machine only',
+    dictShared:'~/.config/voice-shell/dictionary.json (can be shared as defaults)',
+    dictPrivateNote:'~/.config/voice-shell/dictionary.private.json (never committed)',
+    dictReplace:'Replace', dictIgnore:'Ignore',
+    dictReplaceHelp:'Swapped in before sending.',
+    dictIgnoreHelp:'An utterance of only this word is not sent.',
+    dictHeard:'heard as', dictSendAs:'send as',
+    dictFilter:'Filter saved entries',
+    dictIgnorePh:'skip when said alone',
+    dictBuiltin:'Ignored out of the box — no need to add these',
+    add:'Add', save:'Save', exportCsv:'Export CSV', importCsv:'Import CSV',
+    dictPending:'Press Save to apply.',
+    dictSaved:'Saved ({r} replacements / {i} ignored). Effective from the next utterance.',
+    dictSavedShared:'shared', dictSavedPrivate:'this machine only',
+    dictLoaded:'Loaded ({r} replacements / {i} ignored). Press Save to apply.',
+    dictSkipped:' / {n} unreadable rows',
+    grpLog:'Transcript', items:'items', copyAll:'Copy all', copied:'Copied',
+    micSwitched:'Switched microphone: {name}',
+    discarded:'Discarded.', undo:'Undo',
+    switchFailed:'Could not switch: {err}',
+    bootingLeft:'Starting… {n}s left', bootingSoon:'Starting… almost there',
+  },
+  ja: {
+    connecting:'接続中',
+    statusLive:'Claude に届いています', statusHold:'ためています', statusOff:'一時停止中',
+    statusDown:'切断 — 再接続中', statusBooting:'起動しています',
+    statusStopped:'止まっています',
+    titleLive:'● 送信中', titleHold:'◐ ためています', titleOff:'○ 一時停止',
+    hintLive:'話すとそのまま Claude Code に届きます。',
+    hintHold:'話した分は下に溜まります。直してから送ってください。',
+    hintOff:'一時停止中は何も記録されません。',
+    hintBooting:'モデルを読み込んでいます。40秒ほどかかります。',
+    hintStopping:'GPU を解放しています。',
+    hintStopped:'電源アイコンで聞き取りを再開できます。',
+    hintNoMic:'マイクを使えないため、波形はデーモンの音量で動かしています。',
+    modeLive:'即時', modeHold:'手直し',
+    unsent:'未送信', history:'送信履歴', quiet:'（無音）',
+    filterAll:'すべて', filterSent:'送信済み', filterEdited:'手直し',
+    empty:'まだ何も送っていません。話すとここに出ます。',
+    sent:'送信済み', edited:'手直し送信',
+    draftPlaceholder:'ここで直してから送れます。',
+    sendTitle:'Claude に送る', discardTitle:'消す',
+    pauseTitle:'一時停止 — 聞き取りをやめる', resumeTitle:'聞き取りを再開する',
+    settingsTitle:'設定',
+    powerTitle:'聞き取りを止める / 始める',
+    settings:'設定', done:'閉じる', floatBtn:'手前に浮かせる',
+    grpInput:'入力', micDevice:'マイク',
+    sensitivity:'感度',
+    sensitivityNote:'バーが今の音量、印がしきい値です。印を超えた分が発話として拾われます。',
+    silence:'確定までの無音',
+    silenceNote:'これだけ黙ると、ひと区切りとして確定します。',
+    minChars:'最小文字数',
+    minCharsNote:'これより短い認識結果は物音とみなして捨てます。',
+    stripFillers:'「えーと」を消す',
+    calibrate:'自動調整',
+    calibSpeaking:'そのまま話し続けてください… あと{n}秒',
+    calibQuiet:'今度は黙っていてください… あと{n}秒',
+    calibNoData:'音量が届きませんでした。認識が動いているか確認してください。',
+    calibTooNoisy:'まわりの音に対して声が小さすぎます。マイクを近づけるか入力音量を上げて、もう一度お試しください。',
+    calibDone:'{thr} にしました（まわり {noise} / 声 {voice}）。',
+    remove:'削除',
+    grpLook:'見た目', theme:'テーマ',
+    themeAuto:'自動', themeDark:'ダーク', themeLight:'ライト',
+    vizStyle:'波形', vizBar:'バー', vizWave:'流れる', vizRadial:'球', vizGrid:'格子',
+    language:'言語',
+    grpDict:'辞書',
+    dictPrivate:'手元だけに保存する（公開しない）',
+    dictShared:'~/.config/voice-shell/dictionary.json（既定値として共有できます）',
+    dictPrivateNote:'~/.config/voice-shell/dictionary.private.json（リポジトリに入りません）',
+    dictReplace:'言い換え', dictIgnore:'無視する発話',
+    dictReplaceHelp:'送る前に置き換えます。',
+    dictIgnoreHelp:'この語だけの発話は送りません。',
+    dictHeard:'聞こえた語', dictSendAs:'送る語',
+    dictFilter:'絞り込み（登録済みを探す）',
+    dictIgnorePh:'この語だけなら送らない',
+    dictBuiltin:'最初から無視している語 — 登録は不要です',
+    add:'追加', save:'保存する', exportCsv:'CSV で保存', importCsv:'CSV を読み込む',
+    dictPending:'「保存する」を押すと有効になります。',
+    dictSaved:'{where}保存しました（言い換え {r} 件 / 無視 {i} 件）。次の発話から効きます。',
+    dictSavedShared:'共有辞書に', dictSavedPrivate:'手元だけに',
+    dictLoaded:'読み込みました（言い換え {r} 件 / 無視 {i} 件{s}）。「保存する」で確定します。',
+    dictSkipped:' / 読めない行 {n} 件',
+    grpLog:'ログ', items:'件', copyAll:'全部コピー', copied:'コピーしました',
+    micSwitched:'マイクを切り替えました: {name}',
+    discarded:'消しました。', undo:'元に戻す',
+    switchFailed:'切替に失敗しました: {err}',
+    bootingLeft:'起動中… あと{n}秒', bootingSoon:'起動中… もうすぐ',
+  },
+};
+
+const store = {
+  get(k, d) { try { return localStorage.getItem('vs.' + k) ?? d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('vs.' + k, v); } catch {} },
+};
+
+let langPref = store.get('lang', 'auto');
+let lang = 'en';
+function resolveLang() {
+  lang = langPref !== 'auto' ? langPref
+       : ((navigator.language || 'en').toLowerCase().startsWith('ja') ? 'ja' : 'en');
+  if (!I18N[lang]) lang = 'en';
+  document.documentElement.lang = lang;
+}
+// {name} のような差し込みも一緒に扱う
+const t = (key, vars) => {
+  let s = (I18N[lang] && I18N[lang][key]) ?? I18N.en[key] ?? key;
+  if (vars) for (const [k, v] of Object.entries(vars)) s = s.replaceAll('{' + k + '}', v);
+  return s;
+};
+
+function applyI18n(root = document) {
+  for (const n of root.querySelectorAll('[data-i18n]')) {
+    // アイコンを入れた要素は文字の部分だけ差し替える（svg を消さない）
+    const svg = n.querySelector(':scope > svg');
+    if (svg) {
+      const last = n.lastChild;
+      if (last && last.nodeType === 3) last.nodeValue = t(n.dataset.i18n);
+      else n.append(t(n.dataset.i18n));
+    } else {
+      n.textContent = t(n.dataset.i18n);
+    }
+  }
+  for (const n of root.querySelectorAll('[data-i18n-ph]')) n.placeholder = t(n.dataset.i18nPh);
+  // 認識中の枠が空のときに出す文字（CSS から content で読む）
+  for (const n of root.querySelectorAll('[data-i18n-quiet]')) n.dataset.quiet = t(n.dataset.i18nQuiet);
+  for (const n of root.querySelectorAll('[data-i18n-title]')) {
+    n.title = t(n.dataset.i18nTitle);
+    n.setAttribute('aria-label', t(n.dataset.i18nTitle));
+  }
+}
 
 const $ = id => document.getElementById(id);
 const el = {};
-for (const id of ['beacon','stateText','now','stream','tray','draft','send','discard',
-                  'segLive','segHold','segOff','hint','clean','count','copy','log','none','mic','power',
-                  'meterFill',
-                  'dict','speechView','viewSpeech','viewDict','dictSave','dictNote',
-                  'tabReplace','tabIgnore','paneReplace','paneIgnore',
-                  'replaceRows','ignoreRows','addReplace','addIgnore',
-                  'dictExport','dictImport','dictFile',
+for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
+                  'power','openSettings','sheet','closeSettings','floatBtn','page',
+                  'viz','meter','meterFill','logoMark',
+                  'tray','stream','draft','draftTime','draftActions','send','discard',
+                  'hint','log','none','count','copy',
+                  'filterAll','filterSent','filterEdited',
+                  'mic','thresh','threshVal','gaugeFill','gaugeMark',
+                  'silence','silenceVal','minChars','minCharsVal','clean',
+                  'calibBtn','calibNote',
+                  'themeRow','vizRow','langRow',
+                  'scopePrivate','scopeNote','tabReplace','tabIgnore',
+                  'paneReplace','paneIgnore','replaceRows','ignoreRows',
+                  'addReplace','addIgnore','newFrom','newTo','newIgnore','filterReplace',
                   'builtinChips','builtinCount',
-                  'newFrom','newTo','newIgnore','filterReplace',
-                  'scopePrivate','scopeNote'])
+                  'dictSave','dictNote','dictExport','dictImport','dictFile'])
   el[id] = $(id);
 
+const post = (path, body) =>
+  fetch(path, {method:'POST', headers:{'Content-Type':'application/json'},
+               body: JSON.stringify(body || {})});
 
-/* ── 整形 ───────────────────────────────── */
-const FILLERS = ['えーと','えっと','ええと','あのー','あの','えー','えっ','まあ',
-                 'なんか','そのー','うーん','んー'];
-const FILLER_RE = new RegExp('(' + FILLERS.sort((a,b)=>b.length-a.length)
-  .map(s => s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|') + ')','g');
+const putJSON = (path, body) =>
+  fetch(path, {method:'PUT', headers:{'Content-Type':'application/json'},
+               body: JSON.stringify(body || {})});
 
-// 日本語モードで英語を話すと単語ごとに読点が入るため戻す
-const fixLatin = t => t.replace(/([A-Za-z])、(?=[A-Za-z])/g,'$1 ');
+/* ── アイコン ───────────────────────────
+   同じ絵を何度も書かないよう、名前で引けるようにしておく。 */
+const ICON = {
+  check:'M19.5 6.5 9.5 18 4.5 12.6',
+  plus:'M12 4.5v15M4.5 12h15',
+  trash:'M4 6.5h16M9 6.5v-2h6v2M18.2 6.5 17.3 20H6.7L5.8 6.5',
+  download:'M12 4v10.5M7.5 10.5 12 15l4.5-4.5M4.5 19.5h15',
+  upload:'M12 20V9.5M7.5 14 12 9.5l4.5 4.5M4.5 4.5h15',
+  copy:'M9.5 9.5h10v10h-10zM5.5 14.5h-1v-10h10v1',
+  swap:'M4.5 8.5h14l-3.4-3.4M19.5 15.5h-14l3.4 3.4',
+  mute:'M4 4l16 16M9 5a3 3 0 0 1 6 0v5M15 15a3 3 0 0 1-5-2V9M19 11v1a7 7 0 0 1-9 6.7M12 19v3',
+  slider:'M4 6h10M18 6h2M4 12h2M10 12h10M4 18h10M18 18h2',
+  mic:'M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM19 10v2a7 7 0 0 1-14 0v-2M12 19v3',
+  timer:'M12 8v5l3 2M12 21a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM9 2h6',
+  text:'M4 6h16M4 12h10M4 18h7',
+  eye:'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z',
+  palette:'M12 3a9 9 0 1 0 0 18h2a2 2 0 0 0 0-4 2 2 0 0 1 2-2h1a4 4 0 0 0 4-4c0-4.4-4-8-9-8z',
+  book:'M4 4h11a3 3 0 0 1 3 3v13H7a3 3 0 0 0-3 3V4zM18 7h2v16H7',
+  list:'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
+  globe:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3 12h18M12 3c2.5 2.6 2.5 15.4 0 18M12 3c-2.5 2.6-2.5 15.4 0 18',
+  float:'M4 5h10v8H4zM10 11h10v8H10',
+  sparkle:'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3z',
+};
 
-const stripFillers = t => t.replace(FILLER_RE,'')
-  .replace(/、{2,}/g,'、').replace(/^[、。\s]+/,'').replace(/\s{2,}/g,' ').trim();
+// 見出しやボタンの頭に付ける小さなアイコン
+function iconSvg(name, size = 15) {
+  const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  s.setAttribute('viewBox', '0 0 24 24');
+  s.setAttribute('fill', 'none');
+  s.setAttribute('stroke', 'currentColor');
+  s.setAttribute('stroke-width', '2.1');
+  s.setAttribute('stroke-linecap', 'round');
+  s.setAttribute('stroke-linejoin', 'round');
+  s.style.width = s.style.height = size + 'px';
+  s.style.flex = 'none';
+  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  p.setAttribute('d', ICON[name] || ICON.sparkle);
+  s.appendChild(p);
+  return s;
+}
 
-const format = raw => el.clean.checked ? stripFillers(fixLatin(raw)) : fixLatin(raw);
+// data-icon が付いている要素の先頭にアイコンを差し込む（文字だけの画面にしない）
+function decorateIcons(root = document) {
+  for (const n of root.querySelectorAll('[data-icon]:not([data-iconed])')) {
+    n.dataset.iconed = '1';
+    n.prepend(iconSvg(n.dataset.icon, n.dataset.iconSize || 15));
+  }
+}
+
+/* 整形はデーモン側でやる。ここで見た目だけ直しても、Claude に渡る
+   本文には効かないため（「えーと」を消したつもりで消えていなかった）。
+   画面はログに書かれたものをそのまま出す。 */
+const format = raw => raw;
+
+/* ── ビジュアライザ ─────────────────────
+   ブラウザ側でも同じマイクを開いて周波数を取り、実際の声の形を描く。
+   デーモン（ffmpeg）とは別の経路なので、許可が下りなければ
+   WebSocket 越しの音量（level.txt）だけで動かす。 */
+const BARS = 48;
+let vizStyle = store.get('viz', 'bar');
+let audioCtx = null, analyser = null, micStream = null, freq = null;
+let daemonLevel = 0, daemonSpeaking = false;
+let vizFailed = false;
+let wave = null;
+// バー表示はモックと同じく「直近のしばらく」を左から右へ流す。
+// 周波数の絵は低い方だけが立って右半分が寝たままになりやすく、
+// 喋っている実感が出ない。
+const history = new Array(BARS).fill(0);
+const bandFloor = new Array(BARS).fill(0.2);
+
+const canvas = el.viz, cx = canvas.getContext('2d');
+let cw = 0, ch = 0;
+
+function fitCanvas() {
+  const r = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  cw = Math.max(1, Math.round(r.width));
+  ch = Math.max(1, Math.round(r.height));
+  canvas.width = cw * dpr;
+  canvas.height = ch * dpr;
+  cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+new ResizeObserver(fitCanvas).observe(canvas);
+
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+// テーマの色をそのまま薄める（#rrggbb 前提。それ以外はそのまま返す）
+const color = (hex, alpha) => {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex);
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  return `rgba(${n >> 16 & 255}, ${n >> 8 & 255}, ${n & 255}, ${alpha})`;
+};
+
+// 声の帯域に寄せて対数っぽく間引く。素直に等分すると高音側が
+// ほとんど無音の帯ばかりになり、右半分が死んで見える。
+function bandsFromFreq() {
+  const out = new Array(BARS);
+  const n = analyser.frequencyBinCount;
+  const top = Math.floor(n * 0.55);          // 上の方は声がほぼ乗らない
+  for (let i = 0; i < BARS; i++) {
+    const a = Math.floor(Math.pow(i / BARS, 1.7) * top);
+    const b = Math.max(a + 1, Math.floor(Math.pow((i + 1) / BARS, 1.7) * top));
+    let sum = 0;
+    for (let k = a; k < b && k < n; k++) sum += freq[k];
+    const v = sum / (b - a) / 255;
+
+    // 帯ごとに、静かなときの値へゆっくり寄せた基準を持つ。
+    // これを引かないと、空調やファンの低い音で左側が立ちっぱなしになる。
+    bandFloor[i] = v < bandFloor[i] ? bandFloor[i] * 0.9 + v * 0.1
+                                    : bandFloor[i] * 0.999 + v * 0.001;
+
+    // 声の力は低い方に寄っているので、高い帯ほど持ち上げて釣り合わせる
+    const tilt = 0.85 + 1.15 * Math.pow(i / BARS, 0.7);
+    out[i] = Math.min(1, Math.max(0, (v - bandFloor[i] - 0.02) / 0.26) * tilt);
+  }
+  return out;
+}
+
+// マイクが使えないときの代役。単一の音量しか無いので、
+// 山なりの重みを掛けて「真ん中が高い」形にする。
+let fallbackPhase = 0;
+function bandsFromLevel() {
+  fallbackPhase += 0.08;
+  const amp = Math.min(1, daemonLevel * 22);
+  const out = new Array(BARS);
+  for (let i = 0; i < BARS; i++) {
+    const x = i / (BARS - 1);
+    const hump = Math.sin(Math.PI * x);
+    const ripple = 0.75 + 0.25 * Math.sin(fallbackPhase + x * 7);
+    out[i] = Math.max(0.02, amp * hump * ripple);
+  }
+  return out;
+}
+
+// 部屋の暗騒音。静かなときの値にゆっくり寄せていく。
+// 固定のしきい値だと、静かな部屋では空調やファンの音にまで反応し、
+// 騒がしい部屋では逆に振り切ったままになる。
+let floorLv = 0.15;
+
+// いまの声の大きさ。波形が使えないときはデーモンの音量で代える。
+function levelNow() {
+  let v;
+  if (analyser && !vizFailed) {
+    // 全帯域の実効値を見ると、「さ行」の擦れ音だけで振り切ってしまう。
+    // 擦れ音は 4kHz より上に強く出るので、声の基音とフォルマントが乗る
+    // 120〜2600Hz だけを見る。getByteFrequencyData は既に dB 目盛りなので、
+    // そのまま平均すれば大きい音が潰れすぎない。
+    const hz = (audioCtx.sampleRate / 2) / freq.length;
+    const lo = Math.max(1, Math.round(120 / hz));
+    const hi = Math.max(lo + 1, Math.min(freq.length, Math.round(2600 / hz)));
+    let sum = 0;
+    for (let k = lo; k < hi; k++) sum += freq[k];
+    v = sum / (hi - lo) / 255;
+  } else {
+    v = Math.min(1, Math.sqrt(daemonLevel * 6));
+  }
+
+  // 下がるときは速く、上がるときはごく緩やかに追従させる
+  // （喋っている間に暗騒音の推定が引き上げられないように）
+  floorLv = v < floorLv ? floorLv * 0.92 + v * 0.08
+                        : floorLv * 0.9995 + v * 0.0005;
+
+  // 暗騒音の少し上を起点にする。ここを下回る音は絵にしない。
+  return Math.min(1, Math.max(0, (v - floorLv - 0.03) / 0.30));
+}
+
+// 生の音量はコマごとに大きく上下するので、そのまま並べるとちらついて
+// 落ち着かない。立ち上がりは速く、収まるのはゆっくりにして均す。
+let env = 0;
+let lastPush = 0;
+function pushHistory(now) {
+  const v = levelNow();
+  env = v > env ? env * 0.55 + v * 0.45 : env * 0.86 + v * 0.14;
+  if (now - lastPush < 70) return;
+  lastPush = now;
+  history.shift();
+  history.push(env);
+}
+
+// 急に立ち上がると点滅して見えるので、下がるときだけ緩やかにする
+const smooth = new Array(BARS).fill(0);
+function currentBands() {
+  const raw = (analyser && !vizFailed) ? bandsFromFreq() : bandsFromLevel();
+  for (let i = 0; i < BARS; i++) {
+    smooth[i] = raw[i] > smooth[i] ? smooth[i] * 0.4 + raw[i] * 0.6
+                                   : smooth[i] * 0.88 + raw[i] * 0.12;
+  }
+  return smooth;
+}
+
+function gradient(x0, x1) {
+  const g = cx.createLinearGradient(x0, 0, x1, 0);
+  g.addColorStop(0, cssVar('--accent'));
+  g.addColorStop(1, cssVar('--accent-2'));
+  return g;
+}
+
+// 共通の棒描き。値の配列をそのまま縦棒にする。
+function paintBars(vals, maxRatio) {
+  const pad = 14, w = cw - pad * 2;
+  const n = vals.length;
+  const gap = Math.max(1, w / n * 0.35);
+  const bw = (w - gap * (n - 1)) / n;
+  const mid = ch / 2, maxH = ch * maxRatio;
+  cx.fillStyle = gradient(pad, cw - pad);
+  for (let i = 0; i < n; i++) {
+    const h = Math.max(2.5, vals[i] * maxH);
+    const x = pad + i * (bw + gap);
+    cx.beginPath();
+    cx.roundRect(x, mid - h / 2, bw, h, bw / 2);
+    cx.fill();
+  }
+}
+
+// 今この瞬間の声を、低い音を中心にして左右対称に開く。
+// 流れる波形は「録音されている」ように見えてしまうため、
+// 喋っている実感が要るこちらを既定にする。
+function drawBar(b) {
+  const half = Math.floor(BARS / 2);
+  const vals = new Array(BARS);
+  for (let i = 0; i < half; i++) {
+    const v = b[Math.floor(i / half * BARS)];
+    vals[half - 1 - i] = v;      // 中心から左へ
+    vals[half + i] = v;          // 中心から右へ
+  }
+  paintBars(vals, 0.86);
+}
+
+// 直近のしばらくを左から右へ流す（録っている様子を見たいとき用）
+function drawWave() {
+  paintBars(history, 0.72);
+}
+
+// 球。輪を線で描くと図形にしか見えないので、太さの変わる「帯」を
+// 何枚か重ねる。太さと半径をなめらかな揺らぎで動かすと、
+// 図形ではなく息をしているものに見える。
+let spin = 0;
+
+// 乱数を使わない揺らぎ。周期の違う波を重ねて -1〜1 を返す。
+// 毎コマ乱数を引くとちらつくが、これなら滑らかにうねる。
+const wobble = (i, ph) =>
+  Math.sin(i * 0.7 + ph) * 0.55 +
+  Math.sin(i * 1.9 - ph * 1.3) * 0.30 +
+  Math.sin(i * 3.3 + ph * 0.6) * 0.15;
+
+// 帯を1枚描く。外周を進み、内周を戻って閉じることで太さを変えられる
+// （canvas の線は太さを途中で変えられないため）。
+function band(midX, midY, b, cfg) {
+  const out = [], inn = [];
+  for (let i = 0; i <= BARS; i++) {
+    const k = i % BARS;
+    const a = (i / BARS) * Math.PI * 2 + cfg.rot;
+    const amp = b[Math.floor(k * cfg.pick) % BARS];
+    const w = wobble(k, cfg.ph);
+
+    const rMid = cfg.r * (1 + 0.07 * w + cfg.reach * amp);
+    const half = cfg.thick * (0.45 + 0.55 * Math.abs(w)) * (0.5 + 1.1 * amp);
+    const cos = Math.cos(a), sin = Math.sin(a);
+    out.push([midX + cos * (rMid + half) * cfg.sx, midY + sin * (rMid + half) * cfg.sy]);
+    inn.push([midX + cos * (rMid - half) * cfg.sx, midY + sin * (rMid - half) * cfg.sy]);
+  }
+
+  cx.beginPath();
+  cx.moveTo(out[0][0], out[0][1]);
+  for (let i = 1; i < out.length - 1; i++) {
+    const c = out[i], n = out[i + 1];
+    cx.quadraticCurveTo(c[0], c[1], (c[0] + n[0]) / 2, (c[1] + n[1]) / 2);
+  }
+  for (let i = inn.length - 1; i > 0; i--) {
+    const c = inn[i], n = inn[i - 1];
+    cx.quadraticCurveTo(c[0], c[1], (c[0] + n[0]) / 2, (c[1] + n[1]) / 2);
+  }
+  cx.closePath();
+}
+
+function drawRadial(b) {
+  const midX = cw / 2, midY = ch / 2;
+  const base = ch * 0.27;
+  const avg = b.reduce((s, v) => s + v, 0) / BARS;
+  spin += 0.004 + avg * 0.012;
+
+  const g = gradient(midX - ch * 0.5, midX + ch * 0.5);
+  // 暗い画面では重ねるほど明るくする（光が集まって見える）。
+  // 明るい画面で同じことをすると白飛びするので、そのときは普通に重ねる。
+  const dark = !document.documentElement.matches('[data-theme="light"]') &&
+               !(matchMedia('(prefers-color-scheme: light)').matches &&
+                 !document.documentElement.matches('[data-theme="dark"]'));
+  cx.globalCompositeOperation = dark ? 'lighter' : 'source-over';
+
+  // 大きさ・向き・速さをずらした帯を重ねる。ぴったり揃うと機械的に見える。
+  const rings = [
+    {r: base * 1.30, thick: base * 0.055, reach: 0.30, ph: spin * 0.8,  rot:  spin * 0.35, sx: 1.06, sy: 0.94, pick: 1,   a: 0.22},
+    {r: base * 1.06, thick: base * 0.085, reach: 0.36, ph: -spin * 1.2, rot: -spin * 0.55, sx: 0.96, sy: 1.05, pick: 1.7, a: 0.34},
+    {r: base * 0.82, thick: base * 0.130, reach: 0.44, ph: spin * 1.7,  rot:  spin * 0.85, sx: 1.02, sy: 0.98, pick: 2.3, a: 0.46},
+  ];
+  for (const cfg of rings) {
+    band(midX, midY, b, cfg);
+    cx.globalAlpha = cfg.a * (0.55 + avg * 0.8);
+    cx.fillStyle = g;
+    cx.fill();
+  }
+
+  // 中心の芯。声の大きさで膨らみ、輪の内側を満たす
+  const core = base * (0.34 + avg * 0.42);
+  const rg = cx.createRadialGradient(midX, midY, 0, midX, midY, Math.max(1, core));
+  rg.addColorStop(0, cssVar('--accent'));
+  rg.addColorStop(0.55, color(cssVar('--accent-2'), 0.55));
+  rg.addColorStop(1, 'transparent');
+  cx.globalAlpha = 0.5 + avg * 0.5;
+  cx.fillStyle = rg;
+  cx.beginPath();
+  cx.arc(midX, midY, core, 0, Math.PI * 2);
+  cx.fill();
+
+  cx.globalAlpha = 1;
+  cx.globalCompositeOperation = 'source-over';
+}
+
+function drawGrid(b) {
+  const cols = 30, rows = 9;
+  const pad = 14, w = cw - pad * 2;
+  const dx = w / cols, dy = (ch * 0.8) / rows;
+  const top = (ch - dy * rows) / 2;
+  const r = Math.min(dx, dy) * 0.32;
+  const g = gradient(pad, cw - pad);
+  for (let i = 0; i < cols; i++) {
+    const v = b[Math.floor(i / cols * BARS)];
+    const lit = Math.round(v * rows);
+    for (let j = 0; j < rows; j++) {
+      // 真ん中から上下に伸びる形にする（横一列の棒より穏やか）
+      const fromMid = Math.abs(j - (rows - 1) / 2);
+      const on = fromMid <= lit / 2;
+      cx.beginPath();
+      cx.arc(pad + dx * (i + 0.5), top + dy * (j + 0.5), r, 0, Math.PI * 2);
+      cx.fillStyle = g;
+      cx.globalAlpha = on ? 1 : 0.12;
+      cx.fill();
+    }
+  }
+  cx.globalAlpha = 1;
+}
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (!cw || !ch) return;
+  cx.clearRect(0, 0, cw, ch);
+
+  const dead = route === 'off' || engine === 'off';
+  if (analyser && !vizFailed) analyser.getByteFrequencyData(freq);
+
+  // 一時停止中は動かさない。見た目で「録っていない」と分かるようにする。
+  if (dead) { history.fill(0); smooth.fill(0); } else { pushHistory(now); }
+  const bands = dead ? smooth : currentBands();
+
+  if (vizStyle === 'radial') drawRadial(bands);
+  else if (vizStyle === 'grid') drawGrid(bands);
+  else if (vizStyle === 'wave') drawWave();
+  else drawBar(bands);
+
+  // ロゴの波も同じ値で動かす（小さくしたときの手がかり）
+  const src = vizStyle === 'wave' ? history : bands;
+  const marks = el.logoMark.children;
+  for (let i = 0; i < marks.length; i++) {
+    const v = src[BARS - marks.length + i] ?? src[Math.floor((i + 0.5) / marks.length * BARS)] ?? 0;
+    marks[i].style.height = (25 + v * 75) + '%';
+  }
+}
+requestAnimationFrame(frame);
+
+// デーモンが選んでいるマイクを、ブラウザ側でも同じものにしたい。
+// ffmpeg と Chrome でラベルの書き方が違うので、含まれるかどうかで寄せる。
+async function matchDeviceId(label) {
+  if (!label) return null;
+  try {
+    const list = await navigator.mediaDevices.enumerateDevices();
+    const ins = list.filter(d => d.kind === 'audioinput' && d.label);
+    const norm = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const want = norm(label);
+    const hit = ins.find(d => norm(d.label).includes(want) || want.includes(norm(d.label)));
+    return hit ? hit.deviceId : null;
+  } catch { return null; }
+}
+
+async function startViz(label) {
+  try {
+    if (micStream) micStream.getTracks().forEach(tr => tr.stop());
+    const id = await matchDeviceId(label);
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio: id ? {deviceId: {ideal: id}} : true,
+    });
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    analyser.smoothingTimeConstant = 0.7;
+    analyser.minDecibels = -85;
+    analyser.maxDecibels = -25;
+    freq = new Uint8Array(analyser.frequencyBinCount);
+    wave = new Uint8Array(analyser.fftSize);
+    audioCtx.createMediaStreamSource(micStream).connect(analyser);
+    vizFailed = false;
+  } catch {
+    // 許可されない環境でも画面は成立させる（音量だけで動かす）
+    vizFailed = true;
+    analyser = null;
+    if (el.hint.textContent === '') el.hint.textContent = t('hintNoMic');
+  }
+}
+
+function stopViz() {
+  if (micStream) micStream.getTracks().forEach(tr => tr.stop());
+  micStream = null; analyser = null;
+}
+
+// 自動再生の制限があるので、最初に触られた時点で音を取りにいく
+let vizArmed = false;
+function armViz() {
+  if (vizArmed) return;
+  vizArmed = true;
+  startViz(el.mic.value || '');
+}
+addEventListener('pointerdown', armViz, {once:true});
+addEventListener('keydown', armViz, {once:true});
 
 /* ── 表示 ───────────────────────────────── */
 function setState(kind, text) {
@@ -469,26 +1289,36 @@ function setState(kind, text) {
   el.stateText.textContent = text;
 }
 
-function retally() {
-  const n = el.log.children.length;
-  el.count.textContent = n;
-  el.none.hidden = n > 0;
+function matches(row) {
+  if (filter === 'all') return true;
+  return row.dataset.kind === filter;
 }
+
+function retally() {
+  const rows = [...el.log.children];
+  el.count.textContent = rows.length;
+  let shown = 0;
+  for (const r of rows) { r.hidden = !matches(r); if (!r.hidden) shown++; }
+  el.none.hidden = shown > 0;
+}
+
+let filter = 'all';
 
 function addEntry(rec) {
   const row = document.createElement('div');
   row.className = 'entry';
+  row.dataset.kind = rec.edited ? 'edited' : 'sent';
 
   const gutter = document.createElement('div');
   gutter.className = 'gutter';
+  const mark = document.createElement('span');
+  mark.className = 'mark ' + row.dataset.kind;
+  mark.textContent = rec.edited ? t('edited') : t('sent');
   const stamp = document.createElement('span');
   // ログには時刻を載せていないので、受け取った時刻を表示する
   stamp.textContent = rec.time ||
-    new Date().toLocaleTimeString('ja-JP', {hour12:false});
-  const mark = document.createElement('span');
-  mark.className = 'mark ' + (rec.edited ? 'edited' : 'sent');
-  mark.textContent = rec.edited ? '直して送信' : '送信済み';
-  gutter.append(stamp, mark);
+    new Date().toLocaleTimeString(lang === 'ja' ? 'ja-JP' : 'en-GB', {hour12:false});
+  gutter.append(mark, stamp);
 
   const text = document.createElement('div');
   text.className = 'text';
@@ -496,16 +1326,98 @@ function addEntry(rec) {
   text.textContent = format(rec.text);
 
   row.append(gutter, text);
-  el.log.appendChild(row);
+  el.log.prepend(row);          // 新しいものを上に（モックと同じ並び）
   retally();
 }
 
 function reformatAll() {
   for (const row of el.log.children) {
-    const t = row.querySelector('.text');
-    t.textContent = format(t.dataset.raw);
+    const n = row.querySelector('.text');
+    n.textContent = format(n.dataset.raw);
   }
 }
+
+for (const [btn, key] of [[el.filterAll,'all'], [el.filterSent,'sent'], [el.filterEdited,'edited']]) {
+  btn.onclick = () => {
+    filter = key;
+    for (const b of [el.filterAll, el.filterSent, el.filterEdited]) b.classList.toggle('on', b === btn);
+    retally();
+  };
+}
+
+/* ── 送り先 ─────────────────────────────
+   即時 / 手直し / 一時停止 の3つ。デーモンはミュート中に保留の判定へ
+   進まないので、「切りつつ溜める」は存在しない。 */
+const ROUTE = {
+  live: {muted:false, paused:false},
+  hold: {muted:false, paused:true},
+  off:  {muted:true,  paused:false},
+};
+
+let route = 'live';
+let lastMode = 'live';   // 一時停止を解いたとき、直前のモードに戻す
+let inFlight = false;    // 切替中はポーリングに巻き戻されないようにする
+
+function paint() {
+  for (const [k, b] of [['live', el.segLive], ['hold', el.segHold]]) {
+    b.classList.toggle('on', route === k);
+    b.setAttribute('aria-checked', String(route === k));
+  }
+  const off = route === 'off';
+  el.modes.classList.toggle('muted', off);
+  el.segOff.classList.toggle('warn', off);
+  el.segOff.classList.toggle('lit', !off);
+  el.segOff.setAttribute('aria-pressed', String(off));
+  el.segOff.querySelector('.glyph-pause').hidden = off;
+  el.segOff.querySelector('.glyph-play').hidden = !off;
+  el.segOff.title = t(off ? 'resumeTitle' : 'pauseTitle');
+  el.segOff.setAttribute('aria-label', el.segOff.title);
+
+  setState(route, t(off ? 'statusOff' : route === 'hold' ? 'statusHold' : 'statusLive'));
+  el.hint.textContent = t(off ? 'hintOff' : route === 'hold' ? 'hintHold' : 'hintLive');
+  // 手元で作業している間はタブのタイトルだけが手がかりになる
+  document.title = t(off ? 'titleOff' : route === 'hold' ? 'titleHold' : 'titleLive') + ' — voice-shell';
+
+  el.tray.classList.toggle('idle', off);
+  if (off) el.stream.textContent = '';
+  paintDraft();
+}
+
+// 手直し欄は、溜めるモードか書きかけがあるときだけ出す。
+// 即時モードでは認識中の文字だけが見えていればよい。
+function paintDraft() {
+  const want = route === 'hold' || !!el.draft.value.trim();
+  el.draft.hidden = !want;
+  el.draftActions.hidden = !want;
+}
+
+async function setRoute(next) {
+  const prev = route;
+  route = next;
+  if (next !== 'off') lastMode = next;
+  paint();                            // 押した瞬間に反映する
+  inFlight = true;
+  try {
+    const w = ROUTE[next];
+    // 溜め始める前にミュートを解き、切るときは溜めも止める
+    await post('/api/pause', {paused: w.paused});
+    await post('/api/mute', {muted: w.muted});
+  } catch (err) {
+    route = prev;
+    paint();
+    el.hint.textContent = t('switchFailed', {err: err.message});
+    return;
+  } finally {
+    inFlight = false;
+  }
+  // 一時停止のあいだはブラウザ側のマイクも手放す（録音の気配を残さない）
+  if (next === 'off') stopViz(); else if (vizArmed) startViz(el.mic.value || '');
+  refreshState();
+}
+
+el.segLive.onclick = () => setRoute('live');
+el.segHold.onclick = () => setRoute('hold');
+el.segOff.onclick = () => setRoute(route === 'off' ? lastMode : 'off');
 
 /* ── 通信 ───────────────────────────────── */
 function connect() {
@@ -517,15 +1429,18 @@ function connect() {
     const m = JSON.parse(ev.data);
 
     if ('level' in m) {
+      daemonLevel = m.level; daemonSpeaking = m.speaking;
       // 0.05 くらいで振り切る想定。小さい声でも動きが見えるようにする
       el.meterFill.style.width = Math.min(100, m.level * 2000) + '%';
       el.meterFill.classList.toggle('on', m.speaking);
+      paintGauge();
+      onCalibSample(m.level);
       return;      // 下の else まで落とすと、発話として扱われて壊れる
     }
     if ('partial' in m) {
-      const t = m.partial.trim();
-      el.stream.textContent = t;
-      el.now.classList.toggle('idle', !t);
+      const s = m.partial.trim();
+      el.stream.textContent = s;
+      el.tray.classList.toggle('idle', !s);
 
     } else if ('held' in m) {
       // 一時停止中の発話。編集中でも壊さないよう末尾に足すだけにする
@@ -534,12 +1449,12 @@ function connect() {
     } else {
       addEntry(m);
       el.stream.textContent = '';
-      el.now.classList.add('idle');
+      el.tray.classList.add('idle');
     }
   };
 
   ws.onclose = () => {
-    setState('down', '切断 — 再接続中');
+    setState('down', t('statusDown'));
     setTimeout(connect, 2000);
   };
 }
@@ -554,79 +1469,208 @@ function grow() {
 function appendHeld(text) {
   text = (text || '').trim();
   if (!text) return;
-  // ためるモードでないときに来た分でトレイを開かない（説明のつかない表示になる）
+  // ためるモードでないときに来た分で編集欄を開かない（説明のつかない表示になる）
   if (route !== 'hold') return;
-  el.tray.hidden = false;
   const cur = el.draft.value;
   el.draft.value = cur ? cur.replace(/\s*$/, '') + '\n' + text : text;
+  el.draftTime.textContent = new Date().toLocaleTimeString(
+    lang === 'ja' ? 'ja-JP' : 'en-GB', {hour12:false});
+  paintDraft();
   grow();
   // 追記直後は末尾が見えるようにする（編集中でなければ）
-  if (document.activeElement !== el.draft) {
-    el.draft.scrollTop = el.draft.scrollHeight;
-  }
+  if (document.activeElement !== el.draft) el.draft.scrollTop = el.draft.scrollHeight;
 }
 
-// 音声の届け先。3つのうち1つだけが有効。
-// デーモンはミュート中に hold の判定へ進まないので、「切りつつ溜める」は存在しない。
-const ROUTE = {
-  live: {muted: false, paused: false},
-  hold: {muted: false, paused: true},
-  off:  {muted: true,  paused: false},
-};
-const HINT = {
-  live: '話すとそのまま Claude Code に届きます。',
-  hold: '話した分は下に溜まります。直してから「Claude に送る」。',
-  off:  '話しても何も記録されません。通話中や別作業のときに。',
-};
-const STATUS = {
-  live: 'Claude に届いています',
-  hold: 'ためています',
-  off:  '送っていません',
-};
-const TITLE = {live: '● 送信中', hold: '◐ ためています', off: '○ 送りません'};
+/* ── 認識エンジンの入切 ─────────────────
+   止めると GPU（vLLM 版で約12GB）が解放される。macOS 既定の apple エンジンは
+   そもそも確保しないが、止めればマイクも完全に手放せる。
+   'on' / 'booting' / 'stopping' / 'off' の4状態。押した瞬間に on↔off へ
+   書き換えると完了前にラベルが変わってしまうので、途中の状態を挟む。 */
+let engine = 'on';
+const engineOnish = () => engine === 'on';
 
-let route = 'live';
-let inFlight = false;   // 切替中はポーリングに巻き戻されないようにする
+let startedAt = 0;     // 起動を押した時刻
+const BOOT_SEC = 40;   // 実測でおよそ40秒
+let tick = null;
 
-function paint() {
-  const segs = {live: el.segLive, hold: el.segHold, off: el.segOff};
-  for (const [k, b] of Object.entries(segs)) {
-    b.classList.toggle('on', route === k);
-    b.setAttribute('aria-checked', String(route === k));
+function paintPower() {
+  const busy = engine === 'booting' || engine === 'stopping';
+  el.power.classList.toggle('busy', busy);
+  el.power.classList.toggle('lit', engine === 'on');
+  el.power.classList.toggle('warn', engine === 'off');
+  el.power.disabled = busy;
+
+  if (engine === 'booting') {
+    const sec = (Date.now() - startedAt) / 1000;
+    const left = Math.max(0, Math.ceil(BOOT_SEC - sec));
+    el.hint.textContent = left > 0 ? t('bootingLeft', {n: left}) : t('bootingSoon');
   }
-  setState(route, STATUS[route]);
-  el.hint.textContent = HINT[route];
-  // 端末で作業している間はタブのタイトルだけが手がかりになる
-  document.title = TITLE[route] + ' — voice-shell';
 
-  el.now.classList.toggle('idle', route === 'off');
-  if (route === 'off') el.stream.textContent = '';
+  // 動いていないときは送り先を選んでも意味がない
+  for (const b of [el.segLive, el.segHold, el.segOff, el.mic]) b.disabled = !engineOnish();
 }
 
-async function setRoute(next) {
-  const prev = route;
-  route = next;
-  paint();                            // 押した瞬間に反映する
-  inFlight = true;
-  try {
-    const w = ROUTE[next];
-    // 溜め始める前にミュートを解き、切るときは溜めも止める
-    await post('/api/pause', {paused: w.paused});
-    await post('/api/mute', {muted: w.muted});
-  } catch (err) {
-    route = prev;
-    paint();
-    el.hint.textContent = '切替に失敗しました: ' + err.message;
-    return;
-  } finally {
-    inFlight = false;
+el.power.onclick = async () => {
+  const start = engine === 'off';
+  if (start) {
+    engine = 'booting';
+    startedAt = Date.now();
+    setState('down', t('statusBooting'));
+    clearInterval(tick);
+    tick = setInterval(() => { if (engine === 'booting') paintPower(); }, 1000);
+  } else {
+    engine = 'stopping';
+    clearInterval(tick);
+    setState('down', t('statusStopped'));
+    el.hint.textContent = t('hintStopping');
   }
+  paintPower();
+  await post('/api/engine', {running: start});
   refreshState();
+};
+
+let seeded = false;   // 溜まっていた分をリロード時に一度だけ復元する
+
+async function refreshState() {
+  if (inFlight) return;               // 切替中は上書きしない
+  try {
+    const s = await (await fetch('/api/state')).json();
+
+    if (typeof s.engine === 'boolean') {
+      if (s.engine) {
+        if (engine !== 'on') { clearInterval(tick); el.hint.textContent = ''; }
+        engine = 'on';
+      } else if (s.loading) {
+        // 別のタブで押した場合も起動中と分かるように
+        if (engine !== 'booting') {
+          engine = 'booting';
+          startedAt = Date.now();
+          clearInterval(tick);
+          tick = setInterval(() => { if (engine === 'booting') paintPower(); }, 1000);
+        }
+      } else if (engine === 'booting' && Date.now() - startedAt < 12000) {
+        // 押した直後はまだプロセスが見えないことがある。
+        // ここで 'off' に落とすと表示が「止まっています」に戻ってしまう。
+      } else {
+        clearInterval(tick);
+        engine = 'off';
+      }
+
+      paintPower();
+      if (engine === 'booting') { setState('down', t('statusBooting')); return; }
+      if (engine === 'off') {
+        setState('off', t('statusStopped'));
+        el.hint.textContent = t('hintStopped');
+        return;
+      }
+    }
+
+    route = s.muted ? 'off' : (s.paused ? 'hold' : 'live');
+    if (route !== 'off') lastMode = route;
+    paint();
+
+    // リロードで溜めた分が消えないように復元する（入力中は触らない）
+    if (!seeded && Array.isArray(s.held) && s.held.length && !el.draft.value.trim()) {
+      el.draft.value = s.held.map(r => r.text).join('\n');
+      paintDraft();
+      grow();
+    }
+    seeded = true;
+    paintDraft();
+    if (!el.draft.hidden) grow();
+  } catch {
+    setState('down', t('statusDown'));
+  }
 }
 
-el.segLive.onclick = () => setRoute('live');
-el.segHold.onclick = () => setRoute('hold');
-el.segOff.onclick = () => setRoute('off');
+/* ── 送る / 消す ────────────────────────── */
+el.send.onclick = async () => {
+  const text = el.draft.value.trim();
+  if (!text) return;
+  await post('/api/send', {text});
+  el.draft.value = '';
+  grow();
+  paintDraft();
+};
+
+// 消したものは一度だけ戻せるようにする（確認ダイアログは毎回だと煩わしい）
+let lastDiscarded = '';
+
+el.discard.onclick = async () => {
+  lastDiscarded = el.draft.value;
+  await post('/api/discard');
+  el.draft.value = '';
+  grow();
+  paintDraft();
+  if (lastDiscarded.trim()) {
+    el.hint.textContent = t('discarded');
+    const undo = document.createElement('button');
+    undo.textContent = t('undo');
+    undo.onclick = () => {
+      el.draft.value = lastDiscarded;
+      paintDraft();
+      grow();
+      el.hint.textContent = '';
+    };
+    el.hint.appendChild(undo);
+  }
+};
+
+el.draft.addEventListener('input', () => { grow(); });
+// Ctrl+Enter で送信
+el.draft.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); el.send.click(); }
+});
+
+el.copy.onclick = async ev => {
+  const lines = [...el.log.children].map(r => r.querySelector('.text').textContent);
+  if (!lines.length) return;
+  await navigator.clipboard.writeText(lines.join('\n'));
+  const label = [...ev.currentTarget.childNodes].find(n => n.nodeType === 3);
+  if (!label) return;
+  label.nodeValue = t('copied');
+  setTimeout(() => { label.nodeValue = t('copyAll'); }, 1300);
+};
+
+/* ── 設定 ───────────────────────────────── */
+el.openSettings.onclick = async () => {
+  el.sheet.hidden = false;
+  await Promise.all([loadMics(), loadTuning(), loadDict()]);
+  el.dictNote.textContent = '';
+};
+el.closeSettings.onclick = () => { el.sheet.hidden = true; };
+
+// テーマ。自動のときは OS の設定に従う（data-theme を外しておく）
+function applyTheme(choice) {
+  if (choice === 'auto') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', choice);
+  for (const b of el.themeRow.children) b.classList.toggle('on', b.dataset.themeChoice === choice);
+  store.set('theme', choice);
+}
+for (const b of el.themeRow.children) b.onclick = () => applyTheme(b.dataset.themeChoice);
+
+function applyViz(choice) {
+  vizStyle = choice;
+  for (const b of el.vizRow.children) b.classList.toggle('on', b.dataset.vizChoice === choice);
+  store.set('viz', choice);
+}
+for (const b of el.vizRow.children) b.onclick = () => applyViz(b.dataset.vizChoice);
+
+function applyLang(choice) {
+  langPref = choice;
+  store.set('lang', choice);
+  resolveLang();
+  applyI18n();
+  for (const b of el.langRow.children) b.classList.toggle('on', b.dataset.langChoice === choice);
+  paint();
+  reformatAll();
+  for (const row of el.log.children) {
+    const m = row.querySelector('.mark');
+    m.textContent = t(row.dataset.kind);
+  }
+  paintScopeNote();
+}
+for (const b of el.langRow.children) b.onclick = () => applyLang(b.dataset.langChoice);
 
 // 使うマイク。切り替えても録音プロセスだけ入れ替わる（モデルはそのまま）
 async function loadMics() {
@@ -635,9 +1679,7 @@ async function loadMics() {
     if (!d.mics.length) { el.mic.hidden = true; return; }
     el.mic.replaceChildren(...d.mics.map(m => {
       const o = document.createElement('option');
-      o.value = m.id;
-      o.textContent = m.label;
-      o.selected = m.id === d.current;
+      o.value = m.id; o.textContent = m.label; o.selected = m.id === d.current;
       return o;
     }));
     // 一覧に無いものが選ばれている場合も表示に出す
@@ -653,224 +1695,215 @@ async function loadMics() {
 }
 
 el.mic.onchange = async () => {
-  await fetch('/api/mics', {
-    method: 'PUT', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({device: el.mic.value})
-  });
-  el.hint.textContent = `マイクを切り替えました: ${el.mic.selectedOptions[0].textContent}`;
-  setTimeout(() => { el.hint.textContent = HINT[route]; }, 2500);
+  await putJSON('/api/mics', {device: el.mic.value});
+  el.hint.textContent = t('micSwitched', {name: el.mic.selectedOptions[0].textContent});
+  if (vizArmed) startViz(el.mic.value);   // 波形も同じマイクに合わせる
+  setTimeout(() => paint(), 2500);
 };
 
-let seeded = false;   // 溜まっていた分をリロード時に一度だけ復元する
+/* ── 感度と区切り ───────────────────────
+   3つとも保存すると即座にデーモンへ効く（0.5秒おきに読み直している）。 */
+let tuning = {silence_threshold: 0.015, silence_duration: 1.5,
+              min_chars: 15, strip_fillers: false};
 
-// 認識そのものの入切。止めると GPU（約12GB）が解放される。
-// 'on'（動いている） / 'booting'（起動中） / 'stopping'（停止中） / 'off'（止まっている）
-// 押した瞬間に on↔off を書き換えると、完了前にラベルが変わってしまう。
-// 途中の状態を挟んで、サーバが応えるまでは切り替えない。
-let engine = 'on';
-const engineOnish = () => engine === 'on';
+// しきい値のつまみは対数目盛り。よく使う 0.003〜0.03 が
+// つまみの半分以上を占めるようにして、細かく合わせられるようにする。
+let threshLo = 0.003, threshHi = 0.15;
+const threshToPos = v =>
+  Math.round(1000 * Math.log(Math.max(threshLo, v) / threshLo) / Math.log(threshHi / threshLo));
+const posToThresh = p => {
+  const v = threshLo * Math.pow(threshHi / threshLo, p / 1000);
+  return Math.round(v * 1000) / 1000;
+};
 
-let startedAt = 0;     // 起動を押した時刻
-const BOOT_SEC = 40;   // 実測でおよそ40秒
-
-function paintPower() {
-  const busy = engine === 'booting' || engine === 'stopping';
-
-  if (engine === 'booting') {
-    const sec = (Date.now() - startedAt) / 1000;
-    const left = Math.max(0, Math.ceil(BOOT_SEC - sec));
-    el.power.textContent = left > 0 ? `起動中… あと${left}秒` : '起動中… もうすぐ';
-    // 進み具合を背景で見せる（数字だけだと分かりにくい）
-    const pct = Math.min(100, (sec / BOOT_SEC) * 100);
-    el.power.style.background =
-      `linear-gradient(to right, var(--field) ${pct}%, transparent ${pct}%)`;
-  } else if (engine === 'stopping') {
-    el.power.textContent = '停止しています…';
-    el.power.style.background = '';
-  } else {
-    el.power.textContent = engine === 'on' ? '聞き取りを止める' : '聞き取りを始める';
-    el.power.style.background = '';
-  }
-
-  el.power.disabled = busy;
-  el.power.classList.toggle('busy', busy);
-  el.power.classList.toggle('go', engine === 'off');
-
-  // 動いていないときは届け先を選んでも意味がない
-  for (const b of [el.segLive, el.segHold, el.segOff, el.mic]) {
-    b.disabled = !engineOnish();
-    b.style.opacity = engineOnish() ? 1 : .45;
-  }
+function paintTuning() {
+  el.thresh.value = threshToPos(tuning.silence_threshold);
+  el.silence.value = tuning.silence_duration;
+  el.minChars.value = tuning.min_chars;
+  el.threshVal.textContent = Number(tuning.silence_threshold).toFixed(3);
+  el.silenceVal.textContent = Number(tuning.silence_duration).toFixed(1) + 's';
+  el.minCharsVal.textContent = tuning.min_chars;
+  el.clean.checked = !!tuning.strip_fillers;
+  paintGauge();
 }
 
-let tick = null;   // 起動中に残り秒を進める
+// 実測の音量としきい値を並べて出す。数字だけでは自分に合う値を決めようがない。
+function paintGauge() {
+  // メーターもつまみと同じ目盛りにする。ここが揃っていないと、
+  // 印の位置と実際の音量を見比べられない。
+  el.gaugeFill.style.width = Math.min(100, threshToPos(daemonLevel) / 10) + '%';
+  el.gaugeFill.classList.toggle('on', daemonSpeaking);
+  el.gaugeMark.style.left = Math.min(100, Number(el.thresh.value) / 10) + '%';
+}
 
-el.power.onclick = async () => {
-  const start = engine === 'off';
-
-  if (start) {
-    engine = 'booting';
-    startedAt = Date.now();
-    setState('down', '起動しています');
-    el.hint.textContent = 'モデルを読み込んでいます。40秒ほどかかります。';
-    clearInterval(tick);
-    tick = setInterval(() => { if (engine === 'booting') paintPower(); }, 1000);
-  } else {
-    engine = 'stopping';
-    clearInterval(tick);
-    setState('down', '停止しています');
-    el.hint.textContent = 'GPU（約12GB）を解放しています。';
-  }
-  const next = start;
-
-  paintPower();
-  await post('/api/engine', {running: next});
-  refreshState();
-};
-
-async function refreshState() {
-  if (inFlight) return;               // 切替中は上書きしない
+async function loadTuning() {
   try {
-    const s = await (await fetch('/api/state')).json();
-
-    if (typeof s.engine === 'boolean') {
-      if (s.engine) {
-        // 準備できた
-        if (engine !== 'on') { clearInterval(tick); el.hint.textContent = HINT[route]; }
-        engine = 'on';
-      } else if (s.loading) {
-        // 別のタブで押した場合も起動中と分かるように
-        if (engine !== 'booting') {
-          engine = 'booting';
-          startedAt = Date.now();
-          clearInterval(tick);
-          tick = setInterval(() => { if (engine === 'booting') paintPower(); }, 1000);
-        }
-      } else if (engine === 'booting' && Date.now() - startedAt < 12000) {
-        // 押した直後はまだプロセスが見えないことがある。
-        // ここで 'off' に落とすとラベルが「聞き取りを始める」に戻ってしまう。
-      } else {
-        clearInterval(tick);
-        engine = 'off';
-      }
-
-      paintPower();
-      if (engine === 'booting') {
-        setState('down', '起動しています');
-        return;
-      }
-      if (engine === 'off') {
-        setState('off', '止まっています');
-        el.hint.textContent = '「聞き取りを始める」で再開できます。';
-        return;
-      }
+    const d = await (await fetch('/api/tuning')).json();
+    for (const [k, v] of Object.entries(d.tuning || {})) if (v != null) tuning[k] = v;
+    for (const [k, r] of Object.entries(d.range || {})) {
+      if (k === 'silence_threshold') { threshLo = r.min; threshHi = r.max; continue; }
+      const node = {silence_duration: el.silence, min_chars: el.minChars}[k];
+      if (node) { node.min = r.min; node.max = r.max; }
     }
-
-    route = s.muted ? 'off' : (s.paused ? 'hold' : 'live');
-    paint();
-
-    // リロードで溜めた分が消えないように復元する（入力中は触らない）
-    if (!seeded && Array.isArray(s.held) && s.held.length && !el.draft.value.trim()) {
-      el.draft.value = s.held.map(r => r.text).join('\n');
-      el.tray.hidden = false;
-      grow();
-    }
-    seeded = true;
-
-    if (route === 'hold') {
-      el.tray.hidden = false;
-      grow();
-    } else if (!el.draft.value.trim()) {
-      el.tray.hidden = true;
-    }
-  } catch {
-    setState('down', 'つながっていません — 再接続中');
-    el.hint.textContent = '';
-  }
+    paintTuning();
+  } catch {}
 }
 
-const post = (path, body) =>
-  fetch(path, {method:'POST', headers:{'Content-Type':'application/json'},
-               body: JSON.stringify(body || {})});
+// つまみを動かしている間は表示だけ更新し、離した時点で保存する
+// （動かすたびに書くと、途中の極端な値が一瞬デーモンに効いてしまう）
+let saveTimer = null;
+function queueTuning() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => putJSON('/api/tuning', tuning), 250);
+}
 
-/* ── 操作 ───────────────────────────────── */
-el.send.onclick = async () => {
-  const text = el.draft.value.trim();
-  if (!text) return;
-  await post('/api/send', {text});
-  el.draft.value = '';
-  grow();
-  el.tray.hidden = route !== 'hold';   // ためている間はトレイを残す
+el.thresh.oninput = () => {
+  tuning.silence_threshold = posToThresh(Number(el.thresh.value));
+  el.threshVal.textContent = tuning.silence_threshold.toFixed(3);
+  paintGauge();
+  queueTuning();
+};
+el.silence.oninput = () => { tuning.silence_duration = Number(el.silence.value); paintTuning(); queueTuning(); };
+el.minChars.oninput = () => { tuning.min_chars = Number(el.minChars.value); paintTuning(); queueTuning(); };
+
+/* ── 自動調整 ───────────────────────────
+   まわりが騒がしいと、既定のしきい値では声が一度も超えず
+   「喋っているのに何も送られない」状態になる。何 dB という話を
+   させたくないので、喋ってもらって黙ってもらい、その差から決める。
+
+   判定にはデーモンが出す RMS を使う（しきい値と同じ物差しでないと意味がない）。 */
+const CALIB = {speak: 6000, quiet: 4000};   // ミリ秒
+let calib = null;
+
+function onCalibSample(level) {
+  if (!calib) return;
+  calib.samples.push(level);
+}
+
+const pct = (arr, p) => {
+  if (!arr.length) return 0;
+  const s = [...arr].sort((a, b) => a - b);
+  return s[Math.min(s.length - 1, Math.floor(s.length * p))];
 };
 
-// 消したものは一度だけ戻せるようにする（確認ダイアログは毎回だと煩わしい）
-let lastDiscarded = '';
+function calibSay(msg) { el.calibNote.textContent = msg; }
 
-el.discard.onclick = async () => {
-  lastDiscarded = el.draft.value;
-  await post('/api/discard');
-  el.draft.value = '';
-  grow();
-  el.tray.hidden = route !== 'hold';
-  if (lastDiscarded.trim()) {
-    el.hint.textContent = '消しました。';
-    const undo = document.createElement('button');
-    undo.textContent = '元に戻す';
-    undo.style.marginLeft = '.5rem';
-    undo.onclick = () => {
-      el.draft.value = lastDiscarded;
-      el.tray.hidden = false;
-      grow();
-      el.hint.textContent = HINT[route];
-    };
-    el.hint.appendChild(undo);
+async function runCalibration() {
+  if (calib) return;
+  const wasRoute = route;
+  if (route === 'off') await setRoute(lastMode);   // 切ったままでは音量が来ない
+
+  el.calibBtn.disabled = true;
+  el.calibBtn.classList.add('busy');
+
+  const phase = async (ms, label) => {
+    calib = {samples: []};
+    const started = Date.now();
+    while (Date.now() - started < ms) {
+      calibSay(label.replace('{n}', Math.ceil((ms - (Date.now() - started)) / 1000)));
+      await new Promise(r => setTimeout(r, 200));
+    }
+    const s = calib.samples;
+    calib = null;
+    return s;
+  };
+
+  const speech = await phase(CALIB.speak, t('calibSpeaking'));
+  const quiet  = await phase(CALIB.quiet, t('calibQuiet'));
+
+  el.calibBtn.disabled = false;
+  el.calibBtn.classList.remove('busy');
+
+  // 声は上澄み（本当に喋っていた部分）、雑音は上端（たまの物音まで含めて）を見る
+  const voice = pct(speech, 0.80);
+  const noise = pct(quiet, 0.95);
+
+  if (!speech.length || !quiet.length) { calibSay(t('calibNoData')); return; }
+
+  // 声が雑音に埋もれている。しきい値をどこに置いても誤爆するので直させる。
+  if (voice < noise * 1.8) { calibSay(t('calibTooNoisy')); return; }
+
+  // 雑音と声の相乗平均。ただし雑音のすぐ上には置かない。
+  const want = Math.max(noise * 2.5, Math.sqrt(noise * voice));
+  tuning.silence_threshold =
+    Math.min(threshHi, Math.max(threshLo, Math.round(want * 1000) / 1000));
+
+  paintTuning();
+  await putJSON('/api/tuning', tuning);
+  calibSay(t('calibDone', {
+    noise: noise.toFixed(4), voice: voice.toFixed(4),
+    thr: tuning.silence_threshold.toFixed(3),
+  }));
+  if (wasRoute === 'off') setRoute('off');
+}
+
+/* ── フローティング表示 ─────────────────
+   ブラウザを横に並べずに済むよう、常に手前へ浮く小窓へ引っ越す。
+   Chrome の Document Picture-in-Picture を使うので追加の実行環境は要らない。 */
+const canFloat = 'documentPictureInPicture' in window;
+el.floatBtn.hidden = !canFloat;
+
+el.floatBtn.onclick = async () => {
+  if (!canFloat) return;
+  const win = await documentPictureInPicture.requestWindow({width: 400, height: 720});
+  // 同じ見た目にするためスタイルをそのまま持っていく
+  for (const node of document.querySelectorAll('style')) {
+    win.document.head.appendChild(node.cloneNode(true));
   }
+  win.document.documentElement.lang = document.documentElement.lang;
+  const theme = document.documentElement.getAttribute('data-theme');
+  if (theme) win.document.documentElement.setAttribute('data-theme', theme);
+  // 要素ごと移す。参照は生きたままなので JS は書き換えなくてよい。
+  win.document.body.append(el.page, el.sheet);
+  el.sheet.hidden = true;
+  fitCanvas();
+  win.addEventListener('pagehide', () => {
+    document.body.append(el.page, el.sheet);
+    fitCanvas();
+  });
 };
 
-el.draft.addEventListener('input', grow);
-
-el.clean.onchange = reformatAll;
-
-/* ── ユーザー辞書 ───────────────────────── */
-// 1件 = 1行のフォーム。矢印や JSON を手で書かせない。
-
+/* ── ユーザー辞書 ───────────────────────
+   1件 = 1行のフォーム。矢印や JSON を手で書かせない。 */
 function replaceRow(from = '', to = '') {
   const row = document.createElement('div');
   row.className = 'row';
-  row.innerHTML =
-    '<input class="from" placeholder="聞こえた語（例: クロードコード）">' +
-    '<span class="arrow">→</span>' +
-    '<input class="to" placeholder="送る語（例: Claude Code）">' +
-    '<button class="del" title="この行を削除" aria-label="この行を削除">✕</button>';
-  row.querySelector('.from').value = from;
-  row.querySelector('.to').value = to;
-  row.querySelector('.del').onclick = () => row.remove();
+  const a = document.createElement('input'); a.className = 'from'; a.value = from;
+  a.placeholder = t('dictHeard');
+  const arrow = document.createElement('span'); arrow.className = 'arrow'; arrow.textContent = '→';
+  const b = document.createElement('input'); b.className = 'to'; b.value = to;
+  b.placeholder = t('dictSendAs');
+  const del = document.createElement('button');
+  del.className = 'del'; del.title = t('remove');
+  del.appendChild(iconSvg('trash', 14));
+  del.onclick = () => row.remove();
+  row.append(a, arrow, b, del);
   return row;
 }
 
 function ignoreRow(word = '') {
   const row = document.createElement('div');
   row.className = 'row';
-  row.innerHTML =
-    '<input class="word" placeholder="この語だけなら送らない（例: チャンネル登録）">' +
-    '<button class="del" title="この行を削除" aria-label="この行を削除">✕</button>';
-  row.querySelector('.word').value = word;
-  row.querySelector('.del').onclick = () => row.remove();
+  const a = document.createElement('input'); a.className = 'word'; a.value = word;
+  a.placeholder = t('dictIgnorePh');
+  const del = document.createElement('button');
+  del.className = 'del'; del.title = t('remove');
+  del.appendChild(iconSvg('trash', 14));
+  del.onclick = () => row.remove();
+  row.append(a, del);
   return row;
 }
 
 function renderDict(d) {
   el.replaceRows.replaceChildren(
     ...Object.entries(d.replace || {}).map(([k, v]) => replaceRow(k, v)));
-  el.ignoreRows.replaceChildren(
-    ...(d.ignore || []).map(w => ignoreRow(w)));
+  el.ignoreRows.replaceChildren(...(d.ignore || []).map(w => ignoreRow(w)));
 
   // 組み込みで無視している語は編集できないので、見るだけの並びにする
   if (d.builtin) {
     el.builtinChips.replaceChildren(...d.builtin.map(w => {
       const s = document.createElement('span');
-      s.className = 'chip';
-      s.textContent = w;
+      s.className = 'chip'; s.textContent = w;
       return s;
     }));
     el.builtinCount.textContent = d.builtin.length;
@@ -893,50 +1926,31 @@ function collectDict() {
   return {ignore, replace};
 }
 
-function showTab(which) {
+function showDictTab(which) {
   const isReplace = which === 'replace';
   el.paneReplace.hidden = !isReplace;
   el.paneIgnore.hidden = isReplace;
   el.tabReplace.classList.toggle('on', isReplace);
   el.tabIgnore.classList.toggle('on', !isReplace);
 }
-
-el.tabReplace.onclick = () => showTab('replace');
-el.tabIgnore.onclick = () => showTab('ignore');
+el.tabReplace.onclick = () => showDictTab('replace');
+el.tabIgnore.onclick = () => showDictTab('ignore');
 
 // 共有辞書 / 手元だけの辞書
 const scopeQuery = () => el.scopePrivate.checked ? '?scope=private' : '';
+const paintScopeNote = () => {
+  el.scopeNote.textContent = t(el.scopePrivate.checked ? 'dictPrivateNote' : 'dictShared');
+};
 
 async function loadDict() {
   renderDict(await (await fetch('/api/dictionary' + scopeQuery())).json());
-  el.scopeNote.textContent = el.scopePrivate.checked
-    ? '~/.config/voice-shell/dictionary.private.json（リポジトリに入りません）'
-    : '~/.config/voice-shell/dictionary.json（既定値として共有できます）';
+  paintScopeNote();
 }
 
 el.scopePrivate.onchange = async () => {
   await loadDict();
   el.dictNote.textContent = '';
 };
-
-// 画面ごと入れ替える（発話 ⇄ 辞書）
-async function showView(which) {
-  const dict = which === 'dict';
-  if (dict) {
-    await loadDict();
-    el.dictNote.textContent = '';
-    showTab('replace');
-    el.newFrom.focus();
-  }
-  el.dict.hidden = !dict;
-  el.speechView.hidden = dict;
-  el.viewDict.classList.toggle('on', dict);
-  el.viewSpeech.classList.toggle('on', !dict);
-  window.scrollTo(0, 0);
-}
-
-el.viewSpeech.onclick = () => showView('speech');
-el.viewDict.onclick = () => showView('dict');
 
 // 追加は一覧の先頭に入れる（下までスクロールしなくてよい）
 function addReplaceEntry() {
@@ -945,7 +1959,7 @@ function addReplaceEntry() {
   el.replaceRows.prepend(replaceRow(from, to));
   el.newFrom.value = el.newTo.value = '';
   el.newFrom.focus();
-  el.dictNote.textContent = '「保存する」を押すと有効になります。';
+  el.dictNote.textContent = t('dictPending');
 }
 
 function addIgnoreEntry() {
@@ -954,7 +1968,7 @@ function addIgnoreEntry() {
   el.ignoreRows.prepend(ignoreRow(w));
   el.newIgnore.value = '';
   el.newIgnore.focus();
-  el.dictNote.textContent = '「保存する」を押すと有効になります。';
+  el.dictNote.textContent = t('dictPending');
 }
 
 el.addReplace.onclick = addReplaceEntry;
@@ -981,14 +1995,11 @@ el.filterReplace.addEventListener('input', () => {
 
 el.dictSave.onclick = async () => {
   const d = collectDict();
-  await fetch('/api/dictionary' + scopeQuery(), {
-    method: 'PUT', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(d)
+  await putJSON('/api/dictionary' + scopeQuery(), d);
+  el.dictNote.textContent = t('dictSaved', {
+    where: t(el.scopePrivate.checked ? 'dictSavedPrivate' : 'dictSavedShared'),
+    r: Object.keys(d.replace).length, i: d.ignore.length,
   });
-  const where = el.scopePrivate.checked ? '手元だけに' : '共有辞書に';
-  el.dictNote.textContent =
-    `${where}保存しました（言い換え ${Object.keys(d.replace).length} 件 / ` +
-    `無視 ${d.ignore.length} 件）。次の発話から効きます。`;
 };
 
 /* ── CSV ─────────────────────────────────
@@ -1050,27 +2061,30 @@ el.dictFile.onchange = async ev => {
 
   renderDict({replace, ignore});
   el.dictFile.value = '';                          // 同じファイルを選び直せるように
-  el.dictNote.textContent =
-    `読み込みました（言い換え ${Object.keys(replace).length} 件 / 無視 ${ignore.length} 件` +
-    (skipped ? ` / 読めない行 ${skipped} 件` : '') + '）。「保存する」で確定します。';
+  el.dictNote.textContent = t('dictLoaded', {
+    r: Object.keys(replace).length, i: ignore.length,
+    s: skipped ? t('dictSkipped', {n: skipped}) : '',
+  });
 };
 
-el.copy.onclick = async ev => {
-  const lines = [...el.log.children].map(r => r.querySelector('.text').textContent);
-  if (!lines.length) return;
-  await navigator.clipboard.writeText(lines.reverse().join('\n'));
-  const b = ev.currentTarget, was = b.textContent;
-  b.textContent = 'コピーしました';
-  setTimeout(() => { b.textContent = was; }, 1300);
+// つなぎ言葉を落とすかどうかはデーモンの設定。次の発話から効く。
+el.clean.onchange = () => {
+  tuning.strip_fillers = el.clean.checked;
+  putJSON('/api/tuning', tuning);
 };
 
-// Ctrl+Enter で送信
-el.draft.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); el.send.click(); }
-});
-
+/* ── 起動 ───────────────────────────────── */
+resolveLang();
+applyI18n();
+decorateIcons();
+applyTheme(store.get('theme', 'auto'));
+applyViz(vizStyle);
+for (const b of el.langRow.children) b.classList.toggle('on', b.dataset.langChoice === langPref);
+fitCanvas();
 retally();
-loadMics();
+paintPower();
+paint();
+loadTuning();
 connect();
 setInterval(refreshState, 3000);
 </script>

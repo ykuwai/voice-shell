@@ -23,6 +23,18 @@ DEFAULT_LOG = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "qwen-voice" / "
 _CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "voice-shell"
 DICT_FILE = _CONFIG / "dictionary.json"                  # 共有（リポジトリに反映できる）
 PRIVATE_DICT_FILE = _CONFIG / "dictionary.private.json"  # 手元だけ
+# マイク感度と確定までの無音秒数。デーモンが 0.5 秒おきに読み直すので、
+# 書き換えるだけで再起動なしに効く。
+TUNING_FILE = _CONFIG / "tuning.json"
+# 触っていい範囲。外れた値を書くと認識が完全に止まったように見えるので、
+# サーバ側でも必ず挟む（環境ノイズは 0.003 前後、macOS の既定は 0.015）。
+TUNING_RANGE = {"silence_threshold": (0.003, 0.15),
+                "silence_duration": (0.5, 3.0),
+                "min_chars": (1, 40)}
+# 数ではなく入切で持つもの
+TUNING_FLAGS = {"strip_fillers"}
+# 整数で持つもの。小数のまま渡すと文字数の比較が分かりにくくなる。
+TUNING_INT = {"min_chars"}
 
 
 def _builtin_noise() -> list:
@@ -376,6 +388,42 @@ async def main_async(args):
 
     mic_file = state / "mic"
 
+    async def handle_tuning_get(_req):
+        """いまの感度と確定までの無音秒数を返す。範囲も一緒に返して
+        スライダの端をサーバ側の制限と揃える。"""
+        try:
+            cur = json.loads(TUNING_FILE.read_text())
+        except (OSError, ValueError):
+            cur = {}
+        keys = list(TUNING_RANGE) + list(TUNING_FLAGS)
+        return web.json_response({
+            "tuning": {k: cur.get(k) for k in keys},
+            "range": {k: {"min": lo, "max": hi}
+                      for k, (lo, hi) in TUNING_RANGE.items()},
+        })
+
+    async def handle_tuning_put(req):
+        """感度と無音秒数を書き換える。デーモンが次の周期で拾う。"""
+        body = await req.json()
+        try:
+            cur = json.loads(TUNING_FILE.read_text())
+        except (OSError, ValueError):
+            cur = {}
+
+        for key, (lo, hi) in TUNING_RANGE.items():
+            if not isinstance(body.get(key), (int, float)):
+                continue
+            v = min(hi, max(lo, float(body[key])))
+            cur[key] = int(round(v)) if key in TUNING_INT else v
+
+        for key in TUNING_FLAGS:
+            if isinstance(body.get(key), bool):
+                cur[key] = body[key]
+
+        TUNING_FILE.parent.mkdir(parents=True, exist_ok=True)
+        TUNING_FILE.write_text(json.dumps(cur, indent=2) + "\n")
+        return web.json_response({"tuning": cur})
+
     async def handle_mics(_req):
         """使えるマイクの一覧と、いま選ばれているものを返す。"""
         sys.path.insert(0, str(Path(__file__).parent))
@@ -397,6 +445,8 @@ async def main_async(args):
 
     app.router.add_post("/api/engine", handle_engine)
     app.router.add_get("/api/mics", handle_mics)
+    app.router.add_get("/api/tuning", handle_tuning_get)
+    app.router.add_put("/api/tuning", handle_tuning_put)
     app.router.add_put("/api/mics", handle_mic_put)
     app.router.add_get("/api/dictionary", handle_dict_get)
     app.router.add_put("/api/dictionary", handle_dict_put)

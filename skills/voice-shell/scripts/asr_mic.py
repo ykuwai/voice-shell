@@ -343,6 +343,10 @@ def stream_utterances(model, args, should_stop=lambda: False):
         )
 
     state = new_state()
+    # ビューアから変えられる調整値（感度・確定までの無音秒数）を読み直す。
+    # 毎ブロック見るほど変わるものではないので 0.5 秒おきにする。
+    want_tuning = getattr(args, "want_tuning", None)
+    tuning_wait = 0
     silence_run = 0.0    # 連続無音の秒数
     speech_seen = False  # 現発話中に音声を検出したか
     last_text = ""
@@ -358,6 +362,18 @@ def stream_utterances(model, args, should_stop=lambda: False):
                                        want_device=getattr(args, "want_device", None)):
         if should_stop():
             break
+
+        if want_tuning is not None:
+            tuning_wait -= 1
+            if tuning_wait <= 0:
+                tuning_wait = max(1, round(0.5 / BLOCK_SEC))
+                tuned = want_tuning() or {}
+                for key in ("silence_threshold", "silence_duration"):
+                    if isinstance(tuned.get(key), (int, float)):
+                        setattr(args, key, float(tuned[key]))
+                # 最小文字数は voice_daemon.py が同じ args を見て捨てる判定に使う
+                if isinstance(tuned.get("min_chars"), (int, float)):
+                    args.min_chars = int(tuned["min_chars"])
 
         speaking = rms >= args.silence_threshold
         yield {"type": "level", "rms": rms, "speaking": speaking}
