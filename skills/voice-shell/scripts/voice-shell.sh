@@ -223,6 +223,24 @@ case "$cmd" in
   listeners)
     list_listeners
     ;;
+  hold)
+    # 発話を溜める側に回す。Claude 自身が呼ぶことを想定している
+    # （雑談や通話が続いていて、届く内容が指示ではないとき）。
+    # ミュートにはしない。切ると発話がどこにも残らず、画面を見ていない
+    # ユーザーは届いていないことに気づけないため。
+    curl -sf -X POST http://127.0.0.1:8090/api/pause \
+      -H 'content-type: application/json' \
+      -d "$(printf '{"paused":true,"note":%s}' "$(printf '%s' "${1:-}" | "$PY" -c 'import json,sys; print(json.dumps(sys.stdin.read()))')")" \
+      >/dev/null && echo "溜める側に切り替えました（画面から送れます）" \
+      || { echo "ビューアが動いていません" >&2; exit 1; }
+    ;;
+  live)
+    # そのまま届く側に戻す
+    curl -sf -X POST http://127.0.0.1:8090/api/pause \
+      -H 'content-type: application/json' -d '{"paused":false}' \
+      >/dev/null && echo "そのまま届く側に戻しました" \
+      || { echo "ビューアが動いていません" >&2; exit 1; }
+    ;;
   log-path)
     echo "$LOG_FILE"
     ;;
@@ -259,7 +277,7 @@ case "$cmd" in
     echo TIMEOUT; exit 1
     ;;
   *)
-    echo "使い方: voice-shell.sh {start|stop|status|listeners|log-path|wait-ready}" >&2
+    echo "使い方: voice-shell.sh {start|stop|status|listeners|hold|live|log-path|wait-ready}" >&2
     echo "        voice-shell.sh {apple|whisper|remote|remote-conf|remote-log}" >&2
     exit 1
     ;;
