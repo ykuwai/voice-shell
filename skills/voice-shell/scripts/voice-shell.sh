@@ -92,6 +92,31 @@ BOOT_LOG="$STATE_DIR/daemon.out"
 
 cmd="${1:-status}"; shift || true
 
+# 発話ログを追尾しているセッションを一覧する。
+#
+# Monitor を止め忘れると、古いセッションに音声が届き続ける。tail は -F なので
+# デーモンを入れ直してもつながり直してしまい、本人は気づけない。実際に8日前の
+# セッションが生きていて、同じ発話が2つのセッションへ配られていたことがある。
+list_listeners() {
+  local pids found=0
+  pids=$(pgrep -f "tail .*$(basename "$LOG_FILE")" 2>/dev/null || true)
+  for pid in $pids; do
+    # tail の親はラッパーのシェル、その親が claude 本体
+    local sh cl target start cwd
+    sh=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d " ")
+    cl=$(ps -o ppid= -p "${sh:-0}" 2>/dev/null | tr -d " ")
+    target=${cl:-$pid}
+    start=$(ps -o lstart= -p "$target" 2>/dev/null | tr -s " ")
+    cwd=$(lsof -a -p "$target" -d cwd -Fn 2>/dev/null | sed -n "s/^n//p")
+    printf "  claude %s（tail %s）\n" "$target" "$pid"
+    printf "    起動 : %s\n" "${start:-不明}"
+    printf "    場所 : %s\n" "${cwd:-不明}"
+    printf "    切る : kill %s\n" "$pid"
+    found=1
+  done
+  [ "$found" = 1 ] || echo "  なし（音声はどこにも届いていません）"
+}
+
 case "$cmd" in
   start)
     # --engine を明示せずに start したら Qwen3-ASR に戻す
@@ -120,6 +145,14 @@ case "$cmd" in
     echo "起動中… (モデル読み込みに1〜2分かかります)"
     echo "  発話ログ: $LOG_FILE"
     echo "  起動ログ: $BOOT_LOG"
+    # 前のセッションが聞いたままだと、同じ発話が両方へ届く。
+    # 起動のときに気づけるようにここで知らせる。
+    if [ -n "$(pgrep -f "tail .*$(basename "$LOG_FILE")" 2>/dev/null || true)" ]; then
+      echo
+      echo "※ すでにこの音声を聞いているセッションがあります:"
+      list_listeners
+      echo "  身に覚えが無ければ、上の kill で切ってください。"
+    fi
     # ビューアも一緒に立ち上げる（毎回 viewer を打つのを忘れないように）。
     # GPU もマイクも使わないので、常駐と同時に動いてよい。
     "$0" viewer
@@ -183,6 +216,12 @@ case "$cmd" in
     ;;
   status)
     "$PY" "$APP" --status
+    echo
+    echo "この音声を聞いているセッション:"
+    list_listeners
+    ;;
+  listeners)
+    list_listeners
     ;;
   log-path)
     echo "$LOG_FILE"
@@ -220,7 +259,7 @@ case "$cmd" in
     echo TIMEOUT; exit 1
     ;;
   *)
-    echo "使い方: voice-shell.sh {start|stop|status|log-path|wait-ready}" >&2
+    echo "使い方: voice-shell.sh {start|stop|status|listeners|log-path|wait-ready}" >&2
     echo "        voice-shell.sh {apple|whisper|remote|remote-conf|remote-log}" >&2
     exit 1
     ;;
