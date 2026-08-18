@@ -1061,8 +1061,11 @@ function bandsFromLevel() {
 // 騒がしい部屋では逆に振り切ったままになる。
 let floorDb = -60;
 
-// いまの声の大きさ。波形が使えないときはデーモンの音量で代える。
-function levelNow() {
+// 流れる波形の高さ。こちらも感度からの超過分をそのまま使う。
+function levelNow() { return amplitudeOverThreshold(); }
+
+// （参考）ブラウザ側の音量。今は形の算出にだけ使っている。
+function browserLevel() {
   let db;
   if (analyser && !vizFailed) {
     // 全帯域の実効値を見ると、「さ行」の擦れ音だけで振り切ってしまう。
@@ -1089,14 +1092,7 @@ function levelNow() {
   return Math.min(1, Math.max(0, (db - floorDb - GATE_DB) / RANGE_DB));
 }
 
-// デーモンが「発話ではない」と判断している間は大きく沈める。
-// 波が動いている ＝ いま拾われている、と読めるようにするため。
-// 切り替わった瞬間に跳ねないよう、少しずつ寄せる。
-let gateEnv = 0;
-function gate() {
-  gateEnv += ((daemonSpeaking ? 1 : 0.08) - gateEnv) * 0.18;
-  return gateEnv;
-}
+
 
 // 生の音量はコマごとに大きく上下するので、そのまま並べるとちらついて
 // 落ち着かない。立ち上がりは速く、収まるのはゆっくりにして均す。
@@ -1105,20 +1101,35 @@ let lastPush = 0;
 function pushHistory(now) {
   const v = levelNow();
   env = v > env ? env * 0.55 + v * 0.45 : env * 0.86 + v * 0.14;
-  env *= gate();      // 拾われていない音では流れる波も伸ばさない
   if (now - lastPush < 70) return;
   lastPush = now;
   history.shift();
   history.push(env);
 }
 
+// 感度のしきい値を 0 とし、そこから何 dB 出たかを 0〜1 にする。
+// デーモンが実際に判定に使っている音量をそのまま物差しにするので、
+// つまみを動かすと波の起点が動き、「動いている ＝ 拾われている」が成り立つ。
+const OVER_DB = 20;      // しきい値より何 dB 上で振り切るか
+function amplitudeOverThreshold() {
+  const thr = 20 * Math.log10(Math.max(tuning.silence_threshold, 1e-5));
+  const now = 20 * Math.log10(Math.max(daemonLevel, 1e-5));
+  return Math.min(1, Math.max(0, (now - thr) / OVER_DB));
+}
+
 // 急に立ち上がると点滅して見えるので、下がるときだけ緩やかにする
 const smooth = new Array(BARS).fill(0);
 function currentBands() {
-  const raw = (analyser && !vizFailed) ? bandsFromFreq() : bandsFromLevel();
+  // 形はブラウザの FFT から、大きさは感度からの超過分から。
+  // 形だけを取り出すため、いちばん大きい帯で割って山の形にそろえる。
+  const shape = (analyser && !vizFailed) ? bandsFromFreq() : bandsFromLevel();
+  const peak = Math.max(...shape, 0.001);
+  const amp = amplitudeOverThreshold();
+
   for (let i = 0; i < BARS; i++) {
-    smooth[i] = raw[i] > smooth[i] ? smooth[i] * 0.4 + raw[i] * 0.6
-                                   : smooth[i] * 0.88 + raw[i] * 0.12;
+    const raw = (shape[i] / peak) * amp;
+    smooth[i] = raw > smooth[i] ? smooth[i] * 0.4 + raw * 0.6
+                                : smooth[i] * 0.88 + raw * 0.12;
   }
   return smooth;
 }
@@ -1284,9 +1295,8 @@ function frame(now) {
   if (analyser && !vizFailed) analyser.getByteFrequencyData(freq);
 
   // 一時停止中は動かさない。見た目で「録っていない」と分かるようにする。
-  if (dead) { history.fill(0); smooth.fill(0); gateEnv = 0; } else { pushHistory(now); }
-  const g = dead ? 0 : gate();
-  const bands = dead ? smooth : currentBands().map(v => v * g);
+  if (dead) { history.fill(0); smooth.fill(0); } else { pushHistory(now); }
+  const bands = dead ? smooth : currentBands();
 
   if (vizStyle === 'radial') drawRadial(bands);
   else if (vizStyle === 'grid') drawGrid(bands);
