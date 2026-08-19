@@ -718,6 +718,8 @@ _ROUTE_RXS = [re.compile(rx) for rx in (
 LIVE_WORDS = {
     "即時", "そくじ", "即時モード", "そくじもーど", "即時に", "即時にして",
     "即時に戻して", "そのまま送る", "そのまま送って",
+    # 「そくじ」は「食事」に化けやすい（実測）。単独で来たら同じ合図とみなす。
+    "食事", "しょくじ", "食事モード", "速時", "則時",
     "live", "livemode", "instant", "instantmode", "sendlive",
 }
 HOLD_WORDS = {
