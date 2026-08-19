@@ -34,13 +34,16 @@ PREROLL_SEC = 0.6
 # 普通の声量では一度も超えなかった（環境ノイズは 0.003 だった）。
 DEFAULT_SILENCE_THRESHOLD = 0.015 if sys.platform == "darwin" else 0.054
 
-# 既定の録音デバイス。OS ごとに指定の仕方が違う。
-if sys.platform == "darwin":
-    DEFAULT_DEVICE = ":0"              # avfoundation の音声デバイス番号
-elif sys.platform.startswith("win"):
-    DEFAULT_DEVICE = "audio=default"   # dshow のデバイス名
-else:
-    DEFAULT_DEVICE = "pipewire"        # ALSA 経由（PipeWire プラグイン）
+# 「システムの既定を使う」を表す値。OS をまたいで同じ綴りにしておき、
+# 実際の指定の仕方（avfoundation の ":default"、dshow のデバイス名、
+# ALSA の "pipewire"）は mic_command が解決する。
+#
+# 以前は OS ごとに別々の綴りを既定にしていたが、":0" と "audio=default" は
+# list_mics() が返す一覧のどれとも一致しなかった。画面のプルダウンは
+# 一覧と突き合わせて選択状態を決めるため、「どれも選ばれていない」状態になり、
+# 空欄に見えていた。
+SYSTEM_DEFAULT = "default"
+DEFAULT_DEVICE = SYSTEM_DEFAULT
 
 
 # macOS には CUDA が無く vLLM 版は動かない。MLX 版(mlx)も動くが約4GB 積むので、
@@ -181,7 +184,9 @@ def list_mics() -> list:
 
     OS ごとに取り方が違うので、ここで吸収する。
     """
-    out = []
+    # 一覧の先頭は必ず「システムの既定」。ここが無いと、既定のまま使っている人の
+    # プルダウンがどれとも一致せず、空欄に見える。
+    out = [{"id": SYSTEM_DEFAULT, "label": "システムの既定"}]
     try:
         if sys.platform == "darwin":
             # ffmpeg はデバイス一覧を stderr に出し、終了コードも 1 になる
@@ -212,9 +217,8 @@ def list_mics() -> list:
 
         else:
             # arecord -L は「名前」と「説明」が交互に並ぶ。
-            # default / pulse / pipewire は同じサウンドサーバへの別経路なので、
-            # 「自動」ひとつにまとめる（並べても選ぶ意味がなく紛らわしい）。
-            out.append({"id": "pipewire", "label": "自動（システムの既定）"})
+            # default / pulse / pipewire は同じサウンドサーバへの別経路。
+            # 「システムの既定」は先頭に入れてあるので、ここでは足さない。
 
             r = subprocess.run(["arecord", "-L"], capture_output=True, timeout=10)
             name = None
@@ -243,8 +247,12 @@ def mic_command(device: str, in_sr: int) -> list:
     if sys.platform == "darwin":
         if shutil.which("ffmpeg") is None:
             sys.exit("ffmpeg が見つかりません (brew install ffmpeg)")
-        # avfoundation は ":<音声デバイス番号>" 形式。既定は ":0"
-        src = device if device.startswith(":") else ":0"
+        # avfoundation は ":<音声デバイス番号>" 形式。":default" も受け付ける
+        # （実測: システムの既定入力から録れる）。
+        if device == SYSTEM_DEFAULT:
+            src = ":default"
+        else:
+            src = device if device.startswith(":") else ":default"
         return ["ffmpeg", "-hide_banner", "-loglevel", "error",
                 "-f", "avfoundation", "-i", src,
                 "-ac", "1", "-ar", str(in_sr), "-f", "s16le", "-"]
@@ -254,13 +262,22 @@ def mic_command(device: str, in_sr: int) -> list:
             sys.exit("ffmpeg が見つかりません (winget install ffmpeg)")
         # dshow はデバイス名指定。一覧は:
         #   ffmpeg -list_devices true -f dshow -i dummy
-        src = device if device.startswith("audio=") else "audio=default"
+        # avfoundation と違い「既定」を表す綴りが無いので、
+        # 一覧の先頭（通常はシステムの既定）に解決する。
+        if device == SYSTEM_DEFAULT:
+            found = [m["id"] for m in list_mics()]
+            src = found[0] if found else "audio=default"
+        else:
+            src = device if device.startswith("audio=") else "audio=default"
         return ["ffmpeg", "-hide_banner", "-loglevel", "error",
                 "-f", "dshow", "-i", src,
                 "-ac", "1", "-ar", str(in_sr), "-f", "s16le", "-"]
 
     if shutil.which("arecord") is None:
         sys.exit("arecord が見つかりません (alsa-utils をインストールしてください)")
+    # PipeWire / PulseAudio はどちらもサウンドサーバ側で既定を解決してくれる
+    if device == SYSTEM_DEFAULT:
+        device = "pipewire"
     return ["arecord", "-D", device, "-f", "S16_LE",
             "-r", str(in_sr), "-c", "1", "-t", "raw", "-q"]
 
