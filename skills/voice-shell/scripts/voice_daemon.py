@@ -1001,10 +1001,6 @@ def main():
 
     args.want_device = want_device
 
-    # 切っている間は録音そのものを止める（認識結果を捨てるだけにしない）
-    _mute_path = Path(args.log_file).parent / MUTE_FILE.name
-    args.want_muted = _mute_path.exists
-
     # 実際に切り替えが完了したデバイス名。ビューアが「切り替えました」と
     # 表示するのはボタンを押した瞬間の楽観的な表示で、裏で本当に切り替わった
     # かは分からない。ここに確定情報を書き、ビューアはこのファイルの変化を

@@ -346,8 +346,7 @@ def mic_command(device: str, in_sr: int) -> list:
 
 
 def read_blocks(device: str, in_sr: int,
-                want_device=None, on_switch=None,
-                want_muted=None) -> Iterator[Tuple[np.ndarray, float, float]]:
+                want_device=None, on_switch=None) -> Iterator[Tuple[np.ndarray, float, float]]:
     """マイクを読み続け、(16kHz PCM, 長さ秒, RMS) を yield する。
 
     PipeWire がマイクを占有していると PortAudio からは見えないため、
@@ -356,9 +355,10 @@ def read_blocks(device: str, in_sr: int,
     want_device() が別のデバイス名を返したら、録音プロセスだけ差し替える。
     モデルは載せたままなので、マイクの切り替えは待たされない。
 
-    want_muted() が True の間は**録音プロセスごと止める**。認識結果を捨てる
-    だけでは、マイクは開いたままで音量も動き続け、本当に切れているのか
-    確かめようがない。切ると言った以上は本当に切る。
+    マイクを切っている間も録音は続ける（voice_daemon.py が認識結果を捨てる）。
+    録音ごと止める形も試したが、入切のたびに録音プロセスを起こし直すことに
+    なり、切り替えが一拍遅れる。通話アプリと同じく「録ってはいるが送らない」
+    に留める。
 
     on_switch(device) は実際に切り替えが完了した時点で呼ばれる。ビューアが
     「本当に切り替わったか」を確定情報として表示できるようにするため
@@ -390,30 +390,8 @@ def read_blocks(device: str, in_sr: int,
     crash_count = 0
     last_crash_at = 0.0
 
-    muted = False
     try:
         while True:
-            # 切られている間は録音プロセスごと落とす。
-            # 見かけ上だけ止めても、マイクは開いたままになってしまう。
-            if want_muted is not None:
-                now_muted = bool(want_muted())
-                if now_muted and not muted:
-                    if proc is not None:
-                        proc.terminate()
-                        proc = None
-                    print("マイクを切りました（録音を止めています）",
-                          file=sys.stderr, flush=True)
-                elif muted and not now_muted:
-                    proc = start(current)
-                    to_16k = make_resampler()
-                    print("マイクを入れました", file=sys.stderr, flush=True)
-                muted = now_muted
-                if muted:
-                    # 切っている間も、音量ゼロだけは伝える（画面が固まらない）
-                    yield None, BLOCK_SEC, 0.0
-                    time.sleep(BLOCK_SEC)
-                    continue
-
             # 切り替えを頼まれていたら録音だけやり直す
             if want_device is not None:
                 asked = want_device()
@@ -499,15 +477,9 @@ def stream_utterances(model, args, should_stop=lambda: False):
 
     for block, dur, rms in read_blocks(args.device, args.input_samplerate,
                                        want_device=getattr(args, "want_device", None),
-                                       on_switch=getattr(args, "on_switch", None),
-                                       want_muted=getattr(args, "want_muted", None)):
+                                       on_switch=getattr(args, "on_switch", None)):
         if should_stop():
             break
-
-        # 切っている間は音量ゼロだけを流す（認識には回さない）
-        if block is None:
-            yield {"type": "level", "rms": 0.0, "speaking": False}
-            continue
 
         if want_tuning is not None:
             tuning_wait -= 1
