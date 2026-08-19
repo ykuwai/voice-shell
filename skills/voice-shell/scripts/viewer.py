@@ -388,6 +388,51 @@ async def main_async(args):
         hold_file.write_text("")     # 送ったので保留は空にする
         return web.json_response(rec)
 
+    async def handle_utterance(req):
+        """ブラウザ側（Web Speech API）で認識した発話を受け取る。
+
+        デーモンが認識したときと同じ道を通す — 辞書の言い換え、無視する発話、
+        最小文字数、つなぎ言葉の除去、一時停止中の保留。ここを通さないと、
+        認識のやり方によって届く文が変わってしまう。
+        """
+        body = await req.json()
+        text = (body.get("text") or "").strip()
+        if not text:
+            return web.json_response({"error": "empty"}, status=400)
+
+        sys.path.insert(0, str(Path(__file__).parent))
+        import voice_daemon as vd
+
+        # マイクを切っているあいだは、どこにも残さない（デーモンと同じ扱い）
+        if mute_file.exists():
+            return web.json_response({"dropped": "muted"})
+
+        try:
+            tuning = json.loads(TUNING_FILE.read_text())
+        except (OSError, ValueError):
+            tuning = {}
+
+        user_dict = vd.load_dictionary()
+        if vd.is_noise(text, user_dict["ignore"]):
+            return web.json_response({"dropped": "noise"})
+
+        text = vd.polish(text, user_dict, False,
+                         bool(tuning.get("strip_fillers")))
+        min_chars = tuning.get("min_chars", 15)
+        if isinstance(min_chars, (int, float)) and len(text) < int(min_chars):
+            return web.json_response({"dropped": "too_short"})
+
+        stamp = time.strftime("%H:%M:%S")
+        if pause_file.exists():
+            with open(hold_file, "a", encoding="utf-8") as h:
+                h.write(json.dumps({"time": stamp, "text": text},
+                                   ensure_ascii=False) + "\n")
+            return web.json_response({"held": text})
+
+        with open(args.log_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"text": text}, ensure_ascii=False) + "\n")
+        return web.json_response({"time": stamp, "text": text})
+
     async def handle_discard(_req):
         """保留中の発話を捨てる。"""
         hold_file.write_text("")
@@ -530,6 +575,7 @@ async def main_async(args):
     app.router.add_post("/api/mute", handle_mute)
     app.router.add_post("/api/pause", handle_pause)
     app.router.add_post("/api/send", handle_send)
+    app.router.add_post("/api/utterance", handle_utterance)
     app.router.add_post("/api/discard", handle_discard)
 
     runner = web.AppRunner(app)
