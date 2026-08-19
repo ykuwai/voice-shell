@@ -8,6 +8,7 @@
 #   voice-shell.sh viewer / viewer-stop
 #   voice-shell.sh log-path / wait-ready
 #   voice-shell.sh listen                 発話ログを tail する（Monitor 用。多重起動を検知できる形）
+#   voice-shell.sh engines                選べる認識のやり方と、前回の選択
 #   voice-shell.sh listeners              いま listen しているセッションの一覧
 #   voice-shell.sh name "…"               このセッションの表示名を付ける
 #   voice-shell.sh whisper                Whisper で認識する（固有名詞に強い）
@@ -135,8 +136,40 @@ list_listeners() {
 
 case "$cmd" in
   start)
-    # --engine を明示せずに start したら Qwen3-ASR に戻す
-    [[ "$*" == *--engine* ]] || rm -f "$STATE_DIR/engine"
+    # 使うエンジンを決める（指定 > 前回の選択 > 自動）。
+    # 「前回の選択」は ~/.config/voice-shell/config.json に残るので、
+    # 再起動しても選び直しにならない。
+    want=""
+    rest=()
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --engine) want="${2:-}"; shift 2 ;;
+        --engine=*) want="${1#*=}"; shift ;;
+        *) rest+=("$1"); shift ;;
+      esac
+    done
+    set -- "${rest[@]+"${rest[@]}"}"
+    engine="$("$PY" "$APP" --resolve-engine "$want")"
+    "$PY" "$APP" --remember-engine "$engine"
+
+    # ブラウザで認識するなら、この機械にモデルを積む必要がない。
+    # ビューアだけ立ち上げて終わる（画面を開いた時点で認識が始まる）。
+    if [[ "$engine" == "browser" ]]; then
+      mkdir -p "$STATE_DIR"
+      echo "このブラウザで認識します（モデルの読み込みはありません）"
+      echo "  発話ログ: $LOG_FILE"
+      listeners_now="$(list_listeners)"
+      if [ -n "$listeners_now" ]; then
+        echo
+        echo "※ すでにこの音声を聞いているセッションがあります:"
+        echo "$listeners_now"
+      fi
+      "$0" viewer
+      echo
+      echo "ビューアを開くと認識が始まります。開くまでは何も届きません。"
+      exit 0
+    fi
+    echo "$engine" > "$STATE_DIR/engine"
     if "$PY" "$APP" --status | grep -q 稼働中; then
       echo "すでに稼働しています。"; exit 0
     fi
@@ -235,12 +268,30 @@ case "$cmd" in
     echo "${XDG_STATE_HOME:-$HOME/.local/state}/voice-shell/remote"
     ;;
   status)
-    "$PY" "$APP" --status
+    # ブラウザで認識しているときは、この機械にデーモンが居ないのが正常。
+    # 素の「停止しています」だけだと壊れているように読めるので、
+    # 何で認識しているのかを先に言う。
+    engine="$("$PY" "$APP" --resolve-engine "")"
+    if [[ "$engine" == "browser" ]]; then
+      echo "このブラウザで認識します（この機械にモデルは積みません）"
+      if curl -sf -o /dev/null --max-time 2 http://127.0.0.1:8090; then
+        echo "  ビューア: http://127.0.0.1:8090 （開いている間だけ認識します）"
+      else
+        echo "  ビューアが動いていません → voice-shell.sh viewer" >&2
+      fi
+    else
+      echo "認識のやり方: $engine"
+      "$PY" "$APP" --status
+    fi
     echo
     echo "この音声を聞いているセッション:"
     listeners_now="$(list_listeners)"
     if [ -n "$listeners_now" ]; then echo "$listeners_now"
     else echo "  なし（音声はどこにも届いていません）"; fi
+    ;;
+  engines)
+    # 選べる認識のやり方。何が入っていて、前回どれを選んだかを出す。
+    "$PY" "$APP" --list-engines
     ;;
   listeners)
     listeners_now="$(list_listeners)"
@@ -374,6 +425,10 @@ NAMEIT
     fi
     ;;
   wait-ready)
+    # ブラウザで認識するなら、積むモデルが無いので待つものも無い
+    if [[ "$("$PY" "$APP" --resolve-engine "")" == "browser" ]]; then
+      echo READY; exit 0
+    fi
     # 起動完了（またはエラー）まで待つ
     for _ in $(seq 1 90); do
       if grep -q "聞いています" "$BOOT_LOG" 2>/dev/null; then echo READY; exit 0; fi
@@ -385,7 +440,7 @@ NAMEIT
     echo TIMEOUT; exit 1
     ;;
   *)
-    echo "使い方: voice-shell.sh {start|stop|status|listen|listeners|name|hold|live|log-path|wait-ready}" >&2
+    echo "使い方: voice-shell.sh {start [--engine X]|stop|status|engines|listen|listeners|name|hold|live|log-path|wait-ready}" >&2
     echo "        voice-shell.sh {apple|whisper|remote|remote-conf|remote-log}" >&2
     exit 1
     ;;

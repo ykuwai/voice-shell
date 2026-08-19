@@ -62,6 +62,9 @@ PRIVATE_DICT_FILE = CONFIG_DIR / "dictionary.private.json"
 # マイクの感度と「何秒黙ったら確定するか」。辞書と同じく設定ディレクトリに
 # 置き、ビューアから変えられる。デーモンが 0.5 秒おきに読み直すので再起動は要らない。
 TUNING_FILE = CONFIG_DIR / "tuning.json"
+# 「次もこれで起動する」を覚えておく場所。辞書やしきい値と同じく
+# 設定ディレクトリに置く（/tmp だと再起動で消え、毎回選び直しになる）。
+CONFIG_FILE = CONFIG_DIR / "config.json"
 PID_FILE = STATE_DIR / "daemon.pid"
 LOG_FILE = STATE_DIR / "utterances.jsonl"
 # 認識途中のテキスト。上書きし続けるだけで履歴は残さない（ビューアの表示用）。
@@ -440,6 +443,46 @@ def fix_latin_commas(text: str) -> str:
     return re.sub(r"([A-Za-z])、(?=[A-Za-z])", r"\1 ", text)
 
 
+def read_config() -> dict:
+    """前回の選択。無ければ空。"""
+    try:
+        d = json.loads(CONFIG_FILE.read_text())
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def write_config(**kw) -> dict:
+    """選択を覚える。渡した項目だけ差し替える。"""
+    cur = read_config()
+    cur.update({k: v for k, v in kw.items() if v is not None})
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    CONFIG_FILE.write_text(json.dumps(cur, ensure_ascii=False, indent=2) + "\n")
+    return cur
+
+
+def resolve_engine(want: str = "") -> str:
+    """これから使うエンジンを決める。
+
+    指定 > 前回の選択 > 自動。自動は「何も入れずに動く」ブラウザを選ぶ。
+    ブラウザが使えない状況（画面を開けない）だけは呼び出し側が
+    --engine auto を渡してくるので、そのときは入っているモデルから選ぶ。
+    """
+    if want and want != "auto":
+        return want
+    if not want:
+        remembered = read_config().get("engine")
+        if remembered:
+            return remembered
+        return "browser"
+    # want == "auto": 入っているモデルの中から選ぶ
+    have = [e["id"] for e in asr_mic.available_engines()]
+    for pick in ("apple", "whisper", "local", "mlx", "home-lan"):
+        if pick in have:
+            return pick
+    return "browser"
+
+
 def polish(text: str, user_dict: dict, keep_kanji_numbers: bool = False,
            drop_fillers: bool = False) -> str:
     """認識したテキストを読みやすく整える。ローカルと LAN の両方で通す。
@@ -582,6 +625,12 @@ def parse_args():
     p.add_argument("--stop", action="store_true", help="常駐プロセスを停止して終了")
     p.add_argument("--listeners", action="store_true",
                    help="発話ログを聞いているセッションを一覧して終了")
+    p.add_argument("--resolve-engine", metavar="WANT", default=None,
+                   help="使うエンジンを決めて表示する（指定 > 前回 > 自動）")
+    p.add_argument("--remember-engine", metavar="ENGINE", default=None,
+                   help="次回もこのエンジンで起動するよう覚える")
+    p.add_argument("--list-engines", action="store_true",
+                   help="選べるエンジンを一覧して終了")
     return p.parse_args()
 
 
@@ -812,6 +861,23 @@ def list_active_listeners(log_path):
 
 def main():
     args = parse_args()
+
+    if args.remember_engine is not None:
+        write_config(engine=args.remember_engine)
+        return
+
+    if args.resolve_engine is not None:
+        print(resolve_engine(args.resolve_engine))
+        return
+
+    if args.list_engines:
+        remembered = read_config().get("engine", "")
+        have = asr_mic.available_engines()
+        print("  browser   このブラウザ（何も入れずに動く）")
+        for e in have:
+            print(f"  {e['id']:<9} {e['label']}")
+        print(f"\n  前回の選択: {remembered or '(まだ無い)'}")
+        return
 
     if args.listeners:
         # 何も出さない/出す は呼び出し側（voice-shell.sh）に判断させる。

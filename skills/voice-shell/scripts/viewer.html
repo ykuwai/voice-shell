@@ -2552,7 +2552,11 @@ async function loadEngines() {
   // ブラウザで認識できず、入っているモデルも無い、という環境もありうる
   if (!opts.length) opts.push(['', t('engineNone')]);
 
-  const cur = asrChosen ? BROWSER_ENGINE : (d.chosen || localEngines[0]?.id || '');
+  // 覚えている選択はサーバが持っている。localStorage を正にすると、
+  // ブラウザを変えたときに起動時の分岐と食い違う。
+  const cur = d.chosen || BROWSER_ENGINE;
+  asrChosen = canBrowserASR && cur === BROWSER_ENGINE;
+  recWanted = asrChosen && !asrPausedByRoute;
   el.enginePick.replaceChildren(...opts.map(([id, label]) => {
     const o = document.createElement('option');
     o.value = id; o.textContent = label; o.selected = id === cur;
@@ -2569,7 +2573,6 @@ el.enginePick.onchange = async () => {
       asrChosen = true;
       recWanted = true;
       asrPausedByRoute = false;
-      store.set('asr', '1');
       lastVoiceAt = performance.now();
       // 先にモデル側を降ろす。降りる前に張ると、その間の発話が二重に届く。
       if (engineOnish()) {
@@ -2580,7 +2583,6 @@ el.enginePick.onchange = async () => {
       startRecognition();
     } else {
       asrChosen = false;
-      store.set('asr', '');
       stopRecognition();
       engine = 'booting';
       startedAt = Date.now();
@@ -2850,20 +2852,19 @@ decorateIcons();
 // ブラウザ側の認識は Chrome 系だけ。使えない環境では設定ごと出さない。
 if (canBrowserASR) {
   paintAsrLangs();
-  // 何も入れずに動くので、初めて使う人にはこれが既定。
-  asrChosen = store.get('asr', '1') === '1';
-  recWanted = asrChosen;
+  // 何を使うかはサーバが覚えている（loadEngines が読んで反映する）。
+  // ここでは画面を組み立てるだけにする。
   paintBrowserAsr();
   // 認識はマイクの許可が要るので、最初に触られた時点で始める
   // 認識はマイクの許可が要るので、最初に触られた時点で始める。
   // キーボードだけで操作する人もいるので、押鍵でも始める。
-  if (recWanted) {
-    const arm = () => startRecognition();
-    addEventListener('pointerdown', arm, {once:true});
-    addEventListener('keydown', arm, {once:true});
-  }
+  // 認識はマイクの許可が要るので、最初に触られた時点で始める。
+  // キーボードだけで操作する人もいるので、押鍵でも始める。
+  const arm = () => { if (recWanted) startRecognition(); };
+  addEventListener('pointerdown', arm, {once:true});
+  addEventListener('keydown', arm, {once:true});
 }
-loadEngines();
+loadEngines().then(() => { if (recWanted) startRecognition(); });
 applyTheme(store.get('theme', 'auto'));
 applyViz(vizStyle);
 for (const b of el.langRow.children) b.classList.toggle('on', b.dataset.langChoice === langPref);

@@ -358,7 +358,10 @@ async def main_async(args):
         # 使うエンジンの指定。voice-shell.sh は起動時にこのファイルを見る。
         kind = (body.get("engine") or "").strip()
         if kind:
-            (state / "engine").write_text(kind)
+            import voice_daemon as vd
+            vd.write_config(engine=kind)        # 次回の起動もこれになる
+            if kind != "browser":
+                (state / "engine").write_text(kind)
 
         # start_new_session でビューアから切り離す。
         # デーモンは終了時に自分の子を全部 kill するので、ビューアの系統に
@@ -428,14 +431,12 @@ async def main_async(args):
         ブラウザの認識は何も入れずに動くので、これが既定。手元で完結させたい
         人のために、実際に入っているものだけを並べる。
         """
-        import asr_mic
-        try:
-            chosen = (state / "engine").read_text().strip()
-        except OSError:
-            chosen = ""
+        import asr_mic, voice_daemon as vd
         return web.json_response({
             "engines": asr_mic.available_engines(),
-            "chosen": chosen,
+            # 覚えている選択。ブラウザの localStorage ではなくこちらを正とする
+            # （ブラウザごとに食い違うと、起動時の分岐が当てにならなくなる）。
+            "chosen": vd.resolve_engine(""),
             "running": engine_running(),
         })
 
