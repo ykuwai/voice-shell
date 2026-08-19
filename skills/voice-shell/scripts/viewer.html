@@ -259,7 +259,11 @@
     display:flex; align-items:center; gap:.5rem;
     padding:.7rem 1rem .55rem; border-top:1px solid var(--line);
   }
-  .log-head h2 { margin:0; font-size:.8rem; font-weight:600; margin-right:auto; }
+  .log-head h2 {
+    margin:0; margin-right:auto; font-size:.8rem; font-weight:600;
+    display:flex; align-items:center; gap:.35rem;
+  }
+  .log-head h2 svg { opacity:.75; }
   .filters { display:flex; gap:.15rem; background:var(--panel-2); padding:3px; border-radius:var(--pill); }
   .filters button {
     font-size:.7rem; padding:.25rem .7rem; border-radius:var(--pill); color:var(--faint);
@@ -817,7 +821,7 @@ const I18N = {
     hintStopped:'Press the power icon to start listening again.',
     hintNoMic:'No microphone access — the meter still shows the daemon level.',
     modeLive:'Instant', modeHold:'Review',
-    unsent:'Unsent', history:'Sent to the shell', quiet:'(silence)',
+    unsent:'Unsent', history:'History', quiet:'(silence)',
     needsTouch:'Click here to start listening',
     routeAll:'Everyone',
     routeGone:'“{gone}” ended. Sending to “{next}” now.',
@@ -918,7 +922,7 @@ const I18N = {
     hintStopped:'電源アイコンで聞き取りを再開できます。',
     hintNoMic:'マイクを使えないため、波形はデーモンの音量で動かしています。',
     modeLive:'即時', modeHold:'手直し',
-    unsent:'未送信', history:'送った発話', quiet:'（無音）',
+    unsent:'未送信', history:'送信履歴', quiet:'（無音）',
     needsTouch:'ここを一度クリックすると認識が始まります',
     routeAll:'すべて',
     routeGone:'「{gone}」が終了したので、「{next}」に切り替えました。',
