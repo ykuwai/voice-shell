@@ -386,6 +386,13 @@
     cursor:pointer;
   }
   .range-note { font-size:.75rem; line-height:1.5; color:var(--faint); margin:-.1rem 0 .8rem; }
+  /* 手元で完結しなくなる設定には、その場ではっきり書く */
+  .warn-note {
+    margin:.6rem 0 0; padding:.55rem .75rem; border-radius:12px;
+    font-size:.75rem; line-height:1.55; color:var(--warn);
+    background:color-mix(in srgb, var(--warn) 12%, transparent);
+    border:1px solid color-mix(in srgb, var(--warn) 32%, transparent);
+  }
 
   /* 感度を決めるための実測メーター。しきい値の位置に印を出す。 */
   .gauge {
@@ -622,6 +629,18 @@
     <p class="range-note" id="calibNote" style="margin-top:.5rem"></p>
   </div>
 
+  <!-- ブラウザで認識する -->
+  <div class="group" id="browserAsrGroup" hidden>
+    <h3 data-icon="translate" data-icon-size="14" data-i18n="grpBrowserAsr">Recognize in this browser</h3>
+    <label class="toggle"><input type="checkbox" id="browserAsr"><span data-i18n="browserAsrOn">Use this browser to recognize</span></label>
+    <p class="range-note" data-i18n="browserAsrNote"></p>
+    <div class="field" id="asrLangField" hidden>
+      <label for="asrLang" data-icon="language" data-icon-size="17" data-i18n="asrLang">Spoken language</label>
+      <select id="asrLang"></select>
+    </div>
+    <p class="warn-note" id="browserAsrWarn" data-i18n="browserAsrWarn" hidden></p>
+  </div>
+
   <!-- 見た目 -->
   <div class="group">
     <h3 data-icon="palette" data-icon-size="16" data-i18n="grpLook">Appearance</h3>
@@ -761,6 +780,12 @@ const I18N = {
     minChars:'Min length',
     minCharsNote:'Shorter results are dropped as noise.',
     stripFillers:'Strip filler words',
+    grpBrowserAsr:'Recognize in this browser',
+    browserAsrOn:'Use this browser to recognize',
+    browserAsrNote:'Uses the recognition built into Chrome. No model to install, so it runs on low-spec machines — and it works even without the daemon.',
+    browserAsrWarn:'Audio is sent to Google servers for recognition. Keep this off if everything must stay on this machine — use the daemon instead.',
+    asrLang:'Spoken language',
+    asrDenied:'Microphone access was refused, so recognition could not start.',
     calibrate:'Auto-tune',
     calibSpeaking:'Keep talking… {n}s',
     calibQuiet:'Now stay quiet… {n}s',
@@ -835,6 +860,12 @@ const I18N = {
     minChars:'最小文字数',
     minCharsNote:'これより短い認識結果は物音とみなして捨てます。',
     stripFillers:'「えーと」を消す',
+    grpBrowserAsr:'このブラウザで認識する',
+    browserAsrOn:'このブラウザで認識する',
+    browserAsrNote:'Chrome に載っている認識を使います。モデルを入れなくてよいので非力な端末でも動き、デーモンが動いていなくても使えます。',
+    browserAsrWarn:'音声は認識のため Google のサーバへ送られます。手元だけで完結させたい場合は、これを切ってデーモン側の認識をお使いください。',
+    asrLang:'話す言語',
+    asrDenied:'マイクの使用が許可されなかったため、認識を始められませんでした。',
     calibrate:'自動調整',
     calibSpeaking:'そのまま話し続けてください… あと{n}秒',
     calibQuiet:'今度は黙っていてください… あと{n}秒',
@@ -925,6 +956,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'mic','recogLang','recogLangField','thresh','threshVal','gaugeFill','gaugeMark',
                   'silence','silenceVal','minChars','minCharsVal','clean',
                   'calibBtn','calibNote',
+                  'browserAsrGroup','browserAsr','browserAsrWarn','asrLang','asrLangField',
                   'themeRow','vizRow','langRow',
                   'scopePrivate','scopeNote','tabReplace','tabIgnore',
                   'paneReplace','paneIgnore','replaceRows','ignoreRows',
@@ -1141,7 +1173,7 @@ let floorDb = -60;
 // 流れる波形の高さ。こちらも感度からの超過分をそのまま使う。
 function levelNow() { return amplitudeNow(); }
 
-// （参考）ブラウザ側の音量。今は形の算出にだけ使っている。
+// ブラウザ側のマイクで測った音量（0〜1）。デーモンが動いていなくても取れる。
 function browserLevel() {
   let db;
   if (analyser && !vizFailed) {
@@ -1167,6 +1199,11 @@ function browserLevel() {
 
   // 暗騒音から何 dB 出たか。ここを下回る音は絵にしない。
   return Math.min(1, Math.max(0, (db - floorDb - GATE_DB) / RANGE_DB));
+}
+
+// デーモンが動いていないときは、波形もブラウザのマイクで動かす
+function amplitudeFallback() {
+  return (analyser && !vizFailed) ? browserLevel() : 0;
 }
 
 
@@ -1414,6 +1451,13 @@ function paintFrame(now) {
   else drawBar(bands);
 
   // ロゴの波も同じ値で動かす（小さくしたときの手がかり）
+  // ブラウザで認識しているときは、こちらのマイクで声の有無を見る。
+  // 認識結果だけを頼りにすると、認識が落ちている間じゅう「黙っている」
+  // ことになり、張り直しの判断ができない。
+  if (recWanted && analyser && !vizFailed && browserLevel() > 0.12) {
+    lastVoiceAt = performance.now();
+  }
+
   const src = vizStyle === 'wave' ? history : bands;
   const marks = el.logoMark.children;
   for (let i = 0; i < marks.length; i++) {
@@ -2186,6 +2230,179 @@ for (const ev of ['pointerup', 'pointercancel']) {
   addEventListener(ev, endThreshDrag);
 }
 
+/* ── ブラウザで認識する（Web Speech API）───────────
+   Chrome に載っている認識を使う。モデルを積まないので、非力な端末でも
+   そのまま使える。ただし**音声は Google のサーバへ送られる**ので、
+   手元だけで完結させたい場合はデーモン側の認識を使うこと。
+
+   厄介なのは、7〜10 秒黙るとセッションが勝手に切れること。切れてから
+   慌てて張り直すと、話し始めの一言目を落とす。Web Speech API には
+   「溜めておいた音声を後から流し込む」口が無いので、後追いでは取り戻せない。
+
+   そこで **黙っているあいだに先回りして張り直す**。無音中の張り直しなら
+   何も失わない。声が出ている最中は絶対に触らない。 */
+// 話す言語の候補。Chrome は BCP-47 のタグを取るので、よく使うものを並べる。
+const ASR_LANGS = [
+  ['ja-JP', '日本語'], ['en-US', 'English (US)'], ['en-GB', 'English (UK)'],
+  ['zh-CN', '中文（简体）'], ['zh-TW', '中文（繁體）'], ['ko-KR', '한국어'],
+  ['es-ES', 'Español'], ['fr-FR', 'Français'], ['de-DE', 'Deutsch'],
+  ['it-IT', 'Italiano'], ['pt-BR', 'Português (BR)'], ['ru-RU', 'Русский'],
+  ['hi-IN', 'हिन्दी'], ['id-ID', 'Indonesia'], ['th-TH', 'ไทย'],
+  ['vi-VN', 'Tiếng Việt'],
+];
+
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const canBrowserASR = !!SR;
+
+let rec = null;              // いまの SpeechRecognition
+let recRunning = false;      // start() 済みで、まだ end が来ていない
+let recWanted = false;       // 使う設定になっているか
+let lastVoiceAt = 0;         // 最後に声が出ていた時刻
+let recStartedAt = 0;        // いまのセッションを張った時刻
+
+// 切れる手前で自分から張り直す。実測の限界（7〜10秒）より十分手前にする。
+const RENEW_AFTER_MS = 4500;   // このあいだ黙っていたら張り直す
+const SESSION_MAX_MS = 45000;  // 長く続いたセッションも念のため切り替える
+
+function browserLang() {
+  // 認識させる言語。画面の表示言語ではなく、話す言語。
+  const saved = store.get('asrLang', '');
+  if (saved) return saved;
+  // navigator.language は "ja" のように地域の付かない形で返ることがある。
+  // そのままだと候補一覧と一致せず、生のコードが選択肢に並んでしまう。
+  const want = (navigator.language || 'ja-JP');
+  if (ASR_LANGS.some(([c]) => c === want)) return want;
+  const head = want.split('-')[0].toLowerCase();
+  const hit = ASR_LANGS.find(([c]) => c.split('-')[0].toLowerCase() === head);
+  return hit ? hit[0] : 'ja-JP';
+}
+
+function newRecognition() {
+  const r = new SR();
+  r.lang = browserLang();
+  r.continuous = true;
+  r.interimResults = true;
+  r.maxAlternatives = 1;
+
+  r.onstart = () => { recRunning = true; recStartedAt = performance.now(); };
+
+  r.onresult = ev => {
+    let interim = '';
+    for (let i = ev.resultIndex; i < ev.results.length; i++) {
+      const res = ev.results[i];
+      const text = res[0].transcript;
+      if (res.isFinal) {
+        sendUtterance(text);
+      } else {
+        interim += text;
+      }
+    }
+    // 認識中の文字は、デーモンのときと同じ場所に出す
+    el.stream.textContent = interim;
+    el.tray.classList.toggle('idle', !interim);
+    if (interim.trim()) lastVoiceAt = performance.now();
+  };
+
+  r.onerror = ev => {
+    // no-speech と aborted は日常的に起きる（黙っていただけ・張り直した）。
+    // not-allowed だけは人の操作が要るので、そこで止める。
+    if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
+      recWanted = false;
+      el.hint.textContent = t('asrDenied');
+    }
+  };
+
+  r.onend = () => {
+    recRunning = false;
+    el.stream.textContent = '';
+    // 使う設定である限り、すぐ張り直す。ここで待つと一言目を落とす。
+    if (recWanted) startRecognition();
+  };
+  return r;
+}
+
+function startRecognition() {
+  if (!canBrowserASR || recRunning) return;
+  try {
+    rec = newRecognition();
+    rec.start();
+  } catch {
+    // 直前のセッションがまだ畳まれていないことがある。少し待って戻る。
+    setTimeout(() => { if (recWanted && !recRunning) startRecognition(); }, 250);
+  }
+}
+
+function stopRecognition() {
+  recWanted = false;
+  if (rec) { try { rec.abort(); } catch {} }
+  rec = null; recRunning = false;
+  el.stream.textContent = '';
+}
+
+// 黙っているあいだに張り直す見張り。声が出ている最中は何もしない。
+setInterval(() => {
+  if (!recWanted || !recRunning) return;
+  const now = performance.now();
+  const quietFor = now - lastVoiceAt;
+  const age = now - recStartedAt;
+  if (quietFor < RENEW_AFTER_MS) return;              // まだ喋っている
+  if (age < RENEW_AFTER_MS) return;                   // 張り直した直後
+  if (age > SESSION_MAX_MS || quietFor >= RENEW_AFTER_MS) {
+    // stop() は最後の結果を確定させてから end を投げる。abort() だと捨てる。
+    try { rec.stop(); } catch {}   // end で自動的に張り直る
+  }
+}, 1000);
+
+// 確定した発話をサーバへ。辞書・無視語・最小文字数・保留の判定は
+// サーバ側でデーモンと同じ道を通す（認識のやり方で結果が変わらないように）。
+async function sendUtterance(text) {
+  text = (text || '').trim();
+  if (!text) return;
+  lastVoiceAt = performance.now();
+  try {
+    await post('/api/utterance', {text});
+  } catch {}
+}
+
+/* ── ブラウザ認識の設定 ───────────────── */
+
+function paintAsrLangs() {
+  const cur = browserLang();
+  const list = ASR_LANGS.some(([c]) => c === cur) ? ASR_LANGS
+             : [[cur, cur], ...ASR_LANGS];
+  el.asrLang.replaceChildren(...list.map(([code, name]) => {
+    const o = document.createElement('option');
+    o.value = code; o.textContent = name; o.selected = code === cur;
+    return o;
+  }));
+}
+
+function paintBrowserAsr() {
+  el.browserAsr.checked = recWanted;
+  el.browserAsrWarn.hidden = !recWanted;
+  el.asrLangField.hidden = !recWanted;
+}
+
+el.browserAsr.onchange = () => {
+  if (el.browserAsr.checked) {
+    recWanted = true;
+    store.set('asr', '1');
+    lastVoiceAt = performance.now();
+    startRecognition();
+  } else {
+    store.set('asr', '');
+    stopRecognition();
+  }
+  paintBrowserAsr();
+  paint();
+};
+
+el.asrLang.onchange = () => {
+  store.set('asrLang', el.asrLang.value);
+  // 言語は張り直したときに効く。使用中なら今すぐ張り直す。
+  if (recWanted) { try { rec.abort(); } catch {} }
+};
+
 /* ── フローティング表示 ─────────────────
    ブラウザを横に並べずに済むよう、常に手前へ浮く小窓へ引っ越す。
    Chrome の Document Picture-in-Picture を使うので追加の実行環境は要らない。 */
@@ -2426,6 +2643,15 @@ el.clean.onchange = () => {
 resolveLang();
 applyI18n();
 decorateIcons();
+// ブラウザ側の認識は Chrome 系だけ。使えない環境では設定ごと出さない。
+el.browserAsrGroup.hidden = !canBrowserASR;
+if (canBrowserASR) {
+  paintAsrLangs();
+  recWanted = store.get('asr', '') === '1';
+  paintBrowserAsr();
+  // 認識はマイクの許可が要るので、最初に触られた時点で始める
+  if (recWanted) addEventListener('pointerdown', () => startRecognition(), {once:true});
+}
 applyTheme(store.get('theme', 'auto'));
 applyViz(vizStyle);
 for (const b of el.langRow.children) b.classList.toggle('on', b.dataset.langChoice === langPref);
