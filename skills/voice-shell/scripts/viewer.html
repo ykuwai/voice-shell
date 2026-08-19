@@ -293,7 +293,7 @@
     color:var(--dim); background:var(--raise);
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:12rem;
   }
-  .entry .to::before { content:"→"; opacity:.7; }
+  .entry .to svg { opacity:.75; }
   .entry .text { font-size:.88rem; line-height:1.65; word-break:break-word; }
 
   /* 未送信カード。認識中のテキストもここに出る（一等地に置く） */
@@ -617,7 +617,7 @@
   </section>
 
   <div class="log-head">
-    <h2 data-i18n="history">History</h2>
+    <h2 data-icon="list_alt" data-icon-size="15" data-i18n="history">History</h2>
   </div>
 
   <div id="log"></div>
@@ -672,6 +672,12 @@
       <span class="val" id="minCharsVal"></span>
     </div>
     <p class="range-note" data-i18n="minCharsNote"></p>
+    <div class="field">
+      <label for="maxUtter" data-icon="short_text" data-icon-size="17" data-i18n="maxUtter">Max in one go</label>
+      <input type="range" id="maxUtter" min="0" max="180" step="10">
+      <span class="val" id="maxUtterVal"></span>
+    </div>
+    <p class="range-note" data-i18n="maxUtterNote"></p>
     <label class="toggle"><input type="checkbox" id="clean"><span data-i18n="stripFillers">Strip filler words</span></label>
     <div class="btn-row" style="margin-top:.7rem">
       <button class="btn go" id="calibBtn" data-icon="auto_awesome" data-icon-size="17" data-i18n="calibrate">Auto-tune</button>
@@ -811,7 +817,7 @@ const I18N = {
     hintStopped:'Press the power icon to start listening again.',
     hintNoMic:'No microphone access — the meter still shows the daemon level.',
     modeLive:'Instant', modeHold:'Review',
-    unsent:'Unsent', history:'History', quiet:'(silence)',
+    unsent:'Unsent', history:'Sent to the shell', quiet:'(silence)',
     needsTouch:'Click here to start listening',
     routeAll:'Everyone',
     routeGone:'“{gone}” ended. Sending to “{next}” now.',
@@ -840,6 +846,9 @@ const I18N = {
     silenceNote:'How long a silence ends an utterance.',
     minChars:'Min length',
     minCharsNote:'Shorter results are dropped as noise.',
+    maxUtter:'Max in one go',
+    maxUtterNote:'Talk longer than this and it is split at the next breath. Off keeps one long take whole.',
+    maxUtterOff:'no split',
     stripFillers:'Strip filler words',
     grpEngine:'Recognition',
     engineLabel:'Recognized by',
@@ -909,7 +918,7 @@ const I18N = {
     hintStopped:'電源アイコンで聞き取りを再開できます。',
     hintNoMic:'マイクを使えないため、波形はデーモンの音量で動かしています。',
     modeLive:'即時', modeHold:'手直し',
-    unsent:'未送信', history:'送信履歴', quiet:'（無音）',
+    unsent:'未送信', history:'送った発話', quiet:'（無音）',
     needsTouch:'ここを一度クリックすると認識が始まります',
     routeAll:'すべて',
     routeGone:'「{gone}」が終了したので、「{next}」に切り替えました。',
@@ -938,6 +947,9 @@ const I18N = {
     silenceNote:'これだけ黙ると、ひと区切りとして確定します。',
     minChars:'最小文字数',
     minCharsNote:'これより短い認識結果は物音とみなして捨てます。',
+    maxUtter:'ひと続きの上限',
+    maxUtterNote:'これより長く話し続けると、次の息継ぎで区切って送ります。切ると一息のまま送ります。',
+    maxUtterOff:'区切らない',
     stripFillers:'「えーと」を消す',
     grpEngine:'認識のやり方',
     engineLabel:'認識するのは',
@@ -1045,6 +1057,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'hint','note','log','none','count','copy','fresh',
                   'mic','recogLang','recogLangField','thresh','threshVal','gaugeFill','gaugeMark',
                   'silence','silenceVal','minChars','minCharsVal','clean',
+                  'maxUtter','maxUtterVal',
                   'calibBtn','calibNote',
                   'engineGroup','enginePick','engineNote','browserAsrWarn','asrLang','asrLangField',
                   'themeRow','vizRow','langRow',
@@ -1716,8 +1729,9 @@ function addEntry(rec) {
     const to = document.createElement('span');
     to.className = 'to';
     // ここで入れておく。relabelEntries は el.log に入った行しか見ないので、
-    // 貼り直しに任せると、この行だけ次の更新まで矢印だけの空札になる。
-    to.textContent = routeNames.get(row.dataset.to) || `#${rec.to}`;
+    // 貼り直しに任せると、この行だけ次の更新まで名前の無い札になる。
+    to.append(iconSvg('send', 11),
+              document.createTextNode(routeNames.get(row.dataset.to) || `#${rec.to}`));
     gutter.append(to);
   }
 
@@ -1740,7 +1754,10 @@ function relabelEntries() {
     const to = row.dataset.to;
     if (!to) continue;
     const node = row.querySelector('.to');
-    if (node) node.textContent = routeNames.get(to) || `#${to}`;
+    if (!node) continue;
+    // アイコンは残して、名前だけ差し替える
+    const label = node.lastChild;
+    if (label) label.textContent = routeNames.get(to) || `#${to}`;
   }
 }
 
@@ -2302,7 +2319,8 @@ el.recogLang.onchange = () => putJSON('/api/tuning', {language: el.recogLang.val
 
 /* ── 感度と区切り ───────────────────────
    3つとも保存すると即座にデーモンへ効く（0.5秒おきに読み直している）。 */
-let tuning = {silence_threshold: 0.015, silence_duration: 1.5,
+let tuning = {max_utterance_sec: 30,
+              silence_threshold: 0.015, silence_duration: 1.5,
               min_chars: 15, strip_fillers: false};
 
 // しきい値のつまみは対数目盛り。よく使う 0.003〜0.03 が
@@ -2319,9 +2337,12 @@ function paintTuning() {
   el.thresh.value = threshToPos(tuning.silence_threshold);
   el.silence.value = tuning.silence_duration;
   el.minChars.value = tuning.min_chars;
+  el.maxUtter.value = tuning.max_utterance_sec;
   el.threshVal.textContent = Math.round(threshToPos(tuning.silence_threshold) / 10);
   el.silenceVal.textContent = Number(tuning.silence_duration).toFixed(1) + 's';
   el.minCharsVal.textContent = tuning.min_chars;
+  el.maxUtterVal.textContent = Number(tuning.max_utterance_sec) > 0
+    ? tuning.max_utterance_sec + 's' : t('maxUtterOff');
   el.clean.checked = !!tuning.strip_fillers;
   paintGauge();
 }
@@ -2348,7 +2369,8 @@ async function loadTuning() {
     for (const [k, v] of Object.entries(d.tuning || {})) if (v != null) tuning[k] = v;
     for (const [k, r] of Object.entries(d.range || {})) {
       if (k === 'silence_threshold') { threshLo = r.min; threshHi = r.max; continue; }
-      const node = {silence_duration: el.silence, min_chars: el.minChars}[k];
+      const node = {silence_duration: el.silence, min_chars: el.minChars,
+                    max_utterance_sec: el.maxUtter}[k];
       if (node) { node.min = r.min; node.max = r.max; }
     }
     paintTuning();
@@ -2371,6 +2393,7 @@ el.thresh.oninput = () => {
 };
 el.silence.oninput = () => { tuning.silence_duration = Number(el.silence.value); paintTuning(); queueTuning(); };
 el.minChars.oninput = () => { tuning.min_chars = Number(el.minChars.value); paintTuning(); queueTuning(); };
+el.maxUtter.oninput = () => { tuning.max_utterance_sec = Number(el.maxUtter.value); paintTuning(); queueTuning(); };
 
 /* ── 自動調整 ───────────────────────────
    まわりが騒がしいと、既定のしきい値では声が一度も超えず
