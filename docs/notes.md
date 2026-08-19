@@ -1,0 +1,167 @@
+# 実装メモ
+
+作る過程で分かったこと。使うだけなら読まなくてよい。同じ落とし穴を
+踏み直さないための記録として残してある。
+
+## Windows（Git Bash）で動かすには何点か直しが要った
+
+`voice_daemon.py` / `voice-shell.sh` は元々 Linux/macOS しか想定しておらず、
+Windows（Git Bash 上の bash）で動かすと以下がすべて刺さった。いずれも修正済み。
+
+- **`import fcntl`** — POSIX 専用モジュールで Windows には無く、起動直後に
+  `ModuleNotFoundError` で落ちる。Windows では `msvcrt.locking` で
+  二重起動防止ロックを代替した
+- **`os.kill(pid, 0)`**（生存確認）— Windows では未対応で `SystemError` になる。
+  `OpenProcess` が取れるかで代替した
+- **`pgrep` / `pkill` / `setsid`** — Git Bash に無い。`voice-shell.sh` は
+  リスナー一覧・二重起動チェック・停止処理でこれらに依存していたため、
+  無ければその機能だけ諦めて素通しするようガードを入れた
+  （ビューアの起動確認は pgrep が無ければポートへの応答で代用する）
+- **`/tmp` の解釈が bash と Python でずれる** — Git Bash（MSYS）の `/tmp` は
+  実際の Windows パス（例: `...\AppData\Local\Temp`）へマウント変換されるが、
+  素の Windows Python が同じ文字列 `"/tmp"` を受け取ると `C:\tmp` と解釈する。
+  両者が同じ意味のつもりで別ディレクトリを見てしまい、デーモンの書き込み先と
+  Monitor の `tail -F` 先がずれて**発話がどこにも届かない**という壊れ方をする。
+  `voice-shell.sh` が `cygpath -w` で実パスに変換し、`VOICE_SHELL_STATE_DIR`
+  環境変数で子プロセスへ明示的に渡すことで解決した
+- **文字コード** — Windows の Python はファイル I/O に既定でシステムの
+  ロケール（日本語版なら cp932）を使う。UTF-8 で書いた JSON やログを
+  読もうとして `UnicodeDecodeError` になり、状態確認の文字列比較
+  （`grep -q 稼働中` 等）も一致しなくなる。`voice-shell.sh` で
+  `PYTHONUTF8=1` を強制して回避した（macOS/Linux では無害）
+- **ffmpeg の dshow マイク名** — README/SETUP.md の既定値 `audio=default` は
+  実際には認識されない。`ffmpeg -list_devices true -f dshow -i dummy` で
+  出てくる実際のデバイス名をそのまま `--device audio=<名前>` に渡す必要がある
+
+## macOS は OS 付属の認識を既定にした（Qwen3-ASR は重すぎた）
+
+Mac では `--engine apple`（`engine_apple.py`）を既定にしている。macOS 26 の
+`SpeechAnalyzer` / `SpeechTranscriber` を使うので、モデルの追加ダウンロードも
+GPU メモリの確保も要らない。実測（M4 Pro / macOS 26.5.2）で 3.1 秒の日本語音声が
+0.10 秒、句読点まで含めて正しく出た（RTF 0.03）。起動も 0.83 秒で、MLX 版の
+1〜2 分と比べ物にならない。音声はこの Mac の中だけで処理される。
+
+Swift の API しか無いので、`speech_helper.swift` を常駐させて WAV のパスを
+渡し、結果を JSON で受け取る形にした。ヘルパは初回起動時に `swiftc` で
+自動ビルドする（`scripts/build/` に置く。git には入れない）。
+
+### ストリーム給餌ではなくファイル渡しにした
+
+`SpeechAnalyzer` には `start(inputSequence:)` で `AsyncStream` に音声を流す
+API もあるが、署名なしの CLI から呼ぶと `nilError` で落ちた（`.app` 化して
+いる `LiveDictation` では動く）。`analyzeSequence(from: AVAudioFile)` は
+同じ条件で問題なく動くので、発話 1 つ分を WAV に書いて渡している。
+RTF 0.03 なので、途中経過のために全体を何度も認識し直しても間に合う。
+
+### マイクは Python 側が持つ
+
+ヘルパは音声を受け取って文字にするだけで、マイクには触らない。そのため
+TCC の許可も `.app` 化も要らず、`swiftc` で作った素の実行ファイルのまま動く。
+録音と発話の区切り（VAD）は従来どおり `asr_mic.py` の担当。
+
+（この構成は同じ Mac で先に検証した
+[live-dictation](https://github.com/ykuwai/live-dictation) の知見を使っている。）
+
+## macOS 25 以前は MLX 版で動かす（partial も確定も全体を認識し直す）
+
+`SpeechTranscriber` が使えない Apple Silicon には CUDA も無いので
+[mlx-qwen3-asr](https://github.com/moona3k/mlx-qwen3-asr) を使う
+（`engine_mlx.py`、`--engine mlx`）。vLLM 版と同じ3メソッドを持つ
+アダプタなので、認識ループは共通のまま。
+
+同ライブラリの増分デコード（KV キャッシュ再利用）も試したが、チャンク境界
+ごとに読点が入り語も割れる（実測で「くだ。ください」）。vLLM 版の
+「毎秒すべてを認識し直す」表示と比べて明らかに見劣りするため、
+**partial も確定も、溜めた音声全体の一括認識**にした。1回の認識は
+RTF 約0.31 なので、partial の更新間隔は発話長×0.3 で自然に伸びる
+（5秒の発話なら約1.5秒ごと）。確定も同じだけ待つ。
+
+partial の認識はワーカースレッドでやる。メインループで認識すると、
+その間マイクを読めず ffmpeg のパイプ（約0.7秒分）が溢れて録音を
+取りこぼす。スレッド化で feed は 15ms 以下になった（増分デコードを
+メインループで回していたときは毎チャンク約500ms 止まっていた）。
+
+確定文の品質は一括認識のほうが明確に良い（partial で「修復の方針を立案」と
+崩れた 20 秒の発話が、確定では「修正の方針を提案」と正しく出た）。
+
+## vLLM のデフォルト設定では 16GB GPU に載らない
+
+`max_model_len` の既定値 65536 は KV キャッシュに 7GiB 必要で、起動に失敗する
+(`ValueError: To serve at least one request with the models's max seq len...`)。
+本リポジトリは `--max-model-len 16384` を明示して回避している。
+
+公式の `qwen-asr-demo-streaming` CLI はこの値を指定できないため、**そのままでは起動しない**
+（`VLLM_MAX_MODEL_LEN` 環境変数も効かない）。自前のスクリプトを書いた理由がこれ。
+
+## 同時に1つしか起動できない
+
+モデルが約12GB使うため、GPU を使う別の音声プロセスとは同時起動できない。
+`voice-shell.sh start` は起動前に GPU を確認して警告する。
+
+終了時に vLLM のワーカー (`VLLM::EngineCore`) が残って VRAM を掴んだままになる問題は
+`asr_mic.py` の `_kill_engine_on_exit()` で対処済み（Ctrl-C / SIGTERM どちらでも解放）。
+それでも残った場合は `pgrep -f "VLLM::EngineCore" | xargs -r kill -9`。
+
+## マイクは arecord 経由で取得している
+
+PipeWire がマイクを占有しており、conda 版 PortAudio は PulseAudio バックエンド無しで
+ビルドされているため、`sounddevice` からは USB マイクが見えない。
+`arecord -D pipewire` で録音し、soxr で 16kHz に変換している。
+
+リサンプルは `soxr.ResampleStream` を使い回す。ブロックごとに `soxr.resample()` を
+呼ぶとフィルタの生成・破棄が毎回走り、実測で約5倍遅い。
+
+## ミュート判定は「世代番号」で行う（フラグでは破綻する）
+
+認識は発話が終わってから確定するため、確定時点だけを見てミュート判定すると、
+**切っている間に話した内容が解除後にまとめて流れ込む**（ところてん現象）。
+
+単純な「一度でも切られたらフラグを立てる」方式も破綻する:
+
+- 無音のままミュートしただけでフラグが立ち、**解除後の最初の発話が消える**
+- ミュート中に物音が発話として確定すると、そこでフラグが消費され、
+  直後の本当の発話が取りこぼされる
+
+`voice_daemon.py` では「マイクを切られた回数」(`mute_generation`) を数え、
+発話が始まった時点の値を覚えて、確定時に変化していたらその発話を捨てている。
+検証済みシナリオ: 無音ミュート→解除→発話 / ミュート中の物音→解除→発話 /
+発話中にミュート / ミュートをまたぐ発話 / 通常。
+
+## 無音でも相槌が出力される
+
+物音や息だけを拾うと、モデルが「はい」「うん」「ご視聴ありがとうございました」等を
+出力する。`voice_daemon.py` の `NOISE_ONLY` で、これら単独の発話を捨てている
+（`--keep-noise` で無効化）。中身のある発話（「はい、それでは始めます」）は残る。
+
+「ありがとうございました」「お疲れ様でした」は実際に言う言葉なので除外していない。
+
+## 日本語以外への誤認識（既定では何もしない）
+
+物音を拾うと中国語などに誤認識されることがある（実測で `嗯，那嗯嗯。` が出た）。
+ただし意図して他言語を話すこともあるため、**既定では素通し**にしている。
+`--drop-non-japanese` を付けると簡体字・ハングル・キリル等を含む発話を捨てる
+（「時間」「問題」「東京」など日本語と共通の漢字は通すので誤検出しない）。
+
+この判定は発話全体を見るため、日本語の末尾に中国語が混じった場合は通過する。
+文の一部だけを落とす実装にはしていない（誤検出で指示本体を失う方が困るため）。
+
+## ストリーミングは音声全体を毎回再投入する
+
+`streaming_transcribe()` はチャンクごとに「それまでの全音声」をモデルに再投入する
+(`qwen_asr/inference/qwen3_asr.py:751`)。このため **`--max-utterance-sec` と
+`--chunk-size-sec` は独立した遅延つまみではなく、掛け算で効く**。
+1発話でエンコードされる音声量は `発話長² / (2 × チャンク長)` に比例する:
+
+| 発話長 | チャンク | エンコード量 | 増幅率 |
+|---|---|---|---|
+| 30s | 1.0s | 465s | 15.5x |
+| 30s | 2.0s | 240s | 8.0x |
+| 15s | 1.0s | 120s | 8.0x |
+
+長く喋り続けるほど1チャンクの処理が重くなるので、遅延が気になる場合は
+`--max-utterance-sec` を 10〜15 秒に下げるのが効く。
+
+## Monitor は `tail -F` にする
+
+デーモンを再起動するとログファイルが作り直されるため、`-f`（小文字）だと古い inode を
+見続けて音声が届かなくなる。モニターを2つ生かすと同じ発話が二重に届く点にも注意。
