@@ -1269,6 +1269,11 @@ def main():
         mute_generation = 0
         was_muted = False
         speaking_since = None   # いま進行中の発話が始まった時点の generation
+        # いま進行中の発話が始まった時刻。画面の「消す」は、押した時点で
+        # 喋っていた一言だけを落としたい。確定より後に押されたものが次の
+        # 発話を巻き込まないよう、始まりの時刻と押した時刻を比べる。
+        speaking_at = None
+        drop_path = log_path.parent / "drop_at"
 
         # 読み手（ビューア・Monitor）と食い違わないよう明示する。
         # Windows は指定しないとロケール（cp932）で開いてしまう。
@@ -1288,6 +1293,7 @@ def main():
                         encoding="utf-8")
                     if ev.get("speaking") and speaking_since is None:
                         speaking_since = mute_generation
+                        speaking_at = time.time()
                     if muted_now:
                         if partial_path.read_text(encoding="utf-8"):
                             partial_path.write_text("", encoding="utf-8")
@@ -1310,6 +1316,19 @@ def main():
 
                 partial_path.write_text("", encoding="utf-8")
                 text = ev["text"].strip()
+
+                # 画面の「消す」。押した時点で進行中だった一言だけ落とす。
+                started_at_wall, speaking_at = speaking_at, None
+                if drop_path.exists():
+                    try:
+                        asked = float(drop_path.read_text(encoding="utf-8") or 0)
+                    except (OSError, ValueError):
+                        asked = 0.0
+                    drop_path.unlink(missing_ok=True)
+                    if started_at_wall is not None and asked >= started_at_wall:
+                        print(f"(消した) {text[:40]}", file=sys.stderr, flush=True)
+                        speaking_since = None
+                        continue
 
                 # 辞書は毎回読む。Web UI で直した内容が次の発話から効くようにする。
                 user_dict = load_dictionary()

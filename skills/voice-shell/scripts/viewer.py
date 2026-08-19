@@ -603,6 +603,15 @@ async def main_async(args):
             f.write(json.dumps({"text": text}, ensure_ascii=False) + "\n")
         return web.json_response({"time": stamp, "text": text})
 
+    async def handle_drop_current(_req):
+        """いま認識している一言を捨てる。
+
+        押した時刻だけ置いておき、判定はデーモンに任せる。確定より後に
+        押されたものが次の発話を巻き込まないようにするため。
+        """
+        (state / "drop_at").write_text(str(time.time()), encoding="utf-8")
+        return web.json_response({"ok": True})
+
     async def handle_discard(_req):
         """保留中の発話を捨てる。"""
         hold_file.write_text("", encoding="utf-8")
@@ -749,6 +758,7 @@ async def main_async(args):
     app.router.add_get("/api/listeners", handle_listeners)
     app.router.add_put("/api/route", handle_route)
     app.router.add_post("/api/discard", handle_discard)
+    app.router.add_post("/api/drop-current", handle_drop_current)
 
     runner = web.AppRunner(app)
     await runner.setup()
