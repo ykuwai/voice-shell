@@ -157,14 +157,16 @@
 
   /* ── ビジュアライザ ───────────────────── */
   .viz { position:relative; padding:.4rem 0 .1rem; }
-  .viz-row { display:flex; align-items:center; gap:.6rem; padding-right:1rem; }
-  #viz { display:block; flex:1; min-width:0; height:124px; }
+  #viz { display:block; width:100%; height:124px; }
+  /* マイクの入切と音量メーターを1行に並べる */
+  .meter-row { display:flex; align-items:center; gap:.55rem; padding:0 1rem; }
+  .meter-row .meter-hit { flex:1; min-width:0; padding-left:0; padding-right:0; }
 
   /* 一時停止。よく使う操作なので、設定や電源と同じ大きさで並べない。
      文字は付けない — 止めている間は画面全体が沈む（送り先が暗くなり、
      波形が平らになり、上の行が橙になる）ので、それが状態を語る。 */
   .pause {
-    flex:none; width:54px; height:54px; border-radius:50%;
+    flex:none; width:42px; height:42px; border-radius:50%;
     display:grid; place-items:center; color:var(--dim);
     border:2px solid var(--line); background:var(--panel-2);
     transition:border-color .18s, background .18s, box-shadow .18s, color .18s;
@@ -184,7 +186,7 @@
   /* デーモンが拾えている音量。ブラウザ側の波形とは別の経路なので、
      ここが動かないのに波形が動いていれば認識側が死んでいると分かる。 */
   /* 掴みやすいよう、線そのものより広い範囲で受ける */
-  .meter-hit { padding:10px 1rem; cursor:ew-resize; touch-action:none; }
+  .meter-hit { padding:12px 0; cursor:ew-resize; touch-action:none; }
   .meter {
     position:relative; height:3px;
     border-radius:var(--pill); background:var(--line);
@@ -563,22 +565,23 @@
   <div class="routes" id="routes" hidden></div>
 
   <div class="viz">
-   <div class="viz-row">
     <canvas id="viz"></canvas>
-    <button class="pause" id="segOff" aria-pressed="false">
-      <span class="glyph-pause" data-icon="mic" data-icon-size="26"></span>
-      <span class="glyph-play" data-icon="mic_off" data-icon-size="26" hidden></span>
-    </button>
-   </div>
     <!-- デーモンが拾えている音量。ブラウザの波形とは別経路なので、
          波形が動くのにここが動かなければ認識側が落ちていると分かる。 -->
     <!-- 印をつまむと感度が変わる。細い線のままでは掴めないので、
          見た目より広い当たり判定を親に持たせている。 -->
+    <div class="meter-row">
+    <!-- マイクの入切。音量の並びに置くと、何を切るのかがいっそう分かる。 -->
+    <button class="pause" id="segOff" aria-pressed="false">
+      <span class="glyph-pause" data-icon="mic" data-icon-size="22"></span>
+      <span class="glyph-play" data-icon="mic_off" data-icon-size="22" hidden></span>
+    </button>
     <div class="meter-hit" id="meterHit" data-i18n-title="thresholdMark">
       <div class="meter" id="meter">
         <div class="meter-fill" id="meterFill"></div>
         <div class="meter-mark" id="meterMark"></div>
       </div>
+    </div>
     </div>
   </div>
 
