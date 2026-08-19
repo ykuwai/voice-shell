@@ -215,6 +215,26 @@ class Tail:
                 last = cur
             await asyncio.sleep(0.2)
 
+    async def watch_voice_cmd(self):
+        """声の合図に何が起きたかを流す。
+
+        合図は発話として送らないので、通ったかどうかが画面に出ない。
+        デーモンが書く voice_cmd.json をそのまま渡し、音と一言はブラウザに任せる。
+        """
+        path = self.path.parent / "voice_cmd.json"
+        last = None
+        while True:
+            try:
+                cur = json.loads(path.read_text())
+            except (OSError, ValueError):
+                cur = None
+            at = cur.get("at") if isinstance(cur, dict) else None
+            if at is not None and at != last:
+                # 開いた時点で残っているものは、いま起きたことではない。
+                await self.broadcast({"voice_cmd": cur, "first": last is None})
+                last = at
+            await asyncio.sleep(0.2)
+
     async def watch_held(self):
         """一時停止中に確定した発話を、増えた分だけ流す。
 
@@ -732,7 +752,8 @@ async def main_async(args):
              asyncio.create_task(tail.watch_level()),
              asyncio.create_task(tail.watch_held()),
              asyncio.create_task(tail.watch_mic_active()),
-             asyncio.create_task(tail.watch_muted())]
+             asyncio.create_task(tail.watch_muted()),
+             asyncio.create_task(tail.watch_voice_cmd())]
     try:
         await asyncio.Event().wait()
     finally:

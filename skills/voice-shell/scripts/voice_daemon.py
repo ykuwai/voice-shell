@@ -659,6 +659,62 @@ def voice_command(text: str, muted: bool):
     return "mute" if key in MUTE_WORDS else None
 
 
+# 送信先も声で選べるようにする。番号は画面に並ぶ順（「すべて」を除いた1番目から）。
+# 数を言うだけ（「1」）では効かない — 数字ひとつは物音の誤認識でも出てくるし、
+# 話の途中の「1」で送信先が飛ぶと、どこへ行ったのか分からなくなる。
+# 必ず「送信先」「番」「切り替え」のどれかを添えてもらう。
+_ROUTE_ALL_WORDS = {
+    "全員に", "全員へ", "全員に送る", "全員に送って", "全員に切り替え", "全員に切り替えて",
+    "すべてに", "すべてへ", "すべてに送る", "すべてに切り替え", "すべてに切り替えて",
+    "みんなに", "みんなに送る", "全部に", "全部に送る",
+    "送信先すべて", "送信先を全員に", "送信先を全員",
+    "sendtoall", "switchtoall", "routetoall", "broadcast", "toall",
+}
+_ROUTE_JA = re.compile(
+    r"^(?:"
+    r"(?:送信先|宛先|あて先|セッション)を?(\d+)(?:番)?(?:に|へ)?"
+    r"(?:切り替え|切替|きりかえ|変更|送る|送信)?(?:て|る|して)?"
+    r"|(\d+)番(?:目)?(?:に|へ)?(?:切り替え|切替|きりかえ|変更|送る|送信)?(?:て|る|して)?"
+    r"|(\d+)(?:に|へ)(?:切り替え|切替|きりかえ|変更|送る|送信)(?:て|る|して)?"
+    r")$")
+_ROUTE_EN = re.compile(
+    r"^(?:switchto|sendto|routeto|goto|target|session|destination|route)(\d+)$")
+
+# 「一に切り替え」のような漢数字。kanji_numbers_to_arabic は単独の「一」「二」を
+# わざと直さない（数として言ったのか判別できないため）ので、ここで別に直す。
+# 合図として当たるかは正規表現が決めるので、取り違えても素通りするだけ。
+_CMD_DIGITS = str.maketrans("一二三四五六七八九〇１２３４５６７８９０",
+                            "1234567890 1234567890".replace(" ", ""))
+
+
+def route_command(text: str):
+    """送信先を選ぶ合図なら ("all", None) か ("n", 番号) を返す。"""
+    key = text.strip().translate(_CMD_DROP).translate(_CMD_DIGITS).lower()
+    if not key:
+        return None
+    if key in _ROUTE_ALL_WORDS:
+        return ("all", None)
+    for rx in (_ROUTE_JA, _ROUTE_EN):
+        m = rx.match(key)
+        if m:
+            return ("n", int(next(g for g in m.groups() if g)))
+    return None
+
+
+def note_voice_cmd(log_path, kind: str, label: str = "") -> None:
+    """声の合図に何が起きたかを画面へ渡す。
+
+    合図は発話として送らないので、通ったかどうかがユーザーに見えない。
+    ビューアがこのファイルを見て、音を鳴らし、一言を出す。
+    """
+    try:
+        (Path(log_path).parent / "voice_cmd.json").write_text(
+            json.dumps({"at": time.time(), "kind": kind, "label": label},
+                       ensure_ascii=False))
+    except OSError:
+        pass
+
+
 def parse_args():
     p = argparse.ArgumentParser(description="音声プロンプト常駐デーモン")
     asr_mic.add_common_args(p)
@@ -1227,6 +1283,7 @@ def main():
                         mute_path.touch()
                     else:
                         mute_path.unlink(missing_ok=True)
+                    note_voice_cmd(log_path, cmd)
                     print(f"(声で{'切' if cmd == 'mute' else '入'}) {text[:40]}",
                           file=sys.stderr, flush=True)
                     # 合図そのものは発話ではないので送らない。was_muted は
@@ -1234,6 +1291,28 @@ def main():
                     # 世代が上がらず、切る前に始まった発話を落とせなくなる）。
                     speaking_since = None
                     continue
+
+                # 送信先も声で選ぶ。番号は画面に並ぶ順（「すべて」を除いた1番目から）。
+                # 切っている間は何も送らないので、そもそも選ぶ意味がない。
+                if not muted_now:
+                    rc = route_command(text)
+                    if rc:
+                        kind, n = rc
+                        live = list_active_listeners(log_path)
+                        if kind == "all":
+                            route_file(log_path).write_text("all")
+                            note_voice_cmd(log_path, "route_all")
+                        elif 1 <= n <= len(live):
+                            route_file(log_path).write_text(str(live[n - 1]["pid"]))
+                            note_voice_cmd(log_path, "route",
+                                           f"{n}. {live[n - 1]['label']}")
+                        else:
+                            # 無い番号。黙って捨てると「言ったのに変わらない」に
+                            # なるので、画面に出して知らせる。
+                            note_voice_cmd(log_path, "route_missing", str(n))
+                        print(f"(声で送信先) {text[:40]}", file=sys.stderr, flush=True)
+                        speaking_since = None
+                        continue
 
                 # 発話が始まった時点から今までにミュートを挟んだか、
                 # あるいは今なお切られているなら、その発話は送らない。

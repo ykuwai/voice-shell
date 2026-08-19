@@ -875,6 +875,9 @@ const I18N = {
     grpLog:'Transcript', items:'items', copyAll:'Copy all', copied:'Copied',
     micSwitched:'Switched microphone: {name}',
     voiceMuted:'Muted — say “unmute” to come back',
+    voiceRoute:'Now sending to {name}',
+    voiceRouteAll:'Now sending to every session',
+    voiceRouteMissing:'There is no session {n}',
     voiceUnmuted:'Unmuted — listening again',
     micSwitching:'Switching microphone to {name}…',
     discarded:'Discarded.', undo:'Undo',
@@ -970,6 +973,9 @@ const I18N = {
     grpLog:'ログ', items:'件', copyAll:'全部コピー', copied:'コピーしました',
     micSwitched:'マイクを切り替えました: {name}',
     voiceMuted:'ミュートにしました — 「ミュート解除」で戻ります',
+    voiceRoute:'送信先を {name} にしました',
+    voiceRouteAll:'送信先をすべてのセッションにしました',
+    voiceRouteMissing:'{n} 番のセッションはありません',
     voiceUnmuted:'ミュートを解除しました — また届きます',
     micSwitching:'{name} に切り替えています…',
     discarded:'消しました。', undo:'元に戻す',
@@ -1804,24 +1810,34 @@ async function setRoute(next) {
    画面を見ていないから声で操作しているわけで、見た目が変わるだけでは
    通じたのか分からない。通話アプリに倣って、切るときは下がる音、
    戻すときは上がる音にする（どちらに変わったか、音だけで分かる）。 */
+const CHIME = {
+  down: [[680, 440]],              // 切った
+  up:   [[440, 680]],              // 戻した
+  ok:   [[620, 620], [880, 880]],  // 送信先が変わった（2音で区別）
+  err:  [[300, 220]],              // 言ったのに効かなかった
+};
 let chimeCtx = null;
-function chime(muted) {
+function chime(kind) {
+  const seq = CHIME[kind];
+  if (!seq) return;
   try {
     chimeCtx = chimeCtx || new (window.AudioContext || window.webkitAudioContext)();
     if (chimeCtx.state === 'suspended') chimeCtx.resume();
-    const t0 = chimeCtx.currentTime;
-    const osc = chimeCtx.createOscillator();
-    const gain = chimeCtx.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(muted ? 680 : 440, t0);
-    osc.frequency.exponentialRampToValueAtTime(muted ? 440 : 680, t0 + 0.11);
-    // 直線だと切れ際に「プツッ」と鳴るので、両端を絞る
-    gain.gain.setValueAtTime(0.0001, t0);
-    gain.gain.exponentialRampToValueAtTime(0.10, t0 + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.18);
-    osc.connect(gain).connect(chimeCtx.destination);
-    osc.start(t0);
-    osc.stop(t0 + 0.2);
+    seq.forEach(([from, to], i) => {
+      const t0 = chimeCtx.currentTime + i * 0.13;
+      const osc = chimeCtx.createOscillator();
+      const gain = chimeCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(from, t0);
+      osc.frequency.exponentialRampToValueAtTime(to, t0 + 0.10);
+      // 直線だと切れ際に「プツッ」と鳴るので、両端を絞る
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(0.10, t0 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
+      osc.connect(gain).connect(chimeCtx.destination);
+      osc.start(t0);
+      osc.stop(t0 + 0.18);
+    });
   } catch { /* 音が出せない環境では黙って諦める（表示は変わっている） */ }
 }
 
@@ -1853,9 +1869,26 @@ function connect() {
       if (m.muted !== (route === 'off')) {
         route = m.muted ? 'off' : lastMode;
         paint();
-        if (!m.first) {
-          chime(m.muted);
-          el.hint.textContent = t(m.muted ? 'voiceMuted' : 'voiceUnmuted');
+      }
+      return;
+    }
+    if ('voice_cmd' in m) {
+      // 合図は発話として送らないので、通ったことをここで知らせる。
+      // 開いた時点で残っていたもの（first）は、いま起きたことではない。
+      const c = m.voice_cmd || {};
+      if (!m.first) {
+        if (c.kind === 'mute') {
+          chime('down'); el.hint.textContent = t('voiceMuted');
+        } else if (c.kind === 'unmute') {
+          chime('up');   el.hint.textContent = t('voiceUnmuted');
+        } else if (c.kind === 'route') {
+          chime('ok');   el.hint.textContent = t('voiceRoute', {name: c.label});
+          loadListeners();
+        } else if (c.kind === 'route_all') {
+          chime('ok');   el.hint.textContent = t('voiceRouteAll');
+          loadListeners();
+        } else if (c.kind === 'route_missing') {
+          chime('err');  el.hint.textContent = t('voiceRouteMissing', {n: c.label});
         }
       }
       return;
@@ -2651,7 +2684,10 @@ function paintRoutes() {
   // 1つしか聞いていないなら選ばせる意味がない
   if (knownListeners.length < 2) { el.routes.hidden = true; return; }
   el.routes.hidden = false;
-  const items = [{pid: 'all', label: t('routeAll')}, ...knownListeners];
+  // 番号を出す。声で「2番に切り替え」と言うときの番号がこれ。
+  // デーモンも同じ並び（登録の早い順）で数えるので、見えている番号と一致する。
+  const items = [{pid: 'all', label: t('routeAll')},
+                 ...knownListeners.map((l, i) => ({...l, label: `${i + 1}. ${l.label}`}))];
   el.routes.replaceChildren(...items.map(l => {
     // 実際に届く先を光らせる。未選択のときはサーバが「あとで起動した方」に
     // 決めるので、選んだ覚えが無くてもどこへ届くかが見える。
