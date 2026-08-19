@@ -22,7 +22,13 @@ from aiohttp import web, WSCloseCode
 if os.environ.get("VOICE_SHELL_STATE_DIR"):
     DEFAULT_LOG = Path(os.environ["VOICE_SHELL_STATE_DIR"]) / "utterances.jsonl"
 else:
-    DEFAULT_LOG = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "qwen-voice" / "utterances.jsonl"
+    # 名前を "qwen-voice" から改めた。voice_daemon.py と同じ理由で、古い方が
+    # 残っていて新しい方が無ければそちらを使い続ける。
+    _base = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp"))
+    _state = _base / "voice-shell"
+    if not _state.exists() and (_base / "qwen-voice").exists():
+        _state = _base / "qwen-voice"
+    DEFAULT_LOG = _state / "utterances.jsonl"
 
 # ユーザー辞書。voice_daemon.py と同じ場所を読み書きする。
 _CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "voice-shell"

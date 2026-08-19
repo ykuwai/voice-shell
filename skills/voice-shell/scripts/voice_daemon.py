@@ -49,7 +49,15 @@ import asr_mic
 if os.environ.get("VOICE_SHELL_STATE_DIR"):
     STATE_DIR = Path(os.environ["VOICE_SHELL_STATE_DIR"])
 else:
-    STATE_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "qwen-voice"
+    # 以前は "qwen-voice" という名前だった。Qwen3-ASR は数ある選択肢の
+    # ひとつになったので名前を改めたが、動いているものを壊さないよう、
+    # 古い方が残っていて新しい方が無ければそちらを使い続ける
+    # （/tmp が空けば自然に新しい名前へ移る）。
+    _base = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp"))
+    STATE_DIR = _base / "voice-shell"
+    _legacy = _base / "qwen-voice"
+    if not STATE_DIR.exists() and _legacy.exists():
+        STATE_DIR = _legacy
 
 # ユーザー辞書。再起動をまたいで残したいので設定ディレクトリに置く。
 # Web UI から編集でき、変更は次の発話からすぐ効く（デーモン再起動は不要）。

@@ -44,7 +44,7 @@ find_python() {
   if [[ -x "$HERE/../../../.venv/Scripts/python.exe" ]]; then
     echo "$HERE/../../../.venv/Scripts/python.exe"; return
   fi
-  # conda / mamba の qwen3-asr 環境を各所から探す
+  # conda / mamba の環境を各所から探す（qwen3-asr は昔の名前）
   for base in "$HOME/miniforge3" "$HOME/miniconda3" "$HOME/anaconda3" \
               "$HOME/mambaforge" "/opt/homebrew/Caskroom/miniforge/base" "/opt/conda"; do
     for env in qwen3-asr voice-shell; do
@@ -81,7 +81,7 @@ kill_engine_cores() {
 
 # 前回どのエンジンで起動したかを覚えておく。ビューアの「聞き取りを
 # 始める」は engine-start を呼ぶが、そちらは元のコマンドを知らない。
-# 覚えていないと whisper で立ち上げたのに Qwen3-ASR が載ってしまう。
+# 覚えていないと、前回 whisper を選んだのに別のモデルが載ってしまう。
 engine_args() {
   # 覚えている選択（~/.config/voice-shell/config.json）を正とする。
   # 以前は /tmp のファイルを見ていたが、再起動で消えると黙って
@@ -113,7 +113,14 @@ if [[ -z "$PY" ]]; then
   echo "  場所を直接指定する場合: export VOICE_SHELL_PYTHON=/path/to/python" >&2
   exit 1
 fi
-STATE_DIR="${XDG_RUNTIME_DIR:-/tmp}/qwen-voice"
+# 以前は "qwen-voice" という名前だった。Qwen3-ASR は数ある選択肢のひとつに
+# なったので名前を改めたが、動いているものを壊さないよう、古い方が残っていて
+# 新しい方が無ければそちらを使い続ける（/tmp が空けば新しい名前へ移る）。
+STATE_DIR="${XDG_RUNTIME_DIR:-/tmp}/voice-shell"
+_legacy_state="${XDG_RUNTIME_DIR:-/tmp}/qwen-voice"
+if [ ! -d "$STATE_DIR" ] && [ -d "$_legacy_state" ]; then
+  STATE_DIR="$_legacy_state"
+fi
 LOG_FILE="$STATE_DIR/utterances.jsonl"
 BOOT_LOG="$STATE_DIR/daemon.out"
 
@@ -308,7 +315,7 @@ case "$cmd" in
     echo "起動中… (モデル読み込みに1〜2分かかります)"
     ;;
   whisper)
-    # Qwen3-ASR の代わりに Whisper を使う。固有名詞に強い。
+    # 認識に Whisper を使う。固有名詞に強い。
     "$0" start --engine whisper "$@"
     ;;
   apple)
