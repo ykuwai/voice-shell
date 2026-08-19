@@ -260,10 +260,15 @@ case "$cmd" in
     reg="$STATE_DIR/listeners/$reg_pid"
     { date; pwd; } > "$reg" 2>/dev/null || true
     # exec すると trap が引き継がれず（プロセス置き換えで bash 自体が
-    # 消えるため）終了時の自動削除が効かなくなる。多少プロセスが1つ
-    # 余分に残る代わりに、trap を確実に効かせる。
-    trap 'rm -f "$reg"' EXIT
-    tail -F -n 0 "$LOG_FILE"
+    # 消えるため）終了時の自動削除が効かなくなる。
+    #
+    # tail は背景に回して wait する。前面のまま置くと、SIGTERM で bash だけ
+    # 死んで tail が孤児として残る（登録は消えているのに発話は受け取れる、
+    # という多重検知から漏れる状態になる）。
+    tail -F -n 0 "$LOG_FILE" &
+    tail_pid=$!
+    trap 'rm -f "$reg"; kill "$tail_pid" 2>/dev/null || true' EXIT INT TERM HUP
+    wait "$tail_pid"
     ;;
   hold)
     # 発話を溜める側に回す。Claude 自身が呼ぶことを想定している

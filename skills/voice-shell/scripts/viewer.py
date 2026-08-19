@@ -400,8 +400,14 @@ async def main_async(args):
         if not text:
             return web.json_response({"error": "empty"}, status=400)
 
-        sys.path.insert(0, str(Path(__file__).parent))
         import voice_daemon as vd
+
+        # デーモンも認識しているなら受け取らない。同じ発話ログに両方が
+        # 書くので、受けてしまうと同じ指示が2回 Claude に届く。
+        # 画面側でも排他しているが、タブを複数開かれる場合もあるので
+        # ここでも止める。
+        if engine_running():
+            return web.json_response({"dropped": "daemon_running"}, status=409)
 
         # マイクを切っているあいだは、どこにも残さない（デーモンと同じ扱い）
         if mute_file.exists():
@@ -412,15 +418,19 @@ async def main_async(args):
         except (OSError, ValueError):
             tuning = {}
 
+        # 順序はデーモンに合わせる（最小文字数 → 無視語 → 整形）。
+        # polish は辞書の言い換えで文字数が変わるので、順序が違うと
+        # 同じ発話でも認識のやり方によって届く／届かないが変わる。
+        min_chars = tuning.get("min_chars", 15)
+        if isinstance(min_chars, (int, float)) and len(text) < int(min_chars):
+            return web.json_response({"dropped": "too_short"})
+
         user_dict = vd.load_dictionary()
         if vd.is_noise(text, user_dict["ignore"]):
             return web.json_response({"dropped": "noise"})
 
         text = vd.polish(text, user_dict, False,
                          bool(tuning.get("strip_fillers")))
-        min_chars = tuning.get("min_chars", 15)
-        if isinstance(min_chars, (int, float)) and len(text) < int(min_chars):
-            return web.json_response({"dropped": "too_short"})
 
         stamp = time.strftime("%H:%M:%S")
         if pause_file.exists():
@@ -513,7 +523,6 @@ async def main_async(args):
                 cur[key] = body[key]
 
         if isinstance(body.get("language"), str):
-            sys.path.insert(0, str(Path(__file__).parent))
             import whisper_engine
             code = body["language"]
             # 空文字（自動判定）か、対応済みコードのときだけ受け付ける
@@ -533,7 +542,6 @@ async def main_async(args):
             engine = ""
         if engine != "whisper":
             return web.json_response({"engine": engine, "languages": [], "current": ""})
-        sys.path.insert(0, str(Path(__file__).parent))
         import whisper_engine
         try:
             cur = json.loads(TUNING_FILE.read_text()).get("language", "")
@@ -547,7 +555,6 @@ async def main_async(args):
 
     async def handle_mics(_req):
         """使えるマイクの一覧と、いま選ばれているものを返す。"""
-        sys.path.insert(0, str(Path(__file__).parent))
         import asr_mic
         try:
             current = mic_file.read_text().strip()

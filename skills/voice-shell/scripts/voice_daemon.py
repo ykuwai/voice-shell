@@ -19,6 +19,7 @@ import json
 import os
 import re
 import signal
+import subprocess
 import sys
 import threading
 import time
@@ -602,6 +603,12 @@ def _pid_alive(pid):
         return True
     except ProcessLookupError:
         return False
+    except PermissionError:
+        # 他人のプロセスに PID が再利用されている。ここで見る PID は
+        # すべて自分が書いたものなので、他人のもの＝目的のプロセスではない。
+        # True にすると status が永久に「稼働中」になり、start も
+        # 二度と通らなくなる（二重起動の本当の歯止めは flock 側にある）。
+        return False
 
 
 def read_pid():
@@ -610,6 +617,32 @@ def read_pid():
     except (FileNotFoundError, ValueError):
         return None
     return pid if _pid_alive(pid) else None
+
+
+def _proc_started_at(pid):
+    """そのプロセスが始まってから何秒経ったか。分からなければ None。
+
+    PID は使い回されるので、登録ファイルより後に始まったプロセスは別人と
+    みなす。経過秒（ps の etime）で見るのは、書式が "分:秒" や
+    "日-時:分:秒" と揺れる開始時刻より、桁を跨いでも解釈が単純なため。
+    ps が無い環境では None を返し、判定を素通りさせる。
+    """
+    if sys.platform.startswith("win"):
+        return None
+    try:
+        r = subprocess.run(["ps", "-o", "etime=", "-p", str(pid)],
+                           capture_output=True, timeout=5)
+        text = r.stdout.decode(errors="replace").strip()
+        if not text:
+            return None
+        days, _, clock = text.rpartition("-")
+        parts = [int(x) for x in clock.split(":")]
+        while len(parts) < 3:
+            parts.insert(0, 0)            # "分:秒" を "0:分:秒" に揃える
+        secs = parts[0] * 3600 + parts[1] * 60 + parts[2]
+        return secs + (int(days) * 86400 if days else 0)
+    except Exception:
+        return None
 
 
 def listeners_dir(log_path):
@@ -632,16 +665,29 @@ def list_active_listeners(log_path):
             pid = int(f.name)
         except ValueError:
             continue
-        if _pid_alive(pid):
+        try:
+            lines = f.read_text().splitlines()
+        except OSError:
+            lines = []
+        # 登録ファイルより後に始まったプロセスなら、PID が使い回されただけの
+        # 別人。これを見ないと、居ないセッションについて警告を書き続ける。
+        stale = False
+        age = _proc_started_at(pid)
+        if age is not None:
             try:
-                lines = f.read_text().splitlines()
+                registered_ago = time.time() - f.stat().st_mtime
+                stale = age < registered_ago - 5      # 5秒は測り方のぶれ
             except OSError:
-                lines = []
-            started = lines[0] if len(lines) > 0 else "不明"
-            cwd = lines[1] if len(lines) > 1 else "不明"
-            out.append({"pid": pid, "started": started, "cwd": cwd})
+                stale = False
+        if _pid_alive(pid) and not stale:
+            out.append({"pid": pid,
+                        "started": lines[0] if len(lines) > 0 else "不明",
+                        "cwd": lines[1] if len(lines) > 1 else "不明"})
         else:
-            f.unlink(missing_ok=True)   # 死んでいるものは片付ける
+            try:
+                f.unlink(missing_ok=True)   # 死んでいるものは片付ける
+            except PermissionError:
+                pass                        # 他人のもの。触らない
     return out
 
 
@@ -830,7 +876,9 @@ def main():
         was_muted = False
         speaking_since = None   # いま進行中の発話が始まった時点の generation
 
-        with open(log_path, "a", buffering=1) as f:   # 行バッファで即 flush
+        # 読み手（ビューア・Monitor）と食い違わないよう明示する。
+        # Windows は指定しないとロケール（cp932）で開いてしまう。
+        with open(log_path, "a", buffering=1, encoding="utf-8") as f:
             for ev in asr_mic.stream_utterances(model, args):
                 muted_now = mute_path.exists()
                 if muted_now and not was_muted:
