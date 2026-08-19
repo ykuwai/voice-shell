@@ -887,6 +887,7 @@ const I18N = {
     voiceMuted:'Muted — say “unmute” to come back',
     voiceRoute:'Now sending to {name}',
     voiceRouteMissing:'There is no session {n}',
+    voiceSaid:' (heard “{said}” as a command, not a prompt)',
     voiceUnmuted:'Unmuted — listening again',
     micSwitching:'Switching microphone to {name}…',
     discarded:'Discarded.', undo:'Undo',
@@ -985,6 +986,7 @@ const I18N = {
     voiceMuted:'ミュートにしました — 「ミュート解除」で戻ります',
     voiceRoute:'送信先を {name} にしました',
     voiceRouteMissing:'{n} 番のセッションはありません',
+    voiceSaid:'（「{said}」は合図として扱い、指示としては送っていません）',
     voiceUnmuted:'ミュートを解除しました — また届きます',
     micSwitching:'{name} に切り替えています…',
     discarded:'消しました。', undo:'元に戻す',
@@ -1588,7 +1590,7 @@ function paint() {
   el.segOff.setAttribute('aria-label', el.segOff.title);
 
   setState(shown, t(off ? 'statusOff' : shown === 'hold' ? 'statusHold' : 'statusLive'));
-  if (!oneShot) {
+  if (!oneShot && performance.now() > hintHoldUntil) {
     el.hint.textContent = t(off ? 'hintOff' : shown === 'hold' ? 'hintHold' : 'hintLive');
   }
   // 手元で作業している間はタブのタイトルだけが手がかりになる
@@ -1630,6 +1632,14 @@ async function setRoute(next) {
   } finally {
     inFlight = false;
   }
+  applyRouteSideEffects(next);
+  refreshState();
+}
+
+/* 切ったあとの後始末。声で切り替わったときも同じ処理を通す —
+   ここを通さないと、画面は「切」なのにブラウザのマイクは開いたままで、
+   タブの録音インジケータが点き続ける。 */
+function applyRouteSideEffects(next) {
   // 一時停止のあいだはブラウザ側のマイクも手放す（録音の気配を残さない）。
   // 認識も一緒に止める — 止めないと、画面に「何も記録されません」と
   // 出しているのに、音声だけは外へ送られ続ける。
@@ -1643,8 +1653,18 @@ async function setRoute(next) {
     }
   }
   paintBrowserAsr();
-  refreshState();
 }
+
+/* 合図の一言。3秒おきの paint() に上書きされないよう、しばらく守る。
+   画面を見ていないから声で操作しているので、見逃すと何も残らない。 */
+let hintHoldUntil = 0;
+function say(text, sec = 6) {
+  el.hint.textContent = text;
+  hintHoldUntil = performance.now() + sec * 1000;
+}
+
+// 合図と判定した発話そのもの。指示のつもりで言ったものが消えることがある。
+const said = c => c.said ? t('voiceSaid', {said: c.said}) : '';
 
 /* 声で切り替わったときだけ鳴らす短い音。
    画面を見ていないから声で操作しているわけで、見た目が変わるだけでは
@@ -1709,6 +1729,7 @@ function connect() {
       if (m.muted !== (route === 'off')) {
         route = m.muted ? 'off' : lastMode;
         paint();
+        applyRouteSideEffects(route);
       }
       return;
     }
@@ -1716,17 +1737,16 @@ function connect() {
       // 合図は発話として送らないので、通ったことをここで知らせる。
       // 開いた時点で残っていたもの（first）は、いま起きたことではない。
       const c = m.voice_cmd || {};
-      if (!m.first) {
-        if (c.kind === 'mute') {
-          chime('down'); el.hint.textContent = t('voiceMuted');
-        } else if (c.kind === 'unmute') {
-          chime('up');   el.hint.textContent = t('voiceUnmuted');
-        } else if (c.kind === 'route') {
-          chime('ok');   el.hint.textContent = t('voiceRoute', {name: c.label});
-          loadListeners();
-        } else if (c.kind === 'route_missing') {
-          chime('err');  el.hint.textContent = t('voiceRouteMissing', {n: c.label});
-        }
+      if (c.kind === 'mute') {
+        chime('down'); say(t('voiceMuted'));
+      } else if (c.kind === 'unmute') {
+        chime('up');   say(t('voiceUnmuted'));
+      } else if (c.kind === 'route') {
+        // 合図と判定した発話は指示として送られない。何が消えたのかは見せる。
+        chime('ok');   say(t('voiceRoute', {name: c.label}) + said(c));
+        loadListeners();
+      } else if (c.kind === 'route_missing') {
+        chime('err');  say(t('voiceRouteMissing', {n: c.label}) + said(c));
       }
       return;
     }

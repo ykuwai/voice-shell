@@ -543,7 +543,8 @@ def stream_utterances(model, args, should_stop=lambda: False):
         limit = args.max_utterance_sec
         too_long = (limit > 0 and accum_sec >= limit
                     and silence_run >= args.pause_sec)
-        way_too_long = accum_sec >= (limit * 2 if limit > 0 else HARD_UTTERANCE_CAP)
+        way_too_long = accum_sec >= (min(limit * 2, HARD_UTTERANCE_CAP)
+                                     if limit > 0 else HARD_UTTERANCE_CAP)
 
         if done_talking or too_long or way_too_long:
             done = finish()
