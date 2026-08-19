@@ -1799,7 +1799,9 @@ function paintPower() {
   const busy = engine === 'booting' || engine === 'stopping';
   el.power.classList.toggle('busy', busy);
   el.power.classList.toggle('lit', engine === 'on');
-  el.power.classList.toggle('warn', engine === 'off');
+  // オフのときは warn（オレンジ＋点）を付けない。無彩色・点なしの
+  // 素の .icon に戻す（「オレンジ＋点＝オン」と誤解されたため。
+  // 点が無い状態を明確な「オフ」として使う）。
   el.power.disabled = busy;
 
   if (engine === 'booting') {
