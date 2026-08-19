@@ -20,8 +20,15 @@ import numpy as np
 SAMPLE_RATE = 16000
 
 BLOCK_SEC = 0.1  # マイクを読む単位
-# 喋り続けている限り区切らないが、溜めた音声はそのまま推論に渡すので、
-# 際限なく伸ばすと1回の認識が返らなくなる。ここだけは歯止めとして残す。
+# 喋り続けている限り区切らない。ただし溜めた音声はそのまま推論に渡すので、
+# 際限なく伸ばすと1回の認識が重くなり、届くまでが延びる。
+#
+# LONG_UTTERANCE_SEC を超えたら、ごく短い息継ぎ（LONG_PAUSE_SEC）でも区切る。
+# 「1分喋ってから、まとめて1つ届く」のは、待っている側からは止まって見える。
+# 文の切れ目で区切るので、話を遮る感じにはならない。
+LONG_UTTERANCE_SEC = 60.0
+LONG_PAUSE_SEC = 0.4
+# 息継ぎすら無いまま延び続けたときの、最後の歯止め。
 HARD_UTTERANCE_CAP = 300.0
 
 # 発話の頭に付ける「しきい値を超える直前」の長さ。
@@ -528,9 +535,12 @@ def stream_utterances(model, args, should_stop=lambda: False):
         # 話し終わった（無音が続いた）なら確定する。喋っている最中は切らない
         # — 一息で伝えたいのに途中で送られる方が困る。
         done_talking = silence_run >= args.silence_duration
+        # ただし長くなりすぎたら、文の切れ目で区切る（下のコメント参照）
+        long_enough = (accum_sec >= LONG_UTTERANCE_SEC
+                       and silence_run >= LONG_PAUSE_SEC)
         way_too_long = accum_sec >= HARD_UTTERANCE_CAP
 
-        if done_talking or way_too_long:
+        if done_talking or long_enough or way_too_long:
             done = finish()
             if done:
                 yield done
