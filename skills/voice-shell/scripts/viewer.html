@@ -2588,6 +2588,12 @@ el.floatBtn.hidden = !canFloat;
 
 el.floatBtn.onclick = async () => {
   if (!canFloat) return;
+  // トグルにする。浮いている最中にもう一度押したら、元のタブへ戻す
+  // （'pagehide' で戻す処理は既にある。window.close() を呼べばそれが動く）。
+  if (documentPictureInPicture.window) {
+    documentPictureInPicture.window.close();
+    return;
+  }
   const win = await documentPictureInPicture.requestWindow({width: 400, height: 720});
   // 同じ見た目にするためスタイルをそのまま持っていく
   for (const node of document.querySelectorAll('style')) {
