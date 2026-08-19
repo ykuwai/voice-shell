@@ -157,46 +157,21 @@
 
   /* ── ビジュアライザ ───────────────────── */
   .viz { position:relative; padding:.4rem 0 .1rem; }
+  /* 大きなマイクの当たり判定。絵は canvas 側が描くので、ここは透明。 */
+  .mic-hit {
+    position:absolute; left:50%; top:calc(.4rem + 62px);
+    transform:translate(-50%, -50%);
+    width:100px; height:100px; border-radius:50%;
+    background:transparent; cursor:pointer;
+  }
+  .mic-hit:disabled { cursor:default; }
+  /* マイク表示でないときは押せる場所を作らない（波形は操作対象ではない） */
+  .viz.no-mic .mic-hit { display:none; }
   #viz { display:block; width:100%; height:124px; }
   /* マイクの入切と音量メーターを1行に並べる */
   .meter-row { display:flex; align-items:center; gap:.55rem; padding:0 1rem; }
   .meter-row .meter-hit { flex:1; min-width:0; padding-left:0; padding-right:0; }
 
-  /* 一時停止。よく使う操作なので、設定や電源と同じ大きさで並べない。
-     文字は付けない — 止めている間は画面全体が沈む（送り先が暗くなり、
-     波形が平らになり、上の行が橙になる）ので、それが状態を語る。 */
-  .pause {
-    position:relative; overflow:hidden;
-    flex:none; width:42px; height:42px; border-radius:50%;
-    display:grid; place-items:center; color:var(--dim);
-    border:2px solid var(--line); background:var(--panel-2);
-    transition:border-color .18s, background .18s, box-shadow .18s, color .18s;
-  }
-  /* 拾えている音量ぶんだけ下から満ちる（通話アプリのマイクと同じ作法）。
-     絵の後ろに敷くので、マイクの形はそのまま読める。 */
-  .pause::before {
-    content:""; position:absolute; left:0; right:0; bottom:0;
-    height:var(--lv, 0%);
-    background:linear-gradient(180deg,
-      color-mix(in srgb, var(--accent) 55%, transparent),
-      color-mix(in srgb, var(--accent) 22%, transparent));
-    transition:height .1s linear;
-    pointer-events:none;
-  }
-  .pause > span { position:relative; }      /* 満ちる面より前に出す */
-  .pause.paused::before { display:none; }   /* 切っている間は満ちない */
-  .pause > span { display:grid; place-items:center; }
-  .pause:hover:not(:disabled) { color:var(--text); border-color:var(--dim); }
-  .pause:disabled { opacity:.4; }
-  /* 切っている間は斜線入りのマイクを赤で塗る（通話アプリと同じ作法）。
-     色と斜線が揃うので、離れて見ても切れていると分かる。 */
-  .pause.paused {
-    border-color:transparent; color:#fff;
-    background:var(--danger);
-    box-shadow:0 0 20px color-mix(in srgb, var(--danger) 55%, transparent);
-  }
-  .pause .solid { display:inline; }
-  .pause .line { display:none; }
   /* デーモンが拾えている音量。ブラウザ側の波形とは別の経路なので、
      ここが動かないのに波形が動いていれば認識側が死んでいると分かる。 */
   /* 掴みやすいよう、線そのものより広い範囲で受ける */
@@ -580,16 +555,14 @@
 
   <div class="viz">
     <canvas id="viz"></canvas>
+    <!-- 大きなマイクを押すと入切する。絵は canvas なので、
+         押せる範囲だけ透明な丸を重ねる。 -->
+    <button class="mic-hit" id="segOff" aria-pressed="false"></button>
     <!-- デーモンが拾えている音量。ブラウザの波形とは別経路なので、
          波形が動くのにここが動かなければ認識側が落ちていると分かる。 -->
     <!-- 印をつまむと感度が変わる。細い線のままでは掴めないので、
          見た目より広い当たり判定を親に持たせている。 -->
     <div class="meter-row">
-    <!-- マイクの入切。音量の並びに置くと、何を切るのかがいっそう分かる。 -->
-    <button class="pause" id="segOff" aria-pressed="false">
-      <span class="glyph-pause" data-icon="mic" data-icon-size="22"></span>
-      <span class="glyph-play" data-icon="mic_off" data-icon-size="22" hidden></span>
-    </button>
     <div class="meter-hit" id="meterHit" data-i18n-title="thresholdMark">
       <div class="meter" id="meter">
         <div class="meter-fill" id="meterFill"></div>
@@ -1507,83 +1480,77 @@ function drawRadial(b) {
   cx.globalCompositeOperation = 'source-over';
 }
 
-// マイクの形。24x24 の中の座標で持ち、描くときに拡大する。
-// （Material Symbols のパスは 960 系で重いので、輪郭だけ自前で持つ）
-function micPath(cx2, x, y, r) {
-  // 縦長の丸（本体）
-  const bw = r * 0.42, bh = r * 0.86;
-  cx2.beginPath();
-  cx2.roundRect(x - bw / 2, y - r * 0.95, bw, bh, bw / 2);
-}
-
-function micArc(cx2, x, y, r) {
-  // 下の受け皿と軸
-  cx2.beginPath();
-  cx2.arc(x, y - r * 0.16, r * 0.62, 0, Math.PI);
-  cx2.moveTo(x, y + r * 0.46);
-  cx2.lineTo(x, y + r * 0.82);
-}
-
 /* 大きなマイクひとつ。内側が拾えている音量ぶんだけ下から光る。
-   周りの輪も音量で広がるので、離れて見ても分かる。 */
-function drawMic(b) {
+
+   絵は Material Symbols のパスをそのまま使う（手で描くと、ほかの
+   アイコンと形も太さも揃わない）。viewBox は 0 -960 960 960 なので、
+   中心が (480, -480) に来るように動かしてから拡大する。 */
+const _micPaths = {};
+function micPath2D(name) {
+  if (!_micPaths[name]) _micPaths[name] = new Path2D(ICON[name][1]);   // 塗りの方
+  return _micPaths[name];
+}
+
+function paintGlyph(name, midX, midY, size, color) {
+  cx.save();
+  cx.translate(midX, midY);
+  const k = size / 960;
+  cx.scale(k, k);
+  cx.translate(-480, 480);
+  cx.fillStyle = color;
+  cx.fill(micPath2D(name));
+  cx.restore();
+}
+
+function drawMic() {
   const midX = cw / 2, midY = ch / 2;
-  const r = ch * 0.34;
+  const size = ch * 0.62;            // マイクの絵の高さ
+  const ring = ch * 0.40;            // 囲みの輪の半径
   const lv = amplitudeNow();
   const off = route === 'off';
 
-  // 後光。声が大きいほど広がる
-  if (!off && lv > 0.02) {
-    const g2 = cx.createRadialGradient(midX, midY, r * 0.6, midX, midY, r * (1.1 + lv * 0.9));
-    g2.addColorStop(0, color(cssVar('--accent'), 0.28 * lv + 0.05));
-    g2.addColorStop(1, 'transparent');
-    cx.fillStyle = g2;
+  if (off) {
+    cx.strokeStyle = cssVar('--danger');
+    cx.lineWidth = 2;
     cx.beginPath();
-    cx.arc(midX, midY, r * (1.1 + lv * 0.9), 0, Math.PI * 2);
+    cx.arc(midX, midY, ring, 0, Math.PI * 2);
+    cx.stroke();
+    paintGlyph('mic_off', midX, midY, size, cssVar('--danger'));
+    return;
+  }
+
+  // 後光。声が大きいほど広がる
+  if (lv > 0.02) {
+    const g = cx.createRadialGradient(midX, midY, ring * 0.7,
+                                      midX, midY, ring * (1.15 + lv * 0.8));
+    g.addColorStop(0, color(cssVar('--accent'), 0.05 + lv * 0.3));
+    g.addColorStop(1, 'transparent');
+    cx.fillStyle = g;
+    cx.beginPath();
+    cx.arc(midX, midY, ring * (1.15 + lv * 0.8), 0, Math.PI * 2);
     cx.fill();
   }
 
   // 囲みの輪
-  cx.strokeStyle = off ? cssVar('--danger') : cssVar('--line');
+  cx.strokeStyle = cssVar('--line');
   cx.lineWidth = 2;
   cx.beginPath();
-  cx.arc(midX, midY, r * 1.05, 0, Math.PI * 2);
+  cx.arc(midX, midY, ring, 0, Math.PI * 2);
   cx.stroke();
 
-  const dim = off ? cssVar('--danger') : cssVar('--faint');
-  cx.lineCap = 'round';
-  cx.lineJoin = 'round';
-
-  // 沈んだ状態のマイク（下地）
-  cx.strokeStyle = dim; cx.fillStyle = dim; cx.lineWidth = r * 0.1;
-  micPath(cx, midX, midY, r); cx.fill();
-  micArc(cx, midX, midY, r); cx.stroke();
-
-  if (off) {
-    // 斜線（切っていることを示す）
-    cx.strokeStyle = cssVar('--danger');
-    cx.lineWidth = r * 0.12;
-    cx.beginPath();
-    cx.moveTo(midX - r * 0.75, midY - r * 0.75);
-    cx.lineTo(midX + r * 0.75, midY + r * 0.75);
-    cx.stroke();
-    return;
-  }
+  // 沈んだ状態のマイク
+  paintGlyph('mic', midX, midY, size, cssVar('--faint'));
 
   // 内側が下から光る。音量ぶんだけ切り取って、明るい色で描き直す。
   if (lv > 0.01) {
-    const top = midY + r * 0.95 - (r * 1.9) * lv;
+    const top = midY + size / 2 - size * lv;
     cx.save();
     cx.beginPath();
-    cx.rect(midX - r, top, r * 2, r * 1.9);
+    cx.rect(midX - size, top, size * 2, size);
     cx.clip();
-    const g3 = cx.createLinearGradient(0, midY + r, 0, midY - r);
-    g3.addColorStop(0, cssVar('--accent'));
-    g3.addColorStop(1, cssVar('--accent-2'));
-    cx.strokeStyle = g3; cx.fillStyle = g3; cx.lineWidth = r * 0.1;
-    cx.shadowBlur = 14; cx.shadowColor = cssVar('--accent');
-    micPath(cx, midX, midY, r); cx.fill();
-    micArc(cx, midX, midY, r); cx.stroke();
+    cx.shadowBlur = 16;
+    cx.shadowColor = cssVar('--accent');
+    paintGlyph('mic', midX, midY, size, cssVar('--accent'));
     cx.shadowBlur = 0;
     cx.restore();
   }
@@ -1636,7 +1603,7 @@ function paintFrame(now) {
   if (dead) { history.fill(0); smooth.fill(0); } else { pushHistory(now); }
   const bands = dead ? smooth : currentBands();
 
-  if (vizStyle === 'mic') drawMic(bands);
+  if (vizStyle === 'mic') drawMic();
   else if (vizStyle === 'radial') drawRadial(bands);
   else if (vizStyle === 'grid') drawGrid(bands);
   else if (vizStyle === 'wave') drawWave();
@@ -1779,9 +1746,6 @@ function paint() {
   const off = route === 'off';
   el.modes.classList.toggle('muted', off);
   el.segOff.setAttribute('aria-pressed', String(off));
-  el.segOff.querySelector('.glyph-pause').hidden = off;
-  el.segOff.querySelector('.glyph-play').hidden = !off;
-  el.segOff.classList.toggle('paused', off);
   el.segOff.title = t(off ? 'resumeTitle' : 'pauseTitle');
   el.segOff.setAttribute('aria-label', el.segOff.title);
 
@@ -2146,6 +2110,8 @@ for (const b of el.themeRow.children) b.onclick = () => applyTheme(b.dataset.the
 
 function applyViz(choice) {
   vizStyle = choice;
+  // 波形は操作対象ではないので、マイク表示のときだけ押せるようにする
+  el.viz.parentElement.classList.toggle('no-mic', choice !== 'mic');
   for (const b of el.vizRow.children) b.classList.toggle('on', b.dataset.vizChoice === choice);
   store.set('viz', choice);
 }
