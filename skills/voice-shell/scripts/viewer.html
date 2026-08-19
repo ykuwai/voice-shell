@@ -315,6 +315,17 @@
   }
   @keyframes blink { 50% { opacity:0; } }
   .draft-card.idle .caret { display:none; }
+  /* 読み込み直した直後。ブラウザの決まりで、一度触るまで認識を始められない。
+     黙って待つと、最初の一言を落としたことに気づけない。 */
+  .draft-card.needs-touch {
+    border-color:var(--warn);
+    cursor:pointer;
+  }
+  .draft-card.needs-touch .stream::after {
+    content:attr(data-touch);
+    color:var(--warn); font-size:.82rem;
+  }
+  .draft-card.needs-touch #stream { display:none; }
   /* 「今回だけ直す」を押した状態。送り先は即時のままなので、
      ここの色だけで「この一言は止めてある」と示す。 */
   .draft-card.editing {
@@ -573,7 +584,7 @@
       <button class="tiny" id="editOnce" data-icon="edit" data-icon-size="15"
               data-i18n-title="editOnce"></button>
     </div>
-    <div class="stream"><span id="stream" data-i18n-quiet="quiet"></span><span class="caret"></span></div>
+    <div class="stream" data-i18n-touch="needsTouch"><span id="stream" data-i18n-quiet="quiet"></span><span class="caret"></span></div>
     <textarea id="draft" data-i18n-ph="draftPlaceholder" hidden></textarea>
     <div class="draft-actions" id="draftActions" hidden>
       <span class="spacer"></span>
@@ -779,6 +790,7 @@ const I18N = {
     hintNoMic:'No microphone access — the meter still shows the daemon level.',
     modeLive:'Instant', modeHold:'Review',
     unsent:'Unsent', history:'History', quiet:'(silence)',
+    needsTouch:'Click here to start listening',
     routeAll:'Everyone',
     routeGone:'“{gone}” ended. Sending to “{next}” now.',
     routeGoneAll:'“{gone}” ended. Sending to everyone now.',
@@ -816,6 +828,7 @@ const I18N = {
     asrDenied:'Microphone access was refused, so recognition could not start.',
     asrFailed:'Recognition kept failing, so it was turned off. Check your connection and the microphone.',
     asrSendFailed:'Could not deliver what was recognized ({n}). Say it again.',
+    asrDoubled:'Recognition was running twice, so this one was dropped. Switching to the current setting — say it again.',
     calibrate:'Auto-tune',
     calibSpeaking:'Keep talking… {n}s',
     calibQuiet:'Now stay quiet… {n}s',
@@ -868,6 +881,7 @@ const I18N = {
     hintNoMic:'マイクを使えないため、波形はデーモンの音量で動かしています。',
     modeLive:'即時', modeHold:'手直し',
     unsent:'未送信', history:'送信履歴', quiet:'（無音）',
+    needsTouch:'ここを一度クリックすると認識が始まります',
     routeAll:'すべて',
     routeGone:'「{gone}」が終了したので、「{next}」に切り替えました。',
     routeGoneAll:'「{gone}」が終了したので、全員に戻しました。',
@@ -905,6 +919,7 @@ const I18N = {
     asrDenied:'マイクの使用が許可されなかったため、認識を始められませんでした。',
     asrFailed:'認識が続けて失敗したので切りました。回線とマイクを確認してください。',
     asrSendFailed:'認識した文を届けられませんでした（{n}）。もう一度お話しください。',
+    asrDoubled:'認識が二重に動いていたため、この分は届きませんでした。設定を合わせ直したので、もう一度お話しください。',
     calibrate:'自動調整',
     calibSpeaking:'そのまま話し続けてください… あと{n}秒',
     calibQuiet:'今度は黙っていてください… あと{n}秒',
@@ -977,6 +992,7 @@ function applyI18n(root = document) {
   for (const n of root.querySelectorAll('[data-i18n-ph]')) n.placeholder = t(n.dataset.i18nPh);
   // 認識中の枠が空のときに出す文字（CSS から content で読む）
   for (const n of root.querySelectorAll('[data-i18n-quiet]')) n.dataset.quiet = t(n.dataset.i18nQuiet);
+  for (const n of root.querySelectorAll('[data-i18n-touch]')) n.dataset.touch = t(n.dataset.i18nTouch);
   for (const n of root.querySelectorAll('[data-i18n-title]')) {
     n.title = t(n.dataset.i18nTitle);
     n.setAttribute('aria-label', t(n.dataset.i18nTitle));
@@ -2456,7 +2472,13 @@ function sendUtterance(text) {
     try {
       const res = await post('/api/utterance', {text});
       // ブラウザ認識には手元の控えが無い。落ちたら本人に伝えるしかない。
-      if (!res.ok) el.hint.textContent = t('asrSendFailed', {n: res.status});
+      if (res.status === 409) {
+        // デーモンも認識している。画面が取り残されている状態なので合わせ直す。
+        el.hint.textContent = t('asrDoubled');
+        loadEngines();
+      } else if (!res.ok) {
+        el.hint.textContent = t('asrSendFailed', {n: res.status});
+      }
     } catch {
       el.hint.textContent = t('asrSendFailed', {n: '—'});
     }
@@ -2582,6 +2604,7 @@ async function loadEngines() {
     d = await (await fetch('/api/engines')).json();
   } catch { return; }
   localEngines = d.engines || [];
+  const was = asrChosen;
 
   const opts = [];
   if (canBrowserASR) opts.push([BROWSER_ENGINE, t('engineBrowser')]);
@@ -2595,6 +2618,15 @@ async function loadEngines() {
   const cur = d.chosen || BROWSER_ENGINE;
   asrChosen = canBrowserASR && cur === BROWSER_ENGINE;
   recWanted = asrChosen && !asrPausedByRoute;
+
+  // 別のタブやコマンドで切り替えられていたら、こちらも合わせる。
+  // 追従しないと認識が二重に動き、こちらの送信は弾かれて文字だけが消える。
+  if (was && !asrChosen) {
+    stopRecognition();
+    beat('gone');
+  } else if (!was && asrChosen && vizArmed) {
+    startRecognition();
+  }
   el.enginePick.replaceChildren(...opts.map(([id, label]) => {
     const o = document.createElement('option');
     o.value = id; o.textContent = label; o.selected = id === cur;
@@ -2898,11 +2930,21 @@ if (canBrowserASR) {
   // キーボードだけで操作する人もいるので、押鍵でも始める。
   // 認識はマイクの許可が要るので、最初に触られた時点で始める。
   // キーボードだけで操作する人もいるので、押鍵でも始める。
-  const arm = () => { if (recWanted) startRecognition(); };
+  const arm = () => {
+    vizArmed = true;
+    el.tray.classList.remove('needs-touch');
+    if (recWanted) startRecognition();
+  };
   addEventListener('pointerdown', arm, {once:true});
   addEventListener('keydown', arm, {once:true});
 }
-loadEngines().then(() => { if (recWanted) startRecognition(); });
+loadEngines().then(() => {
+  if (!recWanted) return;
+  if (vizArmed) { startRecognition(); return; }
+  // ブラウザの決まりで、一度画面に触るまで認識を始められない。
+  // 何も出さないと「読み込み直したら最初の一言が消えた」になる。
+  el.tray.classList.add('needs-touch');
+});
 applyTheme(store.get('theme', 'auto'));
 applyViz(vizStyle);
 for (const b of el.langRow.children) b.classList.toggle('on', b.dataset.langChoice === langPref);
@@ -2916,6 +2958,8 @@ loadListeners();
 setInterval(refreshState, 3000);
 // 題名は会話が進むと変わるので、定期的に引き直す
 setInterval(loadListeners, 5000);
+// 認識のやり方が外で変わることがある（別タブ、コマンド、別セッション）
+setInterval(loadEngines, 5000);
 </script>
 </body>
 </html>
