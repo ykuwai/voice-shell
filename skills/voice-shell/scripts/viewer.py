@@ -258,11 +258,26 @@ async def main_async(args):
 
     pid_file = state / "daemon.pid"
 
+    def _pid_alive(pid) -> bool:
+        """シグナルを送らずに生存確認する（voice_daemon.py と同じ理由）。
+        os.kill(pid, 0) は Windows では未対応で SystemError になる。"""
+        if sys.platform.startswith("win"):
+            import ctypes
+            handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
+            if handle:
+                ctypes.windll.kernel32.CloseHandle(handle)
+                return True
+            return False
+        try:
+            os.kill(pid, 0)
+            return True
+        except ProcessLookupError:
+            return False
+
     def engine_running() -> bool:
         """認識の準備ができているか（PID は読み込み完了後に書かれる）。"""
         try:
-            os.kill(int(pid_file.read_text()), 0)
-            return True
+            return _pid_alive(int(pid_file.read_text()))
         except (OSError, ValueError):
             return False
 
@@ -287,8 +302,14 @@ async def main_async(args):
             return False
         if time.monotonic() < starting["until"]:
             return True
-        r = subprocess.run(["pgrep", "-f", "voice_daemon.py --language"],
-                           capture_output=True)
+        # pgrep が無い環境（Windows）では、この一瞬の窓を埋める術が無い。
+        # starting["until"] の間だけ拾えれば実害は小さいので諦めて False にする
+        # （クラッシュして /api/state 自体が壊れるよりずっとまし）。
+        try:
+            r = subprocess.run(["pgrep", "-f", "voice_daemon.py --language"],
+                               capture_output=True)
+        except (OSError, FileNotFoundError):
+            return False
         return bool(r.stdout.strip())
 
     # 送信先。空なら全員へ。

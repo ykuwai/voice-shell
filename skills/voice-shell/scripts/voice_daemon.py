@@ -838,6 +838,16 @@ def main():
             print("動いていません。")
             return
         os.kill(pid, signal.SIGTERM)
+        # 本当に終わるまで少し待つ。ここで即座に返ると、呼び出し元
+        # （viewer.py の /api/engine）は「止めた」と判断してしまうが、
+        # 実際にはまだ数百ms〜数秒プロセスが生きていることがある。
+        # その隙にブラウザ認識（Web Speech API）が発話を送ると、
+        # /api/utterance の「デーモンが動いているなら受けない」判定に
+        # 引っかかり、最初の1件だけ発話が黙って捨てられる（実測）。
+        for _ in range(50):        # 最大5秒
+            if not _pid_alive(pid):
+                break
+            time.sleep(0.1)
         print(f"停止しました (PID {pid})")
         return
 
