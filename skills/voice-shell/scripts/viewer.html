@@ -726,6 +726,7 @@
     <div class="field">
       <label data-icon="equalizer" data-icon-size="17" data-i18n="vizStyle">Visualizer</label>
       <div class="seg-row" id="vizRow">
+        <button data-viz-choice="mic" data-i18n="vizMic">Mic</button>
         <button data-viz-choice="bar" data-i18n="vizBar">Bar</button>
         <button data-viz-choice="wave" data-i18n="vizWave">Wave</button>
         <button data-viz-choice="radial" data-i18n="vizRadial">Orb</button>
@@ -879,7 +880,7 @@ const I18N = {
     remove:'Remove',
     grpLook:'Appearance', theme:'Theme',
     themeAuto:'Auto', themeDark:'Dark', themeLight:'Light',
-    vizStyle:'Visualizer', vizBar:'Bar', vizWave:'Wave', vizRadial:'Orb', vizGrid:'Grid',
+    vizStyle:'Visualizer', vizMic:'Mic', vizBar:'Bar', vizWave:'Wave', vizRadial:'Orb', vizGrid:'Grid',
     language:'Language',
     grpDict:'Dictionary',
     dictPrivate:'Keep on this machine only',
@@ -972,7 +973,7 @@ const I18N = {
     remove:'削除',
     grpLook:'見た目', theme:'テーマ',
     themeAuto:'自動', themeDark:'ダーク', themeLight:'ライト',
-    vizStyle:'波形', vizBar:'バー', vizWave:'流れる', vizRadial:'球', vizGrid:'格子',
+    vizStyle:'波形', vizMic:'マイク', vizBar:'バー', vizWave:'流れる', vizRadial:'球', vizGrid:'格子',
     language:'言語',
     grpDict:'辞書',
     dictPrivate:'ローカルにだけ保存する（公開しない）',
@@ -1180,7 +1181,7 @@ const format = raw => raw;
    デーモン（ffmpeg）とは別の経路なので、許可が下りなければ
    WebSocket 越しの音量（level.txt）だけで動かす。 */
 const BARS = 48;
-let vizStyle = store.get('viz', 'bar');
+let vizStyle = store.get('viz', 'mic');
 let audioCtx = null, analyser = null, micStream = null, freq = null;
 let daemonLevel = 0, daemonSpeaking = false;
 let vizFailed = false;
@@ -1506,6 +1507,88 @@ function drawRadial(b) {
   cx.globalCompositeOperation = 'source-over';
 }
 
+// マイクの形。24x24 の中の座標で持ち、描くときに拡大する。
+// （Material Symbols のパスは 960 系で重いので、輪郭だけ自前で持つ）
+function micPath(cx2, x, y, r) {
+  // 縦長の丸（本体）
+  const bw = r * 0.42, bh = r * 0.86;
+  cx2.beginPath();
+  cx2.roundRect(x - bw / 2, y - r * 0.95, bw, bh, bw / 2);
+}
+
+function micArc(cx2, x, y, r) {
+  // 下の受け皿と軸
+  cx2.beginPath();
+  cx2.arc(x, y - r * 0.16, r * 0.62, 0, Math.PI);
+  cx2.moveTo(x, y + r * 0.46);
+  cx2.lineTo(x, y + r * 0.82);
+}
+
+/* 大きなマイクひとつ。内側が拾えている音量ぶんだけ下から光る。
+   周りの輪も音量で広がるので、離れて見ても分かる。 */
+function drawMic(b) {
+  const midX = cw / 2, midY = ch / 2;
+  const r = ch * 0.34;
+  const lv = amplitudeNow();
+  const off = route === 'off';
+
+  // 後光。声が大きいほど広がる
+  if (!off && lv > 0.02) {
+    const g2 = cx.createRadialGradient(midX, midY, r * 0.6, midX, midY, r * (1.1 + lv * 0.9));
+    g2.addColorStop(0, color(cssVar('--accent'), 0.28 * lv + 0.05));
+    g2.addColorStop(1, 'transparent');
+    cx.fillStyle = g2;
+    cx.beginPath();
+    cx.arc(midX, midY, r * (1.1 + lv * 0.9), 0, Math.PI * 2);
+    cx.fill();
+  }
+
+  // 囲みの輪
+  cx.strokeStyle = off ? cssVar('--danger') : cssVar('--line');
+  cx.lineWidth = 2;
+  cx.beginPath();
+  cx.arc(midX, midY, r * 1.05, 0, Math.PI * 2);
+  cx.stroke();
+
+  const dim = off ? cssVar('--danger') : cssVar('--faint');
+  cx.lineCap = 'round';
+  cx.lineJoin = 'round';
+
+  // 沈んだ状態のマイク（下地）
+  cx.strokeStyle = dim; cx.fillStyle = dim; cx.lineWidth = r * 0.1;
+  micPath(cx, midX, midY, r); cx.fill();
+  micArc(cx, midX, midY, r); cx.stroke();
+
+  if (off) {
+    // 斜線（切っていることを示す）
+    cx.strokeStyle = cssVar('--danger');
+    cx.lineWidth = r * 0.12;
+    cx.beginPath();
+    cx.moveTo(midX - r * 0.75, midY - r * 0.75);
+    cx.lineTo(midX + r * 0.75, midY + r * 0.75);
+    cx.stroke();
+    return;
+  }
+
+  // 内側が下から光る。音量ぶんだけ切り取って、明るい色で描き直す。
+  if (lv > 0.01) {
+    const top = midY + r * 0.95 - (r * 1.9) * lv;
+    cx.save();
+    cx.beginPath();
+    cx.rect(midX - r, top, r * 2, r * 1.9);
+    cx.clip();
+    const g3 = cx.createLinearGradient(0, midY + r, 0, midY - r);
+    g3.addColorStop(0, cssVar('--accent'));
+    g3.addColorStop(1, cssVar('--accent-2'));
+    cx.strokeStyle = g3; cx.fillStyle = g3; cx.lineWidth = r * 0.1;
+    cx.shadowBlur = 14; cx.shadowColor = cssVar('--accent');
+    micPath(cx, midX, midY, r); cx.fill();
+    micArc(cx, midX, midY, r); cx.stroke();
+    cx.shadowBlur = 0;
+    cx.restore();
+  }
+}
+
 function drawGrid(b) {
   const cols = 30, rows = 9;
   const pad = 14, w = cw - pad * 2;
@@ -1544,14 +1627,17 @@ function frame(now) {
 function paintFrame(now) {
   cx.clearRect(0, 0, cw, ch);
 
-  const dead = route === 'off' || (engine === 'off' && !asrActive());
+  // マイク表示のときは、切っていることも絵で示したいので描き続ける
+  const dead = (route === 'off' && vizStyle !== 'mic')
+            || (engine === 'off' && !asrActive());
   if (analyser && !vizFailed) analyser.getByteFrequencyData(freq);
 
   // 一時停止中は動かさない。見た目で「録っていない」と分かるようにする。
   if (dead) { history.fill(0); smooth.fill(0); } else { pushHistory(now); }
   const bands = dead ? smooth : currentBands();
 
-  if (vizStyle === 'radial') drawRadial(bands);
+  if (vizStyle === 'mic') drawMic(bands);
+  else if (vizStyle === 'radial') drawRadial(bands);
   else if (vizStyle === 'grid') drawGrid(bands);
   else if (vizStyle === 'wave') drawWave();
   else drawBar(bands);
