@@ -166,11 +166,25 @@
      文字は付けない — 止めている間は画面全体が沈む（送り先が暗くなり、
      波形が平らになり、上の行が橙になる）ので、それが状態を語る。 */
   .pause {
+    position:relative; overflow:hidden;
     flex:none; width:42px; height:42px; border-radius:50%;
     display:grid; place-items:center; color:var(--dim);
     border:2px solid var(--line); background:var(--panel-2);
     transition:border-color .18s, background .18s, box-shadow .18s, color .18s;
   }
+  /* 拾えている音量ぶんだけ下から満ちる（通話アプリのマイクと同じ作法）。
+     絵の後ろに敷くので、マイクの形はそのまま読める。 */
+  .pause::before {
+    content:""; position:absolute; left:0; right:0; bottom:0;
+    height:var(--lv, 0%);
+    background:linear-gradient(180deg,
+      color-mix(in srgb, var(--accent) 55%, transparent),
+      color-mix(in srgb, var(--accent) 22%, transparent));
+    transition:height .1s linear;
+    pointer-events:none;
+  }
+  .pause > span { position:relative; }      /* 満ちる面より前に出す */
+  .pause.paused::before { display:none; }   /* 切っている間は満ちない */
   .pause > span { display:grid; place-items:center; }
   .pause:hover:not(:disabled) { color:var(--text); border-color:var(--dim); }
   .pause:disabled { opacity:.4; }
@@ -829,7 +843,7 @@ const I18N = {
     editOnce:'Edit this one before sending',
     editingOne:'Editing',
     hintOnce:'Holding this one. Fix it, then send — back to instant after.',
-    pauseTitle:'Pause — stop listening', resumeTitle:'Resume listening',
+    pauseTitle:'Turn the microphone off', resumeTitle:'Turn the microphone on',
     settingsTitle:'Settings',
     powerTitle:'Stop / start listening',
     settings:'Settings', back:'Back',
@@ -922,7 +936,7 @@ const I18N = {
     editOnce:'この一言だけ直してから送る',
     editingOne:'編集中',
     hintOnce:'この一言だけ溜めます。直して送ると、即時に戻ります。',
-    pauseTitle:'一時停止 — 聞き取りをやめる', resumeTitle:'聞き取りを再開する',
+    pauseTitle:'マイクを切る', resumeTitle:'マイクを入れる',
     settingsTitle:'設定',
     powerTitle:'聞き取りを止める / 始める',
     settings:'設定', back:'戻る',
@@ -941,9 +955,9 @@ const I18N = {
     engineLabel:'認識するのは',
     engineBrowser:'このブラウザ（何も入れずに動く）',
     engineNone:'使える認識がありません',
-    localAsrNote:'この機械の中だけで認識します。音声は外へ出ません。',
+    localAsrNote:'ローカル（この機械の中）で認識します。音声は外へ出ません。',
     browserAsrNote:'Chrome に載っている認識を使います。モデルを入れなくてよいので非力な端末でも動き、デーモンが動いていなくても使えます。上のマイク選択はここには効きません — Web Speech API は Chrome 自体の既定マイク（chrome://settings/content/microphone）に従います。OS の既定でもサイトごとの設定でもないので、違うデバイスが使われる場合はそちらを変えてください。',
-    browserAsrWarn:'音声は認識のため Google のサーバへ送られます。手元だけで完結させたい場合は、これを切ってデーモン側の認識をお使いください。',
+    browserAsrWarn:'音声は認識のため Google のサーバへ送られます。ローカルだけで完結させたい場合は、ほかの認識に切り替えてください。',
     asrLang:'話す言語',
     asrDenied:'マイクの使用が許可されなかったため、認識を始められませんでした。',
     asrFailed:'認識が続けて失敗したので切りました。回線とマイクを確認してください。',
@@ -961,7 +975,7 @@ const I18N = {
     vizStyle:'波形', vizBar:'バー', vizWave:'流れる', vizRadial:'球', vizGrid:'格子',
     language:'言語',
     grpDict:'辞書',
-    dictPrivate:'手元だけに保存する（公開しない）',
+    dictPrivate:'ローカルにだけ保存する（公開しない）',
     dictShared:'~/.config/voice-shell/dictionary.json（既定値として共有できます）',
     dictPrivateNote:'~/.config/voice-shell/dictionary.private.json（リポジトリに入りません）',
     dictReplace:'言い換え', dictIgnore:'無視する発話',
@@ -974,7 +988,7 @@ const I18N = {
     add:'追加', save:'保存する', exportCsv:'CSV で保存', importCsv:'CSV を読み込む',
     dictPending:'「保存する」を押すと有効になります。',
     dictSaved:'{where}保存しました（言い換え {r} 件 / 無視 {i} 件）。次の発話から効きます。',
-    dictSavedShared:'共有辞書に', dictSavedPrivate:'手元だけに',
+    dictSavedShared:'共有辞書に', dictSavedPrivate:'ローカルにだけ',
     dictLoaded:'読み込みました（言い換え {r} 件 / 無視 {i} 件{s}）。「保存する」で確定します。',
     dictSkipped:' / 読めない行 {n} 件',
     grpLog:'ログ', items:'件', copyAll:'全部コピー', copied:'コピーしました',
@@ -2174,6 +2188,8 @@ function paintGauge() {
   // 本画面の細いメーターにも同じ目盛りで出す
   el.meterFill.style.width = lvl + '%';
   el.meterMark.style.left = mark + '%';
+  // マイクのボタン自体も、拾えている音量ぶんだけ下から満ちる
+  el.segOff.style.setProperty('--lv', Math.round(amplitudeNow() * 100) + '%');
 }
 
 async function loadTuning() {
@@ -2325,7 +2341,7 @@ for (const ev of ['pointerup', 'pointercancel']) {
 /* ── ブラウザで認識する（Web Speech API）───────────
    Chrome に載っている認識を使う。モデルを積まないので、非力な端末でも
    そのまま使える。ただし**音声は Google のサーバへ送られる**ので、
-   手元だけで完結させたい場合はデーモン側の認識を使うこと。
+   ローカルだけで完結させたい場合は、ほかの認識を使うこと。
 
    厄介なのは、7〜10 秒黙るとセッションが勝手に切れること。切れてから
    慌てて張り直すと、話し始めの一言目を落とす。Web Speech API には
@@ -2850,7 +2866,7 @@ function showDictTab(which) {
 el.tabReplace.onclick = () => showDictTab('replace');
 el.tabIgnore.onclick = () => showDictTab('ignore');
 
-// 共有辞書 / 手元だけの辞書
+// 共有辞書 / ローカルだけの辞書
 const scopeQuery = () => el.scopePrivate.checked ? '?scope=private' : '';
 const paintScopeNote = () => {
   el.scopeNote.textContent = t(el.scopePrivate.checked ? 'dictPrivateNote' : 'dictShared');
