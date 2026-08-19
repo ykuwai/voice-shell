@@ -425,6 +425,46 @@ async def main_async(args):
         hold_file.write_text("")     # 送ったので保留は空にする
         return web.json_response(rec)
 
+    # ブラウザ認識の生存確認。開いている画面が「いま聞いている」ことを
+    # 定期的に知らせてくる。これが無いと、wait-ready が READY を返しても
+    # 実際には誰も聞いていない（画面が開かれていない・マイクを拒否された）
+    # 状態と区別が付かず、「どうぞ話してください」と言った先で虚空に話させる。
+    beat_file = state / "asr-heartbeat.json"
+    BEAT_STALE = 15        # これだけ音沙汰が無ければ、その画面は居ないとみなす
+
+    def read_beats() -> dict:
+        try:
+            d = json.loads(beat_file.read_text())
+        except (OSError, ValueError):
+            return {}
+        now = time.time()
+        return {k: v for k, v in d.items()
+                if isinstance(v, dict) and now - v.get("t", 0) < BEAT_STALE}
+
+    async def handle_heartbeat(req):
+        body = await req.json()
+        tab = str(body.get("tab") or "")[:40]
+        st = str(body.get("state") or "")[:20]
+        if not tab:
+            return web.json_response({"error": "no tab"}, status=400)
+        beats = read_beats()
+        if st == "gone":
+            beats.pop(tab, None)
+        else:
+            beats[tab] = {"t": time.time(), "state": st}
+        beat_file.write_text(json.dumps(beats))
+        return web.json_response({"tabs": len(beats)})
+
+    async def handle_asr_status(_req):
+        """ブラウザ認識がいま実際に聞いているか。voice-shell.sh status が読む。"""
+        beats = read_beats()
+        states = [v.get("state") for v in beats.values()]
+        return web.json_response({
+            "tabs": len(beats),
+            "listening": states.count("listening"),
+            "denied": states.count("denied"),
+        })
+
     async def handle_engines(_req):
         """選べる認識エンジンの一覧。
 
@@ -654,6 +694,8 @@ async def main_async(args):
     app.router.add_post("/api/pause", handle_pause)
     app.router.add_post("/api/send", handle_send)
     app.router.add_post("/api/utterance", handle_utterance)
+    app.router.add_post("/api/asr-heartbeat", handle_heartbeat)
+    app.router.add_get("/api/asr-status", handle_asr_status)
     app.router.add_get("/api/engines", handle_engines)
     app.router.add_get("/api/listeners", handle_listeners)
     app.router.add_put("/api/route", handle_route)
