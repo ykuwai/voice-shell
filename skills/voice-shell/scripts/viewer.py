@@ -476,9 +476,15 @@ async def main_async(args):
             return web.json_response({"error": "empty"}, status=400)
 
         # Claude に渡る行は本文だけ。手直し済みの印だけ添える。
-        with open(args.log_file, "a") as f:
-            f.write(json.dumps({"text": text, "edited": True},
-                               ensure_ascii=False) + "\n")
+        # 宛先はデーモンと同じ決め方で付ける。付け忘れると、選んでいない
+        # セッションにも届く（実際に別の作業へ紛れ込んだ）。
+        import voice_daemon as vd
+        rec_out = {"text": text, "edited": True}
+        to = vd.resolve_target(args.log_file)
+        if to:
+            rec_out["to"] = to
+        with open(args.log_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec_out, ensure_ascii=False) + "\n")
         rec = {"time": time.strftime("%H:%M:%S"), "text": text, "edited": True}
         hold_file.write_text("", encoding="utf-8")     # 送ったので保留は空にする
         return web.json_response(rec)
@@ -614,8 +620,13 @@ async def main_async(args):
                                    ensure_ascii=False) + "\n")
             return web.json_response({"held": text})
 
+        # 宛先はデーモンと同じ決め方で付ける（ブラウザ認識も同じ扱い）
+        rec_out = {"text": text}
+        to = vd.resolve_target(args.log_file)
+        if to:
+            rec_out["to"] = to
         with open(args.log_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps({"text": text}, ensure_ascii=False) + "\n")
+            f.write(json.dumps(rec_out, ensure_ascii=False) + "\n")
         return web.json_response({"time": stamp, "text": text})
 
     async def handle_drop_current(_req):

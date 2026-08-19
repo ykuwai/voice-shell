@@ -341,8 +341,12 @@
   .tiny:hover:not(:disabled) > svg .solid { display:inline; }
   .tiny:hover:not(:disabled) > svg .line { display:none; }
   .tiny:disabled { opacity:.28; cursor:default; }
-  /* 認識中の文字も、押せば直しに回せると分かるようにする */
-  .draft-card:not(.holding) .stream { cursor:text; }
+  /* 札のどこを押しても直しに回せると分かるようにする */
+  .draft-card:not(.holding):not(.editing) { cursor:text; }
+  .draft-card:not(.holding):not(.editing):hover {
+    border-color:color-mix(in srgb, var(--accent-2) 45%, var(--line));
+  }
+  .draft-card .draft-actions, .draft-card .tiny-row { cursor:default; }
   .draft-card .mark {
     padding:.05rem .4rem; border-radius:5px; font-size:.64rem; font-weight:600;
     color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, transparent);
@@ -2124,8 +2128,14 @@ el.dropOne.onclick = async () => {
   say(t('droppedOne'), 4);
   paint();
 };
-// 認識中の文字そのものを押しても同じ
-el.stream.onclick = () => { if (route === 'live') editThisOne(); };
+/* 未送信の札はどこを押しても手直しに回せる。認識中の文字を狙わせると、
+   まだ何も出ていないときに押す場所が無い（言い間違える前に構えたい、
+   というのが本来の使いどころなので、空のときこそ押せる必要がある）。 */
+el.tray.onclick = e => {
+  if (route !== 'live' || oneShot) return;
+  if (e.target.closest('button, textarea, input, select, a')) return;
+  editThisOne();
+};
 
 // 送るか消したら、元のモードへ戻す
 async function endOneShot() {
