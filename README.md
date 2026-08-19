@@ -4,7 +4,11 @@ Claude Code に**話しかけて指示を出す**ための仕組み。キーボ�
 
 Alibaba Qwen チームの音声認識モデル **Qwen3-ASR-1.7B**（Apache-2.0）をローカルで動かし、
 発話が確定するたびに1行 JSON を書き出す。Claude Code はその行を Monitor で受け取り、
-ユーザーからの指示として扱う。**クラウドに音声を送らない。**
+ユーザーからの指示として扱う。**既定では、音声は手元から出ない。**
+
+非力な端末や、モデルを入れずに試したい場合のために、**Chrome の認識を使う道**も
+用意してある（設定から入切）。こちらは**音声が Google のサーバへ送られる**ので、
+手元だけで完結させたい場合は使わないこと。画面のその場にも警告を出している。
 
 ```
 マイク → Qwen3-ASR（ローカル GPU） → JSONL → Monitor → Claude Code
@@ -21,6 +25,22 @@ Claude Code で `/voice-shell` と打つか、「音声モードにして」と�
 | 即時 | 話すとそのまま Claude Code に届く |
 | 手直し | 発話を溜めて、直してから送る（誤認識の修正用） |
 | 一時停止 | 止めている間の発話はどこにも残らない（別作業中に） |
+
+## 認識のやり方を選ぶ
+
+| やり方 | 何が要るか | 音声の行き先 | 向いている場面 |
+|---|---|---|---|
+| Qwen3-ASR（既定・Linux） | GPU 約12GB | 手元だけ | GPU のある機械 |
+| Apple のオンデバイス（既定・macOS） | macOS 26 以降 | 手元だけ | Mac。軽い |
+| Whisper | CPU でも動く | 手元だけ | 固有名詞に強い。Windows 向け |
+| **Chrome の認識** | Chrome だけ | **Google のサーバ** | 非力な端末。準備が要らない |
+
+Chrome の認識は設定の「このブラウザで認識する」から入れる。デーモンが動いて
+いなくても使える。7〜10 秒黙るとセッションが切れる仕様だが、**黙っているあいだに
+先回りして張り直す**ので、話し始めを落とさない（実測: 30 秒の無音で切れ目 0ms）。
+
+認識した文は、デーモンで認識したときと同じ道を通す — 辞書の言い換え、無視する発話、
+最小文字数、つなぎ言葉の除去、一時停止中の保留。認識のやり方で届く文は変わらない。
 
 ## 誰が聞いているか確かめる
 
@@ -55,7 +75,7 @@ Chrome の Document Picture-in-Picture を使うので、追加の実行環境�
 
 | 項目 | 何を決めるか | 既定 |
 |---|---|---|
-| マイク | 使う入力装置。切り替えても録音だけ差し替わる | — |
+| マイク | 使う入力装置。既定は「システムの既定」 | システムの既定 |
 | 感度 | 0〜100。小さいほど微かな音まで拾う | macOS 41 / Linux 74 |
 | 確定までの無音 | これだけ黙るとひと区切りとして確定する | 1.5 秒 |
 | 最小文字数 | これより短い認識結果は物音とみなして捨てる | 15 文字 |
@@ -94,18 +114,22 @@ Chrome の Document Picture-in-Picture を使うので、追加の実行環境�
   macOS では既定）で動く。モデルの追加ダウンロードも GPU メモリも要らない
 - **または Apple Silicon Mac（macOS 25 以前）** — MLX 版（`--engine mlx`）で動く。
   ユニファイドメモリを約4GB使う
-- **Python 3.12**（macOS は 3.10〜3.13）と conda または venv
+- **または GPU なし（CPU のみ）** — Whisper（`--engine whisper`、faster-whisper 版）で動く。
+  `--model base --whisper-compute int8` なら 4 コア級 CPU でも RTF 0.15 程度で動く
+  （既定の `large-v3-turbo` は CPU では重すぎる）。GPU メモリはもちろん不要
+- **Python 3.12**（macOS / Whisper 経路は 3.10〜3.13）と conda または venv
 - **Claude Code**
 
-動作確認したのは下記の環境。Windows 向けのコードは書いてあるが未検証。
+動作確認したのは下記の環境。Windows は Whisper 経路のみ確認済み
+（Qwen3-ASR の vLLM/MLX 経路は NVIDIA GPU か Apple Silicon が要るため未検証）。
 
-| 項目 | Linux + NVIDIA | macOS（apple） | macOS（mlx） |
-|---|---|---|---|
-| 機種 | RTX 4080 SUPER (16GB) — VRAM 12.3GB | Mac mini (M4 Pro, 24GB) — OS 側 | 同左 — 約4GB |
-| OS | Ubuntu (GNOME / Wayland / PipeWire) | macOS 26.5.2 | macOS 26 |
-| 主要パッケージ | `qwen-asr` 0.0.6, vLLM 0.14.0, PyTorch 2.9.1+cu128 | OS 付属（Speech.framework） | `mlx-qwen3-asr` 0.3.5, MLX 0.32.0 |
-| 認識速度 | RTF 0.30 | RTF 0.03 | RTF 0.31（確定の一括認識） |
-| 起動 | 1〜2 分 | 1 秒未満 | 1〜2 分 |
+| 項目 | Linux + NVIDIA | macOS（apple） | macOS（mlx） | Windows（whisper・CPU） |
+|---|---|---|---|---|
+| 機種 | RTX 4080 SUPER (16GB) — VRAM 12.3GB | Mac mini (M4 Pro, 24GB) — OS 側 | 同左 — 約4GB | 4コア級 Core i5（内蔵 GPU のみ） |
+| OS | Ubuntu (GNOME / Wayland / PipeWire) | macOS 26.5.2 | macOS 26 | Windows 11 |
+| 主要パッケージ | `qwen-asr` 0.0.6, vLLM 0.14.0, PyTorch 2.9.1+cu128 | OS 付属（Speech.framework） | `mlx-qwen3-asr` 0.3.5, MLX 0.32.0 | `faster-whisper` 1.2.1（`base` / int8） |
+| 認識速度 | RTF 0.30 | RTF 0.03 | RTF 0.31（確定の一括認識） | RTF 0.15 |
+| 起動 | 1〜2 分 | 1 秒未満 | 1〜2 分 | 数秒〜（モデルは初回のみ自動DL） |
 
 ## セットアップ
 
@@ -142,7 +166,7 @@ python3 -m venv .venv                    # 3.10〜3.13
 |---|---|---|
 | Linux | `alsa-utils`（`arecord`） | PipeWire がマイクを占有していても取れる |
 | macOS | `brew install ffmpeg` | avfoundation 経由。初回にマイク許可のダイアログが出る |
-| Windows | `winget install ffmpeg` | dshow 経由。未検証 |
+| Windows | `winget install ffmpeg` | dshow 経由。Whisper 経路で確認済み |
 
 スキルを Claude Code に認識させる（実体はこのリポジトリのまま、リンクを張る）:
 
@@ -164,13 +188,16 @@ export VOICE_SHELL_PYTHON=/path/to/envs/qwen3-asr/bin/python
 ### マイクを指定したいとき
 
 既定は Linux `pipewire` / macOS `:0` / Windows `audio=default`。
+**Windows の既定値は dshow では認識されないので、実質必須で指定が要る**
+（`audio=default` という名前のデバイスは存在しない）。
 別のマイクを使うなら `--device` で指定する:
 
 ```bash
 skills/voice-shell/scripts/voice-shell.sh start --device plughw:2,0   # Linux
 arecord -L                                    # Linux でデバイス一覧
 ffmpeg -f avfoundation -list_devices true -i ""   # macOS
-ffmpeg -list_devices true -f dshow -i dummy       # Windows
+ffmpeg -list_devices true -f dshow -i dummy       # Windows（一覧に出た名前をそのまま
+                                                   # --device audio=<名前> に渡す）
 ```
 
 ## 構成
@@ -217,6 +244,36 @@ $S stop           # 停止（VRAM 解放）
 # 実装メモ
 
 同じ調査を繰り返さないための記録。すべて実測で確認したもの。
+
+## Windows（Git Bash）で動かすには何点か直しが要った
+
+`voice_daemon.py` / `voice-shell.sh` は元々 Linux/macOS しか想定しておらず、
+Windows（Git Bash 上の bash）で動かすと以下がすべて刺さった。いずれも修正済み。
+
+- **`import fcntl`** — POSIX 専用モジュールで Windows には無く、起動直後に
+  `ModuleNotFoundError` で落ちる。Windows では `msvcrt.locking` で
+  二重起動防止ロックを代替した
+- **`os.kill(pid, 0)`**（生存確認）— Windows では未対応で `SystemError` になる。
+  `OpenProcess` が取れるかで代替した
+- **`pgrep` / `pkill` / `setsid`** — Git Bash に無い。`voice-shell.sh` は
+  リスナー一覧・二重起動チェック・停止処理でこれらに依存していたため、
+  無ければその機能だけ諦めて素通しするようガードを入れた
+  （ビューアの起動確認は pgrep が無ければポートへの応答で代用する）
+- **`/tmp` の解釈が bash と Python でずれる** — Git Bash（MSYS）の `/tmp` は
+  実際の Windows パス（例: `...\AppData\Local\Temp`）へマウント変換されるが、
+  素の Windows Python が同じ文字列 `"/tmp"` を受け取ると `C:\tmp` と解釈する。
+  両者が同じ意味のつもりで別ディレクトリを見てしまい、デーモンの書き込み先と
+  Monitor の `tail -F` 先がずれて**発話がどこにも届かない**という壊れ方をする。
+  `voice-shell.sh` が `cygpath -w` で実パスに変換し、`VOICE_SHELL_STATE_DIR`
+  環境変数で子プロセスへ明示的に渡すことで解決した
+- **文字コード** — Windows の Python はファイル I/O に既定でシステムの
+  ロケール（日本語版なら cp932）を使う。UTF-8 で書いた JSON やログを
+  読もうとして `UnicodeDecodeError` になり、状態確認の文字列比較
+  （`grep -q 稼働中` 等）も一致しなくなる。`voice-shell.sh` で
+  `PYTHONUTF8=1` を強制して回避した（macOS/Linux では無害）
+- **ffmpeg の dshow マイク名** — README/SETUP.md の既定値 `audio=default` は
+  実際には認識されない。`ffmpeg -list_devices true -f dshow -i dummy` で
+  出てくる実際のデバイス名をそのまま `--device audio=<名前>` に渡す必要がある
 
 ## macOS は OS 付属の認識を既定にした（Qwen3-ASR は重すぎた）
 

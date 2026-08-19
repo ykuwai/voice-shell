@@ -17,7 +17,12 @@ from pathlib import Path
 
 from aiohttp import web, WSCloseCode
 
-DEFAULT_LOG = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "qwen-voice" / "utterances.jsonl"
+# voice_daemon.py と同じ理由（Windows での "/tmp" の食い違い）で、
+# voice-shell.sh から渡された実パスがあればそちらを優先する。
+if os.environ.get("VOICE_SHELL_STATE_DIR"):
+    DEFAULT_LOG = Path(os.environ["VOICE_SHELL_STATE_DIR"]) / "utterances.jsonl"
+else:
+    DEFAULT_LOG = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "qwen-voice" / "utterances.jsonl"
 
 # ユーザー辞書。voice_daemon.py と同じ場所を読み書きする。
 _CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "voice-shell"
@@ -93,7 +98,7 @@ class Tail:
         with open(self.path) as f:
             for line in f:
                 rec = self._parse(line)
-                if rec:
+                if rec and "system_warning" not in rec:
                     self.history.append(rec)
 
     @staticmethod
@@ -126,7 +131,9 @@ class Tail:
                     continue
 
                 rec = self._parse(line)
-                if rec:
+                # system_warning は Claude Code（Monitor でこのログを直接見ている側）
+                # 宛てで、ブラウザの発話一覧に混ぜると壊れて見えるので流さない。
+                if rec and "system_warning" not in rec:
                     self.history.append(rec)
                     await self.broadcast(rec)
 
@@ -171,6 +178,25 @@ class Tail:
                 last = cur
                 await self.broadcast({"level": cur[0], "speaking": cur[1]})
             await asyncio.sleep(0.1)      # バーが滑らかに見える程度
+
+    async def watch_mic_active(self):
+        """デーモン側で実際に切り替えが完了したマイクを流す。
+
+        ブラウザの「切り替えました」表示は押した瞬間の楽観的なものなので、
+        本当に切り替わったかはこれで確定させる。起動直後の1回目も送るが、
+        ブラウザ側は「切り替え要求後に来た1回」だけをトースト表示に使う。
+        """
+        path = self.path.parent / "mic_active"
+        last = None
+        while True:
+            try:
+                cur = path.read_text().strip()
+            except (FileNotFoundError, OSError):
+                cur = None
+            if cur and cur != last:
+                last = cur
+                await self.broadcast({"mic_active": cur})
+            await asyncio.sleep(0.3)
 
     async def watch_held(self):
         """一時停止中に確定した発話を、増えた分だけ流す。
@@ -362,6 +388,51 @@ async def main_async(args):
         hold_file.write_text("")     # 送ったので保留は空にする
         return web.json_response(rec)
 
+    async def handle_utterance(req):
+        """ブラウザ側（Web Speech API）で認識した発話を受け取る。
+
+        デーモンが認識したときと同じ道を通す — 辞書の言い換え、無視する発話、
+        最小文字数、つなぎ言葉の除去、一時停止中の保留。ここを通さないと、
+        認識のやり方によって届く文が変わってしまう。
+        """
+        body = await req.json()
+        text = (body.get("text") or "").strip()
+        if not text:
+            return web.json_response({"error": "empty"}, status=400)
+
+        sys.path.insert(0, str(Path(__file__).parent))
+        import voice_daemon as vd
+
+        # マイクを切っているあいだは、どこにも残さない（デーモンと同じ扱い）
+        if mute_file.exists():
+            return web.json_response({"dropped": "muted"})
+
+        try:
+            tuning = json.loads(TUNING_FILE.read_text())
+        except (OSError, ValueError):
+            tuning = {}
+
+        user_dict = vd.load_dictionary()
+        if vd.is_noise(text, user_dict["ignore"]):
+            return web.json_response({"dropped": "noise"})
+
+        text = vd.polish(text, user_dict, False,
+                         bool(tuning.get("strip_fillers")))
+        min_chars = tuning.get("min_chars", 15)
+        if isinstance(min_chars, (int, float)) and len(text) < int(min_chars):
+            return web.json_response({"dropped": "too_short"})
+
+        stamp = time.strftime("%H:%M:%S")
+        if pause_file.exists():
+            with open(hold_file, "a", encoding="utf-8") as h:
+                h.write(json.dumps({"time": stamp, "text": text},
+                                   ensure_ascii=False) + "\n")
+            return web.json_response({"held": text})
+
+        with open(args.log_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"text": text}, ensure_ascii=False) + "\n")
+        return web.json_response({"time": stamp, "text": text})
+
     async def handle_discard(_req):
         """保留中の発話を捨てる。"""
         hold_file.write_text("")
@@ -407,6 +478,7 @@ async def main_async(args):
         return web.json_response({k: v for k, v in data.items() if k != "_seen"})
 
     mic_file = state / "mic"
+    engine_active_file = state / "engine_active"
 
     async def handle_tuning_get(_req):
         """いまの感度と確定までの無音秒数を返す。範囲も一緒に返して
@@ -440,9 +512,38 @@ async def main_async(args):
             if isinstance(body.get(key), bool):
                 cur[key] = body[key]
 
+        if isinstance(body.get("language"), str):
+            sys.path.insert(0, str(Path(__file__).parent))
+            import whisper_engine
+            code = body["language"]
+            # 空文字（自動判定）か、対応済みコードのときだけ受け付ける
+            if code == "" or code in whisper_engine.LANGUAGE_NAMES:
+                cur["language"] = code
+
         TUNING_FILE.parent.mkdir(parents=True, exist_ok=True)
         TUNING_FILE.write_text(json.dumps(cur, indent=2) + "\n")
         return web.json_response({"tuning": cur})
+
+    async def handle_languages(_req):
+        """認識言語の一覧（Whisper 使用時のみ）。他のエンジンでは
+        空リストを返し、ビューア側はプルダウンごと隠す。"""
+        try:
+            engine = engine_active_file.read_text().strip()
+        except OSError:
+            engine = ""
+        if engine != "whisper":
+            return web.json_response({"engine": engine, "languages": [], "current": ""})
+        sys.path.insert(0, str(Path(__file__).parent))
+        import whisper_engine
+        try:
+            cur = json.loads(TUNING_FILE.read_text()).get("language", "")
+        except (OSError, ValueError):
+            cur = ""
+        return web.json_response({
+            "engine": engine,
+            "languages": whisper_engine.available_languages(),
+            "current": cur,
+        })
 
     async def handle_mics(_req):
         """使えるマイクの一覧と、いま選ばれているものを返す。"""
@@ -467,12 +568,14 @@ async def main_async(args):
     app.router.add_get("/api/mics", handle_mics)
     app.router.add_get("/api/tuning", handle_tuning_get)
     app.router.add_put("/api/tuning", handle_tuning_put)
+    app.router.add_get("/api/languages", handle_languages)
     app.router.add_put("/api/mics", handle_mic_put)
     app.router.add_get("/api/dictionary", handle_dict_get)
     app.router.add_put("/api/dictionary", handle_dict_put)
     app.router.add_post("/api/mute", handle_mute)
     app.router.add_post("/api/pause", handle_pause)
     app.router.add_post("/api/send", handle_send)
+    app.router.add_post("/api/utterance", handle_utterance)
     app.router.add_post("/api/discard", handle_discard)
 
     runner = web.AppRunner(app)
@@ -485,7 +588,8 @@ async def main_async(args):
     tasks = [asyncio.create_task(tail.watch()),
              asyncio.create_task(tail.watch_partial()),
              asyncio.create_task(tail.watch_level()),
-             asyncio.create_task(tail.watch_held())]
+             asyncio.create_task(tail.watch_held()),
+             asyncio.create_task(tail.watch_mic_active())]
     try:
         await asyncio.Event().wait()
     finally:
