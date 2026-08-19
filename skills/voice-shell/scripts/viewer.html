@@ -823,7 +823,6 @@ const I18N = {
     modeLive:'Instant', modeHold:'Review',
     unsent:'Unsent', history:'History', quiet:'(silence)',
     needsTouch:'Click here to start listening',
-    routeAll:'Everyone',
     routeGone:'“{gone}” ended. Sending to “{next}” now.',
     routeGoneAll:'“{gone}” ended. Sending to everyone now.',
     uiUpdated:'Updated — tap to reload',
@@ -898,7 +897,6 @@ const I18N = {
     micSwitched:'Switched microphone: {name}',
     voiceMuted:'Muted — say “unmute” to come back',
     voiceRoute:'Now sending to {name}',
-    voiceRouteAll:'Now sending to every session',
     voiceRouteMissing:'There is no session {n}',
     voiceUnmuted:'Unmuted — listening again',
     micSwitching:'Switching microphone to {name}…',
@@ -924,7 +922,6 @@ const I18N = {
     modeLive:'即時', modeHold:'手直し',
     unsent:'未送信', history:'送信履歴', quiet:'（無音）',
     needsTouch:'ここを一度クリックすると認識が始まります',
-    routeAll:'すべて',
     routeGone:'「{gone}」が終了したので、「{next}」に切り替えました。',
     routeGoneAll:'「{gone}」が終了したので、全員に戻しました。',
     uiUpdated:'画面が新しくなりました — 押すと反映',
@@ -999,7 +996,6 @@ const I18N = {
     micSwitched:'マイクを切り替えました: {name}',
     voiceMuted:'ミュートにしました — 「ミュート解除」で戻ります',
     voiceRoute:'送信先を {name} にしました',
-    voiceRouteAll:'送信先をすべてのセッションにしました',
     voiceRouteMissing:'{n} 番のセッションはありません',
     voiceUnmuted:'ミュートを解除しました — また届きます',
     micSwitching:'{name} に切り替えています…',
@@ -1939,9 +1935,6 @@ function connect() {
         } else if (c.kind === 'route') {
           chime('ok');   el.hint.textContent = t('voiceRoute', {name: c.label});
           loadListeners();
-        } else if (c.kind === 'route_all') {
-          chime('ok');   el.hint.textContent = t('voiceRouteAll');
-          loadListeners();
         } else if (c.kind === 'route_missing') {
           chime('err');  el.hint.textContent = t('voiceRouteMissing', {n: c.label});
         }
@@ -2737,7 +2730,7 @@ addEventListener('pagehide', () => { if (asrChosen) beat('gone'); });
    別々の作業で同時に音声モードを使うことがある。どれへ届けるかを選ぶ。
    名前はデーモンが決める（最初はフォルダ名、エージェントが会話に題名を
    付けたらそちらへ切り替わる）。 */
-let routeTo = '';          // 選んだもの。'all' なら全員へ、空なら未選択
+let routeTo = '';          // 選んだもの。空なら未選択（サーバが決める）
 let effectiveTo = '';      // 実際に届く先（未選択のときサーバが決めた相手）
 let knownListeners = [];
 
@@ -2747,13 +2740,15 @@ function paintRoutes() {
   el.routes.hidden = false;
   // 番号を出す。声で「2番に切り替え」と言うときの番号がこれ。
   // デーモンも同じ並び（登録の早い順）で数えるので、見えている番号と一致する。
-  const items = [{pid: 'all', label: t('routeAll')},
-                 ...knownListeners.map((l, i) => ({...l, label: `${i + 1}. ${l.label}`}))];
+  //
+  // 「すべてへ」は置かない。2つのセッションが同じ指示を受け取って別々に
+  // 動き出す状況に使い道が無く、間違って選ぶと気づきにくいだけだった。
+  const items = knownListeners.map((l, i) => ({...l, label: `${i + 1}. ${l.label}`}));
   el.routes.replaceChildren(...items.map(l => {
     // 実際に届く先を光らせる。未選択のときはサーバが「あとで起動した方」に
     // 決めるので、選んだ覚えが無くてもどこへ届くかが見える。
     const on = routeTo ? String(l.pid) === routeTo
-                       : (l.pid === 'all' ? !effectiveTo : String(l.pid) === effectiveTo);
+                       : String(l.pid) === effectiveTo;
     const b = document.createElement('button');
     b.className = 'route-chip' + (on ? ' on' : '');
     b.textContent = l.label;
@@ -2785,7 +2780,7 @@ async function loadListeners() {
 
   // 送信先が終了していたら、1つ前の生きているセッションへ移して知らせる。
   // 黙って宙に浮かせると、話しても届かない状態に気づけない。
-  if (routeTo && routeTo !== 'all' && !live.has(routeTo)) {
+  if (routeTo && !live.has(routeTo)) {
     const gone = before.find(l => String(l.pid) === routeTo);
     const next = knownListeners[knownListeners.length - 1];
     routeTo = '';                       // 未選択に戻し、サーバの既定に任せる
