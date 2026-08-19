@@ -350,6 +350,17 @@
   /* 認識中の生テキスト。編集欄とは別に置き、確定した分だけ下へ落とす。
      ここを編集欄に直接流し込むと、手直し中の文字を上書きしてしまう。 */
   .stream { font-size:.88rem; line-height:1.65; color:var(--text); min-height:1.5em; }
+  /* 合図として受け取った言葉。指示ではなく操作として扱ったことを、
+     その言葉自体を光らせて示す。 */
+  .stream mark.cmd {
+    display:inline-block; padding:.05rem .45rem; border-radius:7px;
+    font-weight:600; background:transparent;
+    animation:cmdFade 2.2s ease-out forwards;
+  }
+  .stream mark.cmd.live { color:var(--accent);   background:color-mix(in srgb, var(--accent) 18%, transparent); }
+  .stream mark.cmd.hold { color:var(--accent-2); background:color-mix(in srgb, var(--accent-2) 18%, transparent); }
+  .stream mark.cmd.warn { color:var(--danger);   background:color-mix(in srgb, var(--danger) 18%, transparent); }
+  @keyframes cmdFade { 0%,65% { opacity:1; } 100% { opacity:0; } }
   #stream:empty::after { content:attr(data-quiet); color:var(--faint); font-size:.8rem; }
   .caret {
     display:inline-block; width:1.5px; height:1em; background:var(--accent);
@@ -922,7 +933,6 @@ const I18N = {
     voiceRouteMissing:'There is no session {n}',
     voiceLive:'Sending straight through now',
     voiceHold:'Holding what you say now',
-    voiceSaid:' (heard “{said}” as a command, not a prompt)',
     voiceUnmuted:'Unmuted — listening again',
     micSwitching:'Switching microphone to {name}…',
     discarded:'Discarded.', undo:'Undo',
@@ -1026,7 +1036,6 @@ const I18N = {
     voiceRouteMissing:'{n} 番のセッションはありません',
     voiceLive:'そのまま届く側にしました',
     voiceHold:'溜める側にしました',
-    voiceSaid:'（「{said}」は合図として扱い、指示としては送っていません）',
     voiceUnmuted:'ミュートを解除しました — また届きます',
     micSwitching:'{name} に切り替えています…',
     discarded:'消しました。', undo:'元に戻す',
@@ -1740,8 +1749,27 @@ function say(text, sec = 6) {
   hintHoldUntil = performance.now() + sec * 1000;
 }
 
-// 合図と判定した発話そのもの。指示のつもりで言ったものが消えることがある。
-const said = c => c.said ? t('voiceSaid', {said: c.said}) : '';
+/* 合図として受け取った言葉を、認識中の欄にそのまま光らせて出す。
+   文章で「合図として扱いました」と説明するより、言った言葉そのものが
+   色づいて見える方が、何が起きたのかが一目で分かる。 */
+let flashTimer = null;
+function flashCommand(text, kind) {
+  if (!text) return;
+  const mark = document.createElement('mark');
+  mark.className = 'cmd ' + (kind || 'live');
+  mark.textContent = text;
+  el.stream.replaceChildren(mark);
+  el.tray.classList.remove('idle');
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => {
+    // そのあいだに次の発話が来ていたら触らない
+    if (el.stream.firstChild === mark) {
+      el.stream.textContent = '';
+      el.tray.classList.add('idle');
+      paintTinyButtons();
+    }
+  }, 2200);
+}
 
 /* 声で切り替わったときだけ鳴らす短い音。
    画面を見ていないから声で操作しているわけで、見た目が変わるだけでは
@@ -1815,19 +1843,20 @@ function connect() {
       // 開いた時点で残っていたもの（first）は、いま起きたことではない。
       const c = m.voice_cmd || {};
       if (c.kind === 'mute') {
-        chime('down'); say(t('voiceMuted'));
+        chime('down'); say(t('voiceMuted'));       flashCommand(c.said, 'warn');
       } else if (c.kind === 'unmute') {
-        chime('up');   say(t('voiceUnmuted'));
+        chime('up');   say(t('voiceUnmuted'));     flashCommand(c.said, 'live');
       } else if (c.kind === 'route') {
-        // 合図と判定した発話は指示として送られない。何が消えたのかは見せる。
-        chime('ok');   say(t('voiceRoute', {name: c.label}) + said(c));
+        chime('ok');   say(t('voiceRoute', {name: c.label}));
+        flashCommand(c.said, 'live');
         loadListeners();
       } else if (c.kind === 'mode_live') {
-        chime('up');   say(t('voiceLive') + said(c));
+        chime('up');   say(t('voiceLive'));        flashCommand(c.said, 'live');
       } else if (c.kind === 'mode_hold') {
-        chime('down'); say(t('voiceHold') + said(c));
+        chime('down'); say(t('voiceHold'));        flashCommand(c.said, 'hold');
       } else if (c.kind === 'route_missing') {
-        chime('err');  say(t('voiceRouteMissing', {n: c.label}) + said(c));
+        chime('err');  say(t('voiceRouteMissing', {n: c.label}));
+        flashCommand(c.said, 'warn');
       }
       return;
     }
