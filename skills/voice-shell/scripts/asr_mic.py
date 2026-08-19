@@ -48,6 +48,9 @@ DEFAULT_DEVICE = SYSTEM_DEFAULT
 
 # macOS には CUDA が無く vLLM 版は動かない。MLX 版(mlx)も動くが約4GB 積むので、
 # OS 付属のオンデバイス認識(apple)を既定にする。
+# 直接 asr_mic を叩いたときの既定。通常の経路（voice-shell.sh start）は
+# voice_daemon.resolve_engine が「指定 > 前回の選択 > このブラウザ」で決めるので、
+# ここには来ない。
 _DEFAULT_ENGINE = "apple" if sys.platform == "darwin" else "local"
 
 

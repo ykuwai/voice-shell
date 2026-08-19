@@ -468,19 +468,36 @@ def resolve_engine(want: str = "") -> str:
     ブラウザが使えない状況（画面を開けない）だけは呼び出し側が
     --engine auto を渡してくるので、そのときは入っているモデルから選ぶ。
     """
+    known = {"browser"} | {e["id"] for e in asr_mic.available_engines()}
+    # クラウド/LAN のエンジンは import では見えないので名前で通す
+    known |= {"cloud", "home-lan"}
+
     if want and want != "auto":
+        if want not in known:
+            sys.exit(f"「{want}」は使えません。"
+                     f"選べるのは: {', '.join(sorted(known))}\n"
+                     f"  一覧は voice-shell.sh engines")
         return want
     if not want:
         remembered = read_config().get("engine")
-        if remembered:
+        if remembered in known:
             return remembered
+        # 覚えていたものが使えなくなっている（モデルを消した等）。
+        # 黙って失敗し続けるより、何もいらない方へ戻す。
+        if remembered:
+            print(f"前回選んだ「{remembered}」は今使えないので、"
+                  f"このブラウザで認識します。", file=sys.stderr)
         return "browser"
     # want == "auto": 入っているモデルの中から選ぶ
     have = [e["id"] for e in asr_mic.available_engines()]
     for pick in ("apple", "whisper", "local", "mlx", "home-lan"):
         if pick in have:
             return pick
-    return "browser"
+    # auto は「画面を開けないので手元のモデルで」という意味。
+    # 1つも無いのに browser へ落とすと、その前提を裏切る。
+    sys.exit("手元で使える認識モデルがありません。\n"
+             "  SETUP.md の手順で入れるか、画面を開けるなら\n"
+             "  voice-shell.sh start --engine browser をお使いください。")
 
 
 def polish(text: str, user_dict: dict, keep_kanji_numbers: bool = False,
@@ -941,6 +958,11 @@ def main():
     save_default_dictionary()
 
     # ビューアから指定されたマイクを毎回見る（切り替えは録音だけ入れ替える）
+    # 前回選んだマイクを覚えておく。/tmp のファイルは再起動で消えるので、
+    # そこだけだと毎回「システムの既定」に戻ってしまう。
+    saved_mic = read_config().get("mic")
+    if saved_mic and args.device == asr_mic.DEFAULT_DEVICE:
+        args.device = saved_mic
     mic_path = Path(args.log_file).parent / MIC_FILE.name
     mic_path.write_text(args.device)
 
@@ -961,6 +983,7 @@ def main():
 
     def on_switch(dev):
         mic_active_path.write_text(dev)
+        write_config(mic=dev)      # 次の起動でも同じマイクを使う
 
     args.on_switch = on_switch
 
