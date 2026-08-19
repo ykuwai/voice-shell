@@ -1715,6 +1715,9 @@ function addEntry(rec) {
     row.dataset.to = String(rec.to);
     const to = document.createElement('span');
     to.className = 'to';
+    // ここで入れておく。relabelEntries は el.log に入った行しか見ないので、
+    // 貼り直しに任せると、この行だけ次の更新まで矢印だけの空札になる。
+    to.textContent = routeNames.get(row.dataset.to) || `#${rec.to}`;
     gutter.append(to);
   }
 
@@ -1724,7 +1727,6 @@ function addEntry(rec) {
   text.textContent = format(rec.text);
 
   row.append(gutter, text);
-  relabelEntries();
   el.log.prepend(row);          // 新しいものを上に（モックと同じ並び）
   retally();
 }
