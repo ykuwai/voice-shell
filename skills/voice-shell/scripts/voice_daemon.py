@@ -1211,7 +1211,7 @@ def main():
 
     # 保存済みの値があれば、起動時点から反映しておく
     saved = want_tuning() or {}
-    for key in ("silence_threshold", "silence_duration", "max_utterance_sec"):
+    for key in ("silence_threshold", "silence_duration"):
         if isinstance(saved.get(key), (int, float)):
             setattr(args, key, float(saved[key]))
     if isinstance(saved.get("min_chars"), (int, float)):
@@ -1227,7 +1227,7 @@ def main():
     # 行き渡るようにする（無いままだとビューアのつまみが効かない）。
     filled = dict(saved)
     for key in ("silence_threshold", "silence_duration", "min_chars",
-                "strip_fillers", "max_utterance_sec"):
+                "strip_fillers"):
         filled.setdefault(key, getattr(args, key))
     if args.engine == "whisper":
         # CLI 既定の "Japanese" のような綴りのままだと、ビューアの
