@@ -265,8 +265,14 @@ def mic_command(device: str, in_sr: int) -> list:
         # avfoundation と違い「既定」を表す綴りが無いので、
         # 一覧の先頭（通常はシステムの既定）に解決する。
         if device == SYSTEM_DEFAULT:
-            found = [m["id"] for m in list_mics()]
-            src = found[0] if found else "audio=default"
+            # list_mics() の先頭はセンチネル自身なので、実デバイスだけを見る。
+            # ここを外すと dshow に存在しない "-i default" が渡り、既定のまま
+            # 使っている人は一度も録音できない。
+            found = [m["id"] for m in list_mics() if m["id"] != SYSTEM_DEFAULT]
+            if not found:
+                sys.exit("マイクが見つかりません "
+                         "(ffmpeg -list_devices true -f dshow -i dummy で確認してください)")
+            src = found[0]
         else:
             src = device if device.startswith("audio=") else "audio=default"
         return ["ffmpeg", "-hide_banner", "-loglevel", "error",

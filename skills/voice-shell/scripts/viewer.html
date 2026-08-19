@@ -786,6 +786,8 @@ const I18N = {
     browserAsrWarn:'Audio is sent to Google servers for recognition. Keep this off if everything must stay on this machine — use the daemon instead.',
     asrLang:'Spoken language',
     asrDenied:'Microphone access was refused, so recognition could not start.',
+    asrFailed:'Recognition kept failing, so it was turned off. Check your connection and the microphone.',
+    asrSendFailed:'Could not deliver what was recognized ({n}). Say it again.',
     calibrate:'Auto-tune',
     calibSpeaking:'Keep talking… {n}s',
     calibQuiet:'Now stay quiet… {n}s',
@@ -866,6 +868,8 @@ const I18N = {
     browserAsrWarn:'音声は認識のため Google のサーバへ送られます。手元だけで完結させたい場合は、これを切ってデーモン側の認識をお使いください。',
     asrLang:'話す言語',
     asrDenied:'マイクの使用が許可されなかったため、認識を始められませんでした。',
+    asrFailed:'認識が続けて失敗したので切りました。回線とマイクを確認してください。',
+    asrSendFailed:'認識した文を届けられませんでした（{n}）。もう一度お話しください。',
     calibrate:'自動調整',
     calibSpeaking:'そのまま話し続けてください… あと{n}秒',
     calibQuiet:'今度は黙っていてください… あと{n}秒',
@@ -1253,7 +1257,10 @@ const levelToUnit = v => {
   const out = expand(db, knee);
   return Math.min(1, Math.max(0, (out - (knee - BELOW_DB)) / (SPAN_DB + BELOW_DB)));
 };
-const amplitudeNow = () => levelToUnit(daemonLevel);
+// デーモンが認識していないときは、こちらのマイクで測った音量で動かす。
+// そうしないと、ブラウザ認識だけで使っている間じゅう波形が止まって見える。
+const amplitudeNow = () =>
+  (engine === 'off' || asrActive()) ? amplitudeFallback() : levelToUnit(daemonLevel);
 
 // 急に立ち上がると点滅して見えるので、下がるときだけ緩やかにする
 const smooth = new Array(BARS).fill(0);
@@ -1438,7 +1445,7 @@ function frame(now) {
 function paintFrame(now) {
   cx.clearRect(0, 0, cw, ch);
 
-  const dead = route === 'off' || engine === 'off';
+  const dead = route === 'off' || (engine === 'off' && !asrActive());
   if (analyser && !vizFailed) analyser.getByteFrequencyData(freq);
 
   // 一時停止中は動かさない。見た目で「録っていない」と分かるようにする。
@@ -1451,13 +1458,6 @@ function paintFrame(now) {
   else drawBar(bands);
 
   // ロゴの波も同じ値で動かす（小さくしたときの手がかり）
-  // ブラウザで認識しているときは、こちらのマイクで声の有無を見る。
-  // 認識結果だけを頼りにすると、認識が落ちている間じゅう「黙っている」
-  // ことになり、張り直しの判断ができない。
-  if (recWanted && analyser && !vizFailed && browserLevel() > 0.12) {
-    lastVoiceAt = performance.now();
-  }
-
   const src = vizStyle === 'wave' ? history : bands;
   const marks = el.logoMark.children;
   for (let i = 0; i < marks.length; i++) {
@@ -1596,6 +1596,7 @@ const ROUTE = {
 let route = 'live';
 let lastMode = 'live';   // 一時停止を解いたとき、直前のモードに戻す
 let oneShot = false;     // この一言だけ手直しに回している最中か
+let asrPausedByRoute = false;   // 一時停止のためにブラウザ認識を止めたか
 let inFlight = false;    // 切替中はポーリングに巻き戻されないようにする
 
 function paint() {
@@ -1660,8 +1661,19 @@ async function setRoute(next) {
   } finally {
     inFlight = false;
   }
-  // 一時停止のあいだはブラウザ側のマイクも手放す（録音の気配を残さない）
-  if (next === 'off') stopViz(); else if (vizArmed) startViz(el.mic.value || '');
+  // 一時停止のあいだはブラウザ側のマイクも手放す（録音の気配を残さない）。
+  // 認識も一緒に止める — 止めないと、画面に「何も記録されません」と
+  // 出しているのに、音声だけは外へ送られ続ける。
+  if (next === 'off') {
+    if (recWanted) { asrPausedByRoute = true; stopRecognition(); }
+    stopViz();
+  } else {
+    if (vizArmed) startViz(el.mic.value || '');
+    if (asrPausedByRoute) {
+      asrPausedByRoute = false; recWanted = true; startRecognition();
+    }
+  }
+  paintBrowserAsr();
   refreshState();
 }
 
@@ -1767,8 +1779,10 @@ function paintPower() {
     el.hint.textContent = left > 0 ? t('bootingLeft', {n: left}) : t('bootingSoon');
   }
 
-  // 動いていないときは送り先を選んでも意味がない
-  for (const b of [el.segLive, el.segHold, el.segOff, el.mic]) b.disabled = !engineOnish();
+  // 動いていないときは送り先を選んでも意味がない。
+  // ただしブラウザで認識しているなら、デーモンが止まっていても操作できる。
+  const usable = engineOnish() || asrActive();
+  for (const b of [el.segLive, el.segHold, el.segOff, el.mic]) b.disabled = !usable;
 }
 
 el.power.onclick = async () => {
@@ -1833,7 +1847,7 @@ async function refreshState() {
 
       paintPower();
       if (engine === 'booting') { setState('down', t('statusBooting')); return; }
-      if (engine === 'off') {
+      if (engine === 'off' && !asrActive()) {
         setState('off', t('statusStopped'));
         el.hint.textContent = t('hintStopped');
         return;
@@ -2259,10 +2273,15 @@ let recRunning = false;      // start() 済みで、まだ end が来ていな�
 let recWanted = false;       // 使う設定になっているか
 let lastVoiceAt = 0;         // 最後に声が出ていた時刻
 let recStartedAt = 0;        // いまのセッションを張った時刻
+let recFails = 0;            // 続けて失敗した回数（諦める判断に使う）
+
+// ブラウザ認識が実際に動いている状態か
+const asrActive = () => canBrowserASR && recWanted;
+
+const MAX_FAILS = 6;         // これだけ続けて駄目なら諦めて知らせる
 
 // 切れる手前で自分から張り直す。実測の限界（7〜10秒）より十分手前にする。
-const RENEW_AFTER_MS = 4500;   // このあいだ黙っていたら張り直す
-const SESSION_MAX_MS = 45000;  // 長く続いたセッションも念のため切り替える
+const RENEW_AFTER_MS = 4500;
 
 function browserLang() {
   // 認識させる言語。画面の表示言語ではなく、話す言語。
@@ -2270,11 +2289,11 @@ function browserLang() {
   if (saved) return saved;
   // navigator.language は "ja" のように地域の付かない形で返ることがある。
   // そのままだと候補一覧と一致せず、生のコードが選択肢に並んでしまう。
-  const want = (navigator.language || 'ja-JP');
+  const want = (navigator.language || 'en-US');
   if (ASR_LANGS.some(([c]) => c === want)) return want;
   const head = want.split('-')[0].toLowerCase();
   const hit = ASR_LANGS.find(([c]) => c.split('-')[0].toLowerCase() === head);
-  return hit ? hit[0] : 'ja-JP';
+  return hit ? hit[0] : 'en-US';
 }
 
 function newRecognition() {
@@ -2284,92 +2303,134 @@ function newRecognition() {
   r.interimResults = true;
   r.maxAlternatives = 1;
 
-  r.onstart = () => { recRunning = true; recStartedAt = performance.now(); };
+  // 古いインスタンスの合図で新しい状態を壊さないよう、毎回自分かどうか見る。
+  // これが無いと、入れ直した直後に古い end が来て二重に起動しうる。
+  const mine = () => rec === r;
+
+  r.onstart = () => {
+    if (!mine()) return;
+    recRunning = true; recStartedAt = performance.now(); recFails = 0;
+  };
 
   r.onresult = ev => {
+    if (!mine()) return;
     let interim = '';
     for (let i = ev.resultIndex; i < ev.results.length; i++) {
       const res = ev.results[i];
-      const text = res[0].transcript;
-      if (res.isFinal) {
-        sendUtterance(text);
-      } else {
-        interim += text;
-      }
+      if (res.isFinal) sendUtterance(res[0].transcript);
+      else interim += res[0].transcript;
     }
-    // 認識中の文字は、デーモンのときと同じ場所に出す
     el.stream.textContent = interim;
     el.tray.classList.toggle('idle', !interim);
     if (interim.trim()) lastVoiceAt = performance.now();
   };
 
   r.onerror = ev => {
-    // no-speech と aborted は日常的に起きる（黙っていただけ・張り直した）。
-    // not-allowed だけは人の操作が要るので、そこで止める。
+    if (!mine()) return;
+    // マイクを断られたら人の操作が要る。設定ごと戻して知らせる。
     if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
-      recWanted = false;
-      el.hint.textContent = t('asrDenied');
+      disableBrowserASR(t('asrDenied'));
+      return;
     }
+    // no-speech / aborted は日常的に起きる（黙っていた・自分で張り直した）。
+    // それ以外（network, audio-capture, language-not-supported…）は数える。
+    if (ev.error !== 'no-speech' && ev.error !== 'aborted') recFails++;
   };
 
   r.onend = () => {
+    if (!mine()) return;
     recRunning = false;
     el.stream.textContent = '';
-    // 使う設定である限り、すぐ張り直す。ここで待つと一言目を落とす。
-    if (recWanted) startRecognition();
+    if (!recWanted) return;
+    if (recFails > MAX_FAILS) {
+      disableBrowserASR(t('asrFailed'));
+      return;
+    }
+    // 失敗が続いているときだけ待つ。順調なときは待たない
+    // （待つと、その間に話し始めた分を落とす）。
+    const wait = recFails ? Math.min(8000, 250 * Math.pow(2, recFails - 1)) : 0;
+    setTimeout(() => { if (recWanted && rec === r) startRecognition(); }, wait);
   };
   return r;
 }
 
 function startRecognition() {
-  if (!canBrowserASR || recRunning) return;
+  if (!canBrowserASR || !recWanted || recRunning) return;
+  const r = newRecognition();
+  rec = r;
   try {
-    rec = newRecognition();
-    rec.start();
+    r.start();
   } catch {
     // 直前のセッションがまだ畳まれていないことがある。少し待って戻る。
-    setTimeout(() => { if (recWanted && !recRunning) startRecognition(); }, 250);
+    recFails++;
+    setTimeout(() => { if (recWanted && rec === r) { rec = null; startRecognition(); } },
+               Math.min(8000, 250 * Math.pow(2, recFails - 1)));
   }
 }
 
 function stopRecognition() {
-  recWanted = false;
-  if (rec) { try { rec.abort(); } catch {} }
-  rec = null; recRunning = false;
+  recWanted = false;            // abort より先に降ろす（end での復活を止める）
+  const r = rec;
+  rec = null; recRunning = false; recFails = 0;
+  if (r) { try { r.abort(); } catch {} }
   el.stream.textContent = '';
 }
 
-// 黙っているあいだに張り直す見張り。声が出ている最中は何もしない。
+// 使えなくなったときに、設定・保存・画面をまとめて実態に合わせる。
+// フラグだけ降ろすと、チェックが入ったまま動いていない状態になる。
+function disableBrowserASR(why) {
+  stopRecognition();
+  store.set('asr', '');
+  paintBrowserAsr();
+  if (why) el.hint.textContent = why;
+  paintPower();
+}
+
+/* 声が出ているかどうかは、rAF ではなく自前の間隔で見る。
+   描画は背景タブだと止まるので、そこに相乗りすると
+   「浮かせて別の作業をしている間だけ検出が死ぬ」ことになる。
+   この道具はまさにその使い方をするので、独立させておく。 */
 setInterval(() => {
-  if (!recWanted || !recRunning) return;
+  if (!asrActive() || !analyser || vizFailed) return;
+  analyser.getByteFrequencyData(freq);
+  if (browserLevel() > 0.12) lastVoiceAt = performance.now();
+}, 150);
+
+/* 黙っているあいだに先回りして張り直す見張り。
+   声が出ている最中は絶対に触らない（下の return 1本がその保証）。 */
+setInterval(() => {
+  if (!recWanted || !recRunning || !rec) return;
   const now = performance.now();
-  const quietFor = now - lastVoiceAt;
-  const age = now - recStartedAt;
-  if (quietFor < RENEW_AFTER_MS) return;              // まだ喋っている
-  if (age < RENEW_AFTER_MS) return;                   // 張り直した直後
-  if (age > SESSION_MAX_MS || quietFor >= RENEW_AFTER_MS) {
-    // stop() は最後の結果を確定させてから end を投げる。abort() だと捨てる。
-    try { rec.stop(); } catch {}   // end で自動的に張り直る
-  }
+  if (now - lastVoiceAt < RENEW_AFTER_MS) return;   // まだ喋っている
+  if (now - recStartedAt < RENEW_AFTER_MS) return;  // 張り直した直後
+  // stop() は最後の結果を確定させてから end を投げる（abort は捨てる）
+  try { rec.stop(); } catch {}
 }, 1000);
 
-// 確定した発話をサーバへ。辞書・無視語・最小文字数・保留の判定は
-// サーバ側でデーモンと同じ道を通す（認識のやり方で結果が変わらないように）。
-async function sendUtterance(text) {
+/* 確定した発話をサーバへ。辞書・無視語・最小文字数・保留の判定は
+   サーバ側でデーモンと同じ道を通す（認識のやり方で結果が変わらないように）。
+
+   撃ちっぱなしにすると届く順が入れ替わるので、前の送信に繋いで直列にする。 */
+let sendChain = Promise.resolve();
+function sendUtterance(text) {
   text = (text || '').trim();
   if (!text) return;
   lastVoiceAt = performance.now();
-  try {
-    await post('/api/utterance', {text});
-  } catch {}
+  sendChain = sendChain.then(async () => {
+    try {
+      const res = await post('/api/utterance', {text});
+      // ブラウザ認識には手元の控えが無い。落ちたら本人に伝えるしかない。
+      if (!res.ok) el.hint.textContent = t('asrSendFailed', {n: res.status});
+    } catch {
+      el.hint.textContent = t('asrSendFailed', {n: '—'});
+    }
+  });
 }
 
 /* ── ブラウザ認識の設定 ───────────────── */
-
 function paintAsrLangs() {
   const cur = browserLang();
-  const list = ASR_LANGS.some(([c]) => c === cur) ? ASR_LANGS
-             : [[cur, cur], ...ASR_LANGS];
+  const list = ASR_LANGS.some(([c]) => c === cur) ? ASR_LANGS : [[cur, cur], ...ASR_LANGS];
   el.asrLang.replaceChildren(...list.map(([code, name]) => {
     const o = document.createElement('option');
     o.value = code; o.textContent = name; o.selected = code === cur;
@@ -2381,26 +2442,52 @@ function paintBrowserAsr() {
   el.browserAsr.checked = recWanted;
   el.browserAsrWarn.hidden = !recWanted;
   el.asrLangField.hidden = !recWanted;
+  // Whisper 用の「認識言語」と並ぶと、どちらを触ればいいのか分からない。
+  // ブラウザで認識している間は、そちらは効かないので隠す。
+  if (el.recogLangField) el.recogLangField.hidden = recWanted || el.recogLangField.hidden;
 }
 
-el.browserAsr.onchange = () => {
-  if (el.browserAsr.checked) {
-    recWanted = true;
-    store.set('asr', '1');
-    lastVoiceAt = performance.now();
-    startRecognition();
-  } else {
-    store.set('asr', '');
-    stopRecognition();
+/* ブラウザ認識とデーモンの認識は同時に動かさない。
+   どちらも同じ発話ログに書くので、両方動くと同じ発話が2回 Claude に届く。
+   入れたらデーモンの認識を止め、外したら戻す。 */
+el.browserAsr.onchange = async () => {
+  const on = el.browserAsr.checked;
+  store.set('asr', on ? '1' : '');
+  el.browserAsr.disabled = true;
+  try {
+    if (on) {
+      recWanted = true;
+      asrPausedByRoute = false;
+      lastVoiceAt = performance.now();
+      // 先にデーモンを止める。止まる前に張ると、その間の発話が二重に届く。
+      if (engineOnish()) {
+        engine = 'stopping';
+        paintPower();
+        await post('/api/engine', {running: false});
+      }
+      startRecognition();
+    } else {
+      stopRecognition();
+      // 認識する手立てが無くなるので、デーモンを戻す
+      if (engine === 'off') {
+        engine = 'booting';
+        startedAt = Date.now();
+        paintPower();
+        await post('/api/engine', {running: true});
+      }
+    }
+  } finally {
+    el.browserAsr.disabled = false;
   }
   paintBrowserAsr();
+  refreshState();
   paint();
 };
 
 el.asrLang.onchange = () => {
   store.set('asrLang', el.asrLang.value);
   // 言語は張り直したときに効く。使用中なら今すぐ張り直す。
-  if (recWanted) { try { rec.abort(); } catch {} }
+  if (recWanted && rec) { try { rec.stop(); } catch {} }
 };
 
 /* ── フローティング表示 ─────────────────
@@ -2650,7 +2737,13 @@ if (canBrowserASR) {
   recWanted = store.get('asr', '') === '1';
   paintBrowserAsr();
   // 認識はマイクの許可が要るので、最初に触られた時点で始める
-  if (recWanted) addEventListener('pointerdown', () => startRecognition(), {once:true});
+  // 認識はマイクの許可が要るので、最初に触られた時点で始める。
+  // キーボードだけで操作する人もいるので、押鍵でも始める。
+  if (recWanted) {
+    const arm = () => startRecognition();
+    addEventListener('pointerdown', arm, {once:true});
+    addEventListener('keydown', arm, {once:true});
+  }
 }
 applyTheme(store.get('theme', 'auto'));
 applyViz(vizStyle);
