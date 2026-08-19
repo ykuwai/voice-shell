@@ -632,7 +632,7 @@
       <span class="spacer"></span>
       <button class="tiny edit" id="editOnce" data-icon="edit" data-icon-size="17"
               data-i18n-title="editOnce"></button>
-      <button class="tiny warn" id="dropOne" data-icon="delete" data-icon-size="17"
+      <button class="tiny warn lit" id="dropOne" data-icon="delete" data-icon-size="17"
               data-i18n-title="dropOne"></button>
     </div>
     <div class="stream" data-i18n-touch="needsTouch"><span id="stream" data-i18n-quiet="quiet"></span><span class="caret"></span></div>
@@ -1661,10 +1661,11 @@ function paint() {
 /* 「直す」「消す」は常に置いたままにして、押せるかどうかだけを変える。
    出し入れすると的の位置が動いて、慌てたときに隣を押してしまう。 */
 function paintTinyButtons() {
+  // 「消す」はいつでも押せる。消すものが無いときに押しても、いま喋っている
+  // ものが無いだけなので何も起こらない。出したり沈めたりする方が、
+  // 押したいときに押せるかどうかを毎回確かめることになって使いづらい。
   el.editOnce.disabled = route !== 'live' || oneShot;
-  el.dropOne.disabled = route === 'off' || !el.stream.textContent.trim();
   el.editOnce.classList.toggle('lit', !el.editOnce.disabled);
-  el.dropOne.classList.toggle('lit', !el.dropOne.disabled);
 }
 
 // 手直し欄は、溜めるモードか書きかけがあるときだけ出す。
