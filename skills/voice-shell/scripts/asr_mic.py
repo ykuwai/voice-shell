@@ -189,10 +189,10 @@ def _kill_engine_on_exit():
 # 一覧して選べるようにする。入っていないものは並べても選べないだけなので出さない。
 
 ENGINE_LABELS = {
-    "apple":    "Apple のオンデバイス認識（軽い・手元だけ）",
-    "whisper":  "Whisper（固有名詞に強い・手元だけ）",
-    "mlx":      "Qwen3-ASR / MLX（手元だけ）",
-    "local":    "Qwen3-ASR / GPU（手元だけ）",
+    "apple":    "Apple のオンデバイス認識（軽い・ローカル）",
+    "whisper":  "Whisper（固有名詞に強い・ローカル）",
+    "mlx":      "Qwen3-ASR / MLX（ローカル）",
+    "local":    "Qwen3-ASR / GPU（ローカル）",
     "home-lan": "LAN の GPU 機に任せる",
 }
 
