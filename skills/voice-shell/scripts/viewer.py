@@ -198,6 +198,23 @@ class Tail:
                 await self.broadcast({"mic_active": cur})
             await asyncio.sleep(0.3)
 
+    async def watch_muted(self):
+        """マイクの入切を流す。
+
+        声で切り替えられる（デーモンが「ミュート」を聞いてファイルを作る）ので、
+        画面が押していない変化が起きる。3秒おきの /api/state を待たせると、
+        切れたのかどうか分からないまま喋り続けることになる。
+        """
+        path = self.path.parent / "muted"
+        last = None
+        while True:
+            cur = path.exists()
+            if cur != last:
+                # 最初の1回は「変化」ではないので、状態だけ揃えて音は出させない。
+                await self.broadcast({"muted": cur, "first": last is None})
+                last = cur
+            await asyncio.sleep(0.2)
+
     async def watch_held(self):
         """一時停止中に確定した発話を、増えた分だけ流す。
 
@@ -714,7 +731,8 @@ async def main_async(args):
              asyncio.create_task(tail.watch_partial()),
              asyncio.create_task(tail.watch_level()),
              asyncio.create_task(tail.watch_held()),
-             asyncio.create_task(tail.watch_mic_active())]
+             asyncio.create_task(tail.watch_mic_active()),
+             asyncio.create_task(tail.watch_muted())]
     try:
         await asyncio.Event().wait()
     finally:

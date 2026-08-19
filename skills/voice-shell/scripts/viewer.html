@@ -874,6 +874,8 @@ const I18N = {
     dictSkipped:' / {n} unreadable rows',
     grpLog:'Transcript', items:'items', copyAll:'Copy all', copied:'Copied',
     micSwitched:'Switched microphone: {name}',
+    voiceMuted:'Muted — say “unmute” to come back',
+    voiceUnmuted:'Unmuted — listening again',
     micSwitching:'Switching microphone to {name}…',
     discarded:'Discarded.', undo:'Undo',
     switchFailed:'Could not switch: {err}',
@@ -967,6 +969,8 @@ const I18N = {
     dictSkipped:' / 読めない行 {n} 件',
     grpLog:'ログ', items:'件', copyAll:'全部コピー', copied:'コピーしました',
     micSwitched:'マイクを切り替えました: {name}',
+    voiceMuted:'ミュートにしました — 「ミュート解除」で戻ります',
+    voiceUnmuted:'ミュートを解除しました — また届きます',
     micSwitching:'{name} に切り替えています…',
     discarded:'消しました。', undo:'元に戻す',
     switchFailed:'切替に失敗しました: {err}',
@@ -1796,6 +1800,31 @@ async function setRoute(next) {
   refreshState();
 }
 
+/* 声で切り替わったときだけ鳴らす短い音。
+   画面を見ていないから声で操作しているわけで、見た目が変わるだけでは
+   通じたのか分からない。通話アプリに倣って、切るときは下がる音、
+   戻すときは上がる音にする（どちらに変わったか、音だけで分かる）。 */
+let chimeCtx = null;
+function chime(muted) {
+  try {
+    chimeCtx = chimeCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (chimeCtx.state === 'suspended') chimeCtx.resume();
+    const t0 = chimeCtx.currentTime;
+    const osc = chimeCtx.createOscillator();
+    const gain = chimeCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(muted ? 680 : 440, t0);
+    osc.frequency.exponentialRampToValueAtTime(muted ? 440 : 680, t0 + 0.11);
+    // 直線だと切れ際に「プツッ」と鳴るので、両端を絞る
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(0.10, t0 + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.18);
+    osc.connect(gain).connect(chimeCtx.destination);
+    osc.start(t0);
+    osc.stop(t0 + 0.2);
+  } catch { /* 音が出せない環境では黙って諦める（表示は変わっている） */ }
+}
+
 // 自分でモードを選んだら「今回だけ」も、Claude からの一言も片付ける
 el.segLive.onclick = () => { oneShot = false; el.note.hidden = true; setRoute('live'); };
 el.segHold.onclick = () => { oneShot = false; el.note.hidden = true; setRoute('hold'); };
@@ -1816,6 +1845,20 @@ function connect() {
       paintGauge();
       onCalibSample(m.level);
       return;      // 下の else まで落とすと、発話として扱われて壊れる
+    }
+    if ('muted' in m) {
+      // 声でも切り替わる（デーモンが「ミュート」を聞いてファイルを作る）。
+      // 自分で押したときは押した瞬間に route を更新しているので、ここは
+      // 一致して何も起きない = 外から変わったときだけ鳴る。
+      if (m.muted !== (route === 'off')) {
+        route = m.muted ? 'off' : lastMode;
+        paint();
+        if (!m.first) {
+          chime(m.muted);
+          el.hint.textContent = t(m.muted ? 'voiceMuted' : 'voiceUnmuted');
+        }
+      }
+      return;
     }
     if ('mic_active' in m) {
       // デーモン側で実際に切り替えが完了した確定情報。押した瞬間の楽観的な
