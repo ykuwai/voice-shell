@@ -624,16 +624,12 @@ def is_noise(text: str, extra=()) -> bool:
 
 # ── 声だけでマイクを入切する ──────────────────────
 #
-# 画面に手が届かないときのため。合図になる語は短いので、最小文字数
-# （既定15字）や相槌の判定より**前**に見る必要がある。
+# 合図の語は短いので、最小文字数や相槌の判定より前に見る。誤爆すると
+# 話しかけているのに届かない状態になるので、その一言だけを喋ったときに
+# 限る（部分一致はしない）。
 #
-# 誤爆すると、話しかけているのに届かない状態になる。だから「その一言だけを
-# 喋った」ときに限る（部分一致はしない）。この行のように長い文の中で
-# 「ミュート」と言っても効かない。
-#
-# 切っている間も認識自体は動いている（録ってはいるが送らない）ので、
-# 解除の合図は届く。ブラウザ認識のときだけは、切ると音声そのものを
-# 手放すので声では戻せない — 画面から戻してもらう。
+# 切っている間も認識は動いている（録ってはいるが送らない）ので解除の
+# 合図は届く。ブラウザ認識は切ると音声を手放すので、声では戻せない。
 MUTE_WORDS = {
     "ミュート", "みゅーと", "ミュートして", "ミュートしてください", "ミュートお願い",
     "ミュートオン", "ミュートオンにして", "ミュートします",
@@ -759,6 +755,26 @@ def route_command(text: str):
     return None
 
 
+# 言い終わってから「やっぱりなし」と思うことがある。発話の**終わり**に
+# 取り消しの語が来たら、その一言ごと捨てる。途中に出てきた分は普通の言葉
+# として扱う（この行のように、取り消しの話をしているだけのことがある）。
+#
+# 語は絞る。「やめて」「なし」のような、普通の文の終わりにも来る言い方を
+# 入れると、取り消すつもりのない指示まで消える。
+CANCEL_TAIL = (
+    "キャンセル", "きゃんせる", "キャンセルで", "キャンセルして",
+    "取り消し", "取消", "取り消して", "とりけし", "とりけして",
+    "なかったことに", "なかったことにして", "やっぱなし", "やっぱりなし",
+    "cancel", "cancelthat", "scratchthat", "nevermind",
+)
+
+
+def ends_with_cancel(text: str) -> bool:
+    """発話の終わりが取り消しの合図かどうか。"""
+    key = text.strip().translate(_CMD_DROP).lower()
+    return bool(key) and key.endswith(CANCEL_TAIL)
+
+
 def note_voice_cmd(log_path, kind: str, label: str = "", said: str = "") -> None:
     """声の合図に何が起きたかを画面へ渡す。
 
@@ -774,7 +790,7 @@ def note_voice_cmd(log_path, kind: str, label: str = "", said: str = "") -> None
         # OSError ではないので、捕まえる側も広げておく。
         (Path(log_path).parent / "voice_cmd.json").write_text(
             json.dumps({"at": time.time(), "kind": kind,
-                        "label": label, "said": said},
+                        "label": label, "said": said[:60]},
                        ensure_ascii=False), encoding="utf-8")
     except (OSError, ValueError):
         pass
@@ -920,16 +936,10 @@ def resolve_target(log_path):
 
 # ── 聞き手の名前 ──────────────────────────
 #
-# 起動した時点では、その作業が何なのか本人にも決まっていない。だから
-# 最初はフォルダ名で出し、エージェントが話の内容から題名を付けた時点で
-# そちらへ切り替える。題名の在り処はエージェントごとに違うので、
-# 「探し方」を並べて上から順に試す。
-#
-#   Claude Code  記録(~/.claude/projects/*/<id>.jsonl)の最後の ai-title
-#   Codex        ~/.codex/session_index.jsonl の thread_name
-#
-# どちらでもない道具から使われることもあるので、環境変数で名乗る道
-# （VOICE_SHELL_NAME）と、あとから付け替える道（voice-shell.sh name）も残す。
+# 起動時点では作業の中身が決まっていないので、まずフォルダ名。エージェントが
+# 会話に題名を付けたらそちらへ切り替える。題名の在り処は道具ごとに違うため、
+# 探し方を並べて上から試す。どれにも当たらない道具のために、環境変数
+# （VOICE_SHELL_NAME）と `voice-shell.sh name` も残してある。
 
 _title_cache = {}      # path -> (mtime, title)
 
@@ -1293,13 +1303,10 @@ def main():
         mute_path.unlink(missing_ok=True)
         hold_path.write_text("", encoding="utf-8")
 
-        # 認識は発話単位で確定するため、確定時点のミュート状態だけを見ると
-        # 「切っている間に話した音声」が解除後に流れ込む（ところてん現象）。
-        #
-        # そこで「マイクが切られた回数」を数え、発話が始まった時点の値を覚えておく。
-        # 確定時に値が変わっていれば、その発話はミュートをまたいだので捨てる。
-        # 単純なフラグだと、ミュート中に拾った物音の確定がフラグを消費してしまい、
-        # 直後の本当の発話が巻き込まれる／取りこぼす。
+        # 確定時のミュート状態だけを見ると、切っている間に話した音声が解除後に
+        # 流れ込む。切られた回数を数え、発話が始まった時点の値と比べて、
+        # ミュートをまたいだ発話を捨てる（単純なフラグだと、ミュート中に拾った
+        # 物音がフラグを消費して直後の発話を巻き込む）。
         mute_generation = 0
         was_muted = False
         speaking_since = None   # いま進行中の発話が始まった時点の generation
@@ -1426,6 +1433,12 @@ def main():
                 started_at, speaking_since = speaking_since, None
                 if muted_now or (started_at is not None and started_at != mute_generation):
                     print(f"(マイク切) {text[:40]}", file=sys.stderr, flush=True)
+                    continue
+
+                # 終わりに「キャンセル」が来たら、その一言ごと捨てる。
+                if ends_with_cancel(text):
+                    note_voice_cmd(log_path, "cancelled", "", text)
+                    print(f"(取り消し) {text[:40]}", file=sys.stderr, flush=True)
                     continue
 
                 if len(text) < args.min_chars:

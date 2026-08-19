@@ -304,12 +304,8 @@ async def main_async(args):
     async def handle_ws(request):
         ws = web.WebSocketResponse(heartbeat=30)
         await ws.prepare(request)
-        # 先にブロードキャスト対象へ登録してから履歴を送る。逆順だと、
-        # ちょうど ws.prepare() / 履歴送信で await している隙に新しい行が
-        # 届いた場合、「まだ history に無いので今回のスナップショットには
-        # 含まれず、まだ clients にも入っていないのでブロードキャストも
-        # 受け取れない」という二重の抜け穴ができ、その1件だけが永久に
-        # 届かなくなる（実測: ブラウザ認識の最初の発話だけ抜けることがあった）。
+        # 先に購読者へ登録してから履歴を送る。逆順だと、await している隙に
+        # 届いた行が history にもブロードキャストにも乗らず、そこだけ落ちる。
         tail.clients.add(ws)
         for rec in list(tail.history):
             await ws.send_str(json.dumps(rec, ensure_ascii=False))
