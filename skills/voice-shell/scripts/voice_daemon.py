@@ -713,6 +713,30 @@ _ROUTE_RXS = [re.compile(rx) for rx in (
 )]
 
 
+# 即時 / 手直しの切り替えも声でできるようにする。どちらもこの道具に対して
+# しか言わない言葉なので、単独で言われたら合図として扱ってよい。
+LIVE_WORDS = {
+    "即時", "そくじ", "即時モード", "そくじもーど", "即時に", "即時にして",
+    "即時に戻して", "そのまま送る", "そのまま送って",
+    "live", "livemode", "instant", "instantmode", "sendlive",
+}
+HOLD_WORDS = {
+    "手直し", "てなおし", "手直しモード", "てなおしもーど", "手直しに", "手直しにして",
+    "手直しに回して", "溜めて", "ためて", "溜める", "ためる", "保留",
+    "hold", "holdmode", "draft", "draftmode",
+}
+
+
+def mode_command(text: str):
+    """送り方を切り替える合図なら "live" / "hold" を返す。"""
+    key = text.strip().translate(_CMD_DROP).lower()
+    if not key:
+        return None
+    if key in LIVE_WORDS:
+        return "live"
+    return "hold" if key in HOLD_WORDS else None
+
+
 def route_command(text: str):
     """送信先を選ぶ合図なら番号を返す（画面に並ぶ順の1番目から）。"""
     key = text.strip().translate(_CMD_DROP).lower()
@@ -1349,6 +1373,18 @@ def main():
                     # 合図そのものは発話ではないので送らない。was_muted は
                     # 触らない — 次の周回の頭で数え直させる（ここで先回りすると
                     # 世代が上がらず、切る前に始まった発話を落とせなくなる）。
+                    speaking_since = None
+                    continue
+
+                # 送り方（即時 / 手直し）も声で切り替える。
+                mode = mode_command(text)
+                if mode:
+                    if mode == "hold":
+                        pause_path.touch()
+                    else:
+                        pause_path.unlink(missing_ok=True)
+                    note_voice_cmd(log_path, "mode_" + mode, "", text)
+                    print(f"(声で{mode}) {text[:40]}", file=sys.stderr, flush=True)
                     speaking_since = None
                     continue
 
