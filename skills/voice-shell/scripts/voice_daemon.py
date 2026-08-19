@@ -755,24 +755,35 @@ def route_command(text: str):
     return None
 
 
-# 言い終わってから「やっぱりなし」と思うことがある。発話の**終わり**に
-# 取り消しの語が来たら、その一言ごと捨てる。途中に出てきた分は普通の言葉
-# として扱う（この行のように、取り消しの話をしているだけのことがある）。
+# 言い終わってから「やっぱりなし」「これは直してから送りたい」と思うことが
+# ある。発話の**終わり**に合図が来たら、その一言をそのように扱う。途中に
+# 出てきた分は普通の言葉のまま（合図の話をしているだけのことがある）。
 #
 # 語は絞る。「やめて」「なし」のような、普通の文の終わりにも来る言い方を
-# 入れると、取り消すつもりのない指示まで消える。
+# 入れると、そのつもりのない指示まで持っていかれる。
 CANCEL_TAIL = (
     "キャンセル", "きゃんせる", "キャンセルで", "キャンセルして",
     "取り消し", "取消", "取り消して", "とりけし", "とりけして",
     "なかったことに", "なかったことにして", "やっぱなし", "やっぱりなし",
-    "cancel", "cancelthat", "scratchthat", "nevermind",
+    "cancel", "cancel that", "scratch that", "never mind", "nevermind",
 )
+# こちらは捨てずに、画面の下書きへ回す（直してから送れる）
+HOLD_TAIL = (
+    "手直し", "てなおし", "手直しで", "手直しして", "手直ししたい",
+    "直してから", "なおしてから", "あとで直す", "ちょっと直す",
+    "edit", "edit this", "let me edit", "hold this",
+)
+_TAIL_TRIM = " \t\u3000。、．，・！？!?.,"
 
 
-def ends_with_cancel(text: str) -> bool:
-    """発話の終わりが取り消しの合図かどうか。"""
-    key = text.strip().translate(_CMD_DROP).lower()
-    return bool(key) and key.endswith(CANCEL_TAIL)
+def take_tail(text: str, tails):
+    """末尾が合図なら、それを取り除いた本文を返す。合図でなければ None。"""
+    body = text.strip().rstrip(_TAIL_TRIM)
+    low = body.lower()
+    for w in tails:
+        if low.endswith(w):
+            return body[: len(body) - len(w)].rstrip(_TAIL_TRIM)
+    return None
 
 
 def note_voice_cmd(log_path, kind: str, label: str = "", said: str = "") -> None:
@@ -1436,12 +1447,23 @@ def main():
                     continue
 
                 # 終わりに「キャンセル」が来たら、その一言ごと捨てる。
-                if ends_with_cancel(text):
+                if take_tail(text, CANCEL_TAIL) is not None:
                     note_voice_cmd(log_path, "cancelled", "", text)
                     print(f"(取り消し) {text[:40]}", file=sys.stderr, flush=True)
                     continue
 
-                if len(text) < args.min_chars:
+                # 終わりに「手直し」が来たら、送らずに下書きへ回す。
+                # 短くても落とさない（本人が意図して回しているため）。
+                body = take_tail(text, HOLD_TAIL)
+                force_hold = body is not None
+                if force_hold:
+                    if not body:
+                        note_voice_cmd(log_path, "cancelled", "", text)
+                        print(f"(手直し・空) {text[:40]}", file=sys.stderr, flush=True)
+                        continue
+                    text = body
+
+                if not force_hold and len(text) < args.min_chars:
                     continue
 
                 def drop(kind: str):
@@ -1449,7 +1471,8 @@ def main():
                     print(f"({kind}) {text[:40]}", file=sys.stderr, flush=True)
 
                 # 組み込みと辞書をまとめて判定する（辞書は毎回読むので即反映）
-                if not args.keep_noise and is_noise(text, user_dict["ignore"]):
+                if not force_hold and not args.keep_noise \
+                        and is_noise(text, user_dict["ignore"]):
                     drop("無視")
                     continue
                 if args.drop_non_japanese and looks_non_japanese(text):
@@ -1462,11 +1485,13 @@ def main():
 
                 # 一時停止中は保留ファイルへ。Claude には送られない。
                 # （ビューアが時刻を表示するので、こちらには残す）
-                if pause_path.exists():
+                if force_hold or pause_path.exists():
                     with open(hold_path, "a") as h:
                         h.write(json.dumps({"time": stamp, "text": text},
                                            ensure_ascii=False) + "\n")
                     print(f"[{stamp}] (保留) {text}", file=sys.stderr, flush=True)
+                    if force_hold:
+                        note_voice_cmd(log_path, "held", "", text)
                     continue
 
                 # Claude に渡る行は本文だけにする。時刻や言語は使わないので載せない。
