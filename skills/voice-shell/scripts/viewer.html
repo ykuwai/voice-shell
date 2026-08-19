@@ -166,7 +166,6 @@
   }
   .mic-hit:disabled { cursor:default; }
   /* マイク表示でないときは押せる場所を作らない（波形は操作対象ではない） */
-  .viz.no-mic .mic-hit { display:none; }
   #viz { display:block; width:100%; height:124px; }
   /* マイクの入切と音量メーターを1行に並べる */
   .meter-row { display:flex; align-items:center; gap:.55rem; padding:0 1rem; }
@@ -715,15 +714,6 @@
         <button data-theme-choice="light" data-i18n="themeLight">Light</button>
       </div>
     </div>
-    <div class="field">
-      <label data-icon="equalizer" data-icon-size="17" data-i18n="vizStyle">Visualizer</label>
-      <div class="seg-row" id="vizRow">
-        <button data-viz-choice="mic" data-i18n="vizMic">Mic</button>
-        <button data-viz-choice="bar" data-i18n="vizBar">Bar</button>
-        <button data-viz-choice="wave" data-i18n="vizWave">Wave</button>
-        <button data-viz-choice="radial" data-i18n="vizRadial">Orb</button>
-        <button data-viz-choice="grid" data-i18n="vizGrid">Grid</button>
-      </div>
     </div>
     <div class="field">
       <label data-icon="language" data-icon-size="17" data-i18n="language">Language</label>
@@ -874,7 +864,6 @@ const I18N = {
     remove:'Remove',
     grpLook:'Appearance', theme:'Theme',
     themeAuto:'Auto', themeDark:'Dark', themeLight:'Light',
-    vizStyle:'Visualizer', vizMic:'Mic', vizBar:'Bar', vizWave:'Wave', vizRadial:'Orb', vizGrid:'Grid',
     language:'Language',
     grpDict:'Dictionary',
     dictPrivate:'Keep on this machine only',
@@ -973,7 +962,6 @@ const I18N = {
     remove:'削除',
     grpLook:'見た目', theme:'テーマ',
     themeAuto:'自動', themeDark:'ダーク', themeLight:'ライト',
-    vizStyle:'波形', vizMic:'マイク', vizBar:'バー', vizWave:'流れる', vizRadial:'球', vizGrid:'格子',
     language:'言語',
     grpDict:'辞書',
     dictPrivate:'ローカルにだけ保存する（公開しない）',
@@ -1060,7 +1048,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'maxUtter','maxUtterVal',
                   'calibBtn','calibNote',
                   'engineGroup','enginePick','engineNote','browserAsrWarn','asrLang','asrLangField',
-                  'themeRow','vizRow','langRow',
+                  'themeRow','langRow',
                   'scopePrivate','scopeNote','tabReplace','tabIgnore',
                   'paneReplace','paneIgnore','replaceRows','ignoreRows',
                   'addReplace','addIgnore','newFrom','newTo','newIgnore','filterReplace',
@@ -1186,7 +1174,6 @@ const format = raw => raw;
    デーモン（ffmpeg）とは別の経路なので、許可が下りなければ
    WebSocket 越しの音量（level.txt）だけで動かす。 */
 const BARS = 48;
-let vizStyle = store.get('viz', 'mic');
 let audioCtx = null, analyser = null, micStream = null, freq = null;
 let daemonLevel = 0, daemonSpeaking = false;
 let vizFailed = false;
@@ -1194,7 +1181,6 @@ let wave = null;
 // バー表示はモックと同じく「直近のしばらく」を左から右へ流す。
 // 周波数の絵は低い方だけが立って右半分が寝たままになりやすく、
 // 喋っている実感が出ない。
-const history = new Array(BARS).fill(0);
 const bandFloor = new Array(BARS).fill(-60);   // dB
 
 const canvas = el.viz, cx = canvas.getContext('2d');
@@ -1280,7 +1266,6 @@ function bandsFromLevel() {
 let floorDb = -60;
 
 // 流れる波形の高さ。こちらも感度からの超過分をそのまま使う。
-function levelNow() { return amplitudeNow(); }
 
 // ブラウザ側のマイクで測った音量（0〜1）。デーモンが動いていなくても取れる。
 function browserLevel() {
@@ -1316,19 +1301,6 @@ function amplitudeFallback() {
 }
 
 
-
-// 生の音量はコマごとに大きく上下するので、そのまま並べるとちらついて
-// 落ち着かない。立ち上がりは速く、収まるのはゆっくりにして均す。
-let env = 0;
-let lastPush = 0;
-function pushHistory(now) {
-  const v = levelNow();
-  env = v > env ? env * 0.55 + v * 0.45 : env * 0.86 + v * 0.14;
-  if (now - lastPush < 70) return;
-  lastPush = now;
-  history.shift();
-  history.push(env);
-}
 
 // 音量は dB で見る。そのうえで、しきい値より下は急に小さくする
 // （エキスパンダー）。ゼロにはしないので「もう録れていないのでは」とは
@@ -1383,157 +1355,6 @@ function currentBands() {
   }
   return smooth;
 }
-
-function gradient(x0, x1) {
-  const g = cx.createLinearGradient(x0, 0, x1, 0);
-  g.addColorStop(0, cssVar('--accent'));
-  g.addColorStop(1, cssVar('--accent-2'));
-  return g;
-}
-
-// 共通の棒描き。値の配列をそのまま縦棒にする。
-function paintBars(vals, maxRatio) {
-  const pad = 14, w = cw - pad * 2;
-  const n = vals.length;
-  const gap = Math.max(1, w / n * 0.35);
-  const bw = (w - gap * (n - 1)) / n;
-  const mid = ch / 2, maxH = ch * maxRatio;
-  cx.fillStyle = gradient(pad, cw - pad);
-  for (let i = 0; i < n; i++) {
-    const h = Math.max(2.5, vals[i] * maxH);
-    const x = pad + i * (bw + gap);
-    cx.beginPath();
-    cx.roundRect(x, mid - h / 2, bw, h, bw / 2);
-    cx.fill();
-  }
-}
-
-// 今この瞬間の声を、低い音を中心にして左右対称に開く。
-// 流れる波形は「録音されている」ように見えてしまうため、
-// 喋っている実感が要るこちらを既定にする。
-function drawBar(b) {
-  const half = Math.floor(BARS / 2);
-  const vals = new Array(BARS);
-  for (let i = 0; i < half; i++) {
-    const v = b[Math.floor(i / half * BARS)];
-    vals[half - 1 - i] = v;      // 中心から左へ
-    vals[half + i] = v;          // 中心から右へ
-  }
-  paintBars(vals, 0.86);
-}
-
-// 直近のしばらくを左から右へ流す（録っている様子を見たいとき用）
-function drawWave() {
-  paintBars(history, 0.72);
-}
-
-// 球。輪を線で描くと図形にしか見えないので、太さの変わる「帯」を
-// 何枚か重ねる。太さと半径をなめらかな揺らぎで動かすと、
-// 図形ではなく息をしているものに見える。
-let spin = 0;
-
-// 乱数を使わない揺らぎ。周期の違う波を重ねて -1〜1 を返す。
-// 毎コマ乱数を引くとちらつくが、これなら滑らかにうねる。
-const wobble = (i, ph) =>
-  Math.sin(i * 0.7 + ph) * 0.55 +
-  Math.sin(i * 1.9 - ph * 1.3) * 0.30 +
-  Math.sin(i * 3.3 + ph * 0.6) * 0.15;
-
-// 帯を1枚描く。外周を進み、内周を戻って閉じることで太さを変えられる
-// （canvas の線は太さを途中で変えられないため）。
-function band(midX, midY, b, cfg) {
-  const out = [], inn = [];
-  for (let i = 0; i <= BARS; i++) {
-    const k = i % BARS;
-    const a = (i / BARS) * Math.PI * 2 + cfg.rot;
-    const amp = b[Math.floor(k * cfg.pick) % BARS];
-    const w = wobble(k, cfg.ph);
-
-    const rMid = cfg.r * (1 + 0.07 * w + cfg.reach * amp);
-    const half = cfg.thick * (0.45 + 0.55 * Math.abs(w)) * (0.5 + 1.1 * amp);
-    const cos = Math.cos(a), sin = Math.sin(a);
-    out.push([midX + cos * (rMid + half) * cfg.sx, midY + sin * (rMid + half) * cfg.sy]);
-    inn.push([midX + cos * (rMid - half) * cfg.sx, midY + sin * (rMid - half) * cfg.sy]);
-  }
-
-  cx.beginPath();
-  cx.moveTo(out[0][0], out[0][1]);
-  for (let i = 1; i < out.length - 1; i++) {
-    const c = out[i], n = out[i + 1];
-    cx.quadraticCurveTo(c[0], c[1], (c[0] + n[0]) / 2, (c[1] + n[1]) / 2);
-  }
-  for (let i = inn.length - 1; i > 0; i--) {
-    const c = inn[i], n = inn[i - 1];
-    cx.quadraticCurveTo(c[0], c[1], (c[0] + n[0]) / 2, (c[1] + n[1]) / 2);
-  }
-  cx.closePath();
-}
-
-function drawRadial(b) {
-  const midX = cw / 2, midY = ch / 2;
-  const base = ch * 0.27;
-  const avg = b.reduce((s, v) => s + v, 0) / BARS;
-  spin += 0.004 + avg * 0.012;
-
-  const g = gradient(midX - ch * 0.5, midX + ch * 0.5);
-  // 暗い画面では重ねるほど明るくする（光が集まって見える）。
-  // 明るい画面で同じことをすると白飛びするので、そのときは普通に重ねる。
-  const dark = !document.documentElement.matches('[data-theme="light"]') &&
-               !(matchMedia('(prefers-color-scheme: light)').matches &&
-                 !document.documentElement.matches('[data-theme="dark"]'));
-  cx.globalCompositeOperation = dark ? 'lighter' : 'source-over';
-
-  // 大きさ・向き・速さをずらした帯を重ねる。ぴったり揃うと機械的に見える。
-  const rings = [
-    {r: base * 1.30, thick: base * 0.055, reach: 0.30, ph: spin * 0.8,  rot:  spin * 0.35, sx: 1.06, sy: 0.94, pick: 1,   a: 0.22},
-    {r: base * 1.06, thick: base * 0.085, reach: 0.36, ph: -spin * 1.2, rot: -spin * 0.55, sx: 0.96, sy: 1.05, pick: 1.7, a: 0.34},
-    {r: base * 0.82, thick: base * 0.130, reach: 0.44, ph: spin * 1.7,  rot:  spin * 0.85, sx: 1.02, sy: 0.98, pick: 2.3, a: 0.46},
-  ];
-  for (const cfg of rings) {
-    band(midX, midY, b, cfg);
-    cx.globalAlpha = cfg.a * (0.55 + avg * 0.8);
-    cx.fillStyle = g;
-    cx.fill();
-  }
-
-  // 中心の芯。声の大きさで膨らみ、輪の内側を満たす
-  const core = base * (0.34 + avg * 0.42);
-  const rg = cx.createRadialGradient(midX, midY, 0, midX, midY, Math.max(1, core));
-  rg.addColorStop(0, cssVar('--accent'));
-  rg.addColorStop(0.55, color(cssVar('--accent-2'), 0.55));
-  rg.addColorStop(1, 'transparent');
-  cx.globalAlpha = 0.5 + avg * 0.5;
-  cx.fillStyle = rg;
-  cx.beginPath();
-  cx.arc(midX, midY, core, 0, Math.PI * 2);
-  cx.fill();
-
-  cx.globalAlpha = 1;
-  cx.globalCompositeOperation = 'source-over';
-}
-
-/* 大きなマイクひとつ。内側が拾えている音量ぶんだけ下から光る。
-
-   絵は Material Symbols のパスをそのまま使う（手で描くと、ほかの
-   アイコンと形も太さも揃わない）。viewBox は 0 -960 960 960 なので、
-   中心が (480, -480) に来るように動かしてから拡大する。 */
-const _micPaths = {};
-function micPath2D(name) {
-  if (!_micPaths[name]) _micPaths[name] = new Path2D(ICON[name][1]);   // 塗りの方
-  return _micPaths[name];
-}
-
-function paintGlyph(name, midX, midY, size, color) {
-  cx.save();
-  cx.translate(midX, midY);
-  const k = size / 960;
-  cx.scale(k, k);
-  cx.translate(-480, 480);
-  cx.fillStyle = color;
-  cx.fill(micPath2D(name));
-  cx.restore();
-}
-
 function drawMic() {
   const midX = cw / 2, midY = ch / 2;
   const size = ch * 0.62;            // マイクの絵の高さ
@@ -1551,11 +1372,9 @@ function drawMic() {
     return;
   }
 
-  // 囲みの輪。声が乗ると色が差すが、外へは滲ませない
-  // （後光を広げると残像のように見えて落ち着かない）。
-  cx.strokeStyle = lv > 0.02
-    ? color(cssVar('--accent'), 0.35 + lv * 0.65)
-    : cssVar('--line');
+  // 囲みの輪は常に同じ。声で色が動くと、どこまでが押せる範囲なのかが
+  // その都度あいまいになる。動くのはマイクの内側だけにする。
+  cx.strokeStyle = color(cssVar('--faint'), 0.55);
   cx.lineWidth = 3;
   cx.beginPath();
   cx.arc(midX, midY, ring, 0, Math.PI * 2);
@@ -1575,31 +1394,6 @@ function drawMic() {
     cx.restore();
   }
 }
-
-function drawGrid(b) {
-  const cols = 30, rows = 9;
-  const pad = 14, w = cw - pad * 2;
-  const dx = w / cols, dy = (ch * 0.8) / rows;
-  const top = (ch - dy * rows) / 2;
-  const r = Math.min(dx, dy) * 0.32;
-  const g = gradient(pad, cw - pad);
-  for (let i = 0; i < cols; i++) {
-    const v = b[Math.floor(i / cols * BARS)];
-    const lit = Math.round(v * rows);
-    for (let j = 0; j < rows; j++) {
-      // 真ん中から上下に伸びる形にする（横一列の棒より穏やか）
-      const fromMid = Math.abs(j - (rows - 1) / 2);
-      const on = fromMid <= lit / 2;
-      cx.beginPath();
-      cx.arc(pad + dx * (i + 0.5), top + dy * (j + 0.5), r, 0, Math.PI * 2);
-      cx.fillStyle = g;
-      cx.globalAlpha = on ? 1 : 0.12;
-      cx.fill();
-    }
-  }
-  cx.globalAlpha = 1;
-}
-
 function frame(now) {
   requestAnimationFrame(frame);
   if (!cw || !ch) return;
@@ -1614,23 +1408,18 @@ function frame(now) {
 function paintFrame(now) {
   cx.clearRect(0, 0, cw, ch);
 
-  // マイク表示のときは、切っていることも絵で示したいので描き続ける
-  const dead = (route === 'off' && vizStyle !== 'mic')
-            || (engine === 'off' && !asrActive());
+  // マイクの絵は、切っていることも形で示すので描き続ける
+  const dead = engine === 'off' && !asrActive();
   if (analyser && !vizFailed) analyser.getByteFrequencyData(freq);
 
   // 一時停止中は動かさない。見た目で「録っていない」と分かるようにする。
-  if (dead) { history.fill(0); smooth.fill(0); } else { pushHistory(now); }
+  if (dead) smooth.fill(0);
   const bands = dead ? smooth : currentBands();
 
-  if (vizStyle === 'mic') drawMic();
-  else if (vizStyle === 'radial') drawRadial(bands);
-  else if (vizStyle === 'grid') drawGrid(bands);
-  else if (vizStyle === 'wave') drawWave();
-  else drawBar(bands);
+  drawMic();
 
   // ロゴの波も同じ値で動かす（小さくしたときの手がかり）
-  const src = vizStyle === 'wave' ? history : bands;
+  const src = bands;
   const marks = el.logoMark.children;
   for (let i = 0; i < marks.length; i++) {
     const v = src[BARS - marks.length + i] ?? src[Math.floor((i + 0.5) / marks.length * BARS)] ?? 0;
@@ -2219,15 +2008,6 @@ function applyTheme(choice) {
   store.set('theme', choice);
 }
 for (const b of el.themeRow.children) b.onclick = () => applyTheme(b.dataset.themeChoice);
-
-function applyViz(choice) {
-  vizStyle = choice;
-  // 波形は操作対象ではないので、マイク表示のときだけ押せるようにする
-  el.viz.parentElement.classList.toggle('no-mic', choice !== 'mic');
-  for (const b of el.vizRow.children) b.classList.toggle('on', b.dataset.vizChoice === choice);
-  store.set('viz', choice);
-}
-for (const b of el.vizRow.children) b.onclick = () => applyViz(b.dataset.vizChoice);
 
 function applyLang(choice) {
   langPref = choice;
@@ -3214,7 +2994,6 @@ loadEngines().then(() => {
   el.tray.classList.add('needs-touch');
 });
 applyTheme(store.get('theme', 'auto'));
-applyViz(vizStyle);
 for (const b of el.langRow.children) b.classList.toggle('on', b.dataset.langChoice === langPref);
 fitCanvas();
 retally();
