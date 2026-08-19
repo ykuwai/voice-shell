@@ -313,37 +313,27 @@
     font-variant-numeric:tabular-nums;
   }
   .draft-card .gutter .spacer { flex:1; }
-  /* 「直す」と「消す」。取り違えると失うものが違う（直す=戻せる、
-     消す=消える）ので、的を大きくし、間もはっきり空ける。 */
+  /* 「直す」「消す」。小さな道具なので、ひとつずつ輪郭を描くと騒がしい。
+     本体のモード切り替えと同じ「ひとつの台の上に並ぶ」形にして、台がある
+     ことでボタンだと分かるようにする。色は触れたときにだけ出す。 */
+  .tiny-row {
+    display:flex; align-items:center; gap:.25rem;
+    background:var(--panel-2); border:1px solid var(--line);
+    border-radius:var(--pill); padding:3px;
+  }
   .tiny {
-    display:grid; place-items:center; width:34px; height:34px;
+    display:grid; place-items:center; width:30px; height:30px;
     border-radius:50%; color:var(--faint);
-    /* 縁は常に見せる。どこまでが的なのかが分からないと押しづらい。
-       1.5px は dpr=1 の画面で 1px に丸められて消えかけるので 2px。 */
-    border:2px solid color-mix(in srgb, var(--faint) 60%, transparent);
-    transition:color .15s, background .15s, border-color .15s;
+    transition:color .14s, background .14s, transform .1s;
   }
-  .tiny + .tiny { margin-left:.5rem; }
-  /* 押せるときは塗り＋色。押せないときは沈める。出したり消したりはしない —
-     的の位置が動くと、慌てたときに隣を押す。
-     色は本体と揃える（直す＝手直しの紫、消す＝取り消せない赤）。 */
-  .tiny.edit:not(:disabled) {
-    color:var(--accent-2);
-    border-color:color-mix(in srgb, var(--accent-2) 70%, transparent);
-  }
-  .tiny.edit:hover:not(:disabled) {
-    background:color-mix(in srgb, var(--accent-2) 12%, transparent);
-    border-color:var(--accent-2);
-  }
-  .tiny.warn:not(:disabled) {
-    color:var(--danger);
-    border-color:color-mix(in srgb, var(--danger) 70%, transparent);
-  }
-  .tiny.warn:hover:not(:disabled) {
-    background:color-mix(in srgb, var(--danger) 12%, transparent);
-    border-color:var(--danger);
-  }
-  .tiny:disabled { opacity:.3; cursor:default; }
+  .tiny:hover:not(:disabled) { background:var(--raise); }
+  .tiny:active:not(:disabled) { transform:scale(.9); }
+  .tiny.edit:hover:not(:disabled) { color:var(--accent-2); }
+  .tiny.warn:hover:not(:disabled) { color:var(--danger); }
+  /* 触れたら塗りに変わる。押す前に「これだ」と分かる手応えになる。 */
+  .tiny:hover:not(:disabled) > svg .solid { display:inline; }
+  .tiny:hover:not(:disabled) > svg .line { display:none; }
+  .tiny:disabled { opacity:.28; cursor:default; }
   /* 認識中の文字も、押せば直しに回せると分かるようにする */
   .draft-card:not(.holding) .stream { cursor:text; }
   .draft-card .mark {
@@ -630,10 +620,12 @@
       <span class="mark" id="draftMark" data-i18n="unsent">Unsent</span>
       <span id="draftTime"></span>
       <span class="spacer"></span>
-      <button class="tiny edit" id="editOnce" data-icon="edit" data-icon-size="17"
-              data-i18n-title="editOnce"></button>
-      <button class="tiny warn lit" id="dropOne" data-icon="delete" data-icon-size="17"
-              data-i18n-title="dropOne"></button>
+      <span class="tiny-row">
+        <button class="tiny edit" id="editOnce" data-icon="edit" data-icon-size="16"
+                data-i18n-title="editOnce"></button>
+        <button class="tiny warn" id="dropOne" data-icon="delete" data-icon-size="16"
+                data-i18n-title="dropOne"></button>
+      </span>
     </div>
     <div class="stream" data-i18n-touch="needsTouch"><span id="stream" data-i18n-quiet="quiet"></span><span class="caret"></span></div>
     <textarea id="draft" data-i18n-ph="draftPlaceholder" hidden></textarea>
@@ -740,7 +732,6 @@
         <button data-theme-choice="light" data-i18n="themeLight">Light</button>
         <button data-theme-choice="dark" data-i18n="themeDark">Dark</button>
       </div>
-    </div>
     </div>
     <div class="field">
       <label data-icon="language" data-icon-size="17" data-i18n="language">Language</label>
@@ -858,7 +849,7 @@ const I18N = {
     settingsTitle:'Settings',
     powerTitle:'Stop / start listening',
     settings:'Settings', back:'Back',
-    floatBtn:'Float on top', unfloatBtn:'Back to this window',
+    floatBtn:'Float on top', unfloatBtn:'Back to the tab',
     floatFailed:'Could not float the window. Click the button directly and try again.',
     grpInput:'Input', micDevice:'Microphone',
     recogLang:'Recognition language', recogLangAuto:'Auto-detect',
@@ -959,7 +950,7 @@ const I18N = {
     settingsTitle:'設定',
     powerTitle:'聞き取りを止める / 始める',
     settings:'設定', back:'戻る',
-    floatBtn:'手前に浮かせる', unfloatBtn:'この画面に戻す',
+    floatBtn:'手前に浮かせる', unfloatBtn:'タブに戻す',
     floatFailed:'浮かせられませんでした。ボタンを直接押してもう一度お試しください。',
     grpInput:'入力', micDevice:'マイク',
     recogLang:'認識言語', recogLangAuto:'自動判定',
@@ -1665,7 +1656,6 @@ function paintTinyButtons() {
   // ものが無いだけなので何も起こらない。出したり沈めたりする方が、
   // 押したいときに押せるかどうかを毎回確かめることになって使いづらい。
   el.editOnce.disabled = route !== 'live' || oneShot;
-  el.editOnce.classList.toggle('lit', !el.editOnce.disabled);
 }
 
 // 手直し欄は、溜めるモードか書きかけがあるときだけ出す。
