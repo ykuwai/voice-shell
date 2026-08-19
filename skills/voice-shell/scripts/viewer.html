@@ -322,9 +322,15 @@
     transition:color .15s, background .15s, border-color .15s;
   }
   .tiny + .tiny { margin-left:.5rem; }
-  .tiny:hover { color:var(--accent); background:var(--raise); border-color:var(--line); }
-  .tiny.warn:hover { color:var(--danger); border-color:color-mix(in srgb, var(--danger) 45%, transparent); }
-  .tiny[hidden] { display:none; }
+  .tiny:hover:not(:disabled) { color:var(--accent); background:var(--raise); border-color:var(--line); }
+  /* 押せるときは塗り＋色で分かるようにする。押せないときは沈める。
+     出したり消したりはしない — 的の位置が動くと、慌てたときに隣を押す。 */
+  .tiny.warn:not(:disabled) { color:var(--danger); }
+  .tiny.warn:hover:not(:disabled) {
+    color:var(--danger); background:color-mix(in srgb, var(--danger) 12%, transparent);
+    border-color:color-mix(in srgb, var(--danger) 45%, transparent);
+  }
+  .tiny:disabled { opacity:.3; cursor:default; }
   /* 認識中の文字も、押せば直しに回せると分かるようにする */
   .draft-card:not(.holding) .stream { cursor:text; }
   .draft-card .mark {
@@ -1633,12 +1639,19 @@ function paint() {
   el.tray.classList.toggle('holding', route === 'hold');
   el.tray.classList.toggle('editing', oneShot);
   el.draftMark.textContent = t(oneShot ? 'editingOne' : 'unsent');
-  el.editOnce.hidden = route !== 'live' || oneShot;
-  // 消すものが無いときは出さない。空振りの的があると押し間違いの元になる。
-  el.dropOne.hidden = route === 'off' || !el.stream.textContent.trim();
+  paintTinyButtons();
   el.tray.classList.toggle('idle', off);
   if (off) el.stream.textContent = '';
   paintDraft();
+}
+
+/* 「直す」「消す」は常に置いたままにして、押せるかどうかだけを変える。
+   出し入れすると的の位置が動いて、慌てたときに隣を押してしまう。 */
+function paintTinyButtons() {
+  el.editOnce.disabled = route !== 'live' || oneShot;
+  el.dropOne.disabled = route === 'off' || !el.stream.textContent.trim();
+  el.editOnce.classList.toggle('lit', !el.editOnce.disabled);
+  el.dropOne.classList.toggle('lit', !el.dropOne.disabled);
 }
 
 // 手直し欄は、溜めるモードか書きかけがあるときだけ出す。
@@ -1802,6 +1815,7 @@ function connect() {
       const s = m.partial.trim();
       el.stream.textContent = s;
       el.tray.classList.toggle('idle', !s);
+      paintTinyButtons();
 
     } else if ('held' in m) {
       // 一時停止中の発話。編集中でも壊さないよう末尾に足すだけにする
@@ -2442,6 +2456,7 @@ function newRecognition() {
     }
     el.stream.textContent = interim;
     el.tray.classList.toggle('idle', !interim);
+    paintTinyButtons();
     if (interim.trim()) lastVoiceAt = performance.now();
   };
 
