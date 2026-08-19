@@ -135,6 +135,26 @@
   }
   @keyframes breathe { 50% { opacity:.35; } }
 
+  /* 送信先。聞いているセッションが2つ以上のときだけ出す
+     （1つしか無いなら選ばせる意味がなく、場所を取るだけ）。 */
+  .routes {
+    display:flex; gap:.25rem; overflow-x:auto; padding:.1rem 1rem .5rem;
+    scrollbar-width:none;
+  }
+  .routes::-webkit-scrollbar { display:none; }
+  .route-chip {
+    flex:none; display:inline-flex; align-items:center; gap:.3rem;
+    padding:.3rem .7rem; border-radius:var(--pill);
+    font-size:.75rem; white-space:nowrap;
+    border:1.5px solid var(--line); color:var(--faint);
+    transition:border-color .15s, color .15s, background .15s;
+  }
+  .route-chip:hover { color:var(--text); }
+  .route-chip.on {
+    border-color:transparent; color:var(--panel); font-weight:600;
+    background:linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, var(--accent-2)));
+  }
+
   /* ── ビジュアライザ ───────────────────── */
   .viz { position:relative; padding:.4rem 0 .1rem; }
   #viz { display:block; width:100%; height:124px; }
@@ -512,6 +532,9 @@
     <span class="beacon" id="beacon"></span><span id="stateText" data-i18n="connecting">Connecting…</span>
   </div>
 
+  <!-- 送信先。複数の作業で同時に使うときに、どれへ届けるかを選ぶ。 -->
+  <div class="routes" id="routes" hidden></div>
+
   <div class="viz">
     <canvas id="viz"></canvas>
     <!-- デーモンが拾えている音量。ブラウザの波形とは別経路なので、
@@ -756,6 +779,9 @@ const I18N = {
     hintNoMic:'No microphone access — the meter still shows the daemon level.',
     modeLive:'Instant', modeHold:'Review',
     unsent:'Unsent', history:'History', quiet:'(silence)',
+    routeAll:'Everyone',
+    routeGone:'“{gone}” ended. Sending to “{next}” now.',
+    routeGoneAll:'“{gone}” ended. Sending to everyone now.',
     uiUpdated:'Updated — tap to reload',
     thresholdMark:'Drag to set sensitivity — speech past this mark is picked up',
     sensitivitySet:'Sensitivity {n}',
@@ -838,6 +864,9 @@ const I18N = {
     hintNoMic:'マイクを使えないため、波形はデーモンの音量で動かしています。',
     modeLive:'即時', modeHold:'手直し',
     unsent:'未送信', history:'送信履歴', quiet:'（無音）',
+    routeAll:'すべて',
+    routeGone:'「{gone}」が終了したので、「{next}」に切り替えました。',
+    routeGoneAll:'「{gone}」が終了したので、全員に戻しました。',
     uiUpdated:'画面が新しくなりました — 押すと反映',
     thresholdMark:'つまんで感度を変えられます（この印を超えた分が拾われます）',
     sensitivitySet:'感度 {n}',
@@ -952,7 +981,7 @@ const $ = id => document.getElementById(id);
 const el = {};
 for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'power','openSettings','sheet','closeSettings','floatBtn','page',
-                  'viz','meter','meterHit','meterFill','meterMark','logoMark',
+                  'routes','viz','meter','meterHit','meterFill','meterMark','logoMark',
                   'tray','stream','draft','draftTime','draftActions','send','discard',
                   'editOnce','draftMark',
                   'hint','note','log','none','count','copy','fresh',
@@ -2427,6 +2456,67 @@ function sendUtterance(text) {
   });
 }
 
+/* ── 送信先 ─────────────────────────────
+   別々の作業で同時に音声モードを使うことがある。どれへ届けるかを選ぶ。
+   名前はデーモンが決める（最初はフォルダ名、エージェントが会話に題名を
+   付けたらそちらへ切り替わる）。 */
+let routeTo = '';          // 空なら全員へ
+let knownListeners = [];
+
+function paintRoutes() {
+  // 1つしか聞いていないなら選ばせる意味がない
+  if (knownListeners.length < 2) { el.routes.hidden = true; return; }
+  el.routes.hidden = false;
+  const items = [{pid: '', label: t('routeAll')}, ...knownListeners];
+  el.routes.replaceChildren(...items.map(l => {
+    const b = document.createElement('button');
+    b.className = 'route-chip' + (String(l.pid) === routeTo ? ' on' : '');
+    b.textContent = l.label;
+    b.title = l.cwd || '';
+    b.onclick = () => setRoute2(String(l.pid));
+    return b;
+  }));
+}
+
+async function setRoute2(to) {
+  routeTo = to;
+  paintRoutes();
+  try { await putJSON('/api/route', {to}); } catch {}
+}
+
+async function loadListeners() {
+  let d;
+  try {
+    d = await (await fetch('/api/listeners')).json();
+  } catch { return; }
+
+  const before = knownListeners;
+  knownListeners = d.listeners || [];
+  const live = new Set(knownListeners.map(l => String(l.pid)));
+
+  // 送信先が終了していたら、1つ前の生きているセッションへ移して知らせる。
+  // 黙って宙に浮かせると、話しても届かない状態に気づけない。
+  if (routeTo && !live.has(routeTo)) {
+    const gone = before.find(l => String(l.pid) === routeTo);
+    const next = knownListeners[knownListeners.length - 1];
+    routeTo = next ? String(next.pid) : '';
+    await putJSON('/api/route', {to: routeTo}).catch(() => {});
+    el.note.textContent = next
+      ? t('routeGone', {gone: gone ? gone.label : '?', next: next.label})
+      : t('routeGoneAll', {gone: gone ? gone.label : '?'});
+    el.note.hidden = false;
+  } else if (d.route !== undefined && !routeTo) {
+    routeTo = d.route || '';
+  }
+
+  // 既定は最後に登録されたセッション。新しく始めた方へ自然に向く。
+  if (!routeTo && knownListeners.length > 1) {
+    routeTo = String(knownListeners[knownListeners.length - 1].pid);
+    putJSON('/api/route', {to: routeTo}).catch(() => {});
+  }
+  paintRoutes();
+}
+
 /* ── ブラウザ認識の設定 ───────────────── */
 function paintAsrLangs() {
   const cur = browserLang();
@@ -2754,7 +2844,10 @@ paintPower();
 paint();
 loadTuning();
 connect();
+loadListeners();
 setInterval(refreshState, 3000);
+// 題名は会話が進むと変わるので、定期的に引き直す
+setInterval(loadListeners, 5000);
 </script>
 </body>
 </html>

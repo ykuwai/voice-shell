@@ -291,6 +291,9 @@ async def main_async(args):
                            capture_output=True)
         return bool(r.stdout.strip())
 
+    # 送信先。空なら全員へ。
+    route_path = state / "route"
+
     # Claude が切り替えたときの理由。画面に出すだけで、発話には混ぜない。
     note_file = Path(args.log_file).parent / "pause-note.txt"
 
@@ -387,6 +390,25 @@ async def main_async(args):
         rec = {"time": time.strftime("%H:%M:%S"), "text": text, "edited": True}
         hold_file.write_text("")     # 送ったので保留は空にする
         return web.json_response(rec)
+
+    async def handle_listeners(_req):
+        """いま聞いているセッションの一覧と、選ばれている送信先。"""
+        import voice_daemon as vd
+        try:
+            cur = route_path.read_text().strip()
+        except OSError:
+            cur = ""
+        return web.json_response({
+            "listeners": vd.list_active_listeners(args.log_file),
+            "route": cur,
+        })
+
+    async def handle_route(req):
+        """送信先を選ぶ。空なら全員へ。"""
+        body = await req.json()
+        to = str(body.get("to") or "").strip()
+        route_path.write_text(to)
+        return web.json_response({"route": to})
 
     async def handle_utterance(req):
         """ブラウザ側（Web Speech API）で認識した発話を受け取る。
@@ -583,6 +605,8 @@ async def main_async(args):
     app.router.add_post("/api/pause", handle_pause)
     app.router.add_post("/api/send", handle_send)
     app.router.add_post("/api/utterance", handle_utterance)
+    app.router.add_get("/api/listeners", handle_listeners)
+    app.router.add_put("/api/route", handle_route)
     app.router.add_post("/api/discard", handle_discard)
 
     runner = web.AppRunner(app)

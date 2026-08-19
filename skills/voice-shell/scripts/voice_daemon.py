@@ -645,6 +645,116 @@ def _proc_started_at(pid):
         return None
 
 
+# 送信先の指定。空なら全員へ。ビューアが書き、デーモンが毎回読む。
+def route_file(log_path):
+    return Path(log_path).parent / "route"
+
+
+# ── 聞き手の名前 ──────────────────────────
+#
+# 起動した時点では、その作業が何なのか本人にも決まっていない。だから
+# 最初はフォルダ名で出し、エージェントが話の内容から題名を付けた時点で
+# そちらへ切り替える。題名の在り処はエージェントごとに違うので、
+# 「探し方」を並べて上から順に試す。
+#
+#   Claude Code  記録(~/.claude/projects/*/<id>.jsonl)の最後の ai-title
+#   Codex        ~/.codex/session_index.jsonl の thread_name
+#
+# どちらでもない道具から使われることもあるので、環境変数で名乗る道
+# （VOICE_SHELL_NAME）と、あとから付け替える道（voice-shell.sh name）も残す。
+
+_title_cache = {}      # path -> (mtime, title)
+
+
+def _claude_title(session_id):
+    """Claude Code が付けた題名。会話が進むと更新される。"""
+    import glob
+    hits = glob.glob(str(Path.home() / ".claude/projects/*" / f"{session_id}.jsonl"))
+    if not hits:
+        return None
+    path = hits[0]
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return None
+    hit = _title_cache.get(path)
+    if hit and hit[0] == mtime:
+        return hit[1]
+
+    title = None
+    try:
+        with open(path, errors="replace") as f:
+            for line in f:
+                # 全行を JSON に起こすと重い。目印のある行だけ見る。
+                if '"ai-title"' not in line:
+                    continue
+                try:
+                    d = json.loads(line)
+                except ValueError:
+                    continue
+                if d.get("type") == "ai-title" and d.get("aiTitle"):
+                    title = d["aiTitle"]
+    except OSError:
+        return None
+    _title_cache[path] = (mtime, title)
+    return title
+
+
+def _codex_title(session_id):
+    """Codex が付けた題名（thread_name）。"""
+    path = Path.home() / ".codex" / "session_index.jsonl"
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return None
+    key = f"{path}:{session_id}"
+    hit = _title_cache.get(key)
+    if hit and hit[0] == mtime:
+        return hit[1]
+
+    title = None
+    try:
+        for line in path.read_text(errors="replace").splitlines():
+            if session_id not in line:
+                continue
+            try:
+                d = json.loads(line)
+            except ValueError:
+                continue
+            if d.get("id") == session_id and d.get("thread_name"):
+                title = d["thread_name"]
+    except OSError:
+        return None
+    _title_cache[key] = (mtime, title)
+    return title
+
+
+def listener_title(entry):
+    """その聞き手をいま何と呼ぶか。無ければ None（フォルダ名に落とす）。"""
+    if entry.get("name"):
+        return entry["name"]              # 手で付けた名前が最優先
+    sid, agent = entry.get("session"), entry.get("agent")
+    if not sid:
+        return None
+    if agent == "claude":
+        return _claude_title(sid)
+    if agent == "codex":
+        return _codex_title(sid)
+    return None
+
+
+def label_listeners(entries):
+    """表示名を決める。同じ名前が並んだら登録の早い順に (2) (3) と付ける。"""
+    entries = sorted(entries, key=lambda e: e.get("since", 0))
+    seen = {}
+    for e in entries:
+        base = listener_title(e) or os.path.basename(e.get("cwd", "")) or "?"
+        n = seen.get(base, 0) + 1
+        seen[base] = n
+        e["label"] = base if n == 1 else f"{base} ({n})"
+    return entries
+
+
 def listeners_dir(log_path):
     return Path(log_path).parent / "listeners"
 
@@ -666,9 +776,13 @@ def list_active_listeners(log_path):
         except ValueError:
             continue
         try:
-            lines = f.read_text().splitlines()
+            raw = f.read_text()
         except OSError:
-            lines = []
+            raw = ""
+        try:
+            info = json.loads(raw)
+        except ValueError:
+            info = {}
         # 登録ファイルより後に始まったプロセスなら、PID が使い回されただけの
         # 別人。これを見ないと、居ないセッションについて警告を書き続ける。
         stale = False
@@ -680,15 +794,20 @@ def list_active_listeners(log_path):
             except OSError:
                 stale = False
         if _pid_alive(pid) and not stale:
-            out.append({"pid": pid,
-                        "started": lines[0] if len(lines) > 0 else "不明",
-                        "cwd": lines[1] if len(lines) > 1 else "不明"})
+            info["pid"] = pid
+            info.setdefault("cwd", "不明")
+            info.setdefault("started", "不明")
+            try:
+                info.setdefault("since", f.stat().st_mtime)
+            except OSError:
+                info.setdefault("since", 0)
+            out.append(info)
         else:
             try:
                 f.unlink(missing_ok=True)   # 死んでいるものは片付ける
             except PermissionError:
                 pass                        # 他人のもの。触らない
-    return out
+    return label_listeners(out)
 
 
 def main():
@@ -698,7 +817,7 @@ def main():
         # 何も出さない/出す は呼び出し側（voice-shell.sh）に判断させる。
         # ここで固定文言を出すと「呼び出し側が空かどうかを見分けられない」ため。
         for l in list_active_listeners(args.log_file):
-            print(f"  PID {l['pid']}")
+            print(f"  {l['label']}  （PID {l['pid']}）")
             print(f"    起動 : {l['started']}")
             print(f"    場所 : {l['cwd']}")
         return
@@ -837,15 +956,25 @@ def main():
         while True:
             time.sleep(5)
             count = len(list_active_listeners(log_path))
+            # 送信先を選んでいるなら、複数聞いていても二重には届かない。
+            # 意図した使い方なので黙っている。
+            try:
+                routed = bool(route_file(log_path).read_text().strip())
+            except OSError:
+                routed = False
+            if routed:
+                last_count = count
+                continue
             if count > 1 and count != last_count:
                 try:
                     with open(log_path, "a", buffering=1, encoding="utf-8") as wf:
                         wf.write(json.dumps({
                             "system_warning":
                                 f"モニターが{count}個同時に発話ログを聞いています。"
-                                "同じ発話が複数のセッションに二重に届いている可能性が"
-                                "あります。`voice-shell.sh listeners` で確認し、"
-                                "使っていないものは停止することをお勧めします。"
+                                "送信先を選んでいないため、同じ発話が全部のセッションへ"
+                                "二重に届きます。ビューアの送信先で1つ選ぶか、"
+                                "`voice-shell.sh listeners` で確認して"
+                                "使っていないものを停止してください。"
                         }, ensure_ascii=False) + "\n")
                 except OSError:
                     pass
@@ -859,6 +988,7 @@ def main():
         pause_path = log_path.parent / PAUSE_FILE.name
         hold_path = log_path.parent / HOLD_FILE.name
         mute_path = log_path.parent / MUTE_FILE.name
+        route_path = route_file(log_path)
         partial_path.write_text("")
         level_path.write_text("0 0")
         pause_path.unlink(missing_ok=True)   # 起動時は必ず送信状態から
@@ -955,7 +1085,15 @@ def main():
                     continue
 
                 # Claude に渡る行は本文だけにする。時刻や言語は使わないので載せない。
-                f.write(json.dumps({"text": text}, ensure_ascii=False) + "\n")
+                # 送信先が選ばれているときだけ宛先を添える（無い行は全員へ）。
+                rec = {"text": text}
+                try:
+                    to = route_path.read_text().strip()
+                except OSError:
+                    to = ""
+                if to:
+                    rec["to"] = to
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
                 print(f"[{stamp}] {text}", file=sys.stderr, flush=True)
     except KeyboardInterrupt:
         print("\n終了します。", file=sys.stderr)
