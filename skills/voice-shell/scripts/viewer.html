@@ -2510,17 +2510,22 @@ addEventListener('pagehide', () => { if (asrChosen) beat('gone'); });
    別々の作業で同時に音声モードを使うことがある。どれへ届けるかを選ぶ。
    名前はデーモンが決める（最初はフォルダ名、エージェントが会話に題名を
    付けたらそちらへ切り替わる）。 */
-let routeTo = '';          // 空なら全員へ
+let routeTo = '';          // 選んだもの。'all' なら全員へ、空なら未選択
+let effectiveTo = '';      // 実際に届く先（未選択のときサーバが決めた相手）
 let knownListeners = [];
 
 function paintRoutes() {
   // 1つしか聞いていないなら選ばせる意味がない
   if (knownListeners.length < 2) { el.routes.hidden = true; return; }
   el.routes.hidden = false;
-  const items = [{pid: '', label: t('routeAll')}, ...knownListeners];
+  const items = [{pid: 'all', label: t('routeAll')}, ...knownListeners];
   el.routes.replaceChildren(...items.map(l => {
+    // 実際に届く先を光らせる。未選択のときはサーバが「あとで起動した方」に
+    // 決めるので、選んだ覚えが無くてもどこへ届くかが見える。
+    const on = routeTo ? String(l.pid) === routeTo
+                       : (l.pid === 'all' ? !effectiveTo : String(l.pid) === effectiveTo);
     const b = document.createElement('button');
-    b.className = 'route-chip' + (String(l.pid) === routeTo ? ' on' : '');
+    b.className = 'route-chip' + (on ? ' on' : '');
     b.textContent = l.label;
     b.title = l.cwd || '';
     b.onclick = () => setRoute2(String(l.pid));
@@ -2542,28 +2547,25 @@ async function loadListeners() {
 
   const before = knownListeners;
   knownListeners = d.listeners || [];
+  effectiveTo = d.target || '';
   const live = new Set(knownListeners.map(l => String(l.pid)));
 
   // 送信先が終了していたら、1つ前の生きているセッションへ移して知らせる。
   // 黙って宙に浮かせると、話しても届かない状態に気づけない。
-  if (routeTo && !live.has(routeTo)) {
+  if (routeTo && routeTo !== 'all' && !live.has(routeTo)) {
     const gone = before.find(l => String(l.pid) === routeTo);
     const next = knownListeners[knownListeners.length - 1];
-    routeTo = next ? String(next.pid) : '';
-    await putJSON('/api/route', {to: routeTo}).catch(() => {});
+    routeTo = '';                       // 未選択に戻し、サーバの既定に任せる
+    await putJSON('/api/route', {to: ''}).catch(() => {});
     el.note.textContent = next
       ? t('routeGone', {gone: gone ? gone.label : '?', next: next.label})
       : t('routeGoneAll', {gone: gone ? gone.label : '?'});
     el.note.hidden = false;
-  } else if (d.route !== undefined && !routeTo) {
+  } else {
     routeTo = d.route || '';
   }
-
-  // 既定は最後に登録されたセッション。新しく始めた方へ自然に向く。
-  if (!routeTo && knownListeners.length > 1) {
-    routeTo = String(knownListeners[knownListeners.length - 1].pid);
-    putJSON('/api/route', {to: routeTo}).catch(() => {});
-  }
+  // 既定（あとで起動した方へ）はサーバが決める。ここで固定しないので、
+  // 画面を開いていなくても同じ振る舞いになる。
   paintRoutes();
 }
 
