@@ -614,6 +614,51 @@ def is_noise(text: str, extra=()) -> bool:
     return bool(parts) and all(p.lower() in words for p in parts)
 
 
+# ── 声だけでマイクを入切する ──────────────────────
+#
+# 画面に手が届かないときのため。合図になる語は短いので、最小文字数
+# （既定15字）や相槌の判定より**前**に見る必要がある。
+#
+# 誤爆すると、話しかけているのに届かない状態になる。だから「その一言だけを
+# 喋った」ときに限る（部分一致はしない）。この行のように長い文の中で
+# 「ミュート」と言っても効かない。
+#
+# 切っている間も認識自体は動いている（録ってはいるが送らない）ので、
+# 解除の合図は届く。ブラウザ認識のときだけは、切ると音声そのものを
+# 手放すので声では戻せない — 画面から戻してもらう。
+MUTE_WORDS = {
+    "ミュート", "みゅーと", "ミュートして", "ミュートオン", "ミュートオンにして",
+    "マイクオフ", "マイクをオフ", "マイクをオフにして", "マイクを切って", "マイク切って",
+    "mute", "muteme", "mutethemic", "micoff", "turnoffthemic", "turnthemicoff",
+}
+UNMUTE_WORDS = {
+    "ミュート解除", "ミュートかいじょ", "ミュート解除して", "ミュートを解除",
+    "ミュートを解除して", "ミュートオフ", "ミュートオフにして",
+    "マイクオン", "マイクをオン", "マイクをオンにして", "マイクをつけて", "マイク付けて",
+    "unmute", "unmuteme", "unmutethemic", "micon", "turnonthemic", "turnthemicon",
+}
+
+# 記号と間の空白を落としてから比べる。「ミュート。」「mute me」「マイク、オン」
+# のどれも同じ鍵になるようにする。
+# ー（長音）は落とさない。落とすと「ミュート」が「ミュト」になって当たらない。
+_CMD_DROP = str.maketrans("", "", " \t\u3000。、．，・…！？!?.,-~〜\"'「」『』()（）")
+
+
+def voice_command(text: str, muted: bool):
+    """発話そのものが入切の合図なら "mute" / "unmute" を返す。
+
+    いまの状態で意味のある方だけを見る。切っている最中の「ミュート」も、
+    入っている最中の「ミュート解除」も何も起こさない。見る語が半分になる分、
+    誤爆も半分になる。
+    """
+    key = text.strip().translate(_CMD_DROP).lower()
+    if not key:
+        return None
+    if muted:
+        return "unmute" if key in UNMUTE_WORDS else None
+    return "mute" if key in MUTE_WORDS else None
+
+
 def parse_args():
     p = argparse.ArgumentParser(description="音声プロンプト常駐デーモン")
     asr_mic.add_common_args(p)
@@ -1167,20 +1212,38 @@ def main():
                     continue
 
                 partial_path.write_text("")
+                text = ev["text"].strip()
+
+                # 辞書は毎回読む。Web UI で直した内容が次の発話から効くようにする。
+                user_dict = load_dictionary()
+
+                # 声だけの入切。合図はどれも短いので、最小文字数より前に見る。
+                # 辞書を通した形でも見るため、崩れて聞こえる語は
+                # 「ミュート回収 → ミュート解除」のように登録すれば拾える。
+                cmd = voice_command(text, muted_now) or voice_command(
+                    apply_replacements(text, user_dict["replace"]), muted_now)
+                if cmd:
+                    if cmd == "mute":
+                        mute_path.touch()
+                    else:
+                        mute_path.unlink(missing_ok=True)
+                    print(f"(声で{'切' if cmd == 'mute' else '入'}) {text[:40]}",
+                          file=sys.stderr, flush=True)
+                    # 合図そのものは発話ではないので送らない。was_muted は
+                    # 触らない — 次の周回の頭で数え直させる（ここで先回りすると
+                    # 世代が上がらず、切る前に始まった発話を落とせなくなる）。
+                    speaking_since = None
+                    continue
 
                 # 発話が始まった時点から今までにミュートを挟んだか、
                 # あるいは今なお切られているなら、その発話は送らない。
                 started_at, speaking_since = speaking_since, None
                 if muted_now or (started_at is not None and started_at != mute_generation):
-                    print(f"(マイク切) {ev['text'].strip()[:40]}", file=sys.stderr, flush=True)
+                    print(f"(マイク切) {text[:40]}", file=sys.stderr, flush=True)
                     continue
 
-                text = ev["text"].strip()
                 if len(text) < args.min_chars:
                     continue
-
-                # 辞書は毎回読む。Web UI で直した内容が次の発話から効くようにする。
-                user_dict = load_dictionary()
 
                 def drop(kind: str):
                     """送らなかったことを端末に残す（Claude には渡さない）。"""
