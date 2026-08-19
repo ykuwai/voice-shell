@@ -928,6 +928,7 @@ const I18N = {
     voiceRoute:'Now sending to {name}',
     voiceRouteMissing:'There is no session {n}',
     voiceCancelled:'Cancelled — nothing was sent',
+    voiceHeld:'Held for editing — fix it and send',
     voiceLive:'Sending straight through now',
     voiceHold:'Holding what you say now',
     voiceUnmuted:'Unmuted — listening again',
@@ -1029,6 +1030,7 @@ const I18N = {
     voiceRoute:'送信先を {name} にしました',
     voiceRouteMissing:'{n} 番のセッションはありません',
     voiceCancelled:'取り消しました — 送っていません',
+    voiceHeld:'下書きに回しました — 直して送れます',
     voiceLive:'そのまま届く側にしました',
     voiceHold:'溜める側にしました',
     voiceUnmuted:'ミュートを解除しました — また届きます',
@@ -1848,6 +1850,8 @@ function connect() {
         chime('up');   say(t('voiceLive'));        flashCommand(c.said, 'live');
       } else if (c.kind === 'mode_hold') {
         chime('down'); say(t('voiceHold'));        flashCommand(c.said, 'hold');
+      } else if (c.kind === 'held') {
+        chime('down'); say(t('voiceHeld'));  flashCommand(c.said, 'hold');
       } else if (c.kind === 'cancelled') {
         chime('err');  say(t('voiceCancelled'));  flashCommand(c.said, 'warn');
       } else if (c.kind === 'route_missing') {
