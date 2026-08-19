@@ -2,7 +2,7 @@
 # 音声プロンプト常駐デーモンのラッパー。
 # どのプロジェクトからでも同じコマンドで起動できるようにする。
 #
-#   voice-shell.sh start [--language Japanese]
+#   voice-shell.sh start [--engine X] [--no-gui]
 #   voice-shell.sh stop
 #   voice-shell.sh status
 #   voice-shell.sh viewer / viewer-stop
@@ -129,6 +129,38 @@ fi
 
 cmd="${1:-status}"; shift || true
 
+# ビューアを独立したウィンドウで開く。
+#
+# Chrome の --app はタブもURL欄も無い窓になり、コマンドから開ける。
+# 「常に最前面」にしたい場合は、開いた窓のヘッダから手で浮かせる
+# （Document Picture-in-Picture は人が触らないと開けない決まりのため）。
+open_gui() {
+  local url="http://127.0.0.1:8090"
+  local args=(--app="$url" --window-size=420,780)
+  case "$(uname)" in
+    Darwin)
+      for app in "Google Chrome" "Chromium" "Microsoft Edge"; do
+        if [[ -d "/Applications/$app.app" ]]; then
+          open -na "$app" --args "${args[@]}" 2>/dev/null && return 0
+        fi
+      done
+      ;;
+    *)
+      for c in google-chrome chromium chromium-browser microsoft-edge; do
+        if command -v "$c" >/dev/null; then
+          nohup "$c" "${args[@]}" >/dev/null 2>&1 & return 0
+        fi
+      done
+      # Windows(Git Bash)
+      if command -v cmd.exe >/dev/null; then
+        cmd.exe /c start chrome --app="$url" --window-size=420,780 >/dev/null 2>&1 && return 0
+      fi
+      ;;
+  esac
+  echo "  ブラウザを自動で開けませんでした → $url" >&2
+  return 1
+}
+
 # 発話ログを追尾しているセッションを一覧する。
 #
 # Monitor を止め忘れると、古いセッションに音声が届き続ける。tail は -F なので
@@ -151,14 +183,17 @@ case "$cmd" in
     first_run=0; [[ -f "$conf" ]] || first_run=1
 
     want=""
+    no_gui=0
     rest=()
     while [[ $# -gt 0 ]]; do
       case "$1" in
         --engine) want="${2:-}"; shift 2 ;;
         --engine=*) want="${1#*=}"; shift ;;
+        --no-gui) no_gui=1; shift ;;
         *) rest+=("$1"); shift ;;
       esac
     done
+    export VOICE_SHELL_NO_GUI="$no_gui"
     set -- "${rest[@]+"${rest[@]}"}"
     engine="$("$PY" "$APP" --resolve-engine "$want")"
     "$PY" "$APP" --remember-engine "$engine"
@@ -428,6 +463,7 @@ NAMEIT
     ;;
   viewer)
     # ログを追尾するだけのビューア。GPU もマイクも使わないので常駐と共存できる。
+    [[ "${1:-}" == "--no-gui" ]] && { export VOICE_SHELL_NO_GUI=1; shift; }
     # pgrep が無い環境（Windows/Git Bash 等）ではポートへの応答で代用する。
     viewer_running() {
       if have pgrep; then
@@ -437,7 +473,9 @@ NAMEIT
       fi
     }
     if viewer_running; then
-      echo "すでに起動しています → http://127.0.0.1:8090"; exit 0
+      echo "すでに起動しています → http://127.0.0.1:8090"
+      [[ "${VOICE_SHELL_NO_GUI:-0}" == "1" ]] || open_gui || true
+      exit 0
     fi
     mkdir -p "$STATE_DIR"
     # setsid で切り離す。デーモンが終了時に自分の子を全部 kill するため、
@@ -447,6 +485,8 @@ NAMEIT
     sleep 2
     if viewer_running; then
       echo "ビューアを起動しました → http://127.0.0.1:8090"
+      # 独立したウィンドウで開く（--no-gui なら開かない）
+      [[ "${VOICE_SHELL_NO_GUI:-0}" == "1" ]] || open_gui || true
     else
       echo "起動に失敗しました:" >&2; tail -5 "$STATE_DIR/viewer.out" >&2; exit 1
     fi
@@ -476,7 +516,7 @@ NAMEIT
     echo TIMEOUT; exit 1
     ;;
   *)
-    echo "使い方: voice-shell.sh {start [--engine browser|auto|apple|whisper|...]|stop|status|engines}" >&2
+    echo "使い方: voice-shell.sh {start [--engine X] [--no-gui]|stop|status|engines}" >&2
     echo "        voice-shell.sh {listen|listeners|name|hold|live|log-path|wait-ready|viewer}" >&2
     echo "        voice-shell.sh {apple|whisper|remote|remote-conf|remote-log}" >&2
     exit 1

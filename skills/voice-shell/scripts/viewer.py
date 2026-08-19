@@ -484,12 +484,14 @@ async def main_async(args):
         """いま聞いているセッションの一覧と、選ばれている送信先。"""
         import voice_daemon as vd
         try:
-            cur = route_path.read_text().strip()
+            chosen = route_path.read_text().strip()
         except OSError:
-            cur = ""
+            chosen = ""
         return web.json_response({
             "listeners": vd.list_active_listeners(args.log_file),
-            "route": cur,
+            "route": chosen,                                  # 選ばれているもの
+            # 実際に届く先。未選択なら「あとで起動した方」に決まる。
+            "target": vd.resolve_target(args.log_file) or "",
         })
 
     async def handle_route(req):

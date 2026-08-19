@@ -711,9 +711,36 @@ def _proc_started_at(pid):
         return None
 
 
-# 送信先の指定。空なら全員へ。ビューアが書き、デーモンが毎回読む。
+# 送信先の指定。ビューアが書き、デーモンが毎回読む。
+#   ファイルが無い  … まだ選んでいない（あとで起動した方へ届ける）
+#   "all"          … 全員へ、と明示的に選んだ
+#   <PID>          … その相手へ
 def route_file(log_path):
     return Path(log_path).parent / "route"
+
+
+def resolve_target(log_path):
+    """いまの届け先を決める。None なら全員へ。
+
+    既定は「あとで起動した方」。並行して別の作業を始めたら、そちらへ
+    向くのが自然なため。ここで決めるので、**画面を開いていなくても効く**
+    （以前は画面側だけの処理で、開いていないと全員に二重に届いていた）。
+    """
+    try:
+        raw = route_file(log_path).read_text().strip()
+    except OSError:
+        raw = ""
+
+    if raw == "all":
+        return None                      # 「すべて」を選んだ
+
+    live = list_active_listeners(log_path)
+    if raw and any(str(l["pid"]) == raw for l in live):
+        return raw                       # 選んだ相手が生きている
+
+    # まだ選んでいない、または選んだ相手が終了した。
+    # 聞き手が1つだけなら宛先を書く意味がない。
+    return str(live[-1]["pid"]) if len(live) > 1 else None
 
 
 # ── 聞き手の名前 ──────────────────────────
@@ -1057,10 +1084,8 @@ def main():
             count = len(list_active_listeners(log_path))
             # 送信先を選んでいるなら、複数聞いていても二重には届かない。
             # 意図した使い方なので黙っている。
-            try:
-                routed = bool(route_file(log_path).read_text().strip())
-            except OSError:
-                routed = False
+            # 宛先が決まっていれば二重には届かない（既定でも決まる）
+            routed = resolve_target(log_path) is not None
             if routed:
                 last_count = count
                 continue
@@ -1087,7 +1112,6 @@ def main():
         pause_path = log_path.parent / PAUSE_FILE.name
         hold_path = log_path.parent / HOLD_FILE.name
         mute_path = log_path.parent / MUTE_FILE.name
-        route_path = route_file(log_path)
         partial_path.write_text("")
         level_path.write_text("0 0")
         pause_path.unlink(missing_ok=True)   # 起動時は必ず送信状態から
@@ -1186,10 +1210,7 @@ def main():
                 # Claude に渡る行は本文だけにする。時刻や言語は使わないので載せない。
                 # 送信先が選ばれているときだけ宛先を添える（無い行は全員へ）。
                 rec = {"text": text}
-                try:
-                    to = route_path.read_text().strip()
-                except OSError:
-                    to = ""
+                to = resolve_target(log_path)
                 if to:
                     rec["to"] = to
                 f.write(json.dumps(rec, ensure_ascii=False) + "\n")
