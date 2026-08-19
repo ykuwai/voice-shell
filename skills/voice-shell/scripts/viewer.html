@@ -313,12 +313,18 @@
     font-variant-numeric:tabular-nums;
   }
   .draft-card .gutter .spacer { flex:1; }
-  /* この一言だけ手直しに回す。即時のまま使えるようにしておく。 */
+  /* 「直す」と「消す」。取り違えると失うものが違う（直す=戻せる、
+     消す=消える）ので、的を大きくし、間もはっきり空ける。 */
   .tiny {
-    display:grid; place-items:center; width:24px; height:24px;
+    display:grid; place-items:center; width:34px; height:34px;
     border-radius:50%; color:var(--faint);
+    border:1.5px solid transparent;
+    transition:color .15s, background .15s, border-color .15s;
   }
-  .tiny:hover { color:var(--accent); background:var(--raise); }
+  .tiny + .tiny { margin-left:.5rem; }
+  .tiny:hover { color:var(--accent); background:var(--raise); border-color:var(--line); }
+  .tiny.warn:hover { color:var(--danger); border-color:color-mix(in srgb, var(--danger) 45%, transparent); }
+  .tiny[hidden] { display:none; }
   /* 認識中の文字も、押せば直しに回せると分かるようにする */
   .draft-card:not(.holding) .stream { cursor:text; }
   .draft-card .mark {
@@ -605,8 +611,10 @@
       <span class="mark" id="draftMark" data-i18n="unsent">Unsent</span>
       <span id="draftTime"></span>
       <span class="spacer"></span>
-      <button class="tiny" id="editOnce" data-icon="edit" data-icon-size="15"
+      <button class="tiny" id="editOnce" data-icon="edit" data-icon-size="17"
               data-i18n-title="editOnce"></button>
+      <button class="tiny warn" id="dropOne" data-icon="delete" data-icon-size="17"
+              data-i18n-title="dropOne"></button>
     </div>
     <div class="stream" data-i18n-touch="needsTouch"><span id="stream" data-i18n-quiet="quiet"></span><span class="caret"></span></div>
     <textarea id="draft" data-i18n-ph="draftPlaceholder" hidden></textarea>
@@ -823,6 +831,8 @@ const I18N = {
     draftPlaceholder:'Fix it here, then send.',
     sendTitle:'Send to Claude', discardTitle:'Discard',
     editOnce:'Edit this one before sending',
+    dropOne:'Throw this one away',
+    droppedOne:'Threw it away.',
     editingOne:'Editing',
     hintOnce:'Holding this one. Fix it, then send — back to instant after.',
     pauseTitle:'Turn the microphone off', resumeTitle:'Turn the microphone on',
@@ -922,6 +932,8 @@ const I18N = {
     draftPlaceholder:'ここで直してから送れます。',
     sendTitle:'Claude に送る', discardTitle:'消す',
     editOnce:'この一言だけ直してから送る',
+    dropOne:'この一言を消す',
+    droppedOne:'消しました。',
     editingOne:'編集中',
     hintOnce:'この一言だけ溜めます。直して送ると、即時に戻ります。',
     pauseTitle:'マイクを切る', resumeTitle:'マイクを入れる',
@@ -1043,7 +1055,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'power','openSettings','sheet','closeSettings','floatBtn','page',
                   'routes','viz','meter','meterHit','meterFill','meterMark','logoMark',
                   'tray','stream','draft','draftTime','draftActions','send','discard',
-                  'editOnce','draftMark',
+                  'editOnce','dropOne','draftMark',
                   'hint','note','log','none','count','copy','fresh',
                   'mic','recogLang','recogLangField','thresh','threshVal','gaugeFill','gaugeMark',
                   'silence','silenceVal','minChars','minCharsVal','clean',
@@ -1622,6 +1634,8 @@ function paint() {
   el.tray.classList.toggle('editing', oneShot);
   el.draftMark.textContent = t(oneShot ? 'editingOne' : 'unsent');
   el.editOnce.hidden = route !== 'live' || oneShot;
+  // 消すものが無いときは出さない。空振りの的があると押し間違いの元になる。
+  el.dropOne.hidden = route === 'off' || !el.stream.textContent.trim();
   el.tray.classList.toggle('idle', off);
   if (off) el.stream.textContent = '';
   paintDraft();
@@ -2008,6 +2022,20 @@ async function editThisOne() {
 }
 
 el.editOnce.onclick = editThisOne;
+
+/* 言い間違えた一言を、送る前に捨てる。
+   デーモンが認識しているときは「押した時刻」を渡して向こうで判定させる
+   （確定はこちらより後に来るので、画面で消しても送信は止まらない）。
+   ブラウザ認識のときは、次に確定する1件をこちらで落とす。 */
+let dropNextLocal = false;
+el.dropOne.onclick = async () => {
+  el.stream.textContent = '';
+  el.tray.classList.add('idle');
+  if (asrActive()) dropNextLocal = true;
+  else { try { await post('/api/drop-current'); } catch {} }
+  say(t('droppedOne'), 4);
+  paint();
+};
 // 認識中の文字そのものを押しても同じ
 el.stream.onclick = () => { if (route === 'live') editThisOne(); };
 
@@ -2509,6 +2537,7 @@ let sendChain = Promise.resolve();
 function sendUtterance(text) {
   text = (text || '').trim();
   if (!text) return;
+  if (dropNextLocal) { dropNextLocal = false; return; }   // 画面で消された一言
   lastVoiceAt = performance.now();
   sendChain = sendChain.then(async () => {
     try {
