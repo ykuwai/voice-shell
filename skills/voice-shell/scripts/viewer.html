@@ -157,7 +157,29 @@
 
   /* ── ビジュアライザ ───────────────────── */
   .viz { position:relative; padding:.4rem 0 .1rem; }
-  #viz { display:block; width:100%; height:124px; }
+  .viz-row { display:flex; align-items:center; gap:.6rem; padding-right:1rem; }
+  #viz { display:block; flex:1; min-width:0; height:124px; }
+
+  /* 一時停止。よく使う操作なので、設定や電源と同じ大きさで並べない。
+     文字は付けない — 止めている間は画面全体が沈む（送り先が暗くなり、
+     波形が平らになり、上の行が橙になる）ので、それが状態を語る。 */
+  .pause {
+    flex:none; width:54px; height:54px; border-radius:50%;
+    display:grid; place-items:center; color:var(--dim);
+    border:2px solid var(--line); background:var(--panel-2);
+    transition:border-color .18s, background .18s, box-shadow .18s, color .18s;
+  }
+  .pause > span { display:grid; place-items:center; }
+  .pause:hover:not(:disabled) { color:var(--text); border-color:var(--dim); }
+  .pause:disabled { opacity:.4; }
+  /* 止めている間だけ強く色を持たせる */
+  .pause.paused {
+    border-color:transparent; color:var(--panel);
+    background:var(--warn);
+    box-shadow:0 0 20px color-mix(in srgb, var(--warn) 55%, transparent);
+  }
+  .pause .solid { display:inline; }
+  .pause .line { display:none; }
   /* デーモンが拾えている音量。ブラウザ側の波形とは別の経路なので、
      ここが動かないのに波形が動いていれば認識側が死んでいると分かる。 */
   /* 掴みやすいよう、線そのものより広い範囲で受ける */
@@ -206,9 +228,6 @@
 
   /* 一時停止のボタンは、押したら何が起きるかを絵で示す。
      聞いている間は「止める」、止めている間は「再開する」。 */
-  #segOff.warn { background:color-mix(in srgb, var(--warn) 16%, transparent); }
-  #segOff.warn > span > svg .solid { display:inline; }
-  #segOff.warn > span > svg .line { display:none; }
 
   #segLive.on { color:var(--accent); }
   #segLive.on .ring {
@@ -526,10 +545,6 @@
       <h1>VoiceShell</h1>
     </div>
     <div class="icons">
-      <button class="icon lit" id="segOff" aria-pressed="false">
-        <span class="glyph-pause" data-icon="pause" data-icon-size="20"></span>
-        <span class="glyph-play" data-icon="play_arrow" data-icon-size="20" hidden></span>
-      </button>
       <button class="icon" id="floatBtn" data-icon="picture_in_picture" data-icon-size="20"
               data-i18n-title="floatBtn" hidden></button>
       <button class="icon" id="openSettings" data-icon="settings" data-icon-size="20"
@@ -547,7 +562,13 @@
   <div class="routes" id="routes" hidden></div>
 
   <div class="viz">
+   <div class="viz-row">
     <canvas id="viz"></canvas>
+    <button class="pause" id="segOff" aria-pressed="false">
+      <span class="glyph-pause" data-icon="pause" data-icon-size="26"></span>
+      <span class="glyph-play" data-icon="play_arrow" data-icon-size="26" hidden></span>
+    </button>
+   </div>
     <!-- デーモンが拾えている音量。ブラウザの波形とは別経路なので、
          波形が動くのにここが動かなければ認識側が落ちていると分かる。 -->
     <!-- 印をつまむと感度が変わる。細い線のままでは掴めないので、
@@ -1651,11 +1672,10 @@ function paint() {
   }
   const off = route === 'off';
   el.modes.classList.toggle('muted', off);
-  el.segOff.classList.toggle('warn', off);
-  el.segOff.classList.toggle('lit', !off);
   el.segOff.setAttribute('aria-pressed', String(off));
   el.segOff.querySelector('.glyph-pause').hidden = off;
   el.segOff.querySelector('.glyph-play').hidden = !off;
+  el.segOff.classList.toggle('paused', off);
   el.segOff.title = t(off ? 'resumeTitle' : 'pauseTitle');
   el.segOff.setAttribute('aria-label', el.segOff.title);
 
