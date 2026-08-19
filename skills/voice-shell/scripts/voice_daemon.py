@@ -770,9 +770,13 @@ CANCEL_TAIL = (
 # こちらは捨てずに、画面の下書きへ回す（直してから送れる）
 HOLD_TAIL = (
     "手直し", "てなおし", "手直しで", "手直しして", "手直ししたい",
+    # 「てなおし」は「出直し」に化けやすい（実測）
+    "出直し", "でなおし", "出直して",
     "直してから", "なおしてから", "あとで直す", "ちょっと直す",
     "edit", "edit this", "let me edit", "hold this",
 )
+# 合図だと分かるように「コマンド◯◯」と言う人がいる。前置きは落とす。
+_TAIL_PREFIX = ("コマンド", "こまんど", "command")
 _TAIL_TRIM = " \t\u3000。、．，・！？!?.,"
 
 
@@ -781,8 +785,14 @@ def take_tail(text: str, tails):
     body = text.strip().rstrip(_TAIL_TRIM)
     low = body.lower()
     for w in tails:
-        if low.endswith(w):
-            return body[: len(body) - len(w)].rstrip(_TAIL_TRIM)
+        if not low.endswith(w):
+            continue
+        rest = body[: len(body) - len(w)].rstrip(_TAIL_TRIM)
+        for pre in _TAIL_PREFIX:          # 「〜。コマンド手直し」の前置き
+            if rest.lower().endswith(pre):
+                rest = rest[: len(rest) - len(pre)].rstrip(_TAIL_TRIM)
+                break
+        return rest
     return None
 
 
