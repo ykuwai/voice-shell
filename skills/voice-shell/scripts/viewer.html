@@ -807,7 +807,9 @@ const I18N = {
     pauseTitle:'Pause — stop listening', resumeTitle:'Resume listening',
     settingsTitle:'Settings',
     powerTitle:'Stop / start listening',
-    settings:'Settings', back:'Back', floatBtn:'Float on top',
+    settings:'Settings', back:'Back',
+    floatBtn:'Float on top', unfloatBtn:'Back to this window',
+    floatFailed:'Could not float the window. Click the button directly and try again.',
     grpInput:'Input', micDevice:'Microphone',
     recogLang:'Recognition language', recogLangAuto:'Auto-detect',
     sensitivity:'Sensitivity',
@@ -898,7 +900,9 @@ const I18N = {
     pauseTitle:'一時停止 — 聞き取りをやめる', resumeTitle:'聞き取りを再開する',
     settingsTitle:'設定',
     powerTitle:'聞き取りを止める / 始める',
-    settings:'設定', back:'戻る', floatBtn:'手前に浮かせる',
+    settings:'設定', back:'戻る',
+    floatBtn:'手前に浮かせる', unfloatBtn:'この画面に戻す',
+    floatFailed:'浮かせられませんでした。ボタンを直接押してもう一度お試しください。',
     grpInput:'入力', micDevice:'マイク',
     recogLang:'認識言語', recogLangAuto:'自動判定',
     sensitivity:'感度',
@@ -1086,6 +1090,8 @@ const ICON = {
                   'M514-556 320-752q9-3 19-5.5t21-2.5q66 0 113 47t47 113q0 11-1.5 22t-4.5 22ZM40-200v-32q0-33 17-62t47-44q51-26 115-44t141-18q26 0 49.5 2.5T456-392l-56-54q-9 3-19 4.5t-21 1.5q-66 0-113-47t-47-113q0-11 1.5-21t4.5-19L84-764q-11-11-11-28t11-28q12-12 28.5-12t27.5 12l675 685q11 11 11.5 27.5T816-80q-11 13-28 12.5T759-80L641-200h39q0 33-23.5 56.5T600-120H120q-33 0-56.5-23.5T40-200Zm880-400q0 69-24.5 131.5T829-355q-12 14-30 15t-32-13q-13-13-12-31t12-33q30-38 46.5-85t16.5-98q0-51-16.5-97T767-781q-12-15-12.5-33t12.5-32q13-14 31.5-13.5T829-845q42 51 66.5 113.5T920-600Zm-182 0q0 32-10 61.5T700-484q-11 15-29.5 15.5T638-482q-13-13-13.5-31.5T633-549q6-11 9.5-24t3.5-27q0-14-3.5-27t-9.5-25q-9-17-8.5-35t13.5-31q14-14 32.5-13.5T700-716q18 25 28 54.5t10 61.5Z'],
   auto_awesome: ['m706-706-70-32q-6-3-8.5-8t-2.5-10q0-5 2.5-10t8.5-8l70-32 32-70q3-6 8-9t10-3q5 0 10 3t8 9l32 70 70 32q6 3 9 8t3 10q0 5-3 10t-9 8l-70 32-32 70q-3 6-8 8.5t-10 2.5q-5 0-10-2.5t-8-8.5l-32-70ZM260-380l-160-73q-9-4-13-11.5T83-480q0-8 4-15.5t13-11.5l160-73 73-160q4-9 11.5-13t15.5-4q8 0 15.5 4t11.5 13l73 160 160 73q9 4 13 11.5t4 15.5q0 8-4 15.5T620-453l-160 73-73 160q-4 9-11.5 13t-15.5 4q-8 0-15.5-4T333-220l-73-160Zm100 26 40-86 86-40-86-40-40-86-40 86-86 40 86 40 40 86Zm350 204-70-32q-6-3-9-8t-3-10q0-5 3-10t9-8l70-32 32-70q3-6 8-9t10-3q5 0 10 3t8 9l32 70 70 32q6 3 9 8t3 10q0 5-3 10t-9 8l-70 32-32 70q-3 6-8 9t-10 3q-5 0-10-3t-8-9l-32-70ZM360-480Z',
                 'm706-706-70-32q-6-3-8.5-8t-2.5-10q0-5 2.5-10t8.5-8l70-32 32-70q3-6 8-9t10-3q5 0 10 3t8 9l32 70 70 32q6 3 9 8t3 10q0 5-3 10t-9 8l-70 32-32 70q-3 6-8 8.5t-10 2.5q-5 0-10-2.5t-8-8.5l-32-70ZM260-380l-160-73q-9-4-13-11.5T83-480q0-8 4-15.5t13-11.5l160-73 73-160q4-9 11.5-13t15.5-4q8 0 15.5 4t11.5 13l73 160 160 73q9 4 13 11.5t4 15.5q0 8-4 15.5T620-453l-160 73-73 160q-4 9-11.5 13t-15.5 4q-8 0-15.5-4T333-220l-73-160Zm450 230-70-32q-6-3-9-8t-3-10q0-5 3-10t9-8l70-32 32-70q3-6 8-9t10-3q5 0 10 3t8 9l32 70 70 32q6 3 9 8t3 10q0 5-3 10t-9 8l-70 32-32 70q-3 6-8 9t-10 3q-5 0-10-3t-8-9l-32-70Z'],
+  picture_in_picture_off: ['M700-440q25 0 42.5-17.5T760-500v-120q0-25-17.5-42.5T700-680H480q-17 0-28.5 11.5T440-640q0 17 11.5 28.5T480-600h200v80h-40q-17 0-28.5 11.5T600-480q0 17 12 28.5t29 11.5h59Zm140 200q-15 0-27.5-10.5T800-281v-439H361q-20 0-30-12.5T321-760q0-15 10-27.5t30-12.5h439q33 0 56.5 23.5T880-720v440q0 20-12.5 30T840-240ZM577-497Zm-194 34ZM790-57 686-160H160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800l80 80h-80v480h446L54-792q-12-12-12-28.5T54-849q12-12 28.5-12t28.5 12l736 736q12 12 12 28t-12 28q-12 12-28.5 12T790-57Z',
+                          'M790-57 686-160H160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800l80 80H126l-72-72q-12-12-12-28.5T54-849q12-12 28.5-12t28.5 12l736 736q12 12 12 28t-12 28q-12 12-28.5 12T790-57Zm22-205L634-440h66q25 0 42.5-17.5T760-500v-120q0-25-17.5-42.5T700-680H500q-22 0-38 13.5T441-633l-99-99q-19-19-8.5-43.5T371-800h429q33 0 56.5 23.5T880-720v429q0 27-24.5 37.5T812-262Z'],
   picture_in_picture: ['M160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h640q33 0 56.5 23.5T880-720v480q0 33-23.5 56.5T800-160H160Zm0-80h640v-480H160v480Zm0 0v-480 480Zm320-200h240q17 0 28.5-11.5T760-480v-160q0-17-11.5-28.5T720-680H480q-17 0-28.5 11.5T440-640v160q0 17 11.5 28.5T480-440Zm40-80v-80h160v80H520Z',
                       'M160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h640q33 0 56.5 23.5T880-720v480q0 33-23.5 56.5T800-160H160Zm320-280h240q17 0 28.5-11.5T760-480v-160q0-17-11.5-28.5T720-680H480q-17 0-28.5 11.5T440-640v160q0 17 11.5 28.5T480-440Zm120-120Z'],
   close: ['M480-424 284-228q-11 11-28 11t-28-11q-11-11-11-28t11-28l196-196-196-196q-11-11-11-28t11-28q11-11 28-11t28 11l196 196 196-196q11-11 28-11t28 11q11 11 11 28t-11 28L536-480l196 196q11 11 11 28t-11 28q-11 11-28 11t-28-11L480-424Z',
@@ -2681,15 +2687,49 @@ el.asrLang.onchange = () => {
 const canFloat = 'documentPictureInPicture' in window;
 el.floatBtn.hidden = !canFloat;
 
+// 浮いているかどうかで、絵と説明を入れ替える。
+// 同じ絵のままだと、押したら浮くのか戻るのかが読み取れない。
+function paintFloat(on) {
+  if (on === undefined) on = !!(canFloat && documentPictureInPicture.window);
+  const name = on ? 'picture_in_picture_off' : 'picture_in_picture';
+  el.floatBtn.dataset.icon = name;
+  const svg = el.floatBtn.querySelector(':scope > svg');
+  if (svg) {
+    // 既にある絵の中身だけ差し替える（作り直すと増えることがある）
+    const paths = svg.querySelectorAll('path');
+    if (paths.length === 2) {
+      paths[0].setAttribute('d', ICON[name][0]);
+      paths[1].setAttribute('d', ICON[name][1]);
+    }
+  } else {
+    el.floatBtn.replaceChildren(iconSvg(name, 20));
+  }
+  el.floatBtn.classList.toggle('lit', on);
+  el.floatBtn.title = t(on ? 'unfloatBtn' : 'floatBtn');
+  el.floatBtn.setAttribute('aria-label', el.floatBtn.title);
+  el.floatBtn.setAttribute('aria-pressed', String(on));
+}
+
+let floating = false;      // requestWindow の応答待ち。連打で二重に開かせない
+
 el.floatBtn.onclick = async () => {
-  if (!canFloat) return;
-  // トグルにする。浮いている最中にもう一度押したら、元のタブへ戻す
+  if (!canFloat || floating) return;
+  // トグル。浮いている最中にもう一度押したら、元の画面へ戻す
   // （'pagehide' で戻す処理は既にある。window.close() を呼べばそれが動く）。
   if (documentPictureInPicture.window) {
     documentPictureInPicture.window.close();
     return;
   }
-  const win = await documentPictureInPicture.requestWindow({width: 400, height: 720});
+  floating = true;
+  let win;
+  try {
+    win = await documentPictureInPicture.requestWindow({width: 400, height: 720});
+  } catch {
+    floating = false;
+    el.hint.textContent = t('floatFailed');
+    return;
+  }
+  floating = false;
   // 同じ見た目にするためスタイルをそのまま持っていく
   for (const node of document.querySelectorAll('style')) {
     win.document.head.appendChild(node.cloneNode(true));
@@ -2701,8 +2741,10 @@ el.floatBtn.onclick = async () => {
   win.document.body.append(el.page, el.sheet);
   el.sheet.hidden = true;
   fitCanvas();
+  paintFloat(true);
   win.addEventListener('pagehide', () => {
     document.body.append(el.page, el.sheet);
+    paintFloat(false);          // 閉じる最中は window がまだ残っている
     fitCanvas();
   });
 };
@@ -2921,6 +2963,8 @@ el.clean.onchange = () => {
 resolveLang();
 applyI18n();
 decorateIcons();
+// 絵を入れ終わってから状態を反映する（先にやると二重に入る）
+if (canFloat) paintFloat(false);
 // ブラウザ側の認識は Chrome 系だけ。使えない環境では設定ごと出さない。
 if (canBrowserASR) {
   paintAsrLangs();
