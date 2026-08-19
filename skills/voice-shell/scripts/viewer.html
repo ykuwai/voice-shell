@@ -386,6 +386,13 @@
     cursor:pointer;
   }
   .range-note { font-size:.75rem; line-height:1.5; color:var(--faint); margin:-.1rem 0 .8rem; }
+  /* 手元で完結しなくなる設定には、その場ではっきり書く */
+  .warn-note {
+    margin:.6rem 0 0; padding:.55rem .75rem; border-radius:12px;
+    font-size:.75rem; line-height:1.55; color:var(--warn);
+    background:color-mix(in srgb, var(--warn) 12%, transparent);
+    border:1px solid color-mix(in srgb, var(--warn) 32%, transparent);
+  }
 
   /* 感度を決めるための実測メーター。しきい値の位置に印を出す。 */
   .gauge {
@@ -587,6 +594,10 @@
       <label for="mic" data-icon="mic" data-icon-size="17" data-i18n="micDevice">Microphone</label>
       <select id="mic"></select>
     </div>
+    <div class="field" id="recogLangField" hidden>
+      <label for="recogLang" data-icon="translate" data-icon-size="17" data-i18n="recogLang">Recognition language</label>
+      <select id="recogLang"></select>
+    </div>
     <div class="field">
       <label for="thresh" data-icon="graphic_eq" data-icon-size="17" data-i18n="sensitivity">Sensitivity</label>
       <input type="range" id="thresh" min="0" max="1000" step="1">
@@ -616,6 +627,18 @@
       <button class="btn go" id="calibBtn" data-icon="auto_awesome" data-icon-size="17" data-i18n="calibrate">Auto-tune</button>
     </div>
     <p class="range-note" id="calibNote" style="margin-top:.5rem"></p>
+  </div>
+
+  <!-- ブラウザで認識する -->
+  <div class="group" id="browserAsrGroup" hidden>
+    <h3 data-icon="translate" data-icon-size="14" data-i18n="grpBrowserAsr">Recognize in this browser</h3>
+    <label class="toggle"><input type="checkbox" id="browserAsr"><span data-i18n="browserAsrOn">Use this browser to recognize</span></label>
+    <p class="range-note" data-i18n="browserAsrNote"></p>
+    <div class="field" id="asrLangField" hidden>
+      <label for="asrLang" data-icon="language" data-icon-size="17" data-i18n="asrLang">Spoken language</label>
+      <select id="asrLang"></select>
+    </div>
+    <p class="warn-note" id="browserAsrWarn" data-i18n="browserAsrWarn" hidden></p>
   </div>
 
   <!-- 見た目 -->
@@ -749,6 +772,7 @@ const I18N = {
     powerTitle:'Stop / start listening',
     settings:'Settings', back:'Back', floatBtn:'Float on top',
     grpInput:'Input', micDevice:'Microphone',
+    recogLang:'Recognition language', recogLangAuto:'Auto-detect',
     sensitivity:'Sensitivity',
     sensitivityNote:'0 picks up the faintest sound, 100 only loud speech. The bar is the live level, the marker is where the line sits.',
     silence:'Pause to send',
@@ -756,6 +780,12 @@ const I18N = {
     minChars:'Min length',
     minCharsNote:'Shorter results are dropped as noise.',
     stripFillers:'Strip filler words',
+    grpBrowserAsr:'Recognize in this browser',
+    browserAsrOn:'Use this browser to recognize',
+    browserAsrNote:'Uses the recognition built into Chrome. No model to install, so it runs on low-spec machines — and it works even without the daemon.',
+    browserAsrWarn:'Audio is sent to Google servers for recognition. Keep this off if everything must stay on this machine — use the daemon instead.',
+    asrLang:'Spoken language',
+    asrDenied:'Microphone access was refused, so recognition could not start.',
     calibrate:'Auto-tune',
     calibSpeaking:'Keep talking… {n}s',
     calibQuiet:'Now stay quiet… {n}s',
@@ -786,6 +816,7 @@ const I18N = {
     dictSkipped:' / {n} unreadable rows',
     grpLog:'Transcript', items:'items', copyAll:'Copy all', copied:'Copied',
     micSwitched:'Switched microphone: {name}',
+    micSwitching:'Switching microphone to {name}…',
     discarded:'Discarded.', undo:'Undo',
     switchFailed:'Could not switch: {err}',
     bootingLeft:'Starting… {n}s left', bootingSoon:'Starting… almost there',
@@ -821,6 +852,7 @@ const I18N = {
     powerTitle:'聞き取りを止める / 始める',
     settings:'設定', back:'戻る', floatBtn:'手前に浮かせる',
     grpInput:'入力', micDevice:'マイク',
+    recogLang:'認識言語', recogLangAuto:'自動判定',
     sensitivity:'感度',
     sensitivityNote:'0 に近いほど小さな音まで拾い、100 に近いほど大きな声だけを拾います。バーが今の音量、印が今の設定です。',
     silence:'確定までの無音',
@@ -828,6 +860,12 @@ const I18N = {
     minChars:'最小文字数',
     minCharsNote:'これより短い認識結果は物音とみなして捨てます。',
     stripFillers:'「えーと」を消す',
+    grpBrowserAsr:'このブラウザで認識する',
+    browserAsrOn:'このブラウザで認識する',
+    browserAsrNote:'Chrome に載っている認識を使います。モデルを入れなくてよいので非力な端末でも動き、デーモンが動いていなくても使えます。',
+    browserAsrWarn:'音声は認識のため Google のサーバへ送られます。手元だけで完結させたい場合は、これを切ってデーモン側の認識をお使いください。',
+    asrLang:'話す言語',
+    asrDenied:'マイクの使用が許可されなかったため、認識を始められませんでした。',
     calibrate:'自動調整',
     calibSpeaking:'そのまま話し続けてください… あと{n}秒',
     calibQuiet:'今度は黙っていてください… あと{n}秒',
@@ -858,6 +896,7 @@ const I18N = {
     dictSkipped:' / 読めない行 {n} 件',
     grpLog:'ログ', items:'件', copyAll:'全部コピー', copied:'コピーしました',
     micSwitched:'マイクを切り替えました: {name}',
+    micSwitching:'{name} に切り替えています…',
     discarded:'消しました。', undo:'元に戻す',
     switchFailed:'切替に失敗しました: {err}',
     bootingLeft:'起動中… あと{n}秒', bootingSoon:'起動中… もうすぐ',
@@ -914,9 +953,10 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'editOnce','draftMark',
                   'hint','note','log','none','count','copy','fresh',
                   'filterAll','filterSent','filterEdited',
-                  'mic','thresh','threshVal','gaugeFill','gaugeMark',
+                  'mic','recogLang','recogLangField','thresh','threshVal','gaugeFill','gaugeMark',
                   'silence','silenceVal','minChars','minCharsVal','clean',
                   'calibBtn','calibNote',
+                  'browserAsrGroup','browserAsr','browserAsrWarn','asrLang','asrLangField',
                   'themeRow','vizRow','langRow',
                   'scopePrivate','scopeNote','tabReplace','tabIgnore',
                   'paneReplace','paneIgnore','replaceRows','ignoreRows',
@@ -942,6 +982,8 @@ const ICON = {
          'M640-200q-33 0-56.5-23.5T560-280v-400q0-33 23.5-56.5T640-760q33 0 56.5 23.5T720-680v400q0 33-23.5 56.5T640-200Zm-320 0q-33 0-56.5-23.5T240-280v-400q0-33 23.5-56.5T320-760q33 0 56.5 23.5T400-680v400q0 33-23.5 56.5T320-200Z'],
   play_arrow: ['M320-273v-414q0-17 12-28.5t28-11.5q5 0 10.5 1.5T381-721l326 207q9 6 13.5 15t4.5 19q0 10-4.5 19T707-446L381-239q-5 3-10.5 4.5T360-233q-16 0-28-11.5T320-273Zm80-207Zm0 134 210-134-210-134v268Z',
               'M320-273v-414q0-17 12-28.5t28-11.5q5 0 10.5 1.5T381-721l326 207q9 6 13.5 15t4.5 19q0 10-4.5 19T707-446L381-239q-5 3-10.5 4.5T360-233q-16 0-28-11.5T320-273Z'],
+  translate: ['m603-202-34 97q-4 11-14 18t-22 7q-20 0-32.5-16.5T496-133l152-402q5-11 15-18t22-7h30q12 0 22 7t15 18l152 403q8 19-4 35.5T868-80q-13 0-22.5-7T831-106l-34-96H603ZM362-401 188-228q-11 11-27.5 11.5T132-228q-11-11-11-28t11-28l174-174q-35-35-63.5-80T190-640h84q20 39 40 68t48 58q33-33 68.5-92.5T484-720H80q-17 0-28.5-11.5T40-760q0-17 11.5-28.5T80-800h240v-40q0-17 11.5-28.5T360-880q17 0 28.5 11.5T400-840v40h240q17 0 28.5 11.5T680-760q0 17-11.5 28.5T640-720h-76q-21 72-63 148t-83 116l96 98-30 82-122-125Zm266 129h144l-72-204-72 204Z',
+             'm603-202-34 97q-4 11-14 18t-22 7q-20 0-32.5-16.5T496-133l152-402q5-11 15-18t22-7h30q12 0 22 7t15 18l152 403q8 19-4 35.5T868-80q-13 0-22.5-7T831-106l-34-96H603ZM362-401 188-228q-11 11-27.5 11.5T132-228q-11-11-11-28t11-28l174-174q-35-35-63.5-80T190-640h84q20 39 40 68t48 58q33-33 68.5-92.5T484-720H80q-17 0-28.5-11.5T40-760q0-17 11.5-28.5T80-800h240v-40q0-17 11.5-28.5T360-880q17 0 28.5 11.5T400-840v40h240q17 0 28.5 11.5T680-760q0 17-11.5 28.5T640-720h-76q-21 72-63 148t-83 116l96 98-30 82-122-125Zm266 129h144l-72-204-72 204Z'],
   tune: ['M451.5-131.5Q440-143 440-160v-160q0-17 11.5-28.5T480-360q17 0 28.5 11.5T520-320v40h280q17 0 28.5 11.5T840-240q0 17-11.5 28.5T800-200H520v40q0 17-11.5 28.5T480-120q-17 0-28.5-11.5ZM160-200q-17 0-28.5-11.5T120-240q0-17 11.5-28.5T160-280h160q17 0 28.5 11.5T360-240q0 17-11.5 28.5T320-200H160Zm131.5-171.5Q280-383 280-400v-40H160q-17 0-28.5-11.5T120-480q0-17 11.5-28.5T160-520h120v-40q0-17 11.5-28.5T320-600q17 0 28.5 11.5T360-560v160q0 17-11.5 28.5T320-360q-17 0-28.5-11.5ZM480-440q-17 0-28.5-11.5T440-480q0-17 11.5-28.5T480-520h320q17 0 28.5 11.5T840-480q0 17-11.5 28.5T800-440H480Zm131.5-171.5Q600-623 600-640v-160q0-17 11.5-28.5T640-840q17 0 28.5 11.5T680-800v40h120q17 0 28.5 11.5T840-720q0 17-11.5 28.5T800-680H680v40q0 17-11.5 28.5T640-600q-17 0-28.5-11.5ZM160-680q-17 0-28.5-11.5T120-720q0-17 11.5-28.5T160-760h320q17 0 28.5 11.5T520-720q0 17-11.5 28.5T480-680H160Z',
         'M451.5-131.5Q440-143 440-160v-160q0-17 11.5-28.5T480-360q17 0 28.5 11.5T520-320v40h280q17 0 28.5 11.5T840-240q0 17-11.5 28.5T800-200H520v40q0 17-11.5 28.5T480-120q-17 0-28.5-11.5ZM160-200q-17 0-28.5-11.5T120-240q0-17 11.5-28.5T160-280h160q17 0 28.5 11.5T360-240q0 17-11.5 28.5T320-200H160Zm131.5-171.5Q280-383 280-400v-40H160q-17 0-28.5-11.5T120-480q0-17 11.5-28.5T160-520h120v-40q0-17 11.5-28.5T320-600q17 0 28.5 11.5T360-560v160q0 17-11.5 28.5T320-360q-17 0-28.5-11.5ZM480-440q-17 0-28.5-11.5T440-480q0-17 11.5-28.5T480-520h320q17 0 28.5 11.5T840-480q0 17-11.5 28.5T800-440H480Zm131.5-171.5Q600-623 600-640v-160q0-17 11.5-28.5T640-840q17 0 28.5 11.5T680-800v40h120q17 0 28.5 11.5T840-720q0 17-11.5 28.5T800-680H680v40q0 17-11.5 28.5T640-600q-17 0-28.5-11.5ZM160-680q-17 0-28.5-11.5T120-720q0-17 11.5-28.5T160-760h320q17 0 28.5 11.5T520-720q0 17-11.5 28.5T480-680H160Z'],
   power_settings_new: ['M480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-73 24.5-138.5T172-736q11-14 26.5-13t26.5 11q11 10 14.5 26T229-679q-32 41-50.5 91.5T160-480q0 134 93 227t227 93q134 0 227-93t93-227q0-57-18.5-107.5T731-679q-14-17-10.5-33t14.5-26q11-10 26.5-11t26.5 13q43 52 67.5 117.5T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm-28.5-371.5Q440-463 440-480v-360q0-17 11.5-28.5T480-880q17 0 28.5 11.5T520-840v360q0 17-11.5 28.5T480-440q-17 0-28.5-11.5Z',
@@ -1131,7 +1173,7 @@ let floorDb = -60;
 // 流れる波形の高さ。こちらも感度からの超過分をそのまま使う。
 function levelNow() { return amplitudeNow(); }
 
-// （参考）ブラウザ側の音量。今は形の算出にだけ使っている。
+// ブラウザ側のマイクで測った音量（0〜1）。デーモンが動いていなくても取れる。
 function browserLevel() {
   let db;
   if (analyser && !vizFailed) {
@@ -1157,6 +1199,11 @@ function browserLevel() {
 
   // 暗騒音から何 dB 出たか。ここを下回る音は絵にしない。
   return Math.min(1, Math.max(0, (db - floorDb - GATE_DB) / RANGE_DB));
+}
+
+// デーモンが動いていないときは、波形もブラウザのマイクで動かす
+function amplitudeFallback() {
+  return (analyser && !vizFailed) ? browserLevel() : 0;
 }
 
 
@@ -1404,6 +1451,13 @@ function paintFrame(now) {
   else drawBar(bands);
 
   // ロゴの波も同じ値で動かす（小さくしたときの手がかり）
+  // ブラウザで認識しているときは、こちらのマイクで声の有無を見る。
+  // 認識結果だけを頼りにすると、認識が落ちている間じゅう「黙っている」
+  // ことになり、張り直しの判断ができない。
+  if (recWanted && analyser && !vizFailed && browserLevel() > 0.12) {
+    lastVoiceAt = performance.now();
+  }
+
   const src = vizStyle === 'wave' ? history : bands;
   const marks = el.logoMark.children;
   for (let i = 0; i < marks.length; i++) {
@@ -1631,6 +1685,18 @@ function connect() {
       paintGauge();
       onCalibSample(m.level);
       return;      // 下の else まで落とすと、発話として扱われて壊れる
+    }
+    if ('mic_active' in m) {
+      // デーモン側で実際に切り替えが完了した確定情報。押した瞬間の楽観的な
+      // 表示と違い、これが来て初めて「本当に切り替わった」と言える。
+      if (micConfirmDevice && m.mic_active === micConfirmDevice) {
+        clearTimeout(micConfirmTimer);
+        const opt = [...el.mic.options].find(o => o.value === m.mic_active);
+        el.hint.textContent = t('micSwitched', {name: opt ? opt.textContent : m.mic_active});
+        micConfirmDevice = null;
+        setTimeout(() => paint(), 2500);
+      }
+      return;
     }
     if ('partial' in m) {
       const s = m.partial.trim();
@@ -1872,7 +1938,7 @@ el.copy.onclick = async ev => {
 /* ── 設定 ───────────────────────────────── */
 el.openSettings.onclick = async () => {
   el.sheet.hidden = false;
-  await Promise.all([loadMics(), loadTuning(), loadDict()]);
+  await Promise.all([loadMics(), loadLangs(), loadTuning(), loadDict()]);
   el.dictNote.textContent = '';
 };
 el.closeSettings.onclick = () => { el.sheet.hidden = true; };
@@ -1931,12 +1997,52 @@ async function loadMics() {
   }
 }
 
+// バックエンドで実際に切り替えが完了するまでは楽観的な表示に留める。
+// mic_active（ws.onmessage 側）が確定を送ってきたら、その時点で
+// 「切り替えました」に差し替える。
+let micConfirmDevice = null;
+let micConfirmTimer = null;
+
 el.mic.onchange = async () => {
-  await putJSON('/api/mics', {device: el.mic.value});
-  el.hint.textContent = t('micSwitched', {name: el.mic.selectedOptions[0].textContent});
-  if (vizArmed) startViz(el.mic.value);   // 波形も同じマイクに合わせる
-  setTimeout(() => paint(), 2500);
+  const label = el.mic.selectedOptions[0].textContent;
+  const dev = el.mic.value;
+  el.hint.textContent = t('micSwitching', {name: label});
+  micConfirmDevice = dev;
+  clearTimeout(micConfirmTimer);
+  // デーモンが古く mic_active を送ってこない場合の保険。実際の確定が
+  // 先に来ればそちらが優先される（上の ws.onmessage で処理済みになる）。
+  micConfirmTimer = setTimeout(() => {
+    if (micConfirmDevice === dev) {
+      el.hint.textContent = t('micSwitched', {name: label});
+      micConfirmDevice = null;
+      setTimeout(() => paint(), 2500);
+    }
+  }, 3000);
+  await putJSON('/api/mics', {device: dev});
+  if (vizArmed) startViz(dev);   // 波形も同じマイクに合わせる
 };
+
+// 認識言語（Whisper のときだけ出す。他のエンジンは綴りが違うため
+// このプルダウン自体を隠す）。
+async function loadLangs() {
+  try {
+    const d = await (await fetch('/api/languages')).json();
+    if (!d.languages.length) { el.recogLangField.hidden = true; return; }
+    const auto = document.createElement('option');
+    auto.value = ''; auto.textContent = t('recogLangAuto');
+    auto.selected = !d.current;
+    el.recogLang.replaceChildren(auto, ...d.languages.map(l => {
+      const o = document.createElement('option');
+      o.value = l.code; o.textContent = l.name; o.selected = l.code === d.current;
+      return o;
+    }));
+    el.recogLangField.hidden = false;
+  } catch {
+    el.recogLangField.hidden = true;
+  }
+}
+
+el.recogLang.onchange = () => putJSON('/api/tuning', {language: el.recogLang.value});
 
 /* ── 感度と区切り ───────────────────────
    3つとも保存すると即座にデーモンへ効く（0.5秒おきに読み直している）。 */
@@ -2123,6 +2229,179 @@ for (const ev of ['pointerup', 'pointercancel']) {
   el.meterHit.addEventListener(ev, endThreshDrag);
   addEventListener(ev, endThreshDrag);
 }
+
+/* ── ブラウザで認識する（Web Speech API）───────────
+   Chrome に載っている認識を使う。モデルを積まないので、非力な端末でも
+   そのまま使える。ただし**音声は Google のサーバへ送られる**ので、
+   手元だけで完結させたい場合はデーモン側の認識を使うこと。
+
+   厄介なのは、7〜10 秒黙るとセッションが勝手に切れること。切れてから
+   慌てて張り直すと、話し始めの一言目を落とす。Web Speech API には
+   「溜めておいた音声を後から流し込む」口が無いので、後追いでは取り戻せない。
+
+   そこで **黙っているあいだに先回りして張り直す**。無音中の張り直しなら
+   何も失わない。声が出ている最中は絶対に触らない。 */
+// 話す言語の候補。Chrome は BCP-47 のタグを取るので、よく使うものを並べる。
+const ASR_LANGS = [
+  ['ja-JP', '日本語'], ['en-US', 'English (US)'], ['en-GB', 'English (UK)'],
+  ['zh-CN', '中文（简体）'], ['zh-TW', '中文（繁體）'], ['ko-KR', '한국어'],
+  ['es-ES', 'Español'], ['fr-FR', 'Français'], ['de-DE', 'Deutsch'],
+  ['it-IT', 'Italiano'], ['pt-BR', 'Português (BR)'], ['ru-RU', 'Русский'],
+  ['hi-IN', 'हिन्दी'], ['id-ID', 'Indonesia'], ['th-TH', 'ไทย'],
+  ['vi-VN', 'Tiếng Việt'],
+];
+
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const canBrowserASR = !!SR;
+
+let rec = null;              // いまの SpeechRecognition
+let recRunning = false;      // start() 済みで、まだ end が来ていない
+let recWanted = false;       // 使う設定になっているか
+let lastVoiceAt = 0;         // 最後に声が出ていた時刻
+let recStartedAt = 0;        // いまのセッションを張った時刻
+
+// 切れる手前で自分から張り直す。実測の限界（7〜10秒）より十分手前にする。
+const RENEW_AFTER_MS = 4500;   // このあいだ黙っていたら張り直す
+const SESSION_MAX_MS = 45000;  // 長く続いたセッションも念のため切り替える
+
+function browserLang() {
+  // 認識させる言語。画面の表示言語ではなく、話す言語。
+  const saved = store.get('asrLang', '');
+  if (saved) return saved;
+  // navigator.language は "ja" のように地域の付かない形で返ることがある。
+  // そのままだと候補一覧と一致せず、生のコードが選択肢に並んでしまう。
+  const want = (navigator.language || 'ja-JP');
+  if (ASR_LANGS.some(([c]) => c === want)) return want;
+  const head = want.split('-')[0].toLowerCase();
+  const hit = ASR_LANGS.find(([c]) => c.split('-')[0].toLowerCase() === head);
+  return hit ? hit[0] : 'ja-JP';
+}
+
+function newRecognition() {
+  const r = new SR();
+  r.lang = browserLang();
+  r.continuous = true;
+  r.interimResults = true;
+  r.maxAlternatives = 1;
+
+  r.onstart = () => { recRunning = true; recStartedAt = performance.now(); };
+
+  r.onresult = ev => {
+    let interim = '';
+    for (let i = ev.resultIndex; i < ev.results.length; i++) {
+      const res = ev.results[i];
+      const text = res[0].transcript;
+      if (res.isFinal) {
+        sendUtterance(text);
+      } else {
+        interim += text;
+      }
+    }
+    // 認識中の文字は、デーモンのときと同じ場所に出す
+    el.stream.textContent = interim;
+    el.tray.classList.toggle('idle', !interim);
+    if (interim.trim()) lastVoiceAt = performance.now();
+  };
+
+  r.onerror = ev => {
+    // no-speech と aborted は日常的に起きる（黙っていただけ・張り直した）。
+    // not-allowed だけは人の操作が要るので、そこで止める。
+    if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
+      recWanted = false;
+      el.hint.textContent = t('asrDenied');
+    }
+  };
+
+  r.onend = () => {
+    recRunning = false;
+    el.stream.textContent = '';
+    // 使う設定である限り、すぐ張り直す。ここで待つと一言目を落とす。
+    if (recWanted) startRecognition();
+  };
+  return r;
+}
+
+function startRecognition() {
+  if (!canBrowserASR || recRunning) return;
+  try {
+    rec = newRecognition();
+    rec.start();
+  } catch {
+    // 直前のセッションがまだ畳まれていないことがある。少し待って戻る。
+    setTimeout(() => { if (recWanted && !recRunning) startRecognition(); }, 250);
+  }
+}
+
+function stopRecognition() {
+  recWanted = false;
+  if (rec) { try { rec.abort(); } catch {} }
+  rec = null; recRunning = false;
+  el.stream.textContent = '';
+}
+
+// 黙っているあいだに張り直す見張り。声が出ている最中は何もしない。
+setInterval(() => {
+  if (!recWanted || !recRunning) return;
+  const now = performance.now();
+  const quietFor = now - lastVoiceAt;
+  const age = now - recStartedAt;
+  if (quietFor < RENEW_AFTER_MS) return;              // まだ喋っている
+  if (age < RENEW_AFTER_MS) return;                   // 張り直した直後
+  if (age > SESSION_MAX_MS || quietFor >= RENEW_AFTER_MS) {
+    // stop() は最後の結果を確定させてから end を投げる。abort() だと捨てる。
+    try { rec.stop(); } catch {}   // end で自動的に張り直る
+  }
+}, 1000);
+
+// 確定した発話をサーバへ。辞書・無視語・最小文字数・保留の判定は
+// サーバ側でデーモンと同じ道を通す（認識のやり方で結果が変わらないように）。
+async function sendUtterance(text) {
+  text = (text || '').trim();
+  if (!text) return;
+  lastVoiceAt = performance.now();
+  try {
+    await post('/api/utterance', {text});
+  } catch {}
+}
+
+/* ── ブラウザ認識の設定 ───────────────── */
+
+function paintAsrLangs() {
+  const cur = browserLang();
+  const list = ASR_LANGS.some(([c]) => c === cur) ? ASR_LANGS
+             : [[cur, cur], ...ASR_LANGS];
+  el.asrLang.replaceChildren(...list.map(([code, name]) => {
+    const o = document.createElement('option');
+    o.value = code; o.textContent = name; o.selected = code === cur;
+    return o;
+  }));
+}
+
+function paintBrowserAsr() {
+  el.browserAsr.checked = recWanted;
+  el.browserAsrWarn.hidden = !recWanted;
+  el.asrLangField.hidden = !recWanted;
+}
+
+el.browserAsr.onchange = () => {
+  if (el.browserAsr.checked) {
+    recWanted = true;
+    store.set('asr', '1');
+    lastVoiceAt = performance.now();
+    startRecognition();
+  } else {
+    store.set('asr', '');
+    stopRecognition();
+  }
+  paintBrowserAsr();
+  paint();
+};
+
+el.asrLang.onchange = () => {
+  store.set('asrLang', el.asrLang.value);
+  // 言語は張り直したときに効く。使用中なら今すぐ張り直す。
+  if (recWanted) { try { rec.abort(); } catch {} }
+};
 
 /* ── フローティング表示 ─────────────────
    ブラウザを横に並べずに済むよう、常に手前へ浮く小窓へ引っ越す。
@@ -2364,6 +2643,15 @@ el.clean.onchange = () => {
 resolveLang();
 applyI18n();
 decorateIcons();
+// ブラウザ側の認識は Chrome 系だけ。使えない環境では設定ごと出さない。
+el.browserAsrGroup.hidden = !canBrowserASR;
+if (canBrowserASR) {
+  paintAsrLangs();
+  recWanted = store.get('asr', '') === '1';
+  paintBrowserAsr();
+  // 認識はマイクの許可が要るので、最初に触られた時点で始める
+  if (recWanted) addEventListener('pointerdown', () => startRecognition(), {once:true});
+}
 applyTheme(store.get('theme', 'auto'));
 applyViz(vizStyle);
 for (const b of el.langRow.children) b.classList.toggle('on', b.dataset.langChoice === langPref);

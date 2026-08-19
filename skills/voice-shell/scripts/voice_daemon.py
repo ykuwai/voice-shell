@@ -15,7 +15,6 @@ Claude Code 側は Monitor でこのログを tail し、行が来たらプロ�
 """
 import argparse
 import contextlib
-import fcntl
 import json
 import os
 import re
@@ -25,9 +24,31 @@ import threading
 import time
 from pathlib import Path
 
+# fcntl は POSIX 専用（Windows に無い）。二重起動防止のロックだけの用途なので、
+# Windows では msvcrt.locking で代替する。
+if sys.platform.startswith("win"):
+    import msvcrt
+
+    def _lock_exclusive_nb(f):
+        f.write("x")
+        f.flush()
+        msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+else:
+    import fcntl
+
+    def _lock_exclusive_nb(f):
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
 import asr_mic
 
-STATE_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "qwen-voice"
+# voice-shell.sh(bash) 側の "/tmp" と、この Python プロセスが単独で解釈する
+# "/tmp" は実ディレクトリが食い違いうる（Windows では前者が MSYS のマウント先、
+# 後者はドライブ直下の C:\tmp になる）。voice-shell.sh は cygpath で解決した
+# 実パスを VOICE_SHELL_STATE_DIR で渡してくるので、あればそちらを使う。
+if os.environ.get("VOICE_SHELL_STATE_DIR"):
+    STATE_DIR = Path(os.environ["VOICE_SHELL_STATE_DIR"])
+else:
+    STATE_DIR = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "qwen-voice"
 
 # ユーザー辞書。再起動をまたいで残したいので設定ディレクトリに置く。
 # Web UI から編集でき、変更は次の発話からすぐ効く（デーモン再起動は不要）。
@@ -558,20 +579,83 @@ def parse_args():
                         "remote.json の設定で待ち受ける）")
     p.add_argument("--status", action="store_true", help="稼働状況を表示して終了")
     p.add_argument("--stop", action="store_true", help="常駐プロセスを停止して終了")
+    p.add_argument("--listeners", action="store_true",
+                   help="発話ログを聞いているセッションを一覧して終了")
     return p.parse_args()
+
+
+def _pid_alive(pid):
+    """シグナルを送らずに生存確認する。"""
+    if sys.platform.startswith("win"):
+        # os.kill(pid, 0) は Windows では未対応（SystemError になる）。
+        # ハンドルが取れるかどうかで代用する。
+        import ctypes
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        handle = ctypes.windll.kernel32.OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if handle:
+            ctypes.windll.kernel32.CloseHandle(handle)
+            return True
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
 
 
 def read_pid():
     try:
         pid = int(PID_FILE.read_text())
-        os.kill(pid, 0)          # 生存確認（シグナルは送らない）
-        return pid
-    except (FileNotFoundError, ValueError, ProcessLookupError):
+    except (FileNotFoundError, ValueError):
         return None
+    return pid if _pid_alive(pid) else None
+
+
+def listeners_dir(log_path):
+    return Path(log_path).parent / "listeners"
+
+
+def list_active_listeners(log_path):
+    """発話ログを聞いているセッションを一覧する。
+
+    `pgrep` に頼らない（Windows の Git Bash には無い）。代わりに
+    `voice-shell.sh listen` が起動時に自分で登録するファイルを見る。
+    生きていないものはついでに掃除する。
+    """
+    d = listeners_dir(log_path)
+    if not d.is_dir():
+        return []
+    out = []
+    for f in d.iterdir():
+        try:
+            pid = int(f.name)
+        except ValueError:
+            continue
+        if _pid_alive(pid):
+            try:
+                lines = f.read_text().splitlines()
+            except OSError:
+                lines = []
+            started = lines[0] if len(lines) > 0 else "不明"
+            cwd = lines[1] if len(lines) > 1 else "不明"
+            out.append({"pid": pid, "started": started, "cwd": cwd})
+        else:
+            f.unlink(missing_ok=True)   # 死んでいるものは片付ける
+    return out
 
 
 def main():
     args = parse_args()
+
+    if args.listeners:
+        # 何も出さない/出す は呼び出し側（voice-shell.sh）に判断させる。
+        # ここで固定文言を出すと「呼び出し側が空かどうかを見分けられない」ため。
+        for l in list_active_listeners(args.log_file):
+            print(f"  PID {l['pid']}")
+            print(f"    起動 : {l['started']}")
+            print(f"    場所 : {l['cwd']}")
+        return
 
     if args.status:
         pid = read_pid()
@@ -603,7 +687,7 @@ def main():
     # 異常終了しても OS が解放するので取り残しの心配がない。
     _lock = open(STATE_DIR / "daemon.lock", "w")
     try:
-        fcntl.flock(_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _lock_exclusive_nb(_lock)
     except OSError:
         sys.exit("すでに起動しています（読み込み中かもしれません）。")
     globals()["_daemon_lock"] = _lock   # 閉じると解放されるので握り続ける
@@ -627,6 +711,18 @@ def main():
 
     args.want_device = want_device
 
+    # 実際に切り替えが完了したデバイス名。ビューアが「切り替えました」と
+    # 表示するのはボタンを押した瞬間の楽観的な表示で、裏で本当に切り替わった
+    # かは分からない。ここに確定情報を書き、ビューアはこのファイルの変化を
+    # 見て初めて確定の表示をする。
+    mic_active_path = Path(args.log_file).parent / "mic_active"
+    mic_active_path.write_text(args.device)
+
+    def on_switch(dev):
+        mic_active_path.write_text(dev)
+
+    args.on_switch = on_switch
+
     # マイク感度と確定までの無音秒数もビューアから触れる。録音の入れ替えすら
     # 要らず、次に読み直した時点から効く。ファイルが無ければ今の値で作る。
     def want_tuning():
@@ -646,6 +742,10 @@ def main():
         args.min_chars = int(saved["min_chars"])
     if isinstance(saved.get("strip_fillers"), bool):
         args.strip_fillers = saved["strip_fillers"]
+    # 認識言語（Whisper 限定）。他のエンジンは "Japanese" のような綴りを
+    # 使うため、ここで上書きすると壊れる。空文字は自動判定を意味する。
+    if args.engine == "whisper" and isinstance(saved.get("language"), str):
+        args.language = saved["language"] or None
 
     # 足りない項目を今の値で埋める。ファイルが既にある人にも新しい項目が
     # 行き渡るようにする（無いままだとビューアのつまみが効かない）。
@@ -653,9 +753,18 @@ def main():
     for key in ("silence_threshold", "silence_duration", "min_chars",
                 "strip_fillers"):
         filled.setdefault(key, getattr(args, key))
+    if args.engine == "whisper":
+        # CLI 既定の "Japanese" のような綴りのままだと、ビューアの
+        # プルダウン（2文字コードで持つ）と一致しないので正規化する。
+        import whisper_engine
+        filled.setdefault("language", whisper_engine._lang_code(args.language) or "")
     if filled != saved:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         TUNING_FILE.write_text(json.dumps(filled, indent=2) + "\n")
+
+    # ビューアが「今どのエンジンか」を知るための確定情報（認識言語の
+    # プルダウンは Whisper のときだけ出す）。
+    (Path(args.log_file).parent / "engine_active").write_text(args.engine)
 
     print("モデルを読み込み中… (初回は数分かかります)", file=sys.stderr)
     model = asr_mic.load_model(args)
@@ -671,6 +780,32 @@ def main():
     PID_FILE.write_text(str(os.getpid()))
     print(f"\n  聞いています — 喋ると {log_path} に追記します"
           f"\n  Ctrl-C で終了\n", file=sys.stderr, flush=True)
+
+    # 聞いているセッションが2つ以上になったら、発話ログ自体に警告を書いて
+    # Claude Code（Monitor でこのログを見ている側）へ知らせる。8日前の
+    # セッションが聞いたままで、同じ発話が2つに配られていたことが実際に
+    # あった。`voice-shell.sh listen` が起動時に自分を登録するので、
+    # ここではその数を数えるだけでよい（pgrep 不要、Windows でも動く）。
+    def watch_listeners():
+        last_count = None
+        while True:
+            time.sleep(5)
+            count = len(list_active_listeners(log_path))
+            if count > 1 and count != last_count:
+                try:
+                    with open(log_path, "a", buffering=1, encoding="utf-8") as wf:
+                        wf.write(json.dumps({
+                            "system_warning":
+                                f"モニターが{count}個同時に発話ログを聞いています。"
+                                "同じ発話が複数のセッションに二重に届いている可能性が"
+                                "あります。`voice-shell.sh listeners` で確認し、"
+                                "使っていないものは停止することをお勧めします。"
+                        }, ensure_ascii=False) + "\n")
+                except OSError:
+                    pass
+            last_count = count
+
+    threading.Thread(target=watch_listeners, daemon=True).start()
 
     try:
         partial_path = log_path.parent / PARTIAL_FILE.name
