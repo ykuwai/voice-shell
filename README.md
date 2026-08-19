@@ -31,7 +31,7 @@ Claude Code で `/voice-shell` と打つか、「音声モードにして」と�
 
 | やり方 | 何が要るか | 音声の行き先 |
 |---|---|---|
-| **このブラウザ**（既定） | Chrome だけ | **Google のサーバ** |
+| **このブラウザ**（既定） | Chrome（画面を開いている間だけ） | **Google のサーバ** |
 | Apple のオンデバイス | macOS 26 以降 | この機械の中だけ |
 | Whisper | CPU でも動く。固有名詞に強い | この機械の中だけ |
 | Qwen3-ASR | GPU 約12GB / Apple Silicon | この機械の中だけ |
@@ -40,7 +40,7 @@ Claude Code で `/voice-shell` と打つか、「音声モードにして」と�
 同じ注意書きが出る。
 
 選んだやり方は `~/.config/voice-shell/config.json` に残るので、**次からは
-そのまま起動する**。ブラウザを選んでいるときはモデルを積まないので、
+そのまま起動する**。使ったマイクも一緒に覚える。ブラウザを選んでいるときはモデルを積まないので、
 `/voice-shell` と打った瞬間に使える状態になる。
 
 ```bash
@@ -136,7 +136,13 @@ voice-shell.sh listeners
 
 ## セットアップ
 
-**ブラウザの認識だけで使うなら、何も要らない。** Chrome があれば動く。
+**ブラウザの認識だけで使うなら、モデルは要らない。**
+
+```bash
+pip install numpy aiohttp
+```
+
+これと Chrome があれば動く。
 
 手元で完結させたい場合だけ、下のどれかを入れる。詳しい手順は
 [SETUP.md](skills/voice-shell/SETUP.md) にある。

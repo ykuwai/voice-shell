@@ -766,6 +766,8 @@ const I18N = {
     connecting:'Connecting…',
     statusLive:'Going to Claude', statusHold:'Holding', statusOff:'Paused',
     statusDown:'Disconnected — reconnecting', statusBooting:'Starting up',
+    statusEnded:'Voice mode ended',
+    hintEnded:'Recognition stopped and the microphone was released.',
     statusStopped:'Stopped',
     titleLive:'● live', titleHold:'◐ holding', titleOff:'○ paused',
     hintLive:'Whatever you say goes straight to Claude Code.',
@@ -853,6 +855,8 @@ const I18N = {
     connecting:'接続中',
     statusLive:'Claude に届いています', statusHold:'ためています', statusOff:'一時停止中',
     statusDown:'切断 — 再接続中', statusBooting:'起動しています',
+    statusEnded:'音声モードは終了しました',
+    hintEnded:'認識を止めて、マイクを手放しました。',
     statusStopped:'止まっています',
     titleLive:'● 送信中', titleHold:'◐ ためています', titleOff:'○ 一時停止',
     hintLive:'話すとそのまま Claude Code に届きます。',
@@ -1739,7 +1743,16 @@ function connect() {
     }
   };
 
-  ws.onclose = () => {
+  ws.onclose = ev => {
+    // サーバが畳んだ（音声モード終了）なら、認識も止める。
+    // 再接続を試みるだけだと、止めたつもりでマイクは開いたまま、
+    // 音声が外へ送られ続ける。1001 = GOING_AWAY。
+    if (ev.code === 1001) {
+      stopRecognition();
+      setState('off', t('statusEnded'));
+      el.hint.textContent = t('hintEnded');
+      return;
+    }
     setState('down', t('statusDown'));
     setTimeout(connect, 2000);
   };

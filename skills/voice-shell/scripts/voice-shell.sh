@@ -51,13 +51,14 @@ find_python() {
       [[ -x "$base/envs/$env/bin/python" ]] && { echo "$base/envs/$env/bin/python"; return; }
     done
   done
-  # 見つからなければ、認識エンジンが入っている python を使う。
-  # apple エンジン（macOS 26 付属）は OS 側が認識するので numpy だけあればよい。
+  # 見つからなければ、動かすのに足りる python を探す。
+  #
+  # 既定のブラウザ認識に要るのは numpy と aiohttp だけで、認識のモデルは
+  # 要らない。ここでモデルの有無を条件にすると、「何も入れずに動く」はずの
+  # 既定が、モデルの無い機械では起動すらできなくなる（実際そうなっていた）。
   for c in python3 python; do
     command -v "$c" >/dev/null || continue
-    if "$c" -c "import qwen_asr" 2>/dev/null || \
-       "$c" -c "import mlx_qwen3_asr" 2>/dev/null || \
-       { [[ "$(uname)" == Darwin ]] && "$c" -c "import numpy" 2>/dev/null; }; then
+    if "$c" -c "import numpy, aiohttp" 2>/dev/null; then
       command -v "$c"; return
     fi
   done
@@ -82,8 +83,12 @@ kill_engine_cores() {
 # 始める」は engine-start を呼ぶが、そちらは元のコマンドを知らない。
 # 覚えていないと whisper で立ち上げたのに Qwen3-ASR が載ってしまう。
 engine_args() {
-  local f="${XDG_RUNTIME_DIR:-/tmp}/qwen-voice/engine"
-  [[ -s "$f" ]] && echo "--engine $(cat "$f")"
+  # 覚えている選択（~/.config/voice-shell/config.json）を正とする。
+  # 以前は /tmp のファイルを見ていたが、再起動で消えると黙って
+  # コンパイル時の既定に戻り、config と食い違っていた。
+  local e
+  e="$("$PY" "$APP" --resolve-engine "" 2>/dev/null || true)"
+  [[ -n "$e" && "$e" != "browser" ]] && echo "--engine $e"
 }
 
 PY="$(find_python || true)"
@@ -101,8 +106,10 @@ detach() {
 }
 
 if [[ -z "$PY" ]]; then
-  echo "Qwen3-ASR が入った Python が見つかりません。" >&2
-  echo "  セットアップ手順は README を参照してください。" >&2
+  echo "動かせる Python が見つかりません。" >&2
+  echo "  ブラウザで認識するだけなら、これだけで足ります:" >&2
+  echo "    pip install numpy aiohttp" >&2
+  echo "  手元のモデルで認識する場合は SETUP.md を参照してください。" >&2
   echo "  場所を直接指定する場合: export VOICE_SHELL_PYTHON=/path/to/python" >&2
   exit 1
 fi
@@ -139,6 +146,10 @@ case "$cmd" in
     # 使うエンジンを決める（指定 > 前回の選択 > 自動）。
     # 「前回の選択」は ~/.config/voice-shell/config.json に残るので、
     # 再起動しても選び直しにならない。
+    # 初回かどうか（覚えている選択がまだ無い）を、解決する前に見ておく
+    conf="${XDG_CONFIG_HOME:-$HOME/.config}/voice-shell/config.json"
+    first_run=0; [[ -f "$conf" ]] || first_run=1
+
     want=""
     rest=()
     while [[ $# -gt 0 ]]; do
@@ -156,8 +167,21 @@ case "$cmd" in
     # ビューアだけ立ち上げて終わる（画面を開いた時点で認識が始まる）。
     if [[ "$engine" == "browser" ]]; then
       mkdir -p "$STATE_DIR"
-      echo "このブラウザで認識します（モデルの読み込みはありません）"
+      # デーモン起動と揃える。残しておくと前回の発話が画面に並び直す。
+      : > "$LOG_FILE"
+      echo "このブラウザ（Chrome）で認識します。モデルの読み込みはありません。"
       echo "  発話ログ: $LOG_FILE"
+      # 初回だけ、音声の行き先と、この機械で使える代わりを名指しで伝える。
+      # 一般論だと「では何を選べば」で止まるので、具体名まで出す。
+      if [[ "$first_run" == 1 ]]; then
+        echo
+        echo "※ 音声は認識のため Google のサーバへ送られます。"
+        alt="$("$PY" "$APP" --list-engines | sed -n '2p' | awk '{print $1}')"
+        if [[ -n "$alt" ]]; then
+          echo "   手元だけで完結させたい場合、この機械では次も使えます:"
+          echo "     voice-shell.sh start --engine $alt"
+        fi
+      fi
       listeners_now="$(list_listeners)"
       if [ -n "$listeners_now" ]; then
         echo
@@ -166,10 +190,10 @@ case "$cmd" in
       fi
       "$0" viewer
       echo
-      echo "ビューアを開くと認識が始まります。開くまでは何も届きません。"
+      echo "Chrome でビューアを開き、マイクを許可すると認識が始まります。"
+      echo "開くまでは、話しても何も届きません。"
       exit 0
     fi
-    echo "$engine" > "$STATE_DIR/engine"
     if "$PY" "$APP" --status | grep -q 稼働中; then
       echo "すでに稼働しています。"; exit 0
     fi
@@ -228,6 +252,10 @@ case "$cmd" in
     kill_engine_cores
     ;;
   engine-start)
+    if [[ "$("$PY" "$APP" --resolve-engine "")" == "browser" ]]; then
+      echo "ブラウザ認識が選ばれています。この機械にモデルは積みません。" >&2
+      exit 0
+    fi
     # 認識だけ立ち上げ直す（ビューアには触らない）。
     # setsid で切り離す。デーモンは終了時に自分の子を全部 kill するので、
     # 呼び出し元（ビューア）にぶら下げると巻き込まれる。
@@ -244,20 +272,24 @@ case "$cmd" in
     ;;
   whisper)
     # Qwen3-ASR の代わりに Whisper を使う。固有名詞に強い。
-    mkdir -p "$STATE_DIR"
-    echo whisper > "$STATE_DIR/engine"
     "$0" start --engine whisper "$@"
     ;;
   apple)
     # macOS 26 付属のオンデバイス認識を使う。GPU メモリを積まないので Mac 向け。
-    mkdir -p "$STATE_DIR"
-    echo apple > "$STATE_DIR/engine"
     "$0" start --engine apple "$@"
     ;;
   remote)
     # LAN の端末からも音声を受ける形で立ち上げる。
     # 設定は ~/.config/voice-shell/remote.json（無ければ雛形を作って止まる）。
-    "$0" start --remote "$@"
+    #
+    # これは「エンジン」ではなく「モード」。この機械が認識役になるので、
+    # ブラウザ認識では成立しない。新規環境（覚えている選択が無い）だと
+    # browser に解決されて --remote ごと捨てられていたので、auto を強制する。
+    if [[ "$("$PY" "$APP" --resolve-engine "")" == "browser" ]]; then
+      "$0" start --engine auto --remote "$@"
+    else
+      "$0" start --remote "$@"
+    fi
     ;;
   remote-conf)
     # 設定ファイルの場所を教える（編集しやすいように）
@@ -440,7 +472,8 @@ NAMEIT
     echo TIMEOUT; exit 1
     ;;
   *)
-    echo "使い方: voice-shell.sh {start [--engine X]|stop|status|engines|listen|listeners|name|hold|live|log-path|wait-ready}" >&2
+    echo "使い方: voice-shell.sh {start [--engine browser|auto|apple|whisper|...]|stop|status|engines}" >&2
+    echo "        voice-shell.sh {listen|listeners|name|hold|live|log-path|wait-ready|viewer}" >&2
     echo "        voice-shell.sh {apple|whisper|remote|remote-conf|remote-log}" >&2
     exit 1
     ;;
