@@ -568,8 +568,6 @@
               data-i18n-title="floatBtn" hidden></button>
       <button class="icon" id="openSettings" data-icon="settings" data-icon-size="20"
               data-i18n-title="settingsTitle"></button>
-      <button class="icon" id="power" data-icon="power_settings_new" data-icon-size="20"
-              data-i18n-title="powerTitle"></button>
     </div>
   </header>
 
@@ -720,6 +718,13 @@
       <select id="asrLang"></select>
     </div>
     <p class="warn-note" id="browserAsrWarn" data-i18n="browserAsrWarn" hidden></p>
+    <div id="powerRow">
+      <div class="btn-row" style="margin-top:.7rem">
+        <button class="btn" id="power" data-icon="power_settings_new"
+                data-icon-size="17"><span id="powerLabel"></span></button>
+      </div>
+      <p class="range-note" data-i18n="powerNote"></p>
+    </div>
   </div>
 
   <!-- 見た目 -->
@@ -826,7 +831,7 @@ const I18N = {
     hintOff:'Nothing is recorded while paused.',
     hintBooting:'Loading the model. This takes about 40 seconds.',
     hintStopping:'Releasing the GPU.',
-    hintStopped:'Press the power icon to start listening again.',
+    hintStopped:'Start listening again from Settings → Recognition.',
     hintNoMic:'No microphone access — the meter still shows the daemon level.',
     modeLive:'Instant', modeHold:'Review',
     unsent:'Unsent', history:'History', quiet:'(silence)',
@@ -847,7 +852,8 @@ const I18N = {
     hintOnce:'Holding this one. Fix it, then send — back to instant after.',
     pauseTitle:'Turn the microphone off', resumeTitle:'Turn the microphone on',
     settingsTitle:'Settings',
-    powerTitle:'Stop / start listening',
+    powerStop:'Stop listening', powerStart:'Start listening',
+    powerNote:'Frees the memory the local model holds. Not needed for browser recognition.',
     settings:'Settings', back:'Back',
     floatBtn:'Float on top', unfloatBtn:'Back to the tab',
     floatFailed:'Could not float the window. Click the button directly and try again.',
@@ -927,7 +933,7 @@ const I18N = {
     hintOff:'一時停止中は何も記録されません。',
     hintBooting:'モデルを読み込んでいます。40秒ほどかかります。',
     hintStopping:'GPU を解放しています。',
-    hintStopped:'電源アイコンで聞き取りを再開できます。',
+    hintStopped:'設定 → 認識のやり方 から、聞き取りを再開できます。',
     hintNoMic:'マイクを使えないため、波形はデーモンの音量で動かしています。',
     modeLive:'即時', modeHold:'手直し',
     unsent:'未送信', history:'送信履歴', quiet:'（無音）',
@@ -948,7 +954,8 @@ const I18N = {
     hintOnce:'この一言だけ溜めます。直して送ると、即時に戻ります。',
     pauseTitle:'マイクを切る', resumeTitle:'マイクを入れる',
     settingsTitle:'設定',
-    powerTitle:'聞き取りを止める / 始める',
+    powerStop:'聞き取りを止める', powerStart:'聞き取りを始める',
+    powerNote:'手元のモデルが抱えているメモリを解放します。ブラウザ認識のときは要りません。',
     settings:'設定', back:'戻る',
     floatBtn:'手前に浮かせる', unfloatBtn:'タブに戻す',
     floatFailed:'浮かせられませんでした。ボタンを直接押してもう一度お試しください。',
@@ -1057,12 +1064,14 @@ function applyI18n(root = document) {
     n.title = t(n.dataset.i18nTitle);
     n.setAttribute('aria-label', t(n.dataset.i18nTitle));
   }
+  // 状態で文言が変わるものは data-i18n に載せられないので、ここで塗り直す
+  if (typeof paintPower === 'function' && el.powerLabel) paintPower();
 }
 
 const $ = id => document.getElementById(id);
 const el = {};
 for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
-                  'power','openSettings','sheet','closeSettings','floatBtn','page',
+                  'power','powerLabel','powerRow','openSettings','sheet','closeSettings','floatBtn','page',
                   'routes','viz','meter','meterHit','meterFill','meterMark','logoMark',
                   'tray','stream','draft','draftTime','draftActions','send','discard',
                   'editOnce','dropOne','draftMark',
@@ -1883,11 +1892,11 @@ let tick = null;
 
 function paintPower() {
   const busy = engine === 'booting' || engine === 'stopping';
+  // ヘッダに丸いアイコンで置いていたときは、マイクのミュートと
+  // 取り違えられた（電源の絵は「切る」に見える）。設定の中へ移し、
+  // 何が起きるのかを言葉で書く。
   el.power.classList.toggle('busy', busy);
-  el.power.classList.toggle('lit', engine === 'on');
-  // オフのときは warn（オレンジ＋点）を付けない。無彩色・点なしの
-  // 素の .icon に戻す（「オレンジ＋点＝オン」と誤解されたため。
-  // 点が無い状態を明確な「オフ」として使う）。
+  el.powerLabel.textContent = t(engine === 'off' ? 'powerStart' : 'powerStop');
   el.power.disabled = busy;
 
   if (engine === 'booting') {
@@ -2694,7 +2703,7 @@ function paintBrowserAsr() {
   el.engineNote.textContent = t(asrChosen ? 'browserAsrNote' : 'localAsrNote');
   // 電源はローカルのモデルを積み下ろしするためのもの。
   // ブラウザで認識している間は積むものが無いので、出す意味がない。
-  el.power.hidden = asrChosen;
+  el.powerRow.hidden = asrChosen;
   if (el.recogLangField) el.recogLangField.hidden = asrChosen || el.recogLangField.hidden;
 }
 
