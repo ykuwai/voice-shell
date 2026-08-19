@@ -1511,7 +1511,7 @@ function drawMic() {
 
   if (off) {
     cx.strokeStyle = cssVar('--danger');
-    cx.lineWidth = 2;
+    cx.lineWidth = 3;
     cx.beginPath();
     cx.arc(midX, midY, ring, 0, Math.PI * 2);
     cx.stroke();
@@ -1519,21 +1519,12 @@ function drawMic() {
     return;
   }
 
-  // 後光。声が大きいほど広がる
-  if (lv > 0.02) {
-    const g = cx.createRadialGradient(midX, midY, ring * 0.7,
-                                      midX, midY, ring * (1.15 + lv * 0.8));
-    g.addColorStop(0, color(cssVar('--accent'), 0.05 + lv * 0.3));
-    g.addColorStop(1, 'transparent');
-    cx.fillStyle = g;
-    cx.beginPath();
-    cx.arc(midX, midY, ring * (1.15 + lv * 0.8), 0, Math.PI * 2);
-    cx.fill();
-  }
-
-  // 囲みの輪
-  cx.strokeStyle = cssVar('--line');
-  cx.lineWidth = 2;
+  // 囲みの輪。声が乗ると色が差すが、外へは滲ませない
+  // （後光を広げると残像のように見えて落ち着かない）。
+  cx.strokeStyle = lv > 0.02
+    ? color(cssVar('--accent'), 0.35 + lv * 0.65)
+    : cssVar('--line');
+  cx.lineWidth = 3;
   cx.beginPath();
   cx.arc(midX, midY, ring, 0, Math.PI * 2);
   cx.stroke();
@@ -1548,10 +1539,7 @@ function drawMic() {
     cx.beginPath();
     cx.rect(midX - size, top, size * 2, size);
     cx.clip();
-    cx.shadowBlur = 16;
-    cx.shadowColor = cssVar('--accent');
     paintGlyph('mic', midX, midY, size, cssVar('--accent'));
-    cx.shadowBlur = 0;
     cx.restore();
   }
 }
