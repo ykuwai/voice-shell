@@ -179,6 +179,60 @@ def _kill_engine_on_exit():
     _signal.signal(_signal.SIGTERM, lambda *_: sys.exit(0))
 
 
+# ── 使える認識エンジン ──────────────────
+#
+# ブラウザの認識（Web Speech API）は何も入れずに動くので、これを既定に置く。
+# 手元で完結させたい人や、精度・言語で選びたい人のために、入っているものを
+# 一覧して選べるようにする。入っていないものは並べても選べないだけなので出さない。
+
+ENGINE_LABELS = {
+    "apple":    "Apple のオンデバイス認識（軽い・手元だけ）",
+    "whisper":  "Whisper（固有名詞に強い・手元だけ）",
+    "mlx":      "Qwen3-ASR / MLX（手元だけ）",
+    "local":    "Qwen3-ASR / GPU（手元だけ）",
+    "home-lan": "LAN の GPU 機に任せる",
+}
+
+
+def _mac_version():
+    try:
+        return int(subprocess.run(["sw_vers", "-productVersion"],
+                                  capture_output=True, timeout=5)
+                   .stdout.decode().split(".")[0])
+    except Exception:
+        return 0
+
+
+def available_engines() -> list:
+    """この環境で実際に使えるエンジンを返す。
+
+    import できるかどうかで見る（実際に読み込むと重いので find_spec だけ）。
+    """
+    import importlib.util as iu
+
+    def have(mod):
+        try:
+            return iu.find_spec(mod) is not None
+        except (ImportError, ValueError):
+            return False
+
+    out = []
+    if sys.platform == "darwin" and _mac_version() >= 26:
+        out.append("apple")
+    if have("faster_whisper"):
+        out.append("whisper")
+    if sys.platform == "darwin" and have("mlx_qwen3_asr"):
+        out.append("mlx")
+    if have("qwen_asr"):
+        out.append("local")
+    import pathlib
+    conf = pathlib.Path(os.environ.get("XDG_CONFIG_HOME",
+                                       pathlib.Path.home() / ".config"))
+    if (conf / "voice-shell" / "remote.json").exists():
+        out.append("home-lan")
+    return [{"id": e, "label": ENGINE_LABELS.get(e, e)} for e in out]
+
+
 def list_mics() -> list:
     """使えるマイクの一覧を返す。[{"id": ..., "label": ...}, ...]
 

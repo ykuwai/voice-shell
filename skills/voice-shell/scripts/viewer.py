@@ -355,6 +355,11 @@ async def main_async(args):
         want = bool(body.get("running"))
         sh = str(Path(__file__).with_name("voice-shell.sh"))
 
+        # 使うエンジンの指定。voice-shell.sh は起動時にこのファイルを見る。
+        kind = (body.get("engine") or "").strip()
+        if kind:
+            (state / "engine").write_text(kind)
+
         # start_new_session でビューアから切り離す。
         # デーモンは終了時に自分の子を全部 kill するので、ビューアの系統に
         # ぶら下げると停止のときビューアまで巻き込まれる。
@@ -416,6 +421,23 @@ async def main_async(args):
         rec = {"time": time.strftime("%H:%M:%S"), "text": text, "edited": True}
         hold_file.write_text("")     # 送ったので保留は空にする
         return web.json_response(rec)
+
+    async def handle_engines(_req):
+        """選べる認識エンジンの一覧。
+
+        ブラウザの認識は何も入れずに動くので、これが既定。手元で完結させたい
+        人のために、実際に入っているものだけを並べる。
+        """
+        import asr_mic
+        try:
+            chosen = (state / "engine").read_text().strip()
+        except OSError:
+            chosen = ""
+        return web.json_response({
+            "engines": asr_mic.available_engines(),
+            "chosen": chosen,
+            "running": engine_running(),
+        })
 
     async def handle_listeners(_req):
         """いま聞いているセッションの一覧と、選ばれている送信先。"""
@@ -631,6 +653,7 @@ async def main_async(args):
     app.router.add_post("/api/pause", handle_pause)
     app.router.add_post("/api/send", handle_send)
     app.router.add_post("/api/utterance", handle_utterance)
+    app.router.add_get("/api/engines", handle_engines)
     app.router.add_get("/api/listeners", handle_listeners)
     app.router.add_put("/api/route", handle_route)
     app.router.add_post("/api/discard", handle_discard)

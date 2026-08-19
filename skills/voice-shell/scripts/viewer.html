@@ -586,11 +586,6 @@
 
   <div class="log-head">
     <h2 data-i18n="history">History</h2>
-    <div class="filters" role="tablist">
-      <button class="on" id="filterAll" data-i18n="filterAll">All</button>
-      <button id="filterSent" data-i18n="filterSent">Sent</button>
-      <button id="filterEdited" data-i18n="filterEdited">Edited</button>
-    </div>
   </div>
 
   <div id="log"></div>
@@ -652,11 +647,14 @@
     <p class="range-note" id="calibNote" style="margin-top:.5rem"></p>
   </div>
 
-  <!-- ブラウザで認識する -->
-  <div class="group" id="browserAsrGroup" hidden>
-    <h3 data-icon="translate" data-icon-size="14" data-i18n="grpBrowserAsr">Recognize in this browser</h3>
-    <label class="toggle"><input type="checkbox" id="browserAsr"><span data-i18n="browserAsrOn">Use this browser to recognize</span></label>
-    <p class="range-note" data-i18n="browserAsrNote"></p>
+  <!-- 認識のやり方 -->
+  <div class="group" id="engineGroup">
+    <h3 data-icon="translate" data-icon-size="14" data-i18n="grpEngine">Recognition</h3>
+    <div class="field">
+      <label for="enginePick" data-icon="graphic_eq" data-icon-size="17" data-i18n="engineLabel">Recognized by</label>
+      <select id="enginePick"></select>
+    </div>
+    <p class="range-note" id="engineNote"></p>
     <div class="field" id="asrLangField" hidden>
       <label for="asrLang" data-icon="language" data-icon-size="17" data-i18n="asrLang">Spoken language</label>
       <select id="asrLang"></select>
@@ -785,7 +783,6 @@ const I18N = {
     uiUpdated:'Updated — tap to reload',
     thresholdMark:'Drag to set sensitivity — speech past this mark is picked up',
     sensitivitySet:'Sensitivity {n}',
-    filterAll:'All', filterSent:'Sent', filterEdited:'Edited',
     empty:'Nothing sent yet. Speak and it shows up here.',
     sent:'Sent', edited:'Edited',
     draftPlaceholder:'Fix it here, then send.',
@@ -806,8 +803,11 @@ const I18N = {
     minChars:'Min length',
     minCharsNote:'Shorter results are dropped as noise.',
     stripFillers:'Strip filler words',
-    grpBrowserAsr:'Recognize in this browser',
-    browserAsrOn:'Use this browser to recognize',
+    grpEngine:'Recognition',
+    engineLabel:'Recognized by',
+    engineBrowser:'This browser (nothing to install)',
+    engineNone:'No recognition available',
+    localAsrNote:'Runs on this machine. Audio never leaves it.',
     browserAsrNote:'Uses the recognition built into Chrome. No model to install, so it runs on low-spec machines — and it works even without the daemon. Note: the microphone picker above has no effect here. The Web Speech API follows Chrome’s own default microphone (chrome://settings/content/microphone) — not the OS default, and not a per-site choice. Change it there if the wrong device gets used.',
     browserAsrWarn:'Audio is sent to Google servers for recognition. Keep this off if everything must stay on this machine — use the daemon instead.',
     asrLang:'Spoken language',
@@ -870,7 +870,6 @@ const I18N = {
     uiUpdated:'画面が新しくなりました — 押すと反映',
     thresholdMark:'つまんで感度を変えられます（この印を超えた分が拾われます）',
     sensitivitySet:'感度 {n}',
-    filterAll:'すべて', filterSent:'送信済み', filterEdited:'手直し',
     empty:'まだ何も送っていません。話すとここに出ます。',
     sent:'送信済み', edited:'手直し送信',
     draftPlaceholder:'ここで直してから送れます。',
@@ -891,8 +890,11 @@ const I18N = {
     minChars:'最小文字数',
     minCharsNote:'これより短い認識結果は物音とみなして捨てます。',
     stripFillers:'「えーと」を消す',
-    grpBrowserAsr:'このブラウザで認識する',
-    browserAsrOn:'このブラウザで認識する',
+    grpEngine:'認識のやり方',
+    engineLabel:'認識するのは',
+    engineBrowser:'このブラウザ（何も入れずに動く）',
+    engineNone:'使える認識がありません',
+    localAsrNote:'この機械の中だけで認識します。音声は外へ出ません。',
     browserAsrNote:'Chrome に載っている認識を使います。モデルを入れなくてよいので非力な端末でも動き、デーモンが動いていなくても使えます。上のマイク選択はここには効きません — Web Speech API は Chrome 自体の既定マイク（chrome://settings/content/microphone）に従います。OS の既定でもサイトごとの設定でもないので、違うデバイスが使われる場合はそちらを変えてください。',
     browserAsrWarn:'音声は認識のため Google のサーバへ送られます。手元だけで完結させたい場合は、これを切ってデーモン側の認識をお使いください。',
     asrLang:'話す言語',
@@ -985,11 +987,10 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'tray','stream','draft','draftTime','draftActions','send','discard',
                   'editOnce','draftMark',
                   'hint','note','log','none','count','copy','fresh',
-                  'filterAll','filterSent','filterEdited',
                   'mic','recogLang','recogLangField','thresh','threshVal','gaugeFill','gaugeMark',
                   'silence','silenceVal','minChars','minCharsVal','clean',
                   'calibBtn','calibNote',
-                  'browserAsrGroup','browserAsr','browserAsrWarn','asrLang','asrLangField',
+                  'engineGroup','enginePick','engineNote','browserAsrWarn','asrLang','asrLangField',
                   'themeRow','vizRow','langRow',
                   'scopePrivate','scopeNote','tabReplace','tabIgnore',
                   'paneReplace','paneIgnore','replaceRows','ignoreRows',
@@ -1557,20 +1558,11 @@ function setState(kind, text) {
   el.stateText.textContent = text;
 }
 
-function matches(row) {
-  if (filter === 'all') return true;
-  return row.dataset.kind === filter;
-}
-
 function retally() {
-  const rows = [...el.log.children];
-  el.count.textContent = rows.length;
-  let shown = 0;
-  for (const r of rows) { r.hidden = !matches(r); if (!r.hidden) shown++; }
-  el.none.hidden = shown > 0;
+  const n = el.log.children.length;
+  el.count.textContent = n;
+  el.none.hidden = n > 0;
 }
-
-let filter = 'all';
 
 function addEntry(rec) {
   const row = document.createElement('div');
@@ -1603,14 +1595,6 @@ function reformatAll() {
     const n = row.querySelector('.text');
     n.textContent = format(n.dataset.raw);
   }
-}
-
-for (const [btn, key] of [[el.filterAll,'all'], [el.filterSent,'sent'], [el.filterEdited,'edited']]) {
-  btn.onclick = () => {
-    filter = key;
-    for (const b of [el.filterAll, el.filterSent, el.filterEdited]) b.classList.toggle('on', b === btn);
-    retally();
-  };
 }
 
 /* ── 送り先 ─────────────────────────────
@@ -2306,8 +2290,12 @@ let lastVoiceAt = 0;         // 最後に声が出ていた時刻
 let recStartedAt = 0;        // いまのセッションを張った時刻
 let recFails = 0;            // 続けて失敗した回数（諦める判断に使う）
 
-// ブラウザ認識が実際に動いている状態か
-const asrActive = () => canBrowserASR && recWanted;
+/* ブラウザ認識を「使う設定になっているか」と「いま動いているか」は別物。
+   一緒にしていたため、一時停止で止めた瞬間に「認識する手立てが無い」と
+   判定され、再開ボタンまで押せなくなっていた（実際に詰まった）。
+   画面の有効・無効は設定の方（asrChosen）で見る。 */
+let asrChosen = false;
+const asrActive = () => canBrowserASR && asrChosen;
 
 const MAX_FAILS = 6;         // これだけ続けて駄目なら諦めて知らせる
 
@@ -2530,28 +2518,60 @@ function paintAsrLangs() {
   }));
 }
 
+/* 認識のやり方を選ぶ。
+
+   ブラウザの認識（Web Speech API）は何も入れずに動くので、これを既定に置く。
+   手元で完結させたい人や、精度・言語で選びたい人のために、実際に入っている
+   ものだけをプルダウンに並べる。
+
+   両方を同時に動かすと同じ発話ログに2回書かれるので、選ぶのは常に1つ。 */
+const BROWSER_ENGINE = 'browser';
+let localEngines = [];
+
 function paintBrowserAsr() {
-  el.browserAsr.checked = recWanted;
-  el.browserAsrWarn.hidden = !recWanted;
-  el.asrLangField.hidden = !recWanted;
-  // Whisper 用の「認識言語」と並ぶと、どちらを触ればいいのか分からない。
-  // ブラウザで認識している間は、そちらは効かないので隠す。
-  if (el.recogLangField) el.recogLangField.hidden = recWanted || el.recogLangField.hidden;
+  el.browserAsrWarn.hidden = !asrChosen;
+  el.asrLangField.hidden = !asrChosen;
+  el.engineNote.textContent = t(asrChosen ? 'browserAsrNote' : 'localAsrNote');
+  // 電源はローカルのモデルを積み下ろしするためのもの。
+  // ブラウザで認識している間は積むものが無いので、出す意味がない。
+  el.power.hidden = asrChosen;
+  if (el.recogLangField) el.recogLangField.hidden = asrChosen || el.recogLangField.hidden;
 }
 
-/* ブラウザ認識とデーモンの認識は同時に動かさない。
-   どちらも同じ発話ログに書くので、両方動くと同じ発話が2回 Claude に届く。
-   入れたらデーモンの認識を止め、外したら戻す。 */
-el.browserAsr.onchange = async () => {
-  const on = el.browserAsr.checked;
-  store.set('asr', on ? '1' : '');
-  el.browserAsr.disabled = true;
+async function loadEngines() {
+  let d;
   try {
-    if (on) {
+    d = await (await fetch('/api/engines')).json();
+  } catch { return; }
+  localEngines = d.engines || [];
+
+  const opts = [];
+  if (canBrowserASR) opts.push([BROWSER_ENGINE, t('engineBrowser')]);
+  for (const e of localEngines) opts.push([e.id, e.label]);
+
+  // ブラウザで認識できず、入っているモデルも無い、という環境もありうる
+  if (!opts.length) opts.push(['', t('engineNone')]);
+
+  const cur = asrChosen ? BROWSER_ENGINE : (d.chosen || localEngines[0]?.id || '');
+  el.enginePick.replaceChildren(...opts.map(([id, label]) => {
+    const o = document.createElement('option');
+    o.value = id; o.textContent = label; o.selected = id === cur;
+    return o;
+  }));
+  paintBrowserAsr();
+}
+
+el.enginePick.onchange = async () => {
+  const pick = el.enginePick.value;
+  el.enginePick.disabled = true;
+  try {
+    if (pick === BROWSER_ENGINE) {
+      asrChosen = true;
       recWanted = true;
       asrPausedByRoute = false;
+      store.set('asr', '1');
       lastVoiceAt = performance.now();
-      // 先にデーモンを止める。止まる前に張ると、その間の発話が二重に届く。
+      // 先にモデル側を降ろす。降りる前に張ると、その間の発話が二重に届く。
       if (engineOnish()) {
         engine = 'stopping';
         paintPower();
@@ -2559,17 +2579,16 @@ el.browserAsr.onchange = async () => {
       }
       startRecognition();
     } else {
+      asrChosen = false;
+      store.set('asr', '');
       stopRecognition();
-      // 認識する手立てが無くなるので、デーモンを戻す
-      if (engine === 'off') {
-        engine = 'booting';
-        startedAt = Date.now();
-        paintPower();
-        await post('/api/engine', {running: true});
-      }
+      engine = 'booting';
+      startedAt = Date.now();
+      paintPower();
+      await post('/api/engine', {running: true, engine: pick});
     }
   } finally {
-    el.browserAsr.disabled = false;
+    el.enginePick.disabled = false;
   }
   paintBrowserAsr();
   refreshState();
@@ -2829,10 +2848,11 @@ resolveLang();
 applyI18n();
 decorateIcons();
 // ブラウザ側の認識は Chrome 系だけ。使えない環境では設定ごと出さない。
-el.browserAsrGroup.hidden = !canBrowserASR;
 if (canBrowserASR) {
   paintAsrLangs();
-  recWanted = store.get('asr', '') === '1';
+  // 何も入れずに動くので、初めて使う人にはこれが既定。
+  asrChosen = store.get('asr', '1') === '1';
+  recWanted = asrChosen;
   paintBrowserAsr();
   // 認識はマイクの許可が要るので、最初に触られた時点で始める
   // 認識はマイクの許可が要るので、最初に触られた時点で始める。
@@ -2843,6 +2863,7 @@ if (canBrowserASR) {
     addEventListener('keydown', arm, {once:true});
   }
 }
+loadEngines();
 applyTheme(store.get('theme', 'auto'));
 applyViz(vizStyle);
 for (const b of el.langRow.children) b.classList.toggle('on', b.dataset.langChoice === langPref);
