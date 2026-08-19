@@ -285,6 +285,15 @@
   .entry .mark::before { content:"✓"; font-size:.7em; }
   .entry .mark.sent   { color:var(--ok);       background:color-mix(in srgb, var(--ok) 14%, transparent); }
   .entry .mark.edited { color:var(--accent-2); background:color-mix(in srgb, var(--accent-2) 14%, transparent); }
+  /* どのセッションへ送ったか。複数の作業で使っているとき、履歴を見て
+     「これはどっちに言ったんだっけ」が分からなくなるのを防ぐ。 */
+  .entry .to {
+    display:inline-flex; align-items:center; gap:.2rem; min-width:0;
+    padding:.05rem .4rem; border-radius:5px; font-size:.64rem;
+    color:var(--dim); background:var(--raise);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:12rem;
+  }
+  .entry .to::before { content:"→"; opacity:.7; }
   .entry .text { font-size:.88rem; line-height:1.65; word-break:break-word; }
 
   /* 未送信カード。認識中のテキストもここに出る（一等地に置く） */
@@ -1700,14 +1709,37 @@ function addEntry(rec) {
     new Date().toLocaleTimeString(lang === 'ja' ? 'ja-JP' : 'en-GB', {hour12:false});
   gutter.append(mark, stamp);
 
+  // 宛先つきの行だけ出す。聞いているセッションが1つのときは宛先が付かないので、
+  // ひとりで使っているあいだは何も増えない。
+  if (rec.to) {
+    row.dataset.to = String(rec.to);
+    const to = document.createElement('span');
+    to.className = 'to';
+    gutter.append(to);
+  }
+
   const text = document.createElement('div');
   text.className = 'text';
   text.dataset.raw = rec.text;
   text.textContent = format(rec.text);
 
   row.append(gutter, text);
+  relabelEntries();
   el.log.prepend(row);          // 新しいものを上に（モックと同じ並び）
   retally();
+}
+
+/* 宛先の PID から名前を引く。終わったセッションの名前も残す —
+   履歴は残るのに宛先だけ「#42101」になってしまうと、結局どちらか分からない。 */
+const routeNames = new Map();
+
+function relabelEntries() {
+  for (const row of el.log.children) {
+    const to = row.dataset.to;
+    if (!to) continue;
+    const node = row.querySelector('.to');
+    if (node) node.textContent = routeNames.get(to) || `#${to}`;
+  }
 }
 
 function reformatAll() {
@@ -2716,6 +2748,9 @@ async function loadListeners() {
 
   const before = knownListeners;
   knownListeners = d.listeners || [];
+  // 履歴の宛先を名前で出せるように覚えておく（終了した後も残す）
+  knownListeners.forEach(l => routeNames.set(String(l.pid), l.label));
+  relabelEntries();
   effectiveTo = d.target || '';
   const live = new Set(knownListeners.map(l => String(l.pid)));
 
