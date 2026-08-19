@@ -2342,6 +2342,8 @@ function newRecognition() {
   r.onstart = () => {
     if (!mine()) return;
     recRunning = true; recStartedAt = performance.now(); recFails = 0;
+    asrDeniedFlag = false;
+    beat('listening');           // 待たずにすぐ知らせる
   };
 
   r.onresult = ev => {
@@ -2361,6 +2363,8 @@ function newRecognition() {
     if (!mine()) return;
     // マイクを断られたら人の操作が要る。設定ごと戻して知らせる。
     if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
+      asrDeniedFlag = true;
+      beat('denied');            // 拒否されたことを外からも見えるようにする
       disableBrowserASR(t('asrDenied'));
       return;
     }
@@ -2458,6 +2462,27 @@ function sendUtterance(text) {
     }
   });
 }
+
+/* いま実際に聞いていることをサーバへ知らせる。
+   これが無いと、画面を開いていない／マイクを拒否された状態と、
+   ちゃんと聞いている状態が外から区別できない。 */
+const tabId = Math.random().toString(36).slice(2, 10);
+let asrDeniedFlag = false;
+
+function beat(state) {
+  navigator.sendBeacon
+    ? navigator.sendBeacon('/api/asr-heartbeat',
+        new Blob([JSON.stringify({tab: tabId, state})], {type: 'application/json'}))
+    : post('/api/asr-heartbeat', {tab: tabId, state}).catch(() => {});
+}
+
+setInterval(() => {
+  if (!asrChosen) return;
+  beat(asrDeniedFlag ? 'denied' : (recRunning ? 'listening' : 'idle'));
+}, 5000);
+
+// 閉じるときは、居なくなったことを伝える（残っていると居るように見える）
+addEventListener('pagehide', () => { if (asrChosen) beat('gone'); });
 
 /* ── 送信先 ─────────────────────────────
    別々の作業で同時に音声モードを使うことがある。どれへ届けるかを選ぶ。

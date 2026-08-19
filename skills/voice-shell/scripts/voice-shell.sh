@@ -306,10 +306,14 @@ case "$cmd" in
     engine="$("$PY" "$APP" --resolve-engine "")"
     if [[ "$engine" == "browser" ]]; then
       echo "このブラウザで認識します（この機械にモデルは積みません）"
-      if curl -sf -o /dev/null --max-time 2 http://127.0.0.1:8090; then
-        echo "  ビューア: http://127.0.0.1:8090 （開いている間だけ認識します）"
-      else
+      if ! curl -sf -o /dev/null --max-time 2 http://127.0.0.1:8090; then
         echo "  ビューアが動いていません → voice-shell.sh viewer" >&2
+      else
+        echo "  ビューア: http://127.0.0.1:8090"
+        # 画面が実際に聞いているかまで見る。ここを見ないと、開いていない・
+        # マイクを拒否された状態と、ちゃんと聞いている状態を区別できない。
+        curl -sf --max-time 2 http://127.0.0.1:8090/api/asr-status \
+          | "$PY" "$HERE/asr_status.py" || echo "  画面の状態を確認できませんでした"
       fi
     else
       echo "認識のやり方: $engine"
