@@ -9,6 +9,7 @@
 #   voice-shell.sh log-path / wait-ready
 #   voice-shell.sh listen                 発話ログを tail する（Monitor 用。多重起動を検知できる形）
 #   voice-shell.sh listeners              いま listen しているセッションの一覧
+#   voice-shell.sh name "…"               このセッションの表示名を付ける
 #   voice-shell.sh whisper                Whisper で認識する（固有名詞に強い）
 #   voice-shell.sh apple                  macOS 26 付属の認識で動かす（軽い）
 #   voice-shell.sh remote                 LAN の端末からも受ける
@@ -258,17 +259,64 @@ case "$cmd" in
     [[ -r "/proc/$$/winpid" ]] && reg_pid="$(cat "/proc/$$/winpid" 2>/dev/null || echo "$$")"
     mkdir -p "$STATE_DIR/listeners"
     reg="$STATE_DIR/listeners/$reg_pid"
-    { date; pwd; } > "$reg" 2>/dev/null || true
+
+    # どの道具から呼ばれたかと、その会話の id を控える。
+    # 会話に題名が付いたら、デーモンがそれを引いて表示名に使う
+    # （起動した時点では、何の作業か本人にも決まっていないため）。
+    agent=""; session=""
+    if [[ -n "${CLAUDE_CODE_SESSION_ID:-}" ]]; then
+      agent="claude"; session="$CLAUDE_CODE_SESSION_ID"
+    elif [[ -n "${CODEX_THREAD_ID:-}" ]]; then
+      agent="codex"; session="$CODEX_THREAD_ID"
+    elif [[ -n "${CODEX_SESSION_ID:-}" ]]; then
+      agent="codex"; session="$CODEX_SESSION_ID"
+    fi
+    # どの道具でも名乗れる逃げ道。VOICE_SHELL_NAME があれば最優先。
+    "$PY" - "$reg" "$agent" "$session" "${VOICE_SHELL_NAME:-}" <<'REG' || true
+import json, os, subprocess, sys, time
+reg, agent, session, name = sys.argv[1:5]
+started = time.strftime("%Y-%m-%d %H:%M:%S")
+json.dump({"started": started, "since": time.time(), "cwd": os.getcwd(),
+           "agent": agent, "session": session, "name": name},
+          open(reg, "w"), ensure_ascii=False)
+REG
     # exec すると trap が引き継がれず（プロセス置き換えで bash 自体が
     # 消えるため）終了時の自動削除が効かなくなる。
     #
     # tail は背景に回して wait する。前面のまま置くと、SIGTERM で bash だけ
     # 死んで tail が孤児として残る（登録は消えているのに発話は受け取れる、
     # という多重検知から漏れる状態になる）。
-    tail -F -n 0 "$LOG_FILE" &
+    # 宛先の絞り込みを挟む。行に "to" があって自分宛てでなければ落とす
+    # （宛先の指定が無い行は全員へ）。
+    tail -F -n 0 "$LOG_FILE" | "$PY" -u "$HERE/listen_filter.py" "$reg_pid" &
     tail_pid=$!
     trap 'rm -f "$reg"; kill "$tail_pid" 2>/dev/null || true' EXIT INT TERM HUP
     wait "$tail_pid"
+    ;;
+  name)
+    # このセッションの表示名を手で付ける。エージェントが題名を付けない
+    # 道具から使うときや、自動の題名が実態と合わないときのため。
+    # listen とは別のシェルから呼ばれるので、PID ではなく会話の id で探す。
+    "$PY" - "$STATE_DIR/listeners" "${CLAUDE_CODE_SESSION_ID:-${CODEX_THREAD_ID:-${CODEX_SESSION_ID:-}}}" "${1:-}" <<'NAMEIT'
+import json, os, sys
+d, session, name = sys.argv[1:4]
+if not session:
+    sys.exit("この道具はセッションの id を持っていません。"
+             "VOICE_SHELL_NAME を設定して listen し直してください。")
+hit = 0
+for f in os.scandir(d) if os.path.isdir(d) else []:
+    try:
+        info = json.load(open(f.path))
+    except Exception:
+        continue
+    if info.get("session") != session:
+        continue
+    info["name"] = name
+    json.dump(info, open(f.path, "w"), ensure_ascii=False)
+    hit += 1
+print(f"表示名を「{name}」にしました" if hit else
+      "このセッションは聞いていません（先に音声モードを始めてください）")
+NAMEIT
     ;;
   hold)
     # 発話を溜める側に回す。Claude 自身が呼ぶことを想定している
@@ -337,7 +385,7 @@ case "$cmd" in
     echo TIMEOUT; exit 1
     ;;
   *)
-    echo "使い方: voice-shell.sh {start|stop|status|listen|listeners|hold|live|log-path|wait-ready}" >&2
+    echo "使い方: voice-shell.sh {start|stop|status|listen|listeners|name|hold|live|log-path|wait-ready}" >&2
     echo "        voice-shell.sh {apple|whisper|remote|remote-conf|remote-log}" >&2
     exit 1
     ;;
