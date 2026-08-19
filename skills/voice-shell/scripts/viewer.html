@@ -704,7 +704,7 @@
     <p class="range-note" data-i18n="sensitivityNote"></p>
     <div class="btn-row" style="margin-top:.5rem">
       <button class="btn" id="calibBtn" data-icon="auto_awesome" data-icon-size="17"
-              data-i18n="calibrate">Set sensitivity for me</button>
+              data-i18n="calibrate">Auto-tune</button>
     </div>
     <p class="range-note" id="calibNote" style="margin-top:.5rem"></p>
     <div class="field">
@@ -904,7 +904,7 @@ const I18N = {
     asrFailed:'Recognition kept failing, so it was turned off. Check your connection and the microphone.',
     asrSendFailed:'Could not deliver what was recognized ({n}). Say it again.',
     asrDoubled:'Recognition was running twice, so this one was dropped. Switching to the current setting — say it again.',
-    calibrate:'Set sensitivity for me',
+    calibrate:'Auto-tune',
     calibSpeaking:'Keep talking… {n}s',
     calibQuiet:'Now stay quiet… {n}s',
     calibNoData:'No level data arrived. Is the daemon running?',
@@ -936,6 +936,7 @@ const I18N = {
     voiceMuted:'Muted — say “unmute” to come back',
     voiceRoute:'Now sending to {name}',
     voiceRouteMissing:'There is no session {n}',
+    voiceCancelled:'Cancelled — nothing was sent',
     voiceLive:'Sending straight through now',
     voiceHold:'Holding what you say now',
     voiceUnmuted:'Unmuted — listening again',
@@ -1007,7 +1008,7 @@ const I18N = {
     asrFailed:'認識が続けて失敗したので切りました。回線とマイクを確認してください。',
     asrSendFailed:'認識した文を届けられませんでした（{n}）。もう一度お話しください。',
     asrDoubled:'認識が二重に動いていたため、この分は届きませんでした。設定を合わせ直したので、もう一度お話しください。',
-    calibrate:'感度を自動で決める',
+    calibrate:'自動調整',
     calibSpeaking:'そのまま話し続けてください… あと{n}秒',
     calibQuiet:'今度は黙っていてください… あと{n}秒',
     calibNoData:'音量が届きませんでした。認識が動いているか確認してください。',
@@ -1039,6 +1040,7 @@ const I18N = {
     voiceMuted:'ミュートにしました — 「ミュート解除」で戻ります',
     voiceRoute:'送信先を {name} にしました',
     voiceRouteMissing:'{n} 番のセッションはありません',
+    voiceCancelled:'取り消しました — 送っていません',
     voiceLive:'そのまま届く側にしました',
     voiceHold:'溜める側にしました',
     voiceUnmuted:'ミュートを解除しました — また届きます',
@@ -1859,6 +1861,8 @@ function connect() {
         chime('up');   say(t('voiceLive'));        flashCommand(c.said, 'live');
       } else if (c.kind === 'mode_hold') {
         chime('down'); say(t('voiceHold'));        flashCommand(c.said, 'hold');
+      } else if (c.kind === 'cancelled') {
+        chime('err');  say(t('voiceCancelled'));  flashCommand(c.said, 'warn');
       } else if (c.kind === 'route_missing') {
         chime('err');  say(t('voiceRouteMissing', {n: c.label}));
         flashCommand(c.said, 'warn');
