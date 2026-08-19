@@ -439,23 +439,46 @@ REG
     # listen とは別のシェルから呼ばれるので、PID ではなく会話の id で探す。
     "$PY" - "$STATE_DIR/listeners" "${CLAUDE_CODE_SESSION_ID:-${CODEX_THREAD_ID:-${CODEX_SESSION_ID:-}}}" "${1:-}" <<'NAMEIT'
 import json, os, sys
+from pathlib import Path
 d, session, name = sys.argv[1:4]
 if not session:
     sys.exit("この道具はセッションの id を持っていません。"
              "VOICE_SHELL_NAME を設定して listen し直してください。")
+
+# 設定側にも残す。音声モードを入れ直すと登録ファイルは作り直されるので、
+# ここに置いておかないと、付けた名前が毎回消えて自動の題名に戻ってしまう。
+conf = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "voice-shell"
+conf.mkdir(parents=True, exist_ok=True)
+names_file = conf / "names.json"
+try:
+    names = json.loads(names_file.read_text(encoding="utf-8"))
+except (OSError, ValueError):
+    names = {}
+if name:
+    names[session] = name
+else:
+    names.pop(session, None)          # 空で呼んだら自動の題名に戻す
+names_file.write_text(json.dumps(names, ensure_ascii=False, indent=2) + "\n",
+                      encoding="utf-8")
+
 hit = 0
 for f in os.scandir(d) if os.path.isdir(d) else []:
     try:
-        info = json.load(open(f.path))
+        info = json.load(open(f.path, encoding="utf-8"))
     except Exception:
         continue
     if info.get("session") != session:
         continue
     info["name"] = name
-    json.dump(info, open(f.path, "w"), ensure_ascii=False)
+    json.dump(info, open(f.path, "w", encoding="utf-8"), ensure_ascii=False)
     hit += 1
-print(f"表示名を「{name}」にしました" if hit else
-      "このセッションは聞いていません（先に音声モードを始めてください）")
+if not name:
+    print("自動の題名に戻しました")
+elif hit:
+    print(f"表示名を「{name}」にしました")
+else:
+    print(f"表示名を「{name}」で覚えました"
+          "（このセッションはまだ聞いていません。始めれば反映されます）")
 NAMEIT
     ;;
   hold)

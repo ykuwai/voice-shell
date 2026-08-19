@@ -1031,6 +1031,14 @@ def _codex_title(session_id):
     return title
 
 
+def saved_names() -> dict:
+    """`voice-shell.sh name` で付けた名前（会話の id → 表示名）。"""
+    try:
+        return json.loads((CONFIG_DIR / "names.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
 def listener_title(entry):
     """その聞き手をいま何と呼ぶか。無ければ None（フォルダ名に落とす）。"""
     if entry.get("name"):
@@ -1038,6 +1046,10 @@ def listener_title(entry):
     sid, agent = entry.get("session"), entry.get("agent")
     if not sid:
         return None
+    # 音声モードを入れ直すと登録ファイルは作り直されるので、設定側も見る
+    named = saved_names().get(sid)
+    if named:
+        return named
     if agent == "claude":
         return _claude_title(sid)
     if agent == "codex":
