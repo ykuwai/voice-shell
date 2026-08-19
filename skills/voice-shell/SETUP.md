@@ -118,7 +118,41 @@ python3 -m venv .venv                    # Python 3.10〜3.13（conda でもよ�
 
 ## C. GPU なし（CPU のみ）
 
-ONNX 版を使う。速度が足りるかはページの記載と実機で確認する:
+CPU 向けには 2 つある。**C-1 を勧める**（実測で確認済み。固有名詞にも強い）。
+
+### C-1. Whisper（faster-whisper。推奨）
+
+`--engine whisper`（`whisper_engine.py`）で動く。中身は
+[faster-whisper](https://github.com/SYSTRAN/faster-whisper)（CTranslate2 版
+Whisper）で、`large-v3-turbo` が既定だが、GPU の無い CPU では重すぎる。
+`base` を指定すると実用的な速度になる（4コア CPU の実測で RTF 約0.15。
+`small` は RTF 約0.76 で少し重め、既定の `large-v3-turbo` は CPU では現実的でない）。
+
+```bash
+cd <このリポジトリ>
+python3 -m venv .venv                    # Python 3.10〜3.13
+.venv/bin/pip install -U faster-whisper aiohttp soxr numpy
+```
+
+```bash
+voice-shell.sh whisper --model base --whisper-device cpu --whisper-compute int8
+```
+
+モデルは初回起動時に Hugging Face から自動で落ちてくる（`base` で数十〜
+100MB程度）。`--whisper-compute` は精度と速度の兼ね合いで、CPU では
+`int8` を勧める（`float16` は GPU 向け）。
+
+Qwen3-ASR との違い（実測より）:
+- 固有名詞に強い。人名・製品名の取りこぼしが少ない
+- 文字誤り率そのものは Qwen3-ASR がやや優れる
+- 騒がしい場所や複数人の声には Whisper のほうが崩れにくい
+
+NVIDIA GPU がある環境でも `--whisper-device cuda --whisper-compute float16`
+で使える（固有名詞に強いほうを選びたいときなど）。
+
+### C-2. Qwen3-ASR の ONNX 版
+
+速度が足りるかはページの記載と実機で確認する:
 
 - [Daumee/Qwen3-ASR-0.6B-ONNX-CPU](https://huggingface.co/Daumee/Qwen3-ASR-0.6B-ONNX-CPU)
 
@@ -127,7 +161,7 @@ conda create -n qwen3-asr python=3.12 -y && conda activate qwen3-asr
 pip install -U onnxruntime librosa tokenizers aiohttp soxr
 ```
 
-B と同じく差し替えが要る。
+B と同じく差し替えが要る。**未検証**（C-1 と違い実機で確認していない）。
 
 ## D. クラウドの API を使う（GPU 不要）
 

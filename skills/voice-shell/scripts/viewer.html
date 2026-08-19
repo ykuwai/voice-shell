@@ -587,6 +587,10 @@
       <label for="mic" data-icon="mic" data-icon-size="17" data-i18n="micDevice">Microphone</label>
       <select id="mic"></select>
     </div>
+    <div class="field" id="recogLangField" hidden>
+      <label for="recogLang" data-icon="translate" data-icon-size="17" data-i18n="recogLang">Recognition language</label>
+      <select id="recogLang"></select>
+    </div>
     <div class="field">
       <label for="thresh" data-icon="graphic_eq" data-icon-size="17" data-i18n="sensitivity">Sensitivity</label>
       <input type="range" id="thresh" min="0" max="1000" step="1">
@@ -749,6 +753,7 @@ const I18N = {
     powerTitle:'Stop / start listening',
     settings:'Settings', back:'Back', floatBtn:'Float on top',
     grpInput:'Input', micDevice:'Microphone',
+    recogLang:'Recognition language', recogLangAuto:'Auto-detect',
     sensitivity:'Sensitivity',
     sensitivityNote:'0 picks up the faintest sound, 100 only loud speech. The bar is the live level, the marker is where the line sits.',
     silence:'Pause to send',
@@ -786,6 +791,7 @@ const I18N = {
     dictSkipped:' / {n} unreadable rows',
     grpLog:'Transcript', items:'items', copyAll:'Copy all', copied:'Copied',
     micSwitched:'Switched microphone: {name}',
+    micSwitching:'Switching microphone to {name}…',
     discarded:'Discarded.', undo:'Undo',
     switchFailed:'Could not switch: {err}',
     bootingLeft:'Starting… {n}s left', bootingSoon:'Starting… almost there',
@@ -821,6 +827,7 @@ const I18N = {
     powerTitle:'聞き取りを止める / 始める',
     settings:'設定', back:'戻る', floatBtn:'手前に浮かせる',
     grpInput:'入力', micDevice:'マイク',
+    recogLang:'認識言語', recogLangAuto:'自動判定',
     sensitivity:'感度',
     sensitivityNote:'0 に近いほど小さな音まで拾い、100 に近いほど大きな声だけを拾います。バーが今の音量、印が今の設定です。',
     silence:'確定までの無音',
@@ -858,6 +865,7 @@ const I18N = {
     dictSkipped:' / 読めない行 {n} 件',
     grpLog:'ログ', items:'件', copyAll:'全部コピー', copied:'コピーしました',
     micSwitched:'マイクを切り替えました: {name}',
+    micSwitching:'{name} に切り替えています…',
     discarded:'消しました。', undo:'元に戻す',
     switchFailed:'切替に失敗しました: {err}',
     bootingLeft:'起動中… あと{n}秒', bootingSoon:'起動中… もうすぐ',
@@ -914,7 +922,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'editOnce','draftMark',
                   'hint','note','log','none','count','copy','fresh',
                   'filterAll','filterSent','filterEdited',
-                  'mic','thresh','threshVal','gaugeFill','gaugeMark',
+                  'mic','recogLang','recogLangField','thresh','threshVal','gaugeFill','gaugeMark',
                   'silence','silenceVal','minChars','minCharsVal','clean',
                   'calibBtn','calibNote',
                   'themeRow','vizRow','langRow',
@@ -1632,6 +1640,18 @@ function connect() {
       onCalibSample(m.level);
       return;      // 下の else まで落とすと、発話として扱われて壊れる
     }
+    if ('mic_active' in m) {
+      // デーモン側で実際に切り替えが完了した確定情報。押した瞬間の楽観的な
+      // 表示と違い、これが来て初めて「本当に切り替わった」と言える。
+      if (micConfirmDevice && m.mic_active === micConfirmDevice) {
+        clearTimeout(micConfirmTimer);
+        const opt = [...el.mic.options].find(o => o.value === m.mic_active);
+        el.hint.textContent = t('micSwitched', {name: opt ? opt.textContent : m.mic_active});
+        micConfirmDevice = null;
+        setTimeout(() => paint(), 2500);
+      }
+      return;
+    }
     if ('partial' in m) {
       const s = m.partial.trim();
       el.stream.textContent = s;
@@ -1872,7 +1892,7 @@ el.copy.onclick = async ev => {
 /* ── 設定 ───────────────────────────────── */
 el.openSettings.onclick = async () => {
   el.sheet.hidden = false;
-  await Promise.all([loadMics(), loadTuning(), loadDict()]);
+  await Promise.all([loadMics(), loadLangs(), loadTuning(), loadDict()]);
   el.dictNote.textContent = '';
 };
 el.closeSettings.onclick = () => { el.sheet.hidden = true; };
@@ -1931,12 +1951,52 @@ async function loadMics() {
   }
 }
 
+// バックエンドで実際に切り替えが完了するまでは楽観的な表示に留める。
+// mic_active（ws.onmessage 側）が確定を送ってきたら、その時点で
+// 「切り替えました」に差し替える。
+let micConfirmDevice = null;
+let micConfirmTimer = null;
+
 el.mic.onchange = async () => {
-  await putJSON('/api/mics', {device: el.mic.value});
-  el.hint.textContent = t('micSwitched', {name: el.mic.selectedOptions[0].textContent});
-  if (vizArmed) startViz(el.mic.value);   // 波形も同じマイクに合わせる
-  setTimeout(() => paint(), 2500);
+  const label = el.mic.selectedOptions[0].textContent;
+  const dev = el.mic.value;
+  el.hint.textContent = t('micSwitching', {name: label});
+  micConfirmDevice = dev;
+  clearTimeout(micConfirmTimer);
+  // デーモンが古く mic_active を送ってこない場合の保険。実際の確定が
+  // 先に来ればそちらが優先される（上の ws.onmessage で処理済みになる）。
+  micConfirmTimer = setTimeout(() => {
+    if (micConfirmDevice === dev) {
+      el.hint.textContent = t('micSwitched', {name: label});
+      micConfirmDevice = null;
+      setTimeout(() => paint(), 2500);
+    }
+  }, 3000);
+  await putJSON('/api/mics', {device: dev});
+  if (vizArmed) startViz(dev);   // 波形も同じマイクに合わせる
 };
+
+// 認識言語（Whisper のときだけ出す。他のエンジンは綴りが違うため
+// このプルダウン自体を隠す）。
+async function loadLangs() {
+  try {
+    const d = await (await fetch('/api/languages')).json();
+    if (!d.languages.length) { el.recogLangField.hidden = true; return; }
+    const auto = document.createElement('option');
+    auto.value = ''; auto.textContent = t('recogLangAuto');
+    auto.selected = !d.current;
+    el.recogLang.replaceChildren(auto, ...d.languages.map(l => {
+      const o = document.createElement('option');
+      o.value = l.code; o.textContent = l.name; o.selected = l.code === d.current;
+      return o;
+    }));
+    el.recogLangField.hidden = false;
+  } catch {
+    el.recogLangField.hidden = true;
+  }
+}
+
+el.recogLang.onchange = () => putJSON('/api/tuning', {language: el.recogLang.value});
 
 /* ── 感度と区切り ───────────────────────
    3つとも保存すると即座にデーモンへ効く（0.5秒おきに読み直している）。 */

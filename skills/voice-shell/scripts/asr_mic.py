@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from collections import deque
 from typing import Iterator, Tuple
 
@@ -265,7 +266,7 @@ def mic_command(device: str, in_sr: int) -> list:
 
 
 def read_blocks(device: str, in_sr: int,
-                want_device=None) -> Iterator[Tuple[np.ndarray, float, float]]:
+                want_device=None, on_switch=None) -> Iterator[Tuple[np.ndarray, float, float]]:
     """マイクを読み続け、(16kHz PCM, 長さ秒, RMS) を yield する。
 
     PipeWire がマイクを占有していると PortAudio からは見えないため、
@@ -273,6 +274,10 @@ def read_blocks(device: str, in_sr: int,
 
     want_device() が別のデバイス名を返したら、録音プロセスだけ差し替える。
     モデルは載せたままなので、マイクの切り替えは待たされない。
+
+    on_switch(device) は実際に切り替えが完了した時点で呼ばれる。ビューアが
+    「本当に切り替わったか」を確定情報として表示できるようにするため
+    （ブラウザ側の楽観的な表示だけだと、実際に切り替わったかは分からない）。
     """
     def start(dev):
         return subprocess.Popen(mic_command(dev, in_sr), stdout=subprocess.PIPE)
@@ -292,6 +297,14 @@ def read_blocks(device: str, in_sr: int,
     if in_sr != SAMPLE_RATE:
         print(f"マイクを {in_sr}Hz で録音し {SAMPLE_RATE}Hz に変換します", file=sys.stderr)
 
+    # 録音の ffmpeg が理由もなく落ちることがある（Windows で稀に、パイプへの
+    # 書き込みが "Invalid argument" で失敗する現象を実測。再現条件は不明）。
+    # 頼んでもいない終了は「マイクが壊れた」ではなく「録音プロセスが死んだ」
+    # だけなので、デーモンごと落とさず同じデバイスで立て直す。
+    MAX_QUICK_CRASHES = 5     # これを超えたら本当に壊れているとみなして諦める
+    crash_count = 0
+    last_crash_at = 0.0
+
     try:
         while True:
             # 切り替えを頼まれていたら録音だけやり直す
@@ -303,10 +316,29 @@ def read_blocks(device: str, in_sr: int,
                     proc = start(current)
                     to_16k = make_resampler()   # 履歴を持たせない
                     print(f"マイクを切り替えました: {current}", file=sys.stderr, flush=True)
+                    if on_switch is not None:
+                        on_switch(current)
 
             raw = proc.stdout.read(nbytes)
             if not raw:
-                return
+                now = time.monotonic()
+                # 短時間に何度も落ちるなら、立て直しても無駄なので諦める
+                if now - last_crash_at > 30:
+                    crash_count = 0
+                crash_count += 1
+                last_crash_at = now
+                if crash_count > MAX_QUICK_CRASHES:
+                    print(f"録音プロセスが繰り返し落ちるため諦めます"
+                          f"（{MAX_QUICK_CRASHES}回連続）。マイクの状態を確認してください。",
+                          file=sys.stderr, flush=True)
+                    return
+                print(f"録音プロセスが予期せず終了したため、立て直します"
+                      f"（{crash_count}/{MAX_QUICK_CRASHES}）: {current}",
+                      file=sys.stderr, flush=True)
+                time.sleep(0.5)   # 立て直し直後にまた即死するのを避ける
+                proc = start(current)
+                to_16k = make_resampler()
+                continue
             block = to_16k(np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0)
             # block.dot(block) は二乗の一時配列を作らない
             rms = float(np.sqrt(block.dot(block) / block.size)) if block.size else 0.0
@@ -359,7 +391,8 @@ def stream_utterances(model, args, should_stop=lambda: False):
                 if state.text.strip() else None)
 
     for block, dur, rms in read_blocks(args.device, args.input_samplerate,
-                                       want_device=getattr(args, "want_device", None)):
+                                       want_device=getattr(args, "want_device", None),
+                                       on_switch=getattr(args, "on_switch", None)):
         if should_stop():
             break
 
@@ -377,6 +410,10 @@ def stream_utterances(model, args, should_stop=lambda: False):
                     args.min_chars = int(tuned["min_chars"])
                 if isinstance(tuned.get("strip_fillers"), bool):
                     args.strip_fillers = tuned["strip_fillers"]
+                # 認識言語（Whisper 限定）。次の発話（次の new_state()）
+                # から効く。他のエンジンは綴りが違うので触らない
+                if args.engine == "whisper" and isinstance(tuned.get("language"), str):
+                    args.language = tuned["language"] or None
 
         speaking = rms >= args.silence_threshold
         yield {"type": "level", "rms": rms, "speaking": speaking}

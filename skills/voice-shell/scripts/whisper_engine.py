@@ -34,6 +34,46 @@ def _lang_code(name):
     s = str(name).strip().lower()
     return _LANG.get(s, s.split("-")[0][:2])
 
+
+# Whisper が対応する全言語（コード → 表示名）。ビューアの認識言語プルダウンを
+# ここから作る（一覧を二重管理しない）。コードの一覧は faster-whisper の
+# トークナイザに合わせる。
+LANGUAGE_NAMES = {
+    "af": "Afrikaans", "am": "Amharic", "ar": "Arabic", "as": "Assamese",
+    "az": "Azerbaijani", "ba": "Bashkir", "be": "Belarusian",
+    "bg": "Bulgarian", "bn": "Bengali", "bo": "Tibetan", "br": "Breton",
+    "bs": "Bosnian", "ca": "Catalan", "cs": "Czech", "cy": "Welsh",
+    "da": "Danish", "de": "German", "el": "Greek", "en": "English",
+    "es": "Spanish", "et": "Estonian", "eu": "Basque", "fa": "Persian",
+    "fi": "Finnish", "fo": "Faroese", "fr": "French", "gl": "Galician",
+    "gu": "Gujarati", "ha": "Hausa", "haw": "Hawaiian", "he": "Hebrew",
+    "hi": "Hindi", "hr": "Croatian", "ht": "Haitian Creole",
+    "hu": "Hungarian", "hy": "Armenian", "id": "Indonesian",
+    "is": "Icelandic", "it": "Italian", "ja": "Japanese", "jw": "Javanese",
+    "ka": "Georgian", "kk": "Kazakh", "km": "Khmer", "kn": "Kannada",
+    "ko": "Korean", "la": "Latin", "lb": "Luxembourgish", "ln": "Lingala",
+    "lo": "Lao", "lt": "Lithuanian", "lv": "Latvian", "mg": "Malagasy",
+    "mi": "Maori", "mk": "Macedonian", "ml": "Malayalam", "mn": "Mongolian",
+    "mr": "Marathi", "ms": "Malay", "mt": "Maltese", "my": "Myanmar",
+    "ne": "Nepali", "nl": "Dutch", "nn": "Nynorsk", "no": "Norwegian",
+    "oc": "Occitan", "pa": "Punjabi", "pl": "Polish", "ps": "Pashto",
+    "pt": "Portuguese", "ro": "Romanian", "ru": "Russian",
+    "sa": "Sanskrit", "sd": "Sindhi", "si": "Sinhala", "sk": "Slovak",
+    "sl": "Slovenian", "sn": "Shona", "so": "Somali", "sq": "Albanian",
+    "sr": "Serbian", "su": "Sundanese", "sv": "Swedish", "sw": "Swahili",
+    "ta": "Tamil", "te": "Telugu", "tg": "Tajik", "th": "Thai",
+    "tk": "Turkmen", "tl": "Tagalog", "tr": "Turkish", "tt": "Tatar",
+    "uk": "Ukrainian", "ur": "Urdu", "uz": "Uzbek", "vi": "Vietnamese",
+    "yi": "Yiddish", "yo": "Yoruba", "yue": "Cantonese", "zh": "Chinese",
+}
+
+
+def available_languages():
+    """認識言語プルダウン用の一覧。「自動」はコード "" で表す。"""
+    langs = [{"code": c, "name": n} for c, n in LANGUAGE_NAMES.items()]
+    langs.sort(key=lambda x: x["name"])
+    return langs
+
 # 日本語と英語が混ざった発話を、混ざったまま書き起こさせるための例文。
 # Whisper は言語トークンを 1 つしか持てないため、放っておくと発話ごとに
 # どちらか一方へ寄る（実測: 英語で話したぶんが日本語になって届いた）。
