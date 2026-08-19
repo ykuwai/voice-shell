@@ -7,7 +7,10 @@
 #
 #   sh who-listens.sh
 
-LOG="${VOICE_SHELL_LOG:-${XDG_RUNTIME_DIR:-/tmp}/qwen-voice/utterances.jsonl}"
+_base="${XDG_RUNTIME_DIR:-/tmp}"
+_state="$_base/voice-shell"
+[ ! -d "$_state" ] && [ -d "$_base/qwen-voice" ] && _state="$_base/qwen-voice"
+LOG="${VOICE_SHELL_LOG:-$_state/utterances.jsonl}"
 [ -f "$LOG" ] || { echo "発話ログが見つかりません: $LOG"; exit 1; }
 
 echo "発話ログ: $LOG"

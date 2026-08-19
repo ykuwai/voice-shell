@@ -702,6 +702,11 @@
       <div class="gauge-mark" id="gaugeMark"></div>
     </div>
     <p class="range-note" data-i18n="sensitivityNote"></p>
+    <div class="btn-row" style="margin-top:.5rem">
+      <button class="btn" id="calibBtn" data-icon="auto_awesome" data-icon-size="17"
+              data-i18n="calibrate">Set sensitivity for me</button>
+    </div>
+    <p class="range-note" id="calibNote" style="margin-top:.5rem"></p>
     <div class="field">
       <label for="silence" data-icon="timer" data-icon-size="17" data-i18n="silence">Pause to send</label>
       <input type="range" id="silence" min="0.5" max="3" step="0.1">
@@ -721,10 +726,6 @@
     </div>
     <p class="range-note" data-i18n="maxUtterNote"></p>
     <label class="toggle"><input type="checkbox" id="clean"><span data-i18n="stripFillers">Strip filler words</span></label>
-    <div class="btn-row" style="margin-top:.7rem">
-      <button class="btn go" id="calibBtn" data-icon="auto_awesome" data-icon-size="17" data-i18n="calibrate">Auto-tune</button>
-    </div>
-    <p class="range-note" id="calibNote" style="margin-top:.5rem"></p>
   </div>
 
   <!-- 認識のやり方 -->
@@ -903,7 +904,7 @@ const I18N = {
     asrFailed:'Recognition kept failing, so it was turned off. Check your connection and the microphone.',
     asrSendFailed:'Could not deliver what was recognized ({n}). Say it again.',
     asrDoubled:'Recognition was running twice, so this one was dropped. Switching to the current setting — say it again.',
-    calibrate:'Auto-tune',
+    calibrate:'Set sensitivity for me',
     calibSpeaking:'Keep talking… {n}s',
     calibQuiet:'Now stay quiet… {n}s',
     calibNoData:'No level data arrived. Is the daemon running?',
@@ -1006,7 +1007,7 @@ const I18N = {
     asrFailed:'認識が続けて失敗したので切りました。回線とマイクを確認してください。',
     asrSendFailed:'認識した文を届けられませんでした（{n}）。もう一度お話しください。',
     asrDoubled:'認識が二重に動いていたため、この分は届きませんでした。設定を合わせ直したので、もう一度お話しください。',
-    calibrate:'自動調整',
+    calibrate:'感度を自動で決める',
     calibSpeaking:'そのまま話し続けてください… あと{n}秒',
     calibQuiet:'今度は黙っていてください… あと{n}秒',
     calibNoData:'音量が届きませんでした。認識が動いているか確認してください。',

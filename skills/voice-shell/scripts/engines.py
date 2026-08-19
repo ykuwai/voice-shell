@@ -1,7 +1,7 @@
 """クラウドの音声認識 API を使うためのエンジン。
 
 GPU が無い PC でも voice-shell を動かせるようにするためのもの。
-`--engine deepgram` のように指定すると、ローカルの Qwen3-ASR の代わりに
+`--engine deepgram` のように指定すると、手元のモデルの代わりに
 その API へ音声を送る。
 
 asr_mic.stream_utterances() と同じイベントを yield するので、
