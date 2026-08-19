@@ -193,7 +193,7 @@ _dict_cache = (None, None)   # (更新時刻の組, 中身)
 def _read_one(path: Path) -> dict:
     """辞書ファイル1つを読む。無い・壊れているときは空。"""
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return {"ignore": [], "replace": {}}
     except (json.JSONDecodeError, OSError) as e:
@@ -251,11 +251,11 @@ def save_default_dictionary():
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
     if not DICT_FILE.exists():
-        DICT_FILE.write_text(json.dumps(DEFAULT_DICT, ensure_ascii=False, indent=2) + "\n")
+        DICT_FILE.write_text(json.dumps(DEFAULT_DICT, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return
 
     try:
-        cur = json.loads(DICT_FILE.read_text())
+        cur = json.loads(DICT_FILE.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return                      # 壊れていれば触らない（ユーザーが直せる）
 
@@ -273,7 +273,7 @@ def save_default_dictionary():
 
     cur["replace"] = replace
     cur["_seen"] = sorted(known | set(DEFAULT_DICT["replace"]))
-    DICT_FILE.write_text(json.dumps(cur, ensure_ascii=False, indent=2) + "\n")
+    DICT_FILE.write_text(json.dumps(cur, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"辞書に既定の項目を {added} 件追加しました", file=sys.stderr)
 
 
@@ -446,7 +446,7 @@ def fix_latin_commas(text: str) -> str:
 def read_config() -> dict:
     """前回の選択。無ければ空。"""
     try:
-        d = json.loads(CONFIG_FILE.read_text())
+        d = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
         return d if isinstance(d, dict) else {}
     except (OSError, ValueError):
         return {}
@@ -457,7 +457,7 @@ def write_config(**kw) -> dict:
     cur = read_config()
     cur.update({k: v for k, v in kw.items() if v is not None})
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    CONFIG_FILE.write_text(json.dumps(cur, ensure_ascii=False, indent=2) + "\n")
+    CONFIG_FILE.write_text(json.dumps(cur, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return cur
 
 
@@ -627,19 +627,27 @@ def is_noise(text: str, extra=()) -> bool:
 # 解除の合図は届く。ブラウザ認識のときだけは、切ると音声そのものを
 # 手放すので声では戻せない — 画面から戻してもらう。
 MUTE_WORDS = {
-    "ミュート", "みゅーと", "ミュートして", "ミュートオン", "ミュートオンにして",
-    "マイクオフ", "マイクをオフ", "マイクをオフにして", "マイクを切って", "マイク切って",
+    "ミュート", "みゅーと", "ミュートして", "ミュートしてください", "ミュートお願い",
+    "ミュートオン", "ミュートオンにして", "ミュートします",
+    "マイクオフ", "マイクをオフ", "マイクをオフにして",
+    "マイクを切って", "マイク切って", "マイクを切る", "マイク切る",
     "mute", "muteme", "mutethemic", "micoff", "turnoffthemic", "turnthemicoff",
 }
+# 解除の側は広めに取ってよい。見ているのは切っている最中だけで、そのあいだの
+# 発話はどのみち捨てているので、外れても失うものが無い。
 UNMUTE_WORDS = {
-    "ミュート解除", "ミュートかいじょ", "ミュート解除して", "ミュートを解除",
-    "ミュートを解除して", "ミュートオフ", "ミュートオフにして",
+    "ミュート解除", "ミュートかいじょ", "ミュート解除して", "ミュート解除してください",
+    "ミュートを解除", "ミュートを解除して", "ミュートオフ", "ミュートオフにして",
+    "アンミュート", "あんみゅーと", "解除", "かいじょ", "解除して", "かいじょして",
+    "戻して", "もどして", "再開", "さいかい", "再開して",
     "マイクオン", "マイクをオン", "マイクをオンにして", "マイクをつけて", "マイク付けて",
+    "マイクを入れて", "マイク入れて",
     "unmute", "unmuteme", "unmutethemic", "micon", "turnonthemic", "turnthemicon",
+    "resume", "comeback",
 }
 
 # 記号と間の空白を落としてから比べる。「ミュート。」「mute me」「マイク、オン」
-# のどれも同じ鍵になるようにする。
+# のどれも同じ鍵になるようにする。全角数字はここで半角へ畳む。
 # ー（長音）は落とさない。落とすと「ミュート」が「ミュト」になって当たらない。
 _CMD_DROP = str.maketrans("１２３４５６７８９０", "1234567890",
                           " \t\u3000。、．，・…！？!?.,-~〜\"'「」『』()（）")
@@ -681,21 +689,27 @@ _NUM_WORDS = {
 _NUM_ALT = "(?:" + "|".join(
     sorted((re.escape(k) for k in _NUM_WORDS), key=len, reverse=True)) + ")"
 _COUNTER = r"(?:番目|ばんめ|番|ばん)"
-_VERB = (r"(?:(?:切り替え|切替|きりかえ|変更|へんこう|送る|おくる|送信|そうしん|"
-         r"switchto|sendto|goto)(?:て|る|して|に)?)")
+# 言い方が惜しく外れると、min_chars（既定15字）に届かず黙って消える。
+# 「合図でもプロンプトでもない」が一番たちが悪いので、語尾は広めに取る。
+_VERB_CORE = (r"(?:切り替え|切替|きりかえ|変更|へんこう|送る|おくる|送って|おくって|"
+              r"送信|そうしん|して|お願い|おねがい|頼む|たのむ|"
+              r"switchto|sendto|goto)")
+_TAIL = r"(?:て|る|して|ください|下さい|お願い|おねがい|します|ます|ましょう|な|ね)*"
+_VERB = rf"(?:{_VERB_CORE}{_TAIL})"
 _PREFIX = r"(?:送信先|宛先|あて先|セッション|せっしょん)"
+_PART = r"(?:に|へ|で)?"
 
 _ROUTE_RXS = [re.compile(rx) for rx in (
     # 送信先2 / 送信先を2に / セッション2に切り替えて / セッショントゥー
     # 「送信先に」も入る（に＝2）。番号の無い「送信先に」は言葉として成り立たない。
-    rf"^{_PREFIX}を?({_NUM_ALT}){_COUNTER}?(?:に|へ)?{_VERB}?$",
-    # 2番 / 1番目 / にばんめに切り替えて（頭に数が来る方が認識されやすい）
-    rf"^({_NUM_ALT}){_COUNTER}(?:に|へ)?{_VERB}?$",
-    # 2に切り替え / 2へ送信して（数のあとに必ず動詞が要る）
+    rf"^{_PREFIX}を?({_NUM_ALT}){_COUNTER}?{_PART}{_VERB}?$",
+    # 2番 / 1番目 / 2番にして / 2番でお願い（頭に数が来る方が認識されやすい）
+    rf"^({_NUM_ALT}){_COUNTER}{_PART}{_VERB}?$",
+    # 2に切り替え / 2へ送って（数のあとに必ず動詞が要る）
     rf"^({_NUM_ALT})(?:に|へ){_VERB}$",
     # switch to 2 / session two / route 3
     rf"^(?:switchto|sendto|routeto|goto|target|session|destination|route)"
-    rf"({_NUM_ALT})$",
+    rf"(?:session)?({_NUM_ALT})$",
 )]
 
 
@@ -711,17 +725,24 @@ def route_command(text: str):
     return None
 
 
-def note_voice_cmd(log_path, kind: str, label: str = "") -> None:
+def note_voice_cmd(log_path, kind: str, label: str = "", said: str = "") -> None:
     """声の合図に何が起きたかを画面へ渡す。
 
     合図は発話として送らないので、通ったかどうかがユーザーに見えない。
     ビューアがこのファイルを見て、音を鳴らし、一言を出す。
+
+    said には合図と判定した発話そのものを入れる。指示のつもりで言ったものが
+    合図として消えることがあるので、何が消えたのかは見せておく。
     """
     try:
+        # encoding を書かないと Windows はロケール（cp932）で開く。題名に
+        # cp932 に無い字が1つでもあると UnicodeEncodeError で落ちる。これは
+        # OSError ではないので、捕まえる側も広げておく。
         (Path(log_path).parent / "voice_cmd.json").write_text(
-            json.dumps({"at": time.time(), "kind": kind, "label": label},
-                       ensure_ascii=False))
-    except OSError:
+            json.dumps({"at": time.time(), "kind": kind,
+                        "label": label, "said": said},
+                       ensure_ascii=False), encoding="utf-8")
+    except (OSError, ValueError):
         pass
 
 
@@ -790,7 +811,7 @@ def _pid_alive(pid):
 
 def read_pid():
     try:
-        pid = int(PID_FILE.read_text())
+        pid = int(PID_FILE.read_text(encoding="utf-8"))
     except (FileNotFoundError, ValueError):
         return None
     return pid if _pid_alive(pid) else None
@@ -831,6 +852,17 @@ def route_file(log_path):
     return Path(log_path).parent / "route"
 
 
+def write_atomic(path, text: str) -> None:
+    """別名で書いてから置き換える。
+
+    truncate と write のあいだに読まれると、欠けた内容が渡る。送信先の
+    場合は「一致する PID が無い」と見なされて別の相手へ1発話行く。
+    """
+    tmp = Path(path).with_suffix(".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+
+
 def resolve_target(log_path):
     """いまの届け先を決める。None なら全員へ。
 
@@ -839,7 +871,7 @@ def resolve_target(log_path):
     （以前は画面側だけの処理で、開いていないと全員に二重に届いていた）。
     """
     try:
-        raw = route_file(log_path).read_text().strip()
+        raw = route_file(log_path).read_text(encoding="utf-8").strip()
     except OSError:
         raw = ""
 
@@ -978,7 +1010,7 @@ def list_active_listeners(log_path):
         except ValueError:
             continue
         try:
-            raw = f.read_text()
+            raw = f.read_text(encoding="utf-8")
         except OSError:
             raw = ""
         try:
@@ -1089,7 +1121,7 @@ def main():
     log_path = Path(args.log_file)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     # 起動のたびに空にする（前回の発話を拾わせない）
-    log_path.write_text("")
+    log_path.write_text("", encoding="utf-8")
 
     save_default_dictionary()
 
@@ -1100,11 +1132,11 @@ def main():
     if saved_mic and args.device == asr_mic.DEFAULT_DEVICE:
         args.device = saved_mic
     mic_path = Path(args.log_file).parent / MIC_FILE.name
-    mic_path.write_text(args.device)
+    mic_path.write_text(args.device, encoding="utf-8")
 
     def want_device():
         try:
-            return mic_path.read_text().strip() or None
+            return mic_path.read_text(encoding="utf-8").strip() or None
         except OSError:
             return None
 
@@ -1115,10 +1147,10 @@ def main():
     # かは分からない。ここに確定情報を書き、ビューアはこのファイルの変化を
     # 見て初めて確定の表示をする。
     mic_active_path = Path(args.log_file).parent / "mic_active"
-    mic_active_path.write_text(args.device)
+    mic_active_path.write_text(args.device, encoding="utf-8")
 
     def on_switch(dev):
-        mic_active_path.write_text(dev)
+        mic_active_path.write_text(dev, encoding="utf-8")
         write_config(mic=dev)      # 次の起動でも同じマイクを使う
 
     args.on_switch = on_switch
@@ -1127,7 +1159,7 @@ def main():
     # 要らず、次に読み直した時点から効く。ファイルが無ければ今の値で作る。
     def want_tuning():
         try:
-            return json.loads(TUNING_FILE.read_text())
+            return json.loads(TUNING_FILE.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return None      # 書き換え途中で読んだだけ。次の周期で拾い直す
 
@@ -1135,7 +1167,7 @@ def main():
 
     # 保存済みの値があれば、起動時点から反映しておく
     saved = want_tuning() or {}
-    for key in ("silence_threshold", "silence_duration"):
+    for key in ("silence_threshold", "silence_duration", "max_utterance_sec"):
         if isinstance(saved.get(key), (int, float)):
             setattr(args, key, float(saved[key]))
     if isinstance(saved.get("min_chars"), (int, float)):
@@ -1151,7 +1183,7 @@ def main():
     # 行き渡るようにする（無いままだとビューアのつまみが効かない）。
     filled = dict(saved)
     for key in ("silence_threshold", "silence_duration", "min_chars",
-                "strip_fillers"):
+                "strip_fillers", "max_utterance_sec"):
         filled.setdefault(key, getattr(args, key))
     if args.engine == "whisper":
         # CLI 既定の "Japanese" のような綴りのままだと、ビューアの
@@ -1160,11 +1192,11 @@ def main():
         filled.setdefault("language", whisper_engine._lang_code(args.language) or "")
     if filled != saved:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        TUNING_FILE.write_text(json.dumps(filled, indent=2) + "\n")
+        TUNING_FILE.write_text(json.dumps(filled, indent=2) + "\n", encoding="utf-8")
 
     # ビューアが「今どのエンジンか」を知るための確定情報（認識言語の
     # プルダウンは Whisper のときだけ出す）。
-    (Path(args.log_file).parent / "engine_active").write_text(args.engine)
+    (Path(args.log_file).parent / "engine_active").write_text(args.engine, encoding="utf-8")
 
     print("モデルを読み込み中… (初回は数分かかります)", file=sys.stderr)
     model = asr_mic.load_model(args)
@@ -1177,7 +1209,7 @@ def main():
     if args.remote:
         start_remote_server(model, args)
 
-    PID_FILE.write_text(str(os.getpid()))
+    PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
     print(f"\n  聞いています — 喋ると {log_path} に追記します"
           f"\n  Ctrl-C で終了\n", file=sys.stderr, flush=True)
 
@@ -1221,11 +1253,11 @@ def main():
         pause_path = log_path.parent / PAUSE_FILE.name
         hold_path = log_path.parent / HOLD_FILE.name
         mute_path = log_path.parent / MUTE_FILE.name
-        partial_path.write_text("")
-        level_path.write_text("0 0")
+        partial_path.write_text("", encoding="utf-8")
+        level_path.write_text("0 0", encoding="utf-8")
         pause_path.unlink(missing_ok=True)   # 起動時は必ず送信状態から
         mute_path.unlink(missing_ok=True)
-        hold_path.write_text("")
+        hold_path.write_text("", encoding="utf-8")
 
         # 認識は発話単位で確定するため、確定時点のミュート状態だけを見ると
         # 「切っている間に話した音声」が解除後に流れ込む（ところてん現象）。
@@ -1252,30 +1284,31 @@ def main():
                     # 音量をビューアに渡す。文字が出ないとき、マイクが
                     # 死んでいるのか黙っているだけなのかを見分けたい。
                     level_path.write_text(
-                        f"{ev.get('rms', 0):.4f} {int(bool(ev.get('speaking')))}")
+                        f"{ev.get('rms', 0):.4f} {int(bool(ev.get('speaking')))}",
+                        encoding="utf-8")
                     if ev.get("speaking") and speaking_since is None:
                         speaking_since = mute_generation
                     if muted_now:
-                        if partial_path.read_text():
-                            partial_path.write_text("")
+                        if partial_path.read_text(encoding="utf-8"):
+                            partial_path.write_text("", encoding="utf-8")
                         continue
                     continue
 
                 if muted_now:
                     # ミュート中の途中経過は残さない。確定は下でまとめて判定する。
                     if ev["type"] != "final":
-                        if partial_path.read_text():
-                            partial_path.write_text("")
+                        if partial_path.read_text(encoding="utf-8"):
+                            partial_path.write_text("", encoding="utf-8")
                         continue
 
                 if ev["type"] == "partial":
                     # 途中経過は別ファイルに上書き（プロンプトのログは汚さない）
-                    partial_path.write_text(ev["text"])
+                    partial_path.write_text(ev["text"], encoding="utf-8")
                     continue
                 if ev["type"] != "final":
                     continue
 
-                partial_path.write_text("")
+                partial_path.write_text("", encoding="utf-8")
                 text = ev["text"].strip()
 
                 # 辞書は毎回読む。Web UI で直した内容が次の発話から効くようにする。
@@ -1303,17 +1336,22 @@ def main():
                 # 送信先も声で選ぶ。番号は画面に並ぶ順（「すべて」を除いた1番目から）。
                 # 切っている間も効かせる — どのみち短い語は聞いているので、
                 # 切ったまま次の相手を決めておける（解除するまで何も届かない）。
-                n = route_command(text)
-                if n is not None:
-                    live = list_active_listeners(log_path)
+                # 辞書を通した形でも見る（ミュートの合図と揃える）。
+                n = route_command(text) or route_command(
+                    apply_replacements(text, user_dict["replace"]))
+                live = list_active_listeners(log_path) if n is not None else []
+                # 聞き手が1つなら選ぶ相手がいない。ここで抜けないと、番号で
+                # 答えただけの「2番」まで合図として消えてしまう。
+                if n is not None and len(live) > 1:
                     if 1 <= n <= len(live):
-                        route_file(log_path).write_text(str(live[n - 1]["pid"]))
+                        write_atomic(route_file(log_path),
+                                     str(live[n - 1]["pid"]))
                         note_voice_cmd(log_path, "route",
-                                       f"{n}. {live[n - 1]['label']}")
+                                       f"{n}. {live[n - 1]['label']}", text)
                     else:
                         # 無い番号。黙って捨てると「言ったのに変わらない」に
                         # なるので、画面に出して知らせる。
-                        note_voice_cmd(log_path, "route_missing", str(n))
+                        note_voice_cmd(log_path, "route_missing", str(n), text)
                     print(f"(声で送信先) {text[:40]}", file=sys.stderr, flush=True)
                     speaking_since = None
                     continue

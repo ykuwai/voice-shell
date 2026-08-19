@@ -45,7 +45,7 @@ def load_conf(path: Path = CONF_FILE) -> dict:
             "bind": "127.0.0.1",
             "port": 8091,
             "tokens": {},
-        }, ensure_ascii=False, indent=2) + "\n")
+        }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         sys.exit(
             f"{path} を作りました。\n"
             "  tokens に「トークン: 名前」を足してから起動してください。\n"
@@ -53,7 +53,7 @@ def load_conf(path: Path = CONF_FILE) -> dict:
             "  bind は LAN から使うなら自分の IP を書きます（0.0.0.0 は\n"
             "  VPN や別セグメントにも届くので既定にしていません）。"
         )
-    conf = json.loads(path.read_text())
+    conf = json.loads(path.read_text(encoding="utf-8"))
     if not conf.get("tokens"):
         sys.exit(f"{path} の tokens が空です。トークンを足してください。")
     return conf

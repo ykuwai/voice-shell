@@ -51,7 +51,7 @@ def _builtin_noise() -> list:
     """
     try:
         import ast
-        src = (Path(__file__).with_name("voice_daemon.py")).read_text()
+        src = (Path(__file__).with_name("voice_daemon.py")).read_text(encoding="utf-8")
         tree = ast.parse(src)
         for node in tree.body:
             if isinstance(node, ast.Assign) and any(
@@ -68,7 +68,7 @@ def _read_dict(raw: bool = False, path: Path = None) -> dict:
     raw=True なら内部用のキー（_seen）も含めてそのまま返す。
     """
     try:
-        data = json.loads((path or DICT_FILE).read_text())
+        data = json.loads((path or DICT_FILE).read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return {"ignore": [], "replace": {}}
     if raw:
@@ -153,7 +153,7 @@ class Tail:
         last = None
         while True:
             try:
-                text = path.read_text()
+                text = path.read_text(encoding="utf-8")
             except (FileNotFoundError, OSError):
                 text = ""
             if text != last:
@@ -172,7 +172,7 @@ class Tail:
         last = None
         while True:
             try:
-                rms, speaking = path.read_text().split()
+                rms, speaking = path.read_text(encoding="utf-8").split()
                 cur = (round(float(rms), 3), speaking == "1")
             except (FileNotFoundError, OSError, ValueError):
                 cur = (0.0, False)
@@ -192,7 +192,7 @@ class Tail:
         last = None
         while True:
             try:
-                cur = path.read_text().strip()
+                cur = path.read_text(encoding="utf-8").strip()
             except (FileNotFoundError, OSError):
                 cur = None
             if cur and cur != last:
@@ -212,8 +212,7 @@ class Tail:
         while True:
             cur = path.exists()
             if cur != last:
-                # 最初の1回は「変化」ではないので、状態だけ揃えて音は出させない。
-                await self.broadcast({"muted": cur, "first": last is None})
+                await self.broadcast({"muted": cur})
                 last = cur
             await asyncio.sleep(0.2)
 
@@ -224,16 +223,21 @@ class Tail:
         デーモンが書く voice_cmd.json をそのまま渡し、音と一言はブラウザに任せる。
         """
         path = self.path.parent / "voice_cmd.json"
-        last = None
+        # 先に一度読んで「開いた時点で残っていたもの」を確定させる。
+        # これをしないと、最初に届いた本物の合図が first 扱いになり、
+        # 音も一言も出ないまま飛ばされる。
+        try:
+            last = json.loads(path.read_text(encoding="utf-8")).get("at")
+        except (OSError, ValueError, AttributeError):
+            last = None
         while True:
             try:
-                cur = json.loads(path.read_text())
+                cur = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 cur = None
             at = cur.get("at") if isinstance(cur, dict) else None
             if at is not None and at != last:
-                # 開いた時点で残っているものは、いま起きたことではない。
-                await self.broadcast({"voice_cmd": cur, "first": last is None})
+                await self.broadcast({"voice_cmd": cur})
                 last = at
             await asyncio.sleep(0.2)
 
@@ -247,7 +251,7 @@ class Tail:
         seen = 0
         while True:
             try:
-                lines = [l for l in path.read_text().splitlines() if l.strip()]
+                lines = [l for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
             except (FileNotFoundError, OSError):
                 lines = []
 
@@ -321,7 +325,7 @@ async def main_async(args):
     def engine_running() -> bool:
         """認識の準備ができているか（PID は読み込み完了後に書かれる）。"""
         try:
-            return _pid_alive(int(pid_file.read_text()))
+            return _pid_alive(int(pid_file.read_text(encoding="utf-8")))
         except (OSError, ValueError):
             return False
 
@@ -366,7 +370,7 @@ async def main_async(args):
         """マイクの入切、保留の有無、保留中の発話を返す。"""
         held = []
         if hold_file.exists():
-            for line in hold_file.read_text().splitlines():
+            for line in hold_file.read_text(encoding="utf-8").splitlines():
                 rec = Tail._parse(line)
                 if rec:
                     held.append(rec)
@@ -381,7 +385,7 @@ async def main_async(args):
                                   "engine": engine_running(),
                                   "loading": engine_loading(),
                                   "ui": ui, "held": held,
-                                  "note": note_file.read_text()
+                                  "note": note_file.read_text(encoding="utf-8")
                                           if note_file.exists() else ""})
 
     async def handle_engine(req):
@@ -400,7 +404,7 @@ async def main_async(args):
             import voice_daemon as vd
             vd.write_config(engine=kind)        # 次回の起動もこれになる
             if kind != "browser":
-                (state / "engine").write_text(kind)
+                (state / "engine").write_text(kind, encoding="utf-8")
 
         # start_new_session でビューアから切り離す。
         # デーモンは終了時に自分の子を全部 kill するので、ビューアの系統に
@@ -443,7 +447,7 @@ async def main_async(args):
         note = (body.get("note") or "").strip()[:200]
         if body.get("paused"):
             pause_file.touch()
-            note_file.write_text(note)
+            note_file.write_text(note, encoding="utf-8")
         else:
             pause_file.unlink(missing_ok=True)
             note_file.unlink(missing_ok=True)
@@ -461,7 +465,7 @@ async def main_async(args):
             f.write(json.dumps({"text": text, "edited": True},
                                ensure_ascii=False) + "\n")
         rec = {"time": time.strftime("%H:%M:%S"), "text": text, "edited": True}
-        hold_file.write_text("")     # 送ったので保留は空にする
+        hold_file.write_text("", encoding="utf-8")     # 送ったので保留は空にする
         return web.json_response(rec)
 
     # ブラウザ認識の生存確認。開いている画面が「いま聞いている」ことを
@@ -473,7 +477,7 @@ async def main_async(args):
 
     def read_beats() -> dict:
         try:
-            d = json.loads(beat_file.read_text())
+            d = json.loads(beat_file.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return {}
         now = time.time()
@@ -491,7 +495,7 @@ async def main_async(args):
             beats.pop(tab, None)
         else:
             beats[tab] = {"t": time.time(), "state": st}
-        beat_file.write_text(json.dumps(beats))
+        beat_file.write_text(json.dumps(beats), encoding="utf-8")
         return web.json_response({"tabs": len(beats)})
 
     async def handle_asr_status(_req):
@@ -523,7 +527,7 @@ async def main_async(args):
         """いま聞いているセッションの一覧と、選ばれている送信先。"""
         import voice_daemon as vd
         try:
-            chosen = route_path.read_text().strip()
+            chosen = route_path.read_text(encoding="utf-8").strip()
         except OSError:
             chosen = ""
         return web.json_response({
@@ -537,7 +541,11 @@ async def main_async(args):
         """送信先を選ぶ。空なら全員へ。"""
         body = await req.json()
         to = str(body.get("to") or "").strip()
-        route_path.write_text(to)
+        # 一度別名で書いてから置き換える。truncate と write のあいだに
+        # デーモンが読むと、欠けた PID になって別の相手へ1発話行く。
+        tmp = route_path.with_suffix(".tmp")
+        tmp.write_text(to, encoding="utf-8")
+        os.replace(tmp, route_path)
         return web.json_response({"route": to})
 
     async def handle_utterance(req):
@@ -566,7 +574,7 @@ async def main_async(args):
             return web.json_response({"dropped": "muted"})
 
         try:
-            tuning = json.loads(TUNING_FILE.read_text())
+            tuning = json.loads(TUNING_FILE.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             tuning = {}
 
@@ -597,7 +605,7 @@ async def main_async(args):
 
     async def handle_discard(_req):
         """保留中の発話を捨てる。"""
-        hold_file.write_text("")
+        hold_file.write_text("", encoding="utf-8")
         return web.json_response({"ok": True})
 
     app = web.Application()
@@ -636,7 +644,7 @@ async def main_async(args):
             data["_seen"] = sorted(seen | set(data["replace"]))
 
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+        target.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return web.json_response({k: v for k, v in data.items() if k != "_seen"})
 
     mic_file = state / "mic"
@@ -646,7 +654,7 @@ async def main_async(args):
         """いまの感度と確定までの無音秒数を返す。範囲も一緒に返して
         スライダの端をサーバ側の制限と揃える。"""
         try:
-            cur = json.loads(TUNING_FILE.read_text())
+            cur = json.loads(TUNING_FILE.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             cur = {}
         keys = list(TUNING_RANGE) + list(TUNING_FLAGS)
@@ -660,7 +668,7 @@ async def main_async(args):
         """感度と無音秒数を書き換える。デーモンが次の周期で拾う。"""
         body = await req.json()
         try:
-            cur = json.loads(TUNING_FILE.read_text())
+            cur = json.loads(TUNING_FILE.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             cur = {}
 
@@ -682,21 +690,21 @@ async def main_async(args):
                 cur["language"] = code
 
         TUNING_FILE.parent.mkdir(parents=True, exist_ok=True)
-        TUNING_FILE.write_text(json.dumps(cur, indent=2) + "\n")
+        TUNING_FILE.write_text(json.dumps(cur, indent=2) + "\n", encoding="utf-8")
         return web.json_response({"tuning": cur})
 
     async def handle_languages(_req):
         """認識言語の一覧（Whisper 使用時のみ）。他のエンジンでは
         空リストを返し、ビューア側はプルダウンごと隠す。"""
         try:
-            engine = engine_active_file.read_text().strip()
+            engine = engine_active_file.read_text(encoding="utf-8").strip()
         except OSError:
             engine = ""
         if engine != "whisper":
             return web.json_response({"engine": engine, "languages": [], "current": ""})
         import whisper_engine
         try:
-            cur = json.loads(TUNING_FILE.read_text()).get("language", "")
+            cur = json.loads(TUNING_FILE.read_text(encoding="utf-8")).get("language", "")
         except (OSError, ValueError):
             cur = ""
         return web.json_response({
@@ -709,7 +717,7 @@ async def main_async(args):
         """使えるマイクの一覧と、いま選ばれているものを返す。"""
         import asr_mic
         try:
-            current = mic_file.read_text().strip()
+            current = mic_file.read_text(encoding="utf-8").strip()
         except OSError:
             current = ""
         return web.json_response({"current": current, "mics": asr_mic.list_mics()})
@@ -720,7 +728,7 @@ async def main_async(args):
         dev = (body.get("device") or "").strip()
         if not dev:
             return web.json_response({"error": "empty"}, status=400)
-        mic_file.write_text(dev)
+        mic_file.write_text(dev, encoding="utf-8")
         return web.json_response({"current": dev})
 
     app.router.add_post("/api/engine", handle_engine)
