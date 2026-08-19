@@ -1357,6 +1357,24 @@ function currentBands() {
   }
   return smooth;
 }
+// Material Symbols のパスをそのまま塗る。canvas に置くので Path2D にして
+// 使い回す（毎コマ作り直すと確保と破棄だけで重くなる）。
+const _micPaths = {};
+function micPath2D(name) {
+  if (!_micPaths[name]) _micPaths[name] = new Path2D(ICON[name][1]);   // 塗りの方
+  return _micPaths[name];
+}
+function paintGlyph(name, midX, midY, size, color) {
+  cx.save();
+  cx.translate(midX, midY);
+  const k = size / 960;                 // viewBox は 0 -960 960 960
+  cx.scale(k, k);
+  cx.translate(-480, 480);
+  cx.fillStyle = color;
+  cx.fill(micPath2D(name));
+  cx.restore();
+}
+
 function drawMic() {
   const midX = cw / 2, midY = ch / 2;
   const size = ch * 0.62;            // マイクの絵の高さ
@@ -1396,11 +1414,15 @@ function drawMic() {
     cx.restore();
   }
 }
+let frameFailed = false;
 function frame(now) {
   requestAnimationFrame(frame);
   if (!cw || !ch) return;
   try { paintFrame(now); } catch (err) {
     // 一コマ失敗しても止めない。次のコマで描き直す。
+    // ただし黙るのは2回目から — 握りつぶすと、毎コマ落ちていても
+    // 「絵が出ない」としか分からない（実際にそれで気づけなかった）。
+    if (!frameFailed) { frameFailed = true; console.error('paintFrame:', err); }
     cx.setTransform(window.devicePixelRatio || 1, 0, 0, window.devicePixelRatio || 1, 0, 0);
     cx.globalAlpha = 1;
     cx.globalCompositeOperation = 'source-over';
