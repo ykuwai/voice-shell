@@ -913,6 +913,8 @@ const I18N = {
     voiceMuted:'Muted — say “unmute” to come back',
     voiceRoute:'Now sending to {name}',
     voiceRouteMissing:'There is no session {n}',
+    voiceLive:'Sending straight through now',
+    voiceHold:'Holding what you say now',
     voiceSaid:' (heard “{said}” as a command, not a prompt)',
     voiceUnmuted:'Unmuted — listening again',
     micSwitching:'Switching microphone to {name}…',
@@ -1015,6 +1017,8 @@ const I18N = {
     voiceMuted:'ミュートにしました — 「ミュート解除」で戻ります',
     voiceRoute:'送信先を {name} にしました',
     voiceRouteMissing:'{n} 番のセッションはありません',
+    voiceLive:'そのまま届く側にしました',
+    voiceHold:'溜める側にしました',
     voiceSaid:'（「{said}」は合図として扱い、指示としては送っていません）',
     voiceUnmuted:'ミュートを解除しました — また届きます',
     micSwitching:'{name} に切り替えています…',
@@ -1807,8 +1811,22 @@ function connect() {
         // 合図と判定した発話は指示として送られない。何が消えたのかは見せる。
         chime('ok');   say(t('voiceRoute', {name: c.label}) + said(c));
         loadListeners();
+      } else if (c.kind === 'mode_live') {
+        chime('up');   say(t('voiceLive') + said(c));
+      } else if (c.kind === 'mode_hold') {
+        chime('down'); say(t('voiceHold') + said(c));
       } else if (c.kind === 'route_missing') {
         chime('err');  say(t('voiceRouteMissing', {n: c.label}) + said(c));
+      }
+      return;
+    }
+    if ('paused' in m) {
+      // 声でも切り替わる。ミュート中は表示が「切」のままでよいので触らない。
+      if (route !== 'off') {
+        const next = m.paused ? 'hold' : 'live';
+        if (next !== route) { route = lastMode = next; oneShot = false; paint(); }
+      } else {
+        lastMode = m.paused ? 'hold' : 'live';
       }
       return;
     }

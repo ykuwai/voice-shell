@@ -216,6 +216,21 @@ class Tail:
                 last = cur
             await asyncio.sleep(0.2)
 
+    async def watch_paused(self):
+        """溜める側かどうかを流す。
+
+        ミュートと同じく、声でも切り替わるようになったので、
+        3秒おきの /api/state を待たせると画面が置いていかれる。
+        """
+        path = self.path.parent / "paused"
+        last = None
+        while True:
+            cur = path.exists()
+            if cur != last:
+                await self.broadcast({"paused": cur})
+                last = cur
+            await asyncio.sleep(0.2)
+
     async def watch_voice_cmd(self):
         """声の合図に何が起きたかを流す。
 
@@ -773,7 +788,8 @@ async def main_async(args):
              asyncio.create_task(tail.watch_held()),
              asyncio.create_task(tail.watch_mic_active()),
              asyncio.create_task(tail.watch_muted()),
-             asyncio.create_task(tail.watch_voice_cmd())]
+             asyncio.create_task(tail.watch_voice_cmd()),
+             asyncio.create_task(tail.watch_paused())]
     try:
         await asyncio.Event().wait()
     finally:
