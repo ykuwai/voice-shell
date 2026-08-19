@@ -946,12 +946,15 @@ def resolve_target(log_path):
     except OSError:
         raw = ""
 
-    live = list_active_listeners(log_path)
-    if raw and any(str(l["pid"]) == raw for l in live):
-        return raw                       # 選んだ相手が生きている
+    # 選んだ相手は、登録ファイルの有無だけで判断する。生存確認の走査は
+    # 一時的に数え損なうことがあり、そのたびに別の相手へ回すと、選んだ
+    # つもりのない相手へ発話が紛れ込む（届かない方がまだ安全）。
+    if raw and (listeners_dir(log_path) / raw).exists():
+        return raw
 
     # まだ選んでいない、または選んだ相手が終了した。
     # 聞き手が1つだけなら宛先を書く意味がない。
+    live = list_active_listeners(log_path)
     return str(live[-1]["pid"]) if len(live) > 1 else None
 
 
