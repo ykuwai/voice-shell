@@ -232,8 +232,15 @@
     background:linear-gradient(145deg, color-mix(in srgb, var(--accent-2) 70%, var(--accent)), var(--accent-2));
     box-shadow:0 0 22px color-mix(in srgb, var(--accent-2) 55%, transparent);
   }
-  /* 一時停止中は送り先の選択自体が意味を失うので、まとめて沈める */
-  .modes.muted .mode { opacity:.3; }
+  /* ミュート中は選べないので沈めるが、どちらに戻るのかは分かるようにする。
+     色だけ抜いて灰色にし、選ばれている方をひとつぶん起こす。 */
+  .modes.muted .mode { opacity:.26; }
+  .modes.muted .mode.on { opacity:.55; }
+  .modes.muted #segLive.on, .modes.muted #segHold.on { color:var(--faint); }
+  .modes.muted #segLive.on .ring, .modes.muted #segHold.on .ring {
+    background:var(--raise); color:var(--faint);
+    border-color:var(--line); box-shadow:none;
+  }
 
   .hint {
     margin:0; padding:0 1rem .6rem; min-height:1.4em;
@@ -1634,7 +1641,9 @@ let inFlight = false;    // 切替中はポーリングに巻き戻されない�
 function paint() {
   // 「今回だけ直す」の間は即時のまま見せる。中では保留にしているが、
   // モードを切り替えたわけではないので、表示まで変えると別物に見える。
-  const shown = oneShot ? 'live' : route;
+  // ミュート中は route が 'off' なので、どちらも選ばれていない見た目に
+  // なってしまう。戻ったときのモードを選択中として見せる（色は CSS で抜く）。
+  const shown = oneShot ? 'live' : (route === 'off' ? lastMode : route);
 
   for (const [k, b] of [['live', el.segLive], ['hold', el.segHold]]) {
     b.classList.toggle('on', shown === k);
@@ -1646,7 +1655,9 @@ function paint() {
   el.segOff.title = t(off ? 'resumeTitle' : 'pauseTitle');
   el.segOff.setAttribute('aria-label', el.segOff.title);
 
-  setState(shown, t(off ? 'statusOff' : shown === 'hold' ? 'statusHold' : 'statusLive'));
+  // 目印の色は「切っている」を優先する（shown は戻り先を指しているため）
+  setState(off ? 'off' : shown,
+           t(off ? 'statusOff' : shown === 'hold' ? 'statusHold' : 'statusLive'));
   if (!oneShot && performance.now() > hintHoldUntil) {
     el.hint.textContent = t(off ? 'hintOff' : shown === 'hold' ? 'hintHold' : 'hintLive');
   }
@@ -1852,7 +1863,10 @@ function connect() {
       // 一時停止中の発話。編集中でも壊さないよう末尾に足すだけにする
       appendHeld(m.held);
 
-    } else {
+    } else if (m.text != null) {
+      // 本文のある行だけ履歴にする。制御用の知らせ（level / muted / paused /
+      // voice_cmd …）が増えるたび、古い画面がそれを発話として並べて空の札を
+      // 作っていた。知らない鍵は黙って捨てる方が安全。
       addEntry(m);
       el.stream.textContent = '';
       el.tray.classList.add('idle');
