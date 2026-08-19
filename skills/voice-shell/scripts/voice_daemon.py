@@ -641,7 +641,8 @@ UNMUTE_WORDS = {
 # 記号と間の空白を落としてから比べる。「ミュート。」「mute me」「マイク、オン」
 # のどれも同じ鍵になるようにする。
 # ー（長音）は落とさない。落とすと「ミュート」が「ミュト」になって当たらない。
-_CMD_DROP = str.maketrans("", "", " \t\u3000。、．，・…！？!?.,-~〜\"'「」『』()（）")
+_CMD_DROP = str.maketrans("１２３４５６７８９０", "1234567890",
+                          " \t\u3000。、．，・…！？!?.,-~〜\"'「」『』()（）")
 
 
 def voice_command(text: str, muted: bool):
@@ -670,34 +671,55 @@ _ROUTE_ALL_WORDS = {
     "送信先すべて", "送信先を全員に", "送信先を全員",
     "sendtoall", "switchtoall", "routetoall", "broadcast", "toall",
 }
-_ROUTE_JA = re.compile(
-    r"^(?:"
-    r"(?:送信先|宛先|あて先|セッション)を?(\d+)(?:番)?(?:に|へ)?"
-    r"(?:切り替え|切替|きりかえ|変更|送る|送信)?(?:て|る|して)?"
-    r"|(\d+)番(?:目)?(?:に|へ)?(?:切り替え|切替|きりかえ|変更|送る|送信)?(?:て|る|して)?"
-    r"|(\d+)(?:に|へ)(?:切り替え|切替|きりかえ|変更|送る|送信)(?:て|る|して)?"
-    r")$")
-_ROUTE_EN = re.compile(
-    r"^(?:switchto|sendto|routeto|goto|target|session|destination|route)(\d+)$")
+# 数の言い方は認識のたびに揺れる。「2」と言っても「に」「ツー」「二」と出るし、
+# 「送信先に」は「送信先2」のことがある。読みを一通り並べて、どれで来ても拾う。
+# ひらがな1文字（に・し・ご・く）は助詞と見分けが付かないので、単独では効かない
+# — 下の型はどれも「番」「送信先」「〜に切り替え」の形を要求する。
+_NUM_WORDS = {
+    "0": 0, "〇": 0, "ぜろ": 0, "れい": 0, "ゼロ": 0, "zero": 0,
+    "1": 1, "一": 1, "いち": 1, "ワン": 1, "わん": 1, "one": 1,
+    "2": 2, "二": 2, "に": 2, "ツー": 2, "つー": 2, "トゥー": 2, "とぅー": 2, "two": 2,
+    "3": 3, "三": 3, "さん": 3, "スリー": 3, "すりー": 3, "three": 3,
+    "4": 4, "四": 4, "よん": 4, "し": 4, "フォー": 4, "ふぉー": 4, "four": 4,
+    "5": 5, "五": 5, "ご": 5, "ファイブ": 5, "ふぁいぶ": 5, "five": 5,
+    "6": 6, "六": 6, "ろく": 6, "シックス": 6, "しっくす": 6, "six": 6,
+    "7": 7, "七": 7, "なな": 7, "しち": 7, "セブン": 7, "せぶん": 7, "seven": 7,
+    "8": 8, "八": 8, "はち": 8, "エイト": 8, "えいと": 8, "eight": 8,
+    "9": 9, "九": 9, "きゅう": 9, "く": 9, "ナイン": 9, "ないん": 9, "nine": 9,
+    "10": 10, "十": 10, "じゅう": 10, "テン": 10, "てん": 10, "ten": 10,
+}
+# 長いものから当てる。「じゅう」を「じ」「ゅ」…と崩されないように。
+_NUM_ALT = "(?:" + "|".join(
+    sorted((re.escape(k) for k in _NUM_WORDS), key=len, reverse=True)) + ")"
+_COUNTER = r"(?:番目|ばんめ|番|ばん)"
+_VERB = (r"(?:(?:切り替え|切替|きりかえ|変更|へんこう|送る|おくる|送信|そうしん|"
+         r"switchto|sendto|goto)(?:て|る|して|に)?)")
+_PREFIX = r"(?:送信先|宛先|あて先|セッション|せっしょん)"
 
-# 「一に切り替え」のような漢数字。kanji_numbers_to_arabic は単独の「一」「二」を
-# わざと直さない（数として言ったのか判別できないため）ので、ここで別に直す。
-# 合図として当たるかは正規表現が決めるので、取り違えても素通りするだけ。
-_CMD_DIGITS = str.maketrans("一二三四五六七八九〇１２３４５６７８９０",
-                            "1234567890 1234567890".replace(" ", ""))
-
+_ROUTE_RXS = [re.compile(rx) for rx in (
+    # 送信先2 / 送信先を2に / セッション2に切り替えて / セッショントゥー
+    # 「送信先に」も入る（に＝2）。番号の無い「送信先に」は言葉として成り立たない。
+    rf"^{_PREFIX}を?({_NUM_ALT}){_COUNTER}?(?:に|へ)?{_VERB}?$",
+    # 2番 / 1番目 / にばんめに切り替えて（頭に数が来る方が認識されやすい）
+    rf"^({_NUM_ALT}){_COUNTER}(?:に|へ)?{_VERB}?$",
+    # 2に切り替え / 2へ送信して（数のあとに必ず動詞が要る）
+    rf"^({_NUM_ALT})(?:に|へ){_VERB}$",
+    # switch to 2 / session two / route 3
+    rf"^(?:switchto|sendto|routeto|goto|target|session|destination|route)"
+    rf"({_NUM_ALT})$",
+)]
 
 def route_command(text: str):
     """送信先を選ぶ合図なら ("all", None) か ("n", 番号) を返す。"""
-    key = text.strip().translate(_CMD_DROP).translate(_CMD_DIGITS).lower()
-    if not key:
+    key = text.strip().translate(_CMD_DROP).lower()
+    if not key or len(key) > 24:      # 合図はどれも短い。長い文は見るまでもない
         return None
     if key in _ROUTE_ALL_WORDS:
         return ("all", None)
-    for rx in (_ROUTE_JA, _ROUTE_EN):
+    for rx in _ROUTE_RXS:
         m = rx.match(key)
         if m:
-            return ("n", int(next(g for g in m.groups() if g)))
+            return ("n", _NUM_WORDS[m.group(1)])
     return None
 
 
@@ -1293,26 +1315,26 @@ def main():
                     continue
 
                 # 送信先も声で選ぶ。番号は画面に並ぶ順（「すべて」を除いた1番目から）。
-                # 切っている間は何も送らないので、そもそも選ぶ意味がない。
-                if not muted_now:
-                    rc = route_command(text)
-                    if rc:
-                        kind, n = rc
-                        live = list_active_listeners(log_path)
-                        if kind == "all":
-                            route_file(log_path).write_text("all")
-                            note_voice_cmd(log_path, "route_all")
-                        elif 1 <= n <= len(live):
-                            route_file(log_path).write_text(str(live[n - 1]["pid"]))
-                            note_voice_cmd(log_path, "route",
-                                           f"{n}. {live[n - 1]['label']}")
-                        else:
-                            # 無い番号。黙って捨てると「言ったのに変わらない」に
-                            # なるので、画面に出して知らせる。
-                            note_voice_cmd(log_path, "route_missing", str(n))
-                        print(f"(声で送信先) {text[:40]}", file=sys.stderr, flush=True)
-                        speaking_since = None
-                        continue
+                # 切っている間も効かせる — どのみち短い語は聞いているので、
+                # 切ったまま次の相手を決めておける（解除するまで何も届かない）。
+                rc = route_command(text)
+                if rc:
+                    kind, n = rc
+                    live = list_active_listeners(log_path)
+                    if kind == "all":
+                        route_file(log_path).write_text("all")
+                        note_voice_cmd(log_path, "route_all")
+                    elif 1 <= n <= len(live):
+                        route_file(log_path).write_text(str(live[n - 1]["pid"]))
+                        note_voice_cmd(log_path, "route",
+                                       f"{n}. {live[n - 1]['label']}")
+                    else:
+                        # 無い番号。黙って捨てると「言ったのに変わらない」に
+                        # なるので、画面に出して知らせる。
+                        note_voice_cmd(log_path, "route_missing", str(n))
+                    print(f"(声で送信先) {text[:40]}", file=sys.stderr, flush=True)
+                    speaking_since = None
+                    continue
 
                 # 発話が始まった時点から今までにミュートを挟んだか、
                 # あるいは今なお切られているなら、その発話は送らない。

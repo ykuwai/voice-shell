@@ -20,6 +20,9 @@ import numpy as np
 SAMPLE_RATE = 16000
 
 BLOCK_SEC = 0.1  # マイクを読む単位
+# 「区切らない」を選んでいても、ここまで来たら確定する。溜めた音声を
+# そのまま推論に渡すので、際限なく伸ばすと1回の認識が返らなくなる。
+HARD_UTTERANCE_CAP = 300.0
 
 # 発話の頭に付ける「しきい値を超える直前」の長さ。
 # 子音の立ち上がりは RMS が低く、超えた瞬間から渡すと語頭が欠ける
@@ -100,7 +103,8 @@ def add_common_args(p):
                    help="この秒数だけ無音が続いたら発話を確定する")
     p.add_argument("--max-utterance-sec", type=float, default=30.0,
                    help="1発話の目安の上限。超えても喋っている間は切らず、"
-                        "息継ぎを待って区切る（この2倍で強制確定）")
+                        f"息継ぎを待って区切る（この2倍で強制確定）。"
+                        f"0 なら区切らない（{HARD_UTTERANCE_CAP:.0f} 秒で強制確定）")
     p.add_argument("--pause-sec", type=float, default=0.4,
                    help="上限を超えたあと、この秒数の息継ぎがあれば区切る")
     return p
@@ -486,7 +490,8 @@ def stream_utterances(model, args, should_stop=lambda: False):
             if tuning_wait <= 0:
                 tuning_wait = max(1, round(0.5 / BLOCK_SEC))
                 tuned = want_tuning() or {}
-                for key in ("silence_threshold", "silence_duration"):
+                for key in ("silence_threshold", "silence_duration",
+                            "max_utterance_sec"):
                     if isinstance(tuned.get(key), (int, float)):
                         setattr(args, key, float(tuned[key]))
                 # 最小文字数とつなぎ言葉の除去は voice_daemon.py が
@@ -531,9 +536,14 @@ def stream_utterances(model, args, should_stop=lambda: False):
         done_talking = silence_run >= args.silence_duration
         # 長すぎる発話は打ち切るが、喋っている最中には切らない。
         # 上限を超えたら、ごく短い息継ぎでも区切りとして扱う。
-        too_long = accum_sec >= args.max_utterance_sec and silence_run >= args.pause_sec
-        # それでも延び続けるときの歯止め（推論が重くなりすぎるのを防ぐ）
-        way_too_long = accum_sec >= args.max_utterance_sec * 2
+        #
+        # 0 なら区切らない。「一息に全部伝えたいのに途中で送られる」方が
+        # 困る、という使い方があるため（設定から選べる）。それでも音声を
+        # 際限なく溜めると推論が重くなるので、絶対の歯止めだけは残す。
+        limit = args.max_utterance_sec
+        too_long = (limit > 0 and accum_sec >= limit
+                    and silence_run >= args.pause_sec)
+        way_too_long = accum_sec >= (limit * 2 if limit > 0 else HARD_UTTERANCE_CAP)
 
         if done_talking or too_long or way_too_long:
             done = finish()
