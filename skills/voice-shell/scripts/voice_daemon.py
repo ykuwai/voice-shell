@@ -660,17 +660,6 @@ def voice_command(text: str, muted: bool):
     return "mute" if key in MUTE_WORDS else None
 
 
-# 送信先も声で選べるようにする。番号は画面に並ぶ順（「すべて」を除いた1番目から）。
-# 数を言うだけ（「1」）では効かない — 数字ひとつは物音の誤認識でも出てくるし、
-# 話の途中の「1」で送信先が飛ぶと、どこへ行ったのか分からなくなる。
-# 必ず「送信先」「番」「切り替え」のどれかを添えてもらう。
-_ROUTE_ALL_WORDS = {
-    "全員に", "全員へ", "全員に送る", "全員に送って", "全員に切り替え", "全員に切り替えて",
-    "すべてに", "すべてへ", "すべてに送る", "すべてに切り替え", "すべてに切り替えて",
-    "みんなに", "みんなに送る", "全部に", "全部に送る",
-    "送信先すべて", "送信先を全員に", "送信先を全員",
-    "sendtoall", "switchtoall", "routetoall", "broadcast", "toall",
-}
 # 数の言い方は認識のたびに揺れる。「2」と言っても「に」「ツー」「二」と出るし、
 # 「送信先に」は「送信先2」のことがある。読みを一通り並べて、どれで来ても拾う。
 # ひらがな1文字（に・し・ご・く）は助詞と見分けが付かないので、単独では効かない
@@ -709,17 +698,16 @@ _ROUTE_RXS = [re.compile(rx) for rx in (
     rf"({_NUM_ALT})$",
 )]
 
+
 def route_command(text: str):
-    """送信先を選ぶ合図なら ("all", None) か ("n", 番号) を返す。"""
+    """送信先を選ぶ合図なら番号を返す（画面に並ぶ順の1番目から）。"""
     key = text.strip().translate(_CMD_DROP).lower()
     if not key or len(key) > 24:      # 合図はどれも短い。長い文は見るまでもない
         return None
-    if key in _ROUTE_ALL_WORDS:
-        return ("all", None)
     for rx in _ROUTE_RXS:
         m = rx.match(key)
         if m:
-            return ("n", _NUM_WORDS[m.group(1)])
+            return _NUM_WORDS[m.group(1)]
     return None
 
 
@@ -836,8 +824,9 @@ def _proc_started_at(pid):
 
 # 送信先の指定。ビューアが書き、デーモンが毎回読む。
 #   ファイルが無い  … まだ選んでいない（あとで起動した方へ届ける）
-#   "all"          … 全員へ、と明示的に選んだ
 #   <PID>          … その相手へ
+# 「全員へ」は選べない。2つのセッションが同じ指示を受け取って別々に動き出す
+# 状況に使い道が無く、間違って選ぶと気づきにくいだけだった。
 def route_file(log_path):
     return Path(log_path).parent / "route"
 
@@ -853,9 +842,6 @@ def resolve_target(log_path):
         raw = route_file(log_path).read_text().strip()
     except OSError:
         raw = ""
-
-    if raw == "all":
-        return None                      # 「すべて」を選んだ
 
     live = list_active_listeners(log_path)
     if raw and any(str(l["pid"]) == raw for l in live):
@@ -1317,14 +1303,10 @@ def main():
                 # 送信先も声で選ぶ。番号は画面に並ぶ順（「すべて」を除いた1番目から）。
                 # 切っている間も効かせる — どのみち短い語は聞いているので、
                 # 切ったまま次の相手を決めておける（解除するまで何も届かない）。
-                rc = route_command(text)
-                if rc:
-                    kind, n = rc
+                n = route_command(text)
+                if n is not None:
                     live = list_active_listeners(log_path)
-                    if kind == "all":
-                        route_file(log_path).write_text("all")
-                        note_voice_cmd(log_path, "route_all")
-                    elif 1 <= n <= len(live):
+                    if 1 <= n <= len(live):
                         route_file(log_path).write_text(str(live[n - 1]["pid"]))
                         note_voice_cmd(log_path, "route",
                                        f"{n}. {live[n - 1]['label']}")
