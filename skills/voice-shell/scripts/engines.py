@@ -405,11 +405,7 @@ def stream(conf, args, should_stop=lambda: False):
                 yield {"type": "partial", "text": text,
                        "language": args.language or "Japanese"}
 
-            # 0 は「区切らない」。ガードが無いと over が常に真になり、
-            # 「0.4秒の息継ぎごとに毎回切る」という正反対の挙動になる。
-            over = (args.max_utterance_sec > 0
-                    and speaking_since >= args.max_utterance_sec)
-            if silence_run >= args.silence_duration or (over and silence_run >= args.pause_sec):
+            if silence_run >= args.silence_duration:
                 done = finish()
                 if done:
                     yield done
