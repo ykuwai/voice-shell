@@ -592,6 +592,13 @@
   .chip { font-size:.75rem; padding:.15rem .6rem; border-radius:var(--pill);
     background:var(--panel-2); color:var(--faint); border:1px solid var(--line-soft); }
   .builtin-head { margin-top:.7rem; }
+  /* chrome:// は web ページから開けない決まりなので、押したら写す。
+     行き先が分かる形にしておかないと、どこを触ればよいのか伝わらない。 */
+  .link {
+    color:var(--accent); text-decoration:underline; text-underline-offset:2px;
+    font-size:inherit; word-break:break-all; text-align:left;
+  }
+  .link:hover { color:var(--text); }
   .dict-note, .scope-note { font-size:.75rem; line-height:1.5; color:var(--faint); margin:.5rem 0 0; }
 
   [hidden] { display:none !important; }
@@ -757,6 +764,10 @@
       <label for="asrLang" data-icon="language" data-icon-size="17" data-i18n="asrLang">Spoken language</label>
       <select id="asrLang"></select>
     </div>
+    <p class="range-note" id="browserMic" hidden>
+      <span data-i18n="browserMicNote"></span>
+      <button class="link" id="micSettingsLink">chrome://settings/content/microphone</button>
+    </p>
     <p class="warn-note" id="browserAsrWarn" data-i18n="browserAsrWarn" hidden></p>
     <div id="powerRow">
       <div class="btn-row" style="margin-top:.7rem">
@@ -924,7 +935,9 @@ const I18N = {
     engineBrowser:'This browser (nothing to install)',
     engineNone:'No recognition available',
     localAsrNote:'Runs on this machine. Audio never leaves it.',
-    browserAsrNote:'Uses the recognition built into Chrome. No model to install, so it runs on low-spec machines — and it works even without the daemon. Note: the microphone picker above has no effect here. The Web Speech API follows Chrome’s own default microphone (chrome://settings/content/microphone) — not the OS default, and not a per-site choice. Change it there if the wrong device gets used.',
+    browserAsrNote:'Chrome’s own recognition. Nothing to install.',
+    browserMicNote:'The microphone above does not apply here — Chrome’s own default is used:',
+    copied:'Copied',
     browserAsrWarn:'Audio is sent to Google servers for recognition. Keep this off if everything must stay on this machine — use the daemon instead.',
     asrLang:'Spoken language',
     asrDenied:'Microphone access was refused, so recognition could not start.',
@@ -1033,7 +1046,9 @@ const I18N = {
     engineBrowser:'このブラウザ（何も入れずに動く）',
     engineNone:'使える認識がありません',
     localAsrNote:'ローカル（この機械の中）で認識します。音声は外へ出ません。',
-    browserAsrNote:'Chrome に載っている認識を使います。モデルを入れなくてよいので非力な端末でも動き、デーモンが動いていなくても使えます。上のマイク選択はここには効きません — Web Speech API は Chrome 自体の既定マイク（chrome://settings/content/microphone）に従います。OS の既定でもサイトごとの設定でもないので、違うデバイスが使われる場合はそちらを変えてください。',
+    browserAsrNote:'Chrome の認識を使います。入れるものはありません。',
+    browserMicNote:'上のマイクはここには効きません。Chrome 自体の既定が使われます:',
+    copied:'コピーしました',
     browserAsrWarn:'音声は認識のため Google のサーバへ送られます。ローカルだけで完結させたい場合は、ほかの認識に切り替えてください。',
     asrLang:'話す言語',
     asrDenied:'マイクの使用が許可されなかったため、認識を始められませんでした。',
@@ -1146,7 +1161,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'mic','recogLang','recogLangField','thresh','threshVal','gaugeFill','gaugeMark',
                   'silence','silenceVal','minChars','minCharsVal','clean',
                   'calibBtn','calibNote',
-                  'engineGroup','enginePick','engineNote','browserAsrWarn','asrLang','asrLangField',
+                  'engineGroup','enginePick','engineNote','browserAsrWarn','browserMic','micSettingsLink','asrLang','asrLangField',
                   'themeRow','langRow','multiOn','machineName','machineTag',
                   'scopePrivate','scopeNote','tabReplace','tabIgnore',
                   'paneReplace','paneIgnore','replaceRows','ignoreRows',
@@ -2869,6 +2884,7 @@ let localEngines = [];
 
 function paintBrowserAsr() {
   el.browserAsrWarn.hidden = !asrChosen;
+  el.browserMic.hidden = !asrChosen;
   el.asrLangField.hidden = !asrChosen;
   el.engineNote.textContent = t(asrChosen ? 'browserAsrNote' : 'localAsrNote');
   // 電源はローカルのモデルを積み下ろしするためのもの。
@@ -3019,6 +3035,15 @@ el.floatBtn.onclick = async () => {
     paintFloat(false);          // 閉じる最中は window がまだ残っている
     fitCanvas();
   });
+};
+
+/* chrome:// はページから開けないので、押したら写すだけにする。 */
+el.micSettingsLink.onclick = async () => {
+  const url = el.micSettingsLink.textContent.trim();
+  try { await navigator.clipboard.writeText(url); } catch { return; }
+  const was = el.micSettingsLink.textContent;
+  el.micSettingsLink.textContent = t('copied');
+  setTimeout(() => { el.micSettingsLink.textContent = was; }, 1400);
 };
 
 /* ── ユーザー辞書 ───────────────────────

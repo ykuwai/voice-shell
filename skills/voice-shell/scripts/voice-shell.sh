@@ -94,6 +94,41 @@ engine_args() {
 PY="$(find_python || true)"
 APP="$HERE/voice_daemon.py"
 
+# ビューアへの問い合わせ。curl は環境によって弾かれる（Windows で
+# 「Permission denied」が出た）。Python は必ずあるので、そちらで叩く。
+#   http_get <パス>        本文を標準出力へ。届かなければ 1 を返す
+#   port_open              ポートが開いているかだけ見る
+http_get() {
+  "$PY" - "http://127.0.0.1:8090$1" <<'HTTPGET' 2>/dev/null
+import sys, urllib.request
+try:
+    with urllib.request.urlopen(sys.argv[1], timeout=2) as r:
+        sys.stdout.write(r.read().decode("utf-8", "replace"))
+except Exception:
+    sys.exit(1)
+HTTPGET
+}
+
+http_post() {
+  "$PY" - "http://127.0.0.1:8090$1" "$2" <<'HTTPPOST' 2>/dev/null
+import sys, urllib.request
+req = urllib.request.Request(sys.argv[1], data=sys.argv[2].encode("utf-8"),
+                             headers={"content-type": "application/json"})
+try:
+    urllib.request.urlopen(req, timeout=2).read()
+except Exception:
+    sys.exit(1)
+HTTPPOST
+}
+
+port_open() {
+  "$PY" - <<'PORT' 2>/dev/null
+import socket, sys
+s = socket.socket(); s.settimeout(0.6)
+sys.exit(0 if s.connect_ex(("127.0.0.1", 8090)) == 0 else 1)
+PORT
+}
+
 # プロセスを呼び出し元の系統から切り離して起動する。
 # macOS には setsid が無いので、その場合は nohup だけで済ませる
 # （デーモンの子 kill は pgrep -P による直接の子だけなので、これで足りる）。
@@ -359,13 +394,13 @@ case "$cmd" in
     engine="$("$PY" "$APP" --resolve-engine "")"
     if [[ "$engine" == "browser" ]]; then
       echo "このブラウザで認識します（この機械にモデルは積みません）"
-      if ! curl -sf -o /dev/null --max-time 2 http://127.0.0.1:8090; then
+      if ! port_open; then
         echo "  ビューアが動いていません → voice-shell.sh viewer" >&2
       else
         echo "  ビューア: http://127.0.0.1:8090"
         # 画面が実際に聞いているかまで見る。ここを見ないと、開いていない・
         # マイクを拒否された状態と、ちゃんと聞いている状態を区別できない。
-        curl -sf --max-time 2 http://127.0.0.1:8090/api/asr-status \
+        http_get /api/asr-status \
           | "$PY" "$HERE/asr_status.py" || echo "  画面の状態を確認できませんでした"
       fi
     else
@@ -518,17 +553,15 @@ NAMEIT
     # （雑談や通話が続いていて、届く内容が指示ではないとき）。
     # ミュートにはしない。切ると発話がどこにも残らず、画面を見ていない
     # ユーザーは届いていないことに気づけないため。
-    curl -sf -X POST http://127.0.0.1:8090/api/pause \
-      -H 'content-type: application/json' \
-      -d "$(printf '{"paused":true,"note":%s}' "$(printf '%s' "${1:-}" | "$PY" -c 'import json,sys; print(json.dumps(sys.stdin.read()))')")" \
-      >/dev/null && echo "溜める側に切り替えました（画面から送れます）" \
+    http_post /api/pause \
+      "$(printf '{"paused":true,"note":%s}' "$(printf '%s' "${1:-}" | "$PY" -c 'import json,sys; print(json.dumps(sys.stdin.read()))')")" \
+      && echo "溜める側に切り替えました（画面から送れます）" \
       || { echo "ビューアが動いていません" >&2; exit 1; }
     ;;
   live)
     # そのまま届く側に戻す
-    curl -sf -X POST http://127.0.0.1:8090/api/pause \
-      -H 'content-type: application/json' -d '{"paused":false}' \
-      >/dev/null && echo "そのまま届く側に戻しました" \
+    http_post /api/pause '{"paused":false}' \
+      && echo "そのまま届く側に戻しました" \
       || { echo "ビューアが動いていません" >&2; exit 1; }
     ;;
   log-path)
@@ -542,7 +575,7 @@ NAMEIT
       if have pgrep; then
         pgrep -f "voice-shell/scripts/viewer\.p[y]" >/dev/null
       else
-        curl -sf -o /dev/null http://127.0.0.1:8090
+        port_open
       fi
     }
     if viewer_running; then
