@@ -360,6 +360,14 @@
     display:flex; align-items:center; gap:.35rem;
   }
   .log-head h2 svg { opacity:.75; }
+  /* 送信済みの件数。設定の中に置いていたころは、数を見るためだけに設定を
+     開くことになっていた。見出しの隣なら、履歴を見る目のまま読める。 */
+  .log-head .count {
+    flex:none; padding:.1rem .5rem; border-radius:var(--pill);
+    font-size:.68rem; color:var(--faint); background:var(--panel-2);
+    box-shadow:inset 0 0 0 1px var(--line-soft);
+    font-variant-numeric:tabular-nums;
+  }
   /* タブの土台。地の色を 3:1 まで持ち上げると、静かな画面が灰色の階段になる。
      形は輪郭の方で見せて、土台の色は静かなままにする。選ばれているものは
      --raise の塗りと文字の濃さで示す。輪郭は内側に描くので、背丈は変わらない。
@@ -564,12 +572,20 @@
   }
   .sheet-head .icon::after { display:none; }   /* 状態を示す点は要らない */
   .sheet-head h2 { margin:0; font-size:1rem; font-weight:600; margin-right:auto; }
+  /* 設定と辞書を開いている間の、聞こえているかどうかの手がかり。シートは画面を
+     丸ごと覆うので、本体のマイクの絵も音量メーターもここからは見えない。
+     押せる場所にはしない。戻るボタンの隣で押し間違えると、設定の奥に居るまま
+     マイクが切れる。 */
+  .mini-mic { flex:none; width:30px; height:30px; }
+  .mini-mic canvas { display:block; width:100%; height:100%; }
 
   .group { padding:1.1rem var(--pad); border-bottom:1px solid var(--line-soft); }
+  /* 見出しは、その下に並ぶ項目名（.875rem）より大きく、シートの題（1rem）より
+     小さくする。大文字と字間で見出しらしさを作る型は、大文字を持たない日本語
+     には効かず、「小さくて薄い」だけが残っていた。大きさと濃さで序列を作る。 */
   .group > h3 {
     display:flex; align-items:center; gap:.4rem;
-    margin:0 0 .8rem; font-size:.75rem; font-weight:700; letter-spacing:.06em;
-    text-transform:uppercase; color:var(--faint);
+    margin:0 0 .8rem; font-size:.9375rem; font-weight:700; color:var(--text);
   }
   /* 項目名にも小さな絵を添える。文字だけの一覧にしない。 */
   .field > label {
@@ -945,6 +961,9 @@
 
   <div class="log-head">
     <h2 data-icon="list_alt" data-icon-size="15" data-i18n="history">History</h2>
+    <!-- 件数はここに置く。設定の中にあったころは、数を見るためだけに設定を
+         開くことになっていた。 -->
+    <span class="count"><span id="count">0</span> <span data-i18n="items">items</span></span>
   </div>
 
   <div class="log-wrap">
@@ -978,6 +997,9 @@
   <div class="sheet-head">
     <button class="icon" id="closeSettings" data-icon="arrow_back_ios_new"
             data-icon-size="18" data-i18n-title="back"></button>
+    <!-- 本体と同じマイクの絵を小さく描く。ここを開いている間も喋りかけるので、
+         届いているのか切れているのかが見えないと困る。絵は canvas 側が描く。 -->
+    <span class="mini-mic" id="miniMic" role="img"><canvas id="miniViz"></canvas></span>
     <div class="seg-row" id="sheetTabs">
       <button id="tabBasic" class="on" data-i18n="settings">Settings</button>
       <button id="tabDict" data-i18n="grpDict">Dictionary</button>
@@ -1094,16 +1116,6 @@
     <p class="range-note" data-i18n="multiNote"></p>
   </div>
 
-  <!-- ログ -->
-  <div class="group">
-    <h3 data-icon="list_alt" data-icon-size="16" data-i18n="grpLog">Transcript</h3>
-    <div class="btn-row">
-      <span class="val" style="margin:0"><span id="count">0</span> <span data-i18n="items">items</span></span>
-      <span class="spacer"></span>
-      <button class="btn" id="copy" data-icon="content_copy" data-icon-size="17" data-i18n="copyAll">Copy all</button>
-    </div>
-  </div>
-
   </div><!-- /paneBasic -->
 
   <div id="paneDict" hidden>
@@ -1196,6 +1208,7 @@ const I18N = {
     droppedOne:'Threw it away.',
     editingOne:'Editing',
     hintOnce:'Holding this one. Fix it, then send — back to instant after.',
+    oneShotOff:'Stopped editing this one. Back to instant.',
     pauseTitle:'Turn the microphone off', resumeTitle:'Turn the microphone on',
     settingsTitle:'Settings',
     powerStop:'Stop listening', powerStart:'Start listening',
@@ -1209,7 +1222,7 @@ const I18N = {
     grpInput:'Input', micDevice:'Microphone',
     recogLang:'Recognition language', recogLangAuto:'Auto-detect',
     sensitivity:'Sensitivity',
-    sensitivityNote:'0 picks up the faintest sound, 100 only loud speech. The bar is the live level, the marker is where the line sits.',
+    sensitivityNote:'The higher it is, the fainter the sounds it picks up. The bar above is the level right now, and the mark is where it starts listening.',
     silence:'Pause to send',
     silenceNote:'How long a silence ends an utterance.',
     minChars:'Min length',
@@ -1253,7 +1266,7 @@ const I18N = {
     dictSaved:'Saved.',
     dictLoaded:'Imported and saved ({a} added, {u} changed{s}).',
     dictSkipped:' / {n} unreadable rows',
-    grpLog:'Transcript', items:'items', copyAll:'Copy all', copied:'Copied',
+    items:'items',
     micSwitched:'Switched microphone: {name}',
     voiceMuted:'Muted — say “unmute” to come back',
     voiceRoute:'Now sending to {name}',
@@ -1308,6 +1321,7 @@ const I18N = {
     droppedOne:'消しました。',
     editingOne:'編集中',
     hintOnce:'この一言だけ溜めます。直して送ると、即時に戻ります。',
+    oneShotOff:'手直しをやめました。即時に戻ります。',
     pauseTitle:'マイクを切る', resumeTitle:'マイクを入れる',
     settingsTitle:'設定',
     powerStop:'聞き取りを止める', powerStart:'聞き取りを始める',
@@ -1321,7 +1335,7 @@ const I18N = {
     grpInput:'入力', micDevice:'マイク',
     recogLang:'認識言語', recogLangAuto:'自動判定',
     sensitivity:'感度',
-    sensitivityNote:'0 に近いほど小さな音まで拾い、100 に近いほど大きな声だけを拾います。バーが今の音量、印が今の設定です。',
+    sensitivityNote:'数字が大きいほど、小さな音まで拾います。上のバーが今の音量で、印がここから拾い始める線です。',
     silence:'確定までの無音',
     silenceNote:'これだけ黙ると、ひと区切りとして確定します。',
     minChars:'最小文字数',
@@ -1365,7 +1379,7 @@ const I18N = {
     dictSaved:'保存しました。',
     dictLoaded:'読み込んで保存しました（追加 {a} 件、書き換え {u} 件{s}）。',
     dictSkipped:' / 読めない行 {n} 件',
-    grpLog:'ログ', items:'件', copyAll:'全部コピー', copied:'コピーしました',
+    items:'件',
     micSwitched:'マイクを切り替えました: {name}',
     voiceMuted:'ミュートにしました — 「ミュート解除」で戻ります',
     voiceRoute:'送信先を {name} にしました',
@@ -1450,10 +1464,11 @@ const $ = id => document.getElementById(id);
 const el = {};
 for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'power','powerLabel','powerRow','openSettings','sheet','closeSettings','floatBtn','page',
+                  'miniMic','miniViz',
                   'routes','routeChips','routePick','viz','meter','meterHit','meterFill','meterMark','logoMark',
                   'tray','stream','draft','draftTime','draftActions','send','discard',
                   'editOnce','dropOne','draftMark',
-                  'hint','note','log','none','count','copy','fresh','floatAsk','taken','takeBack',
+                  'hint','note','log','none','count','fresh','floatAsk','taken','takeBack',
                   'mic','recogLang','recogLangField','thresh','threshVal','gaugeFill','gaugeMark',
                   'silence','silenceVal','minChars','minCharsVal','clean',
                   'engineGroup','enginePick','engineNote','browserAsrWarn','browserMic','micSettingsLink','asrLang','asrLangField',
@@ -1612,6 +1627,23 @@ function fitCanvas() {
   try { paintFrame(performance.now()); } catch {}
 }
 new ResizeObserver(fitCanvas).observe(canvas);
+
+/* 設定と辞書の見出しに置く小さいマイク。本体と同じ絵を、同じ値で描く。
+   隠れている間は寸法が取れない（display:none なので 0 になる）ので、
+   開いた時点で測り直す。 */
+const mini = el.miniViz, mcx = mini.getContext('2d');
+let mw = 0, mh = 0;
+function fitMini() {
+  const r = mini.getBoundingClientRect();
+  if (!r.width || !r.height) { mw = mh = 0; return; }
+  const dpr = window.devicePixelRatio || 1;
+  mw = Math.round(r.width);
+  mh = Math.round(r.height);
+  mini.width = mw * dpr;
+  mini.height = mh * dpr;
+  mcx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+new ResizeObserver(fitMini).observe(mini);
 
 // 色も「いま中身が居る document」から読む。元の document から読むと、浮かせて
 // いる間にテーマを変えたときに canvas のマイクだけ新しい色になり、周りの
@@ -1806,54 +1838,59 @@ function micPath2D(name) {
   if (!_micPaths[name]) _micPaths[name] = new Path2D(ICON[name][1]);   // 塗りの方
   return _micPaths[name];
 }
-function paintGlyph(name, midX, midY, size, color) {
-  cx.save();
-  cx.translate(midX, midY);
+function paintGlyph(ctx, name, midX, midY, size, color) {
+  ctx.save();
+  ctx.translate(midX, midY);
   const k = size / 960;                 // viewBox は 0 -960 960 960
-  cx.scale(k, k);
-  cx.translate(-480, 480);
-  cx.fillStyle = color;
-  cx.fill(micPath2D(name));
-  cx.restore();
+  ctx.scale(k, k);
+  ctx.translate(-480, 480);
+  ctx.fillStyle = color;
+  ctx.fill(micPath2D(name));
+  ctx.restore();
 }
 
-function drawMic() {
-  const midX = cw / 2, midY = ch / 2;
-  const size = ch * 0.62;            // マイクの絵の高さ
-  const ring = ch * 0.40;            // 囲みの輪の半径
+/* 同じ絵を2か所へ描く。本体の大きいものと、設定の見出しに置く小さいもの。
+   宛先と寸法を引数で受けるのは、小さい方で輪の線まで同じ太さにすると、
+   30px の丸が輪だけで埋まって中のマイクが見えなくなるため。
+   tone は音量ぶんが満ちてくる色。送り先（即時 / 手直し）をそのまま持たせる。 */
+function drawMic(ctx, w, h, tone) {
+  const midX = w / 2, midY = h / 2;
+  const size = h * 0.62;            // マイクの絵の高さ
+  const ring = h * 0.40;            // 囲みの輪の半径
+  const lw = Math.max(1.6, Math.min(3, h * 0.05));   // 本体は 3px のまま
   const lv = micLevel;               // 緩和した値。素の値だと段を踏んで動く
   const off = route === 'off';
 
   if (off) {
-    cx.strokeStyle = cssVar('--danger');
-    cx.lineWidth = 3;
-    cx.beginPath();
-    cx.arc(midX, midY, ring, 0, Math.PI * 2);
-    cx.stroke();
-    paintGlyph('mic_off', midX, midY, size, cssVar('--danger'));
+    ctx.strokeStyle = cssVar('--danger');
+    ctx.lineWidth = lw;
+    ctx.beginPath();
+    ctx.arc(midX, midY, ring, 0, Math.PI * 2);
+    ctx.stroke();
+    paintGlyph(ctx, 'mic_off', midX, midY, size, cssVar('--danger'));
     return;
   }
 
   // 囲みの輪は常に同じ。声で色が動くと、どこまでが押せる範囲なのかが
   // その都度あいまいになる。動くのはマイクの内側だけにする。
-  cx.strokeStyle = color(cssVar('--faint'), 0.55);
-  cx.lineWidth = 3;
-  cx.beginPath();
-  cx.arc(midX, midY, ring, 0, Math.PI * 2);
-  cx.stroke();
+  ctx.strokeStyle = color(cssVar('--faint'), 0.55);
+  ctx.lineWidth = lw;
+  ctx.beginPath();
+  ctx.arc(midX, midY, ring, 0, Math.PI * 2);
+  ctx.stroke();
 
   // 沈んだ状態のマイク
-  paintGlyph('mic', midX, midY, size, cssVar('--faint'));
+  paintGlyph(ctx, 'mic', midX, midY, size, cssVar('--faint'));
 
   // 内側が下から光る。音量ぶんだけ切り取って、明るい色で描き直す。
   if (lv > 0.01) {
     const top = midY + size / 2 - size * lv;
-    cx.save();
-    cx.beginPath();
-    cx.rect(midX - size, top, size * 2, size);
-    cx.clip();
-    paintGlyph('mic', midX, midY, size, cssVar('--accent'));
-    cx.restore();
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(midX - size, top, size * 2, size);
+    ctx.clip();
+    paintGlyph(ctx, 'mic', midX, midY, size, tone);
+    ctx.restore();
   }
 }
 let frameFailed = false;
@@ -1883,7 +1920,15 @@ function paintFrame(now) {
   const bands = dead ? smooth : currentBands();
 
   stepMicLevel(now);
-  drawMic();
+  drawMic(cx, cw, ch, cssVar('--accent'));
+
+  // 設定や辞書を開いている間は本体が丸ごと隠れる。同じ絵を見出しの隣にも
+  // 描いて、聞こえているかどうかだけは見えるようにする。閉じている間は
+  // 描かない（見えないものを毎コマ描くだけになる）。
+  if (!el.sheet.hidden && mw && mh) {
+    mcx.clearRect(0, 0, mw, mh);
+    drawMic(mcx, mw, mh, cssVar(shownMode === 'hold' ? '--accent-2' : '--accent'));
+  }
 
   // ロゴの波も同じ値で動かす（小さくしたときの手がかり）
   const src = bands;
@@ -1954,6 +1999,10 @@ addEventListener('keydown', armViz, {once:true});
 function setState(kind, text) {
   el.beacon.className = 'beacon ' + kind;
   el.stateText.textContent = text;
+  // 設定を開いている間、この一行は隠れる。小さなマイクだけが手がかりに
+  // なるので、同じ文をそちらの読み上げと吹き出しにも持たせる。
+  el.miniMic.title = text;
+  el.miniMic.setAttribute('aria-label', text);
 }
 
 function retally() {
@@ -2036,6 +2085,7 @@ const ROUTE = {
 let route = 'live';
 let lastMode = 'live';   // 一時停止を解いたとき、直前のモードに戻す
 let oneShot = false;     // この一言だけ手直しに回している最中か
+let shownMode = 'live';  // 画面に見せている送り先。小さいマイクの色もこれに従う
 let asrPausedByRoute = false;   // 一時停止のためにブラウザ認識を止めたか
 let inFlight = false;    // 切替中はポーリングに巻き戻されないようにする
 
@@ -2045,6 +2095,7 @@ function paint() {
   // ミュート中は route が 'off' なので、どちらも選ばれていない見た目に
   // なってしまう。戻ったときのモードを選択中として見せる（色は CSS で抜く）。
   const shown = oneShot ? 'live' : (route === 'off' ? lastMode : route);
+  shownMode = shown;
 
   for (const [k, b] of [['live', el.segLive], ['hold', el.segHold]]) {
     b.classList.toggle('on', shown === k);
@@ -2096,9 +2147,9 @@ function paintMachine() {
   el.machineTag.title = t('multiOn');
 }
 /* 打っている最中は、サーバの値で上書きしない。3秒ごとの取り直しが
-   書きかけを消してしまう（浮かせた小窓では document.activeElement が
-   別の document を指すので、焦点で見分ける手も効かない）。
-   読み取りは離れたときだけ。 */
+   書きかけを消してしまう。焦点で見分けずに旗で持つのは、書き込みに失敗した
+   ときも守り続けるため。離れた時点で焦点は外れるが、まだサーバには届いて
+   いないので、焦点だけを見ていると次の取り直しで書きかけが消える。 */
 let machineDirty = false;
 
 function saveMachine() {
@@ -2401,7 +2452,7 @@ function appendHeld(text) {
   paintDraft();
   grow();
   // 追記直後は末尾が見えるようにする（編集中でなければ）
-  if (document.activeElement !== el.draft) el.draft.scrollTop = el.draft.scrollHeight;
+  if (uiDoc().activeElement !== el.draft) el.draft.scrollTop = el.draft.scrollHeight;
 }
 
 /* ── 認識エンジンの入切 ─────────────────
@@ -2459,9 +2510,11 @@ el.power.onclick = async () => {
 let seeded = false;   // 溜まっていた分をリロード時に一度だけ復元する
 let uiStamp = 0;      // 読み込んだ時点の画面ファイルの更新時刻
 
-// 浮かせている間は、小窓を閉じてから元のタブで読み直す
+// 浮かせている間は、小窓を閉じてから元のタブで読み直す。
+// canFloat で守るのは、?. がプロパティの不在しか守らないため。
+// 識別子ごと無いブラウザでは、見に行った時点で落ちる。
 el.fresh.onclick = () => {
-  if (documentPictureInPicture?.window) documentPictureInPicture.window.close();
+  if (canFloat && documentPictureInPicture.window) documentPictureInPicture.window.close();
   location.reload();
 };
 
@@ -2627,21 +2680,27 @@ async function endOneShot() {
   await setRoute('live');
 }
 
+/* 手直しに入ったあと、何も無いまま外を押したらやめたとみなす。
+   空のまま構えておくのが本来の使い方なので、下書きにも認識中の文字にも
+   何も無いときだけ戻す。どちらかに何かあれば、外を押しても持ったままにする。
+   聞き手を3か所に貼るのは、el.page と el.sheet が浮かせた小窓へ丸ごと移る
+   （どちらの document でも同じ聞き手が動く）のに対して、広いタブでは板の
+   外側の余白が document にしか届かないため。二重に走っても、oneShot が
+   下りた時点で二度目は何もしない。 */
+function leaveOneShotIfEmpty(e) {
+  if (!oneShot) return;
+  if (e.target.closest('#tray')) return;      // 札の中は「外」ではない
+  if (el.draft.value.trim() || el.stream.textContent.trim()) return;
+  endOneShot();
+  say(t('oneShotOff'), 4);
+}
+for (const n of [el.page, el.sheet, document]) n.addEventListener('click', leaveOneShotIfEmpty);
+
 el.draft.addEventListener('input', () => { grow(); });
 // Ctrl+Enter で送信
 el.draft.addEventListener('keydown', e => {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); el.send.click(); }
 });
-
-el.copy.onclick = async ev => {
-  const lines = [...el.log.children].map(r => r.querySelector('.text').textContent);
-  if (!lines.length) return;
-  await navigator.clipboard.writeText(lines.join('\n'));
-  const label = [...ev.currentTarget.childNodes].find(n => n.nodeType === 3);
-  if (!label) return;
-  label.nodeValue = t('copied');
-  setTimeout(() => { label.nodeValue = t('copyAll'); }, 1300);
-};
 
 /* ── 設定 ───────────────────────────────── */
 /* 設定と辞書を分ける。ひと繋ぎだと 1400px を超えて、辞書は下端に埋もれる
@@ -2662,6 +2721,7 @@ el.tabDict.onclick = () => showSheetTab('dict');
 
 el.openSettings.onclick = async () => {
   el.sheet.hidden = false;
+  fitMini();                        // 隠れている間は寸法が取れない
   showSheetTab(store.get('sheetTab', 'basic'));
   await Promise.all([loadMics(), loadLangs(), loadTuning(), loadDict()]);
   el.dictNote.textContent = '';
@@ -2780,13 +2840,19 @@ const posToThresh = p => {
   const v = threshLo * Math.pow(threshHi / threshLo, p / 1000);
   return Math.round(v * 1000) / 1000;
 };
+/* つまみと数字に出すのは「感度」。敷居を下げるほど小さな音まで拾うので、
+   感度の目盛りは音の大きさの目盛りと逆向きになる。裏返すのはここだけにして、
+   メーターの印は音の大きさの目盛りに置いたままにする。感度を上げると印が
+   左へ動くのは、拾い始める音の大きさが下がるということ。 */
+const threshToSens = v => Math.max(0, Math.min(1000, 1000 - threshToPos(v)));
+const sensToThresh = s => posToThresh(1000 - s);
 
 function paintTuning() {
-  el.thresh.value = threshToPos(tuning.silence_threshold);
+  el.thresh.value = threshToSens(tuning.silence_threshold);
   el.silence.value = tuning.silence_duration;
   el.minChars.value = tuning.min_chars;
-  el.threshVal.textContent = Math.round(threshToPos(tuning.silence_threshold) / 10);
-  if (document.activeElement !== el.silenceVal) {          // 打っている最中は触らない
+  el.threshVal.textContent = Math.round(threshToSens(tuning.silence_threshold) / 10);
+  if (uiDoc().activeElement !== el.silenceVal) {          // 打っている最中は触らない
     el.silenceVal.value = Number(tuning.silence_duration).toFixed(1);
   }
   el.minCharsVal.textContent = tuning.min_chars;
@@ -2839,7 +2905,7 @@ function queueTuning() {
 }
 
 el.thresh.oninput = () => {
-  tuning.silence_threshold = posToThresh(Number(el.thresh.value));
+  tuning.silence_threshold = sensToThresh(Number(el.thresh.value));
   el.threshVal.textContent = Math.round(Number(el.thresh.value) / 10);
   paintGauge();
   queueTuning();
@@ -2887,7 +2953,8 @@ function threshFromX(clientX) {
   if (!Number.isFinite(next) || next <= 0) return;   // 変な値で描画を壊さない
   tuning.silence_threshold = next;
   paintTuning();
-  el.hint.textContent = t('sensitivitySet', {n: Math.round(pos / 10)});
+  // 掴んでいるのは音の大きさの目盛りなので、感度として言うときは裏返す
+  el.hint.textContent = t('sensitivitySet', {n: Math.round((1000 - pos) / 10)});
   queueTuning();
 }
 
@@ -3500,6 +3567,7 @@ el.floatBtn.onclick = async () => {
     paintFloat(false);          // 閉じる最中は window がまだ残っている
     paintFloatAsk();
     fitCanvas();
+    fitMini();                  // 小窓で開いたまま戻ることがある
   });
 };
 
