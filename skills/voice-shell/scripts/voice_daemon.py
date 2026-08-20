@@ -807,21 +807,29 @@ def take_tail(text: str, tails):
 #
 # 名前が付いていない合図は、どの機械のものか決められないので**どれも動かない**。
 # ただし黙って捨てる（別の機械へ言ったものが、こちらの指示として届くと困る）。
-_NAME_SEP = " \t\u3000、,:：のは"
+_NAME_SEP = " \t\u3000、,。．，:：・のはで"
 
 
 def machine_config() -> tuple:
-    """(複数台モードか, この機械の名前) を返す。"""
+    """(複数台モードか, この機械の呼び名) を返す。
+
+    呼び名は読点で区切って何通りでも書ける。「Mac, マック, まっく」のように、
+    認識のたびに綴りが揺れる名前を全部並べておける。
+    """
     cfg = read_config()
-    return bool(cfg.get("multi_machine")), (cfg.get("machine_name") or "").strip()
+    raw = cfg.get("machine_name") or ""
+    names = [n.strip() for n in re.split(r"[,、]", raw) if n.strip()]
+    return bool(cfg.get("multi_machine")), names
 
 
-def _strip_name(text: str, name: str):
-    """頭がこの機械の名前なら、それを外した残りを返す。違えば None。"""
+def _strip_name(text: str, names):
+    """頭がこの機械の呼び名なら、それを外した残りを返す。違えば None。"""
     body = text.strip()
-    if not name or not body.lower().startswith(name.lower()):
-        return None
-    return body[len(name):].lstrip(_NAME_SEP)
+    low = body.lower()
+    for name in sorted(names or [], key=len, reverse=True):
+        if low.startswith(name.lower()):
+            return body[len(name):].lstrip(_NAME_SEP)
+    return None
 
 
 def looks_like_any_command(text: str) -> bool:

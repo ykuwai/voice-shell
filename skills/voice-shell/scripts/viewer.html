@@ -966,8 +966,8 @@ const I18N = {
     voiceCancelled:'Cancelled — nothing was sent',
     grpMulti:'Several machines',
     multiOn:'Require this machine\'s name',
-    machineName:'This machine', machineNamePh:'e.g. work laptop',
-    multiNote:'When two machines listen at once, “mute” stops both. Turn this on and say the name first — “work mute”, “work 2”. Signals meant for other machines are ignored here.',
+    machineName:'Names', machineNamePh:'mac, Mac, マック',
+    multiNote:'When two machines listen at once, “mute” stops both. Turn this on and say the name first — “work mute”, “work 2”. List several names separated by commas: recognition spells the same word differently each time. Signals meant for other machines are ignored here.',
     disconnectTitle:'Stop {name} from listening',
     disconnectAsk:'Stop listening?',
     disconnected:'{name} stopped listening',
@@ -1075,8 +1075,8 @@ const I18N = {
     voiceCancelled:'取り消しました — 送っていません',
     grpMulti:'複数台で使う',
     multiOn:'この機械の名前を付けたときだけ合図を受ける',
-    machineName:'この機械の名前', machineNamePh:'例: 会社用',
-    multiNote:'2台が同時に聞いていると「ミュート」で両方が切れます。入れておくと、名前を頭に付けた合図（「会社用ミュート」「会社用2番」）だけを受けます。他の機械宛ての合図は、こちらでは指示にしません。',
+    machineName:'呼び名', machineNamePh:'例: マック, Mac, まっく',
+    multiNote:'2台が同時に聞いていると「ミュート」で両方が切れます。入れておくと、呼び名を頭に付けた合図（「会社用ミュート」「会社用2番」）だけを受けます。**読点で区切って何通りでも書けます** — 同じ言葉でも認識のたびに綴りが揺れるためです。他の機械宛ての合図は、こちらでは指示にしません。',
     disconnectTitle:'{name} に聞くのをやめさせる',
     disconnectAsk:'解除しますか？',
     disconnected:'{name} が聞くのをやめました',
@@ -1742,9 +1742,9 @@ function paintTinyButtons() {
    いても気づけない）。 */
 function paintMachine() {
   const on = el.multiOn.checked;
-  const nm = el.machineName.value.trim();
-  el.machineTag.hidden = !(on && nm);
-  el.machineTag.textContent = nm;
+  const all = el.machineName.value.split(/[,、]/).map(v => v.trim()).filter(Boolean);
+  el.machineTag.hidden = !(on && all.length);
+  el.machineTag.textContent = all[0] || '';
   el.machineTag.title = t('multiOn');
 }
 function saveMachine() {
