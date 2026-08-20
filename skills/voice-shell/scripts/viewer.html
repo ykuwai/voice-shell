@@ -395,17 +395,6 @@
   }
   @keyframes blink { 50% { opacity:0; } }
   .draft-card.idle .caret { display:none; }
-  /* 読み込み直した直後。ブラウザの決まりで、一度触るまで認識を始められない。
-     黙って待つと、最初の一言を落としたことに気づけない。 */
-  .draft-card.needs-touch {
-    border-color:var(--warn);
-    cursor:pointer;
-  }
-  .draft-card.needs-touch .stream::after {
-    content:attr(data-touch);
-    color:var(--warn); font-size:.82rem;
-  }
-  .draft-card.needs-touch #stream { display:none; }
   /* 「今回だけ直す」を押した状態。送り先は即時のままなので、
      ここの色だけで「この一言は止めてある」と示す。 */
   .draft-card.editing {
@@ -692,7 +681,7 @@
                 data-i18n-title="dropOne"></button>
       </span>
     </div>
-    <div class="stream" data-i18n-touch="needsTouch"><span id="stream" data-i18n-quiet="quiet"></span><span class="caret"></span></div>
+    <div class="stream"><span id="stream" data-i18n-quiet="quiet"></span><span class="caret"></span></div>
     <textarea id="draft" data-i18n-ph="draftPlaceholder" hidden></textarea>
     <div class="draft-actions" id="draftActions" hidden>
       <span class="spacer"></span>
@@ -927,7 +916,7 @@ const I18N = {
     hintNoMic:'No microphone access — the meter still shows the daemon level.',
     modeLive:'Instant', modeHold:'Review',
     unsent:'Unsent', history:'History', quiet:'(silence)',
-    needsTouch:'Click once — the browser will not open the microphone until you do',
+    hintArm:'Press the microphone to start listening',
     routeGone:'“{gone}” ended. Sending to “{next}” now.',
     routeGoneAll:'“{gone}” ended. Sending to everyone now.',
     uiUpdated:'Updated — tap to reload',
@@ -1041,7 +1030,7 @@ const I18N = {
     hintNoMic:'マイクを使えないため、波形はデーモンの音量で動かしています。',
     modeLive:'即時', modeHold:'手直し',
     unsent:'未送信', history:'送信履歴', quiet:'（無音）',
-    needsTouch:'一度クリックしてください — ブラウザの決まりで、触るまでマイクを開けません',
+    hintArm:'マイクを押すと聞き取りを始めます',
     routeGone:'「{gone}」が終了したので、「{next}」に切り替えました。',
     routeGoneAll:'「{gone}」が終了したので、全員に戻しました。',
     uiUpdated:'画面が新しくなりました — 押すと反映',
@@ -1175,7 +1164,6 @@ function applyI18n(root = document) {
   for (const n of root.querySelectorAll('[data-i18n-ph]')) n.placeholder = t(n.dataset.i18nPh);
   // 認識中の枠が空のときに出す文字（CSS から content で読む）
   for (const n of root.querySelectorAll('[data-i18n-quiet]')) n.dataset.quiet = t(n.dataset.i18nQuiet);
-  for (const n of root.querySelectorAll('[data-i18n-touch]')) n.dataset.touch = t(n.dataset.i18nTouch);
   for (const n of root.querySelectorAll('[data-i18n-title]')) {
     n.title = t(n.dataset.i18nTitle);
     n.setAttribute('aria-label', t(n.dataset.i18nTitle));
@@ -1763,7 +1751,8 @@ function paint() {
   setState(off ? 'off' : shown,
            t(off ? 'statusOff' : shown === 'hold' ? 'statusHold' : 'statusLive'));
   if (!oneShot && performance.now() > hintHoldUntil) {
-    el.hint.textContent = t(off ? 'hintOff' : shown === 'hold' ? 'hintHold' : 'hintLive');
+    el.hint.textContent = armPending ? t('hintArm')
+      : t(off ? 'hintOff' : shown === 'hold' ? 'hintHold' : 'hintLive');
   }
   // 手元で作業している間はタブのタイトルだけが手がかりになる
   setTitle(t(off ? 'titleOff' : shown === 'hold' ? 'titleHold' : 'titleLive') + ' — voice-shell');
@@ -2190,8 +2179,10 @@ async function refreshState() {
     el.note.textContent = s.note || '';
     el.note.hidden = !s.note;
 
-    route = s.muted ? 'off' : (s.paused ? 'hold' : 'live');
-    if (route !== 'off') lastMode = route;
+    if (!armPending) {
+      route = s.muted ? 'off' : (s.paused ? 'hold' : 'live');
+      if (route !== 'off') lastMode = route;
+    }
     paint();
 
     // リロードで溜めた分が消えないように復元する（入力中は触らない）
@@ -3090,6 +3081,10 @@ function paintFloatAsk() {
 }
 el.floatAsk.onclick = () => { el.floatAsk.hidden = true; el.floatBtn.click(); };
 
+// ブラウザ認識で、まだ画面に触られていない状態。切って見せているが、
+// サーバ側のミュートは触っていない（押された時点で入るだけ）。
+let armPending = false;
+
 let floating = false;      // requestWindow の応答待ち。連打で二重に開かせない
 
 el.floatBtn.onclick = async () => {
@@ -3368,7 +3363,7 @@ if (canBrowserASR) {
   // キーボードだけで操作する人もいるので、押鍵でも始める。
   const arm = () => {
     vizArmed = true;
-    el.tray.classList.remove('needs-touch');
+    armPending = false;
     if (recWanted) startRecognition();
   };
   addEventListener('pointerdown', arm, {once:true});
@@ -3377,9 +3372,12 @@ if (canBrowserASR) {
 loadEngines().then(() => {
   if (!recWanted) return;
   if (vizArmed) { startRecognition(); return; }
-  // ブラウザの決まりで、一度画面に触るまで認識を始められない。
-  // 何も出さないと「読み込み直したら最初の一言が消えた」になる。
-  el.tray.classList.add('needs-touch');
+  // ブラウザの決まりで、一度画面に触るまでマイクを開けない。「クリックして
+  // ください」と頼む代わりに、切った状態で始める。マイクを押して入れる —
+  // という当たり前の動作が、そのまま「触った」ことになる。
+  armPending = true;
+  route = 'off';
+  paint();
 });
 applyTheme(store.get('theme', 'auto'));
 for (const b of el.langRow.children) b.classList.toggle('on', b.dataset.langChoice === langPref);
