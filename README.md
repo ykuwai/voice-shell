@@ -92,7 +92,7 @@ Claude Code で `/voice-shell` と打つか、「音声モードにして」と�
 
 崩れて聞こえるようなら、辞書に `ミュート回収 → ミュート解除` のように登録すれば拾う。
 
-合図を聞くのは、手元のモデル（Apple / Whisper / Qwen3-ASR）を選んでいるとき。
+合図を聞くのは、手元のモデル（Apple / Whisper）を選んでいるとき。
 切っている間も認識自体は動いていて、聞こえた内容を捨てているだけなので、解除の合図は
 届く。**ブラウザ認識のときは使えない** — 切ると音声そのものを手放す作りにしてあり
 （Google へ送り続けないため）、切った後の合図を聞く方法が無い。画面から戻す。
@@ -106,7 +106,6 @@ Claude Code で `/voice-shell` と打つか、「音声モードにして」と�
 | **このブラウザ**（既定） | Chrome（画面を開いている間だけ） | **Google のサーバ** |
 | Apple のオンデバイス | macOS 26 以降 | この機械の中だけ |
 | Whisper | CPU でも動く。固有名詞に強い | この機械の中だけ |
-| Qwen3-ASR | GPU 約12GB / Apple Silicon | この機械の中だけ |
 
 **手元から音声を出したくない場合は、ブラウザ以外を選ぶ。** 画面のその場にも
 同じ注意書きが出る。
@@ -249,9 +248,7 @@ pip install numpy aiohttp
 | 環境 | 入れるもの |
 |---|---|
 | macOS 26 以降 | 何も要らない（OS 付属の認識を使う） |
-| Windows / CPU のみ | `faster-whisper` |
-| NVIDIA GPU | `vLLM` + Qwen3-ASR |
-| Apple Silicon（macOS 25 以前） | `mlx-qwen3-asr` |
+| それ以外 | `faster-whisper` |
 
 録音には `ffmpeg`（macOS / Windows）または `arecord`（Linux）が要る。
 
@@ -259,7 +256,7 @@ pip install numpy aiohttp
 
 | 場所 | 中身 |
 |---|---|
-| `~/.config/voice-shell/config.json` | 使う認識のやり方 |
+| `~/.config/voice-shell/config.json` | 使う認識のやり方と、Whisper のモデル |
 | `~/.config/voice-shell/tuning.json` | 感度・無音秒数・最小文字数など |
 | `~/.config/voice-shell/dictionary.json` | ユーザー辞書 |
 | ブラウザの localStorage | テーマ・波形・表示言語 |
@@ -297,8 +294,11 @@ skills/voice-shell/
 
 ## 認識できる言語
 
-30言語 + 22中国語方言。`--language` は主に出力形式を固定するもので、認識できる
-言語を制限しない（日本語固定でも英語を話せば英語で返る）。
+どの言語を認識できるかは、選んだやり方で決まる。ブラウザは Chrome が持つ一覧、
+Apple は OS に入っているロケール、Whisper はモデルが対応する言語。
+
+`--language` は主に出力形式を固定するもので、認識できる言語を制限しない
+（日本語固定でも英語を話せば英語で返る）。
 
 ビューアの表示言語は認識する言語とは別で、英語と日本語を持つ。
 
@@ -309,9 +309,8 @@ skills/voice-shell/
 
 ## 参考
 
-- [QwenLM/Qwen3-ASR](https://github.com/QwenLM/Qwen3-ASR)
-- [Qwen/Qwen3-ASR-1.7B (Hugging Face)](https://huggingface.co/Qwen/Qwen3-ASR-1.7B)
 - [Web Speech API (MDN)](https://developer.mozilla.org/docs/Web/API/SpeechRecognition)
+- [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
 
 ## ライセンス
 

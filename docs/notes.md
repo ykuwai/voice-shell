@@ -33,13 +33,14 @@ Windows（Git Bash 上の bash）で動かすと以下がすべて刺さった�
   実際には認識されない。`ffmpeg -list_devices true -f dshow -i dummy` で
   出てくる実際のデバイス名をそのまま `--device audio=<名前>` に渡す必要がある
 
-## macOS は OS 付属の認識を既定にした（Qwen3-ASR は重すぎた）
+## macOS は OS 付属の認識を既定にした
 
 Mac では `--engine apple`（`engine_apple.py`）を既定にしている。macOS 26 の
 `SpeechAnalyzer` / `SpeechTranscriber` を使うので、モデルの追加ダウンロードも
-GPU メモリの確保も要らない。実測（M4 Pro / macOS 26.5.2）で 3.1 秒の日本語音声が
-0.10 秒、句読点まで含めて正しく出た（RTF 0.03）。起動も 0.83 秒で、MLX 版の
-1〜2 分と比べ物にならない。音声はこの Mac の中だけで処理される。
+メモリの確保も要らない。実測（M4 Pro / macOS 26.5.2）で 3.1 秒の日本語音声が
+0.10 秒、句読点まで含めて正しく出た（RTF 0.03）。起動も 0.83 秒で、モデルを
+落として積むやり方の 1〜2 分と比べ物にならない。
+音声はこの Mac の中だけで処理される。
 
 Swift の API しか無いので、`speech_helper.swift` を常駐させて WAV のパスを
 渡し、結果を JSON で受け取る形にした。ヘルパは初回起動時に `swiftc` で
@@ -62,45 +63,21 @@ TCC の許可も `.app` 化も要らず、`swiftc` で作った素の実行フ�
 （この構成は同じ Mac で先に検証した
 [live-dictation](https://github.com/ykuwai/live-dictation) の知見を使っている。）
 
-## macOS 25 以前は MLX 版で動かす（partial も確定も全体を認識し直す）
+## 認識はワーカースレッドに逃がす
 
-`SpeechTranscriber` が使えない Apple Silicon には CUDA も無いので
-[mlx-qwen3-asr](https://github.com/moona3k/mlx-qwen3-asr) を使う
-（`engine_mlx.py`、`--engine mlx`）。vLLM 版と同じ3メソッドを持つ
-アダプタなので、認識ループは共通のまま。
+途中経過をメインループで認識すると、その間マイクを読めず ffmpeg のパイプ
+（約0.7秒分）が溢れて録音を取りこぼす。スレッド化で feed は 15ms 以下に
+なった（メインループで回していたときは毎チャンク約500ms 止まっていた）。
 
-同ライブラリの増分デコード（KV キャッシュ再利用）も試したが、チャンク境界
-ごとに読点が入り語も割れる（実測で「くだ。ください」）。vLLM 版の
-「毎秒すべてを認識し直す」表示と比べて明らかに見劣りするため、
-**partial も確定も、溜めた音声全体の一括認識**にした。1回の認識は
-RTF 約0.31 なので、partial の更新間隔は発話長×0.3 で自然に伸びる
-（5秒の発話なら約1.5秒ごと）。確定も同じだけ待つ。
+## 録音プロセスの後始末は、エンジンによらず要る
 
-partial の認識はワーカースレッドでやる。メインループで認識すると、
-その間マイクを読めず ffmpeg のパイプ（約0.7秒分）が溢れて録音を
-取りこぼす。スレッド化で feed は 15ms 以下になった（増分デコードを
-メインループで回していたときは毎チャンク約500ms 止まっていた）。
+Ctrl-C や kill で親が死ぬと、録音の ffmpeg / arecord がマイクを掴んだまま
+残る。`asr_mic.py` の `_kill_engine_on_exit()` が atexit で自分の子を始末
+する（SIGTERM は既定で atexit を通らないので、sys.exit へ変換している）。
 
-確定文の品質は一括認識のほうが明確に良い（partial で「修復の方針を立案」と
-崩れた 20 秒の発話が、確定では「修正の方針を提案」と正しく出た）。
-
-## vLLM のデフォルト設定では 16GB GPU に載らない
-
-`max_model_len` の既定値 65536 は KV キャッシュに 7GiB 必要で、起動に失敗する
-(`ValueError: To serve at least one request with the models's max seq len...`)。
-本リポジトリは `--max-model-len 16384` を明示して回避している。
-
-公式の `qwen-asr-demo-streaming` CLI はこの値を指定できないため、**そのままでは起動しない**
-（`VLLM_MAX_MODEL_LEN` 環境変数も効かない）。自前のスクリプトを書いた理由がこれ。
-
-## 同時に1つしか起動できない
-
-モデルが約12GB使うため、GPU を使う別の音声プロセスとは同時起動できない。
-`voice-shell.sh start` は起動前に GPU を確認して警告する。
-
-終了時に vLLM のワーカー (`VLLM::EngineCore`) が残って VRAM を掴んだままになる問題は
-`asr_mic.py` の `_kill_engine_on_exit()` で対処済み（Ctrl-C / SIGTERM どちらでも解放）。
-それでも残った場合は `pgrep -f "VLLM::EngineCore" | xargs -r kill -9`。
+**この登録はエンジンの分岐に入る前に置く。** 以前はモデルを積む側の分岐の
+中にあり、モデルを積まない apple では登録を通らず、stop のたびに録音
+プロセスだけが孤児として残り続けていた。
 
 ## マイクは arecord 経由で取得している
 

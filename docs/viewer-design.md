@@ -238,33 +238,14 @@ https://claude.ai/code/artifact/8bb05723-f138-4076-bd9b-de4d6555e907
 
 設定の中身が小さい。狭い板とはいえ、設定は読む画面なので本体より詰めない。
 
-## 浮かせ方は2通りある
+## 浮かせ方
 
-### Chrome の Document Picture-in-Picture（ビューア本体に実装済み）
+Chrome の Document Picture-in-Picture を使う（設定の「手前に浮かせる」ボタン。
+ビューア本体に実装済み）。追加の実行環境が要らず、要素ごと移すので JS の参照が
+生きたまま引っ越せる。Chrome か Edge が要る。
 
-設定の「手前に浮かせる」ボタン。追加の実行環境が要らず、要素ごと移すので JS の参照が
-生きたまま引っ越せる。Chrome / Edge が要る。
-
-### 独立した小窓（`clients/floating-panel.swift`）
-
-ブラウザを開いていなくても使いたい場合。
-
-```sh
-swiftc -O clients/floating-panel.swift -o build/floating-panel
-./build/floating-panel                      # 既定 http://127.0.0.1:8090
-./build/floating-panel http://127.0.0.1:8091
-```
-
-- `NSWindow.level = .floating` で常に手前。Space を移動しても付いてくる
-- Dock に出さない（`.accessory`）。常駐する小窓がアプリ切り替えの列に並ぶと邪魔になる
-- 位置と大きさを憶える（`setFrameAutosaveName`）
-- ビューアがまだ起動していなければ 0.5 秒おきに 20 秒まで静かに待つ
-- **マイクの許可は拒否する**。音量はデーモンの rms を使う設計なので、ここで許可を
-  求めると TCC の帰属が実行ファイルへ移るだけで得るものが無い
-- `.app` にしない。`speech_helper.swift` と同じ素の `swiftc` ビルド
-
-どちらを既定にするかは好みの問題。ブラウザを常用しているなら PiP の方が手軽で、
-「音声入力だけ常駐させたい」なら小窓の方が素直。
+OS 側の小窓（macOS なら `NSWindow.level = .floating`）を別に作る案もあったが、
+実装は残していない。ブラウザを開かずに使いたいという要望が出てから考える。
 
 ## ページ側の音量取得について（訂正）
 
@@ -274,5 +255,5 @@ swiftc -O clients/floating-panel.swift -o build/floating-panel
 LiveKit の調査で分かった失敗の型と同じで、帯域の偏りと包絡線の不在が原因。
 
 **デーモンの rms を主にして、マイクが無くても成立させる。** ページ側の FFT は
-ブラウザで動かしたときだけの付加機能として扱う。上の小窓はマイクを渡さないので、
+ブラウザで動かしたときだけの付加機能として扱う。マイクを渡せない置き方では、
 この経路（`vizFailed → daemonLevel`）が常に使われる。

@@ -3,13 +3,14 @@
 
 Whisper は 30 秒の音声をまとめて処理する作りで、本来ストリーミング向き
 ではない。そこで、溜まった音声を短い間隔で繰り返し認識し直す形にする。
-Qwen3-ASR の streaming_transcribe と同じ顔にしてあるので、asr_mic.py 側は
-どちらのモデルでも同じコードで扱える。
+asr_mic.py が呼ぶ 3 つのメソッド（init_streaming_state /
+streaming_transcribe / finish_streaming_transcribe）を備えているので、
+どのエンジンを選んでも asr_mic.py 側は同じコードで扱える。
 
-Qwen3-ASR との違い（実測とベンチマークより）:
-  - 固有名詞に強い。人名・製品名の取りこぼしが少ない
-  - 文字誤り率そのものは Qwen3-ASR がやや優れる
-  - 騒がしい場所や複数人の声には Whisper のほうが崩れにくい
+Apple のオンデバイス認識との違い（実測より）:
+  - 固有名詞に強い。人名や製品名の取りこぼしが少ない
+  - 騒がしい場所や複数人の声でも崩れにくい
+  - モデルを落として積むので、起動が遅くメモリを使う
 """
 import sys
 
@@ -18,8 +19,8 @@ import numpy as np
 SAMPLE_RATE = 16000
 
 # Whisper は "ja" のような 2 文字コードしか受け付けない。
-# voice-shell は Qwen3-ASR に合わせて "Japanese" と綴りで渡してくるので、
-# ここで直す（そのまま渡すと ValueError で落ちる）。
+# voice-shell はどのエンジンにも "Japanese" と綴りで渡すので、ここで直す
+# （そのまま渡すと ValueError で落ちる）。
 _LANG = {
     "japanese": "ja", "english": "en", "chinese": "zh", "korean": "ko",
     "french": "fr", "german": "de", "spanish": "es", "italian": "it",
@@ -94,10 +95,10 @@ MAX_WINDOW_SEC = 28.0
 
 
 class WhisperState:
-    """発話 1 つ分の途中経過。Qwen3-ASR の ASRStreamingState に相当する。"""
+    """発話 1 つ分の途中経過。"""
 
     def __init__(self, language=None):
-        # 名前は Qwen3-ASR の state に合わせる。asr_mic は発話の長さを
+        # 名前は他のエンジンの state と揃えてある。asr_mic は発話の長さを
         # 測るのにこれを読む（属性が無いとそこで落ちる）。
         self.audio_accum = np.zeros(0, dtype=np.float32)
         self.text = ""
@@ -107,7 +108,7 @@ class WhisperState:
 
 
 class WhisperModel:
-    """faster-whisper を Qwen3-ASR と同じ呼び出し方で使えるようにする。"""
+    """faster-whisper を、他のエンジンと同じ呼び出し方で使えるようにする。"""
 
     def __init__(self, name="large-v3-turbo", device="cuda",
                  compute_type="float16", language=None):
@@ -116,16 +117,15 @@ class WhisperModel:
         print(f"Whisper ({name} / {compute_type}) を読み込んでいます…",
               file=sys.stderr, flush=True)
         self._m = FW(name, device=device, compute_type=compute_type)
-        # None のままにして自動判定させる。voice-shell は Qwen3-ASR の
-        # 都合で --language Japanese を常に渡してくるが、それをそのまま
-        # 効かせると英語が日本語に訳されて届く。言語を固定したいときは
-        # --whisper-language で明示する。
+        # None のままにして自動判定させる。voice-shell は --language Japanese を
+        # 常に渡してくるが、それをそのまま効かせると英語が日本語に訳されて
+        # 届く。言語を固定したいときは --whisper-language で明示する。
         self._lang = _lang_code(language)
 
-    # ── Qwen3-ASR と同じ 3 つ ──────────────────────
+    # ── asr_mic が呼ぶ 3 つ ──────────────────────
 
     def init_streaming_state(self, language=None, **_ignored):
-        """発話の始まり。使わない引数は Qwen3-ASR に合わせて受け流す。"""
+        """発話の始まり。使わない引数は他のエンジンに合わせて受け流す。"""
         return WhisperState(_lang_code(language) or self._lang)
 
     def streaming_transcribe(self, pcm16k, state):
@@ -188,9 +188,9 @@ class WhisperModel:
 def load(args):
     """asr_mic.load_model から呼ばれる。
 
-    --language は見ない。voice-shell は Qwen3-ASR に合わせて常に
-    Japanese を渡してくるが、Whisper でそれを効かせると英語で話した
-    ぶんまで日本語に訳される。固定したいときは --whisper-language。
+    --language は見ない。voice-shell は常に Japanese を渡してくるが、
+    Whisper でそれを効かせると英語で話したぶんまで日本語に訳される。
+    固定したいときは --whisper-language。
     """
     return WhisperModel(
         name=getattr(args, "model", None) or "large-v3-turbo",
