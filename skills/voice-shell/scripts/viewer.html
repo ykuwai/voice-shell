@@ -448,6 +448,15 @@
     box-shadow:0 4px 18px color-mix(in srgb, var(--accent) 45%, transparent);
   }
 
+  /* 引き下がった窓。中身は隠して、戻る道だけ残す。 */
+  .taken {
+    position:fixed; inset:0; z-index:50;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:1rem; padding:2rem; text-align:center;
+    background:var(--bg); color:var(--faint); font-size:.85rem; line-height:1.7;
+  }
+  .taken p { margin:0; max-width:22rem; }
+
   /* 最前面にするには人が押す必要があるので、一度だけ誘う */
   .fresh.ask {
     background:var(--accent-2); color:var(--panel);
@@ -704,6 +713,14 @@
   <button class="fresh" id="fresh" data-icon="auto_awesome" data-icon-size="15"
           data-i18n="uiUpdated" hidden>Updated — tap to reload</button>
 
+  <!-- 同じ画面を2つ開いても見るものは同じで、マイクだけ二重に掴む。
+       後から開いた方を本物にして、こちらは引き下がる。 -->
+  <div class="taken" id="taken" hidden>
+    <p data-i18n="takenOver">This viewer is open in another window.</p>
+    <button class="btn go" id="takeBack" data-icon="picture_in_picture"
+            data-icon-size="17" data-i18n="takeBack">Use this one</button>
+  </div>
+
   <!-- 独立した窓では開けるが、最前面に固定するのは人が押さないと始められない
        （ブラウザの決まり）。一度使ったらもう出さない。 -->
   <button class="fresh ask" id="floatAsk" data-icon="picture_in_picture" data-icon-size="15"
@@ -932,6 +949,8 @@ const I18N = {
     settings:'Settings', back:'Back',
     floatBtn:'Float on top', unfloatBtn:'Back to the tab',
     floatAsk:'Keep this window on top',
+    takenOver:'Opened in another window. Only one viewer runs at a time — this one stepped aside.',
+    takeBack:'Use this window',
     floatFailed:'Could not float the window. Click the button directly and try again.',
     grpInput:'Input', micDevice:'Microphone',
     recogLang:'Recognition language', recogLangAuto:'Auto-detect',
@@ -1044,6 +1063,8 @@ const I18N = {
     settings:'設定', back:'戻る',
     floatBtn:'手前に浮かせる', unfloatBtn:'タブに戻す',
     floatAsk:'この窓を手前に固定する',
+    takenOver:'別の窓で開いています。画面は1つだけ動かす作りなので、こちらは引き下がりました。',
+    takeBack:'この窓で使う',
     floatFailed:'浮かせられませんでした。ボタンを直接押してもう一度お試しください。',
     grpInput:'入力', micDevice:'マイク',
     recogLang:'認識言語', recogLangAuto:'自動判定',
@@ -1170,7 +1191,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'routes','viz','meter','meterHit','meterFill','meterMark','logoMark',
                   'tray','stream','draft','draftTime','draftActions','send','discard',
                   'editOnce','dropOne','draftMark',
-                  'hint','note','log','none','count','copy','fresh','floatAsk',
+                  'hint','note','log','none','count','copy','fresh','floatAsk','taken','takeBack',
                   'mic','recogLang','recogLangField','thresh','threshVal','gaugeFill','gaugeMark',
                   'silence','silenceVal','minChars','minCharsVal','clean',
                   'calibBtn','calibNote',
@@ -3019,6 +3040,36 @@ function paintFloat(on) {
   el.floatBtn.setAttribute('aria-label', el.floatBtn.title);
   el.floatBtn.setAttribute('aria-pressed', String(on));
 }
+
+/* ── 画面は1つだけ ─────────────────────
+   同じ画面を2つ開いても、見えるものは同じでマイクだけ二重に掴む。送信先は
+   画面の中で選べるので、並べて見たい場面も無い。後から開いた方を本物にして、
+   古い方は引き下がる（窓を閉じられるなら閉じる。ブラウザが許さない作りの
+   窓もあるので、そのときは中身を隠して戻る道だけ出す）。 */
+const soleId = Math.random().toString(36).slice(2);
+let soleChannel = null;
+try { soleChannel = new BroadcastChannel('voice-shell-viewer'); } catch {}
+
+function standDown() {
+  el.taken.hidden = false;
+  stopViz();
+  if (typeof stopRecognition === 'function') stopRecognition();
+  recWanted = false;
+  try { window.close(); } catch {}
+}
+
+function claimSole() {
+  el.taken.hidden = true;
+  if (soleChannel) soleChannel.postMessage({claim: soleId});
+}
+
+if (soleChannel) {
+  soleChannel.onmessage = ev => {
+    if (ev.data?.claim && ev.data.claim !== soleId) standDown();
+  };
+}
+el.takeBack.onclick = () => { claimSole(); location.reload(); };
+claimSole();
 
 /* 独立した窓は自動で開けるが、最前面に固定するのは人が押さないと始められない
    （ブラウザの決まり）。窓なのに前に出ない中途半端な状態になるので、一度だけ
