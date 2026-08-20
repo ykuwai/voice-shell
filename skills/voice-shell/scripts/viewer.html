@@ -30,9 +30,12 @@
     /* 窓の大きさで変わる寸法。色と違いテーマでは変えないので、
        ここだけを見れば「どこが縮むのか」が分かる。 */
     --pad:1rem;                            /* 左右の余白 */
-    --viz-h:clamp(72px, 20vh, 124px);      /* マイクの絵の高さ */
-    --viz-pad:.4rem;
+    --viz-h:clamp(78px, 24vh, 116px);      /* マイクの絵の高さ */
+    --viz-pad:.25rem;
     --ring:clamp(44px, 11vh, 64px);        /* 即時 / 手直しの丸 */
+    /* 丸の下にぶら下がるラベルの高さ（gap + 1行）。同じ値を .mode の
+       上の余白にも入れて、丸が箱のちょうど真ん中に来るようにする。 */
+    --mode-label:calc(.5rem + .8rem);
     --stream-max:11em;                     /* 認識中テキストの高さの上限 */
   }
   :root[data-theme="light"] {
@@ -210,7 +213,16 @@
   }
 
   /* ── ビジュアライザ ───────────────────── */
-  .viz { position:relative; padding:var(--viz-pad) 0 .1rem; }
+  /* マイクと丸2つは、いつも横に並べる。縦に積むと、この3つだけで
+     240px 以上を使う。並べれば 130px 前後で収まり、履歴が1件ぶん多く見える。
+     space-evenly を使うのは、間隔を自分で決めないため。丸ごとに幅を分けると
+     （以前の .mode { flex:1 }）、窓が広いほど丸2つの間だけが開いて、
+     マイクとの間隔と食い違う（460px 幅で 54px 対 92px になっていた）。 */
+  .control-row {
+    display:flex; align-items:center; justify-content:space-evenly;
+    padding:.1rem var(--pad) .4rem;
+  }
+  .viz { position:relative; flex:none; width:var(--viz-h); padding:var(--viz-pad) 0; }
   /* 大きなマイクの当たり判定。絵は canvas 側が描くので、ここは透明。 */
   .mic-hit {
     position:absolute; left:50%; top:calc(var(--viz-pad) + var(--viz-h) / 2);
@@ -255,12 +267,14 @@
   .meter-fill.on { background:var(--accent); box-shadow:var(--glow) var(--accent); }
 
   /* ── 送り先（即時 / 手直し） ───────────── */
-  .modes {
-    display:flex; align-items:center; justify-content:center; gap:0;
-    padding:1rem var(--pad) .9rem;
-  }
+  /* 箱を持たせない。持たせるとマイクと「丸2つのまとまり」の2つを並べる
+     ことになり、丸どうしの間隔だけが別勘定になる。 */
+  .modes { display:contents; }
   .mode {
-    flex:1; display:flex; flex-direction:column; align-items:center; gap:.5rem;
+    flex:none; display:flex; flex-direction:column; align-items:center; gap:.5rem;
+    /* 丸の下にラベルがぶら下がる分、上にも同じだけ空ける。こうしないと
+       箱の中心が丸の中心より下にずれ、マイクと 11.5px ずれて並ぶ。 */
+    padding-top:var(--mode-label);
     color:var(--faint); transition:color .18s;
   }
   .mode .ring {
@@ -272,6 +286,8 @@
   }
 
   .mode span { font-size:.8rem; font-weight:600; }
+  /* 行の高さを 1 に固定する。--mode-label と同じ値でないと釣り合わない */
+  .mode span:not(.ring) { line-height:1; }
   /* 中の絵も丸に合わせる。iconSvg が寸法を inline style で付けるので、
      こちらから決め直すには !important が要る。 */
   .mode .ring svg {
@@ -715,7 +731,7 @@
 
   /* 背が低い。履歴の見出しと説明の行を畳んで、縦の余白を詰める */
   @media (max-height: 639px) {
-    :root { --viz-pad:.25rem; --stream-max:6em; }
+    :root { --stream-max:6em; }
     .hint { display:none; }
     .log-head { display:none; }
     .log-wrap { border-top:1px solid var(--line); }   /* 見出しの区切りを引き継ぐ */
@@ -750,7 +766,7 @@
     :root { --stream-max:3em; }
     #draft { min-height:2em; }
     .mode span:not(.ring) { display:none; }   /* 丸の絵で区別がつく */
-    .mode { gap:0; }
+    .mode { gap:0; padding-top:0; }
     .routes { padding-bottom:.35rem; }
     /* 送信先の札は1つずつ行を使う。ここまで低いとそれだけで埋まるので、
        名前は省かずに、ひとまとめの選び方へ替える。 */
@@ -786,21 +802,9 @@
     .draft-card .draft-actions { order:4; flex:1 1 100%; margin-top:0; }
   }
 
-  /* 横に並べ替える。マイクを左に大きく置き、丸2つを右へ。
-     縦に積むと、この2つだけで 200px 以上を使ってしまう。
-     ここは他の段より後に置く（余白の決め方をこちらで上書きするため）。 */
+  /* 背が低いときは、上の帯を名札だけにする。題も波も、いま見る必要がない。
+     （並べ替えはもう段に依らない。いつも横並び） */
   @media (max-height: 559px) {
-    :root {
-      --viz-pad:.25rem;
-      --viz-h:clamp(78px, 26vh, 112px);
-    }
-    .control-row {
-      display:flex; align-items:center; gap:.5rem;
-      padding:0 var(--pad) .1rem;
-    }
-    .viz { flex:none; width:var(--viz-h); padding:var(--viz-pad) 0; }
-    .modes { flex:1; min-width:0; padding:.15rem 0; }
-    /* 上の帯は名札だけでよい。題も波も、いま見る必要がない */
     header { padding:.35rem var(--pad) .25rem; gap:.35rem; }
     .brand h1, #logoMark { display:none; }
     .machine { max-width:100%; }
