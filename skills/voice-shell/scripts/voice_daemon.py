@@ -1500,12 +1500,27 @@ def main():
         # 発話を巻き込まないよう、始まりの時刻と押した時刻を比べる。
         speaking_at = None
         drop_path = log_path.parent / "drop_at"
+        dropping = False        # 画面の「消す」を受けた。確定まで何も出さない
 
         # 読み手（ビューア・Monitor）と食い違わないよう明示する。
         # Windows は指定しないとロケール（cp932）で開いてしまう。
         with open(log_path, "a", buffering=1, encoding="utf-8") as f:
             for ev in asr_mic.stream_utterances(model, args):
                 muted_now = mute_path.exists()
+
+                # 画面の「消す」。押した時点で進行中だった一言を、途中経過ごと
+                # 引っ込める。確定を待ってから消すと、そのあいだ画面に文字が
+                # 出続けて「消えていない」ように見える。
+                if drop_path.exists():
+                    try:
+                        asked = float(drop_path.read_text(encoding="utf-8") or 0)
+                    except (OSError, ValueError):
+                        asked = 0.0
+                    drop_path.unlink(missing_ok=True)
+                    if speaking_at is not None and asked >= speaking_at:
+                        dropping = True
+                        partial_path.write_text("", encoding="utf-8")
+
                 if muted_now and not was_muted:
                     mute_generation += 1      # 切られた
                 was_muted = muted_now
@@ -1534,6 +1549,8 @@ def main():
                         continue
 
                 if ev["type"] == "partial":
+                    if dropping:
+                        continue        # 消した一言の途中経過は出さない
                     # 途中経過は別ファイルに上書き（プロンプトのログは汚さない）
                     partial_path.write_text(ev["text"], encoding="utf-8")
                     continue
@@ -1543,18 +1560,12 @@ def main():
                 partial_path.write_text("", encoding="utf-8")
                 text = ev["text"].strip()
 
-                # 画面の「消す」。押した時点で進行中だった一言だけ落とす。
-                started_at_wall, speaking_at = speaking_at, None
-                if drop_path.exists():
-                    try:
-                        asked = float(drop_path.read_text(encoding="utf-8") or 0)
-                    except (OSError, ValueError):
-                        asked = 0.0
-                    drop_path.unlink(missing_ok=True)
-                    if started_at_wall is not None and asked >= started_at_wall:
-                        print(f"(消した) {text[:40]}", file=sys.stderr, flush=True)
-                        speaking_since = None
-                        continue
+                speaking_at = None
+                if dropping:
+                    dropping = False
+                    print(f"(消した) {text[:40]}", file=sys.stderr, flush=True)
+                    speaking_since = None
+                    continue
 
                 # 辞書は毎回読む。Web UI で直した内容が次の発話から効くようにする。
                 user_dict = load_dictionary()

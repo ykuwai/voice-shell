@@ -2264,8 +2264,17 @@ let dropNextLocal = false;
 el.dropOne.onclick = async () => {
   el.stream.textContent = '';
   el.tray.classList.add('idle');
-  if (asrActive()) dropNextLocal = true;
-  else { try { await post('/api/drop-current'); } catch {} }
+  if (asrActive()) {
+    // 画面から消すだけでは戻ってくる。認識は「そこまでの全文」を途中経過と
+    // して出し続けるので、いまのセッションごと畳んで溜まりを空にする。
+    dropNextLocal = true;
+    const r = rec;
+    rec = null; recRunning = false;
+    if (r) { try { r.abort(); } catch {} }
+    if (recWanted) setTimeout(startRecognition, 120);
+  } else {
+    try { await post('/api/drop-current'); } catch {}
+  }
   say(t('droppedOne'), 4);
   paint();
 };
