@@ -41,12 +41,10 @@ find_python() {
   if [[ -x "$HERE/../../../.venv/Scripts/python.exe" ]]; then
     echo "$HERE/../../../.venv/Scripts/python.exe"; return
   fi
-  # conda / mamba の環境を各所から探す（qwen3-asr は昔の名前）
+  # conda / mamba を使っている人向け。環境の名前はこの道具の名前に揃える。
   for base in "$HOME/miniforge3" "$HOME/miniconda3" "$HOME/anaconda3" \
               "$HOME/mambaforge" "/opt/homebrew/Caskroom/miniforge/base" "/opt/conda"; do
-    for env in qwen3-asr voice-shell; do
-      [[ -x "$base/envs/$env/bin/python" ]] && { echo "$base/envs/$env/bin/python"; return; }
-    done
+    [[ -x "$base/envs/voice-shell/bin/python" ]] && { echo "$base/envs/voice-shell/bin/python"; return; }
   done
   # 見つからなければ、動かすのに足りる python を探す。
   #
@@ -539,7 +537,7 @@ NAMEIT
     echo "$LOG_FILE"
     ;;
   viewer)
-    # ログを追尾するだけのビューア。GPU もマイクも使わないので常駐と共存できる。
+    # ログを追尾するだけのビューア。マイクを使わないので常駐と共存できる。
     [[ "${1:-}" == "--no-gui" ]] && { export VOICE_SHELL_NO_GUI=1; shift; }
     # pgrep が無い環境（Windows/Git Bash 等）ではポートへの応答で代用する。
     viewer_running() {

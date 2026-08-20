@@ -183,8 +183,6 @@ DEFAULT_DICT = {
         "ジャバスクリプト": "JavaScript",
         # このプロジェクト
         "ボイスシェル": "voice-shell",
-        "クエンエーエスアール": "Qwen3-ASR",
-        "クエンASR": "Qwen3-ASR",
     },
 }
 
@@ -517,6 +515,36 @@ def is_noise(text: str, extra=(), allow=()) -> bool:
     # 句読点で分割して、全部が相槌なら捨てる（「はい、はい」「うん、うん。」）
     parts = [p.strip().strip(_TRIM) for p in re.split(r"[、。,.\s]+", core) if p.strip(_TRIM)]
     return bool(parts) and all(p.lower() in words for p in parts)
+
+
+def is_allowed_short(text: str, allow=()) -> bool:
+    """短くても最小文字数で落としてはいけない発話か。
+
+    最小文字数（既定15字）は物音の誤認識を捨てるためのもので、下げると
+    「はい」「うん」まで通り始める。下げずに、**この語だけは通したい**と
+    ユーザーが選んだものだけを通す。
+
+    allow に渡すのは辞書の unignore、つまり組み込みの無視語から本人が
+    外した語。「わかった」「了解」のような、こちらの問いかけへの返事と
+    して実際に言う語がそこに入る。外したのに長さで消えるなら、外せる
+    ようにした意味が無い。
+
+    物音の誤認識は一覧に載っていない語として出てくるので、この抜け道は
+    広がらない。判定は is_noise と同じ形に揃える（記号を落として比べ、
+    「了解、了解」のような繰り返しも同じ扱いにする）。
+    """
+    off = {w.strip().strip(_TRIM).lower() for w in allow}
+    off.discard("")
+    if not off:
+        return False
+    core = text.strip().strip(_TRIM).lower()
+    if not core:
+        return False
+    if core in off:
+        return True
+    parts = [p.strip().strip(_TRIM).lower()
+             for p in re.split(r"[、。,.\s]+", core) if p.strip(_TRIM)]
+    return bool(parts) and all(p in off for p in parts)
 
 
 # ── 声だけでマイクを入切する ──────────────────────
@@ -859,6 +887,7 @@ def parse_args():
     p.add_argument("--min-chars", type=int, default=15,
                    help="この文字数未満の発話は無視する（相槌や雑音よけ）。"
                         "短い発話はほとんどが物音の誤認識なので厚めに切る。"
+                        "ただし辞書で「無視しない」側へ回した語は、短くても通る。"
                         "本当に短く指示したいときはビューアから送る")
     p.add_argument("--keep-noise", action="store_true",
                    help="「はい」「うん」等の相槌も送る（既定では捨てる）")
@@ -1501,7 +1530,11 @@ def main():
                         continue
                     text = body
 
-                if not force_hold and len(text) < args.min_chars:
+                # 短い発話は基本的に捨てるが、辞書で「無視しない」側へ回した
+                # 語だけは通す（「わかった」「了解」のような、意味のある返事）。
+                if not force_hold and len(text) < args.min_chars \
+                        and not is_allowed_short(text,
+                                                 user_dict.get("unignore", ())):
                     continue
 
                 def drop(kind: str):

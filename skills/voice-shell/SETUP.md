@@ -13,8 +13,7 @@ Claude Code が案内するための手順書。まず環境を調べ、**どれ
 
 ```bash
 uname -s -m
-sw_vers -productVersion 2>/dev/null                              # macOS のとき
-nvidia-smi --query-gpu=name,memory.total --format=csv 2>/dev/null
+sw_vers -productVersion 2>/dev/null      # macOS のとき
 ```
 
 | 環境 | 進む節 |
@@ -48,8 +47,8 @@ swiftc --version                         # macOS 26 SDK が見えるか確認
 日本語の音声認識モデルは OS が初回に自動で落としてくる（数十秒）。
 2 回目以降は端末に残るので待ち時間はない。
 
-メモリは OS 側が持つので、この機械では抱えない。起動は 1 秒未満、
-3.5 秒の発話の認識に 0.1 秒ほど（M4 Pro の実測）。
+メモリは OS 側が持つので、こちらでは抱えない。起動は 1 秒未満、
+3.5 秒の発話の認識に 0.1 秒ほど（Apple Silicon での実測）。
 
 **macOS 25 以前には `SpeechTranscriber` が無い。** その場合は B へ進む。
 
@@ -65,7 +64,7 @@ python3 -m venv .venv                    # Python 3.10〜3.13
 .venv/bin/pip install -U faster-whisper aiohttp soxr numpy
 ```
 
-NVIDIA GPU があるなら、そのまま既定で動く。
+`nvidia-smi` で NVIDIA の GPU が見える機械なら、そのまま既定で動く。
 
 ```bash
 voice-shell.sh whisper
@@ -145,6 +144,6 @@ ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh wait-ready
 | `arecord`／`ffmpeg` が無い | 上の「共通」で入れる |
 | 起動が `FAILED` | `voice-shell.sh status` と `daemon.out` の末尾を見る |
 | Whisper が遅い | モデルを小さくする（`--model base`）。CPU なら `--whisper-compute int8` |
-| 喋っても届かない | しきい値が高い。ビューアのメーターを見て `--silence-threshold` を下げる |
-| 物音で勝手に届く | しきい値が低い。上げる |
+| 喋っても届かない | 感度が低い。ビューアのマイクの下の印を、声のときだけバーが超える位置まで上げる |
+| 物音で勝手に届く | 感度が高い。同じ印を下げる |
 | マイクを変えたい | `arecord -L`（Linux）等で一覧を出し `--device` に渡す |
