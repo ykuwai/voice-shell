@@ -32,7 +32,7 @@
     --pad:1rem;                            /* 左右の余白 */
     --viz-h:clamp(72px, 20vh, 124px);      /* マイクの絵の高さ */
     --viz-pad:.4rem;
-    --ring:clamp(42px, 11vh, 64px);        /* 即時 / 手直しの丸 */
+    --ring:clamp(44px, 11vh, 64px);        /* 即時 / 手直しの丸 */
     --stream-max:11em;                     /* 認識中テキストの高さの上限 */
   }
   :root[data-theme="light"] {
@@ -746,7 +746,6 @@
     :root {
       --viz-pad:.25rem;
       --viz-h:clamp(78px, 26vh, 112px);
-      --ring:clamp(46px, 15vh, 60px);
     }
     .control-row {
       display:flex; align-items:center; gap:.5rem;
@@ -1499,6 +1498,11 @@ function fitCanvas() {
   canvas.width = cw * dpr;
   canvas.height = ch * dpr;
   cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  // 幅か高さを書き換えると canvas の中身は消える。ResizeObserver は
+  // requestAnimationFrame の**後**に走るので、次のコマまで待つと空のまま
+  // 1枚描かれる。窓を掴んで動かしている間はそれが毎コマ続いて、
+  // マイクが点滅しながら縮んでいくように見える。ここで描き直す。
+  try { paintFrame(performance.now()); } catch {}
 }
 new ResizeObserver(fitCanvas).observe(canvas);
 
