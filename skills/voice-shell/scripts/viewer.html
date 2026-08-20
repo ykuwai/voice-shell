@@ -711,7 +711,7 @@
     /* 選ばれている札と同じ見た目にする。ここだけ地の色に戻ると、
        いまどこへ届くのかが札のときより弱く見えてしまう。 */
     .route-pick {
-      display:block; width:100%; padding:.32rem .7rem; font-size:.8rem;
+      display:block; width:auto; max-width:100%; padding:.32rem .7rem; font-size:.8rem;
       font-weight:600; border-color:transparent; color:var(--panel);
       background:linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, var(--accent-2)));
     }
@@ -886,11 +886,18 @@
 <!-- ── 設定 ─────────────────────────────── -->
 <section class="sheet" id="sheet" hidden>
  <div class="sheet-inner">
+  <!-- 上の帯に置く。中身を繰っても見えたままなので、辞書が下の方に
+       埋もれて見つからない、が起きない。 -->
   <div class="sheet-head">
     <button class="icon" id="closeSettings" data-icon="arrow_back_ios_new"
             data-icon-size="18" data-i18n-title="back"></button>
-    <h2 data-i18n="settings">Settings</h2>
+    <div class="seg-row" id="sheetTabs">
+      <button id="tabBasic" class="on" data-i18n="settings">Settings</button>
+      <button id="tabDict" data-i18n="grpDict">Dictionary</button>
+    </div>
   </div>
+
+  <div id="paneBasic">
 
   <!-- 入力 -->
   <div class="group">
@@ -915,11 +922,6 @@
       <div class="gauge-mark" id="gaugeMark"></div>
     </div>
     <p class="range-note" data-i18n="sensitivityNote"></p>
-    <div class="btn-row" style="margin-top:.5rem">
-      <button class="btn" id="calibBtn" data-icon="auto_awesome" data-icon-size="17"
-              data-i18n="calibrate">Auto-tune</button>
-    </div>
-    <p class="range-note" id="calibNote" style="margin-top:.5rem"></p>
     <div class="field">
       <label for="silence" data-icon="timer" data-icon-size="17" data-i18n="silence">Pause to send</label>
       <input type="range" id="silence" min="0.5" max="3" step="0.1">
@@ -997,13 +999,26 @@
     <label class="toggle" style="margin-bottom:.5rem">
       <input type="checkbox" id="multiOn"><span data-i18n="multiOn">Require this machine's name</span>
     </label>
-    <div class="field">
+    <div class="field" id="machineNameField" hidden>
       <label for="machineName" data-icon="short_text" data-icon-size="17" data-i18n="machineName">This machine</label>
       <input class="filter" id="machineName" data-i18n-ph="machineNamePh" style="margin:0">
     </div>
     <p class="range-note" data-i18n="multiNote"></p>
   </div>
 
+  <!-- ログ -->
+  <div class="group">
+    <h3 data-icon="list_alt" data-icon-size="16" data-i18n="grpLog">Transcript</h3>
+    <div class="btn-row">
+      <span class="val" style="margin:0"><span id="count">0</span> <span data-i18n="items">items</span></span>
+      <span class="spacer"></span>
+      <button class="btn" id="copy" data-icon="content_copy" data-icon-size="17" data-i18n="copyAll">Copy all</button>
+    </div>
+  </div>
+
+  </div><!-- /paneBasic -->
+
+  <div id="paneDict" hidden>
   <!-- 辞書 -->
   <div class="group">
     <h3 data-icon="menu_book" data-icon-size="16" data-i18n="grpDict">Dictionary</h3>
@@ -1052,15 +1067,7 @@
     <p class="dict-note" id="dictNote"></p>
   </div>
 
-  <!-- ログ -->
-  <div class="group">
-    <h3 data-icon="list_alt" data-icon-size="16" data-i18n="grpLog">Transcript</h3>
-    <div class="btn-row">
-      <span class="val" style="margin:0"><span id="count">0</span> <span data-i18n="items">items</span></span>
-      <span class="spacer"></span>
-      <button class="btn" id="copy" data-icon="content_copy" data-icon-size="17" data-i18n="copyAll">Copy all</button>
-    </div>
-  </div>
+  </div><!-- /paneDict -->
  </div>
 </section>
 <script>
@@ -1144,12 +1151,6 @@ const I18N = {
     asrFailed:'Recognition kept failing, so it was turned off. Check your connection and the microphone.',
     asrSendFailed:'Could not deliver what was recognized ({n}). Say it again.',
     asrDoubled:'Recognition was running twice, so this one was dropped. Switching to the current setting — say it again.',
-    calibrate:'Auto-tune',
-    calibSpeaking:'Keep talking… {n}s',
-    calibQuiet:'Now stay quiet… {n}s',
-    calibNoData:'No level data arrived. Is the daemon running?',
-    calibTooNoisy:'Your voice barely rises above the room. Move the mic closer or raise the input volume, then try again.',
-    calibDone:'Set to {thr} (room {noise} / voice {voice}).',
     remove:'Remove',
     grpLook:'Appearance', theme:'Theme',
     themeAuto:'Auto', themeDark:'Dark', themeLight:'Light',
@@ -1264,12 +1265,6 @@ const I18N = {
     asrFailed:'認識が続けて失敗したので切りました。回線とマイクを確認してください。',
     asrSendFailed:'認識した文を届けられませんでした（{n}）。もう一度お話しください。',
     asrDoubled:'認識が二重に動いていたため、この分は届きませんでした。設定を合わせ直したので、もう一度お話しください。',
-    calibrate:'自動調整',
-    calibSpeaking:'そのまま話し続けてください… あと{n}秒',
-    calibQuiet:'今度は黙っていてください… あと{n}秒',
-    calibNoData:'音量が届きませんでした。認識が動いているか確認してください。',
-    calibTooNoisy:'まわりの音に対して声が小さすぎます。マイクを近づけるか入力音量を上げて、もう一度お試しください。',
-    calibDone:'{thr} にしました（まわり {noise} / 声 {voice}）。',
     remove:'削除',
     grpLook:'見た目', theme:'テーマ',
     themeAuto:'自動', themeDark:'ダーク', themeLight:'ライト',
@@ -1369,15 +1364,15 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'hint','note','log','none','count','copy','fresh','floatAsk','taken','takeBack',
                   'mic','recogLang','recogLangField','thresh','threshVal','gaugeFill','gaugeMark',
                   'silence','silenceVal','minChars','minCharsVal','clean',
-                  'calibBtn','calibNote',
                   'engineGroup','enginePick','engineNote','browserAsrWarn','browserMic','micSettingsLink','asrLang','asrLangField',
                   'idleMute','idleMuteVal','idleMuteField','idleMinsField','idleMuteOn','idleMuteNote',
-                  'themeRow','langRow','multiOn','machineName','machineTag',
+                  'themeRow','langRow','multiOn','machineName','machineNameField','machineTag',
                   'scopePrivate','scopeNote','tabReplace','tabIgnore',
                   'paneReplace','paneIgnore','replaceRows','ignoreRows',
                   'addReplace','addIgnore','newFrom','newTo','newIgnore','filterReplace',
                   'builtinChips','builtinCount',
-                  'dictSave','dictNote','dictExport','dictImport','dictFile'])
+                  'dictSave','dictNote','dictExport','dictImport','dictFile',
+                  'paneBasic','paneDict','tabBasic','tabDict'])
   el[id] = $(id);
 
 const post = (path, body) =>
@@ -1974,6 +1969,7 @@ function paintTinyButtons() {
 function paintMachine() {
   const on = el.multiOn.checked;
   const all = el.machineName.value.split(/[,、]/).map(v => v.trim()).filter(Boolean);
+  el.machineNameField.hidden = !on;      // 使わない設定は置かない
   el.machineTag.hidden = !(on && all.length);
   el.machineTag.textContent = all[0] || '';
   el.machineTag.title = t('multiOn');
@@ -2168,7 +2164,6 @@ function connect() {
       daemonLevel = m.level; daemonSpeaking = m.speaking;
       el.meterFill.classList.toggle('on', m.speaking);
       paintGauge();
-      onCalibSample(m.level);
       return;      // 下の else まで落とすと、発話として扱われて壊れる
     }
     if ('muted' in m) {
@@ -2528,8 +2523,24 @@ el.copy.onclick = async ev => {
 };
 
 /* ── 設定 ───────────────────────────────── */
+/* 設定と辞書を分ける。ひと繋ぎだと 1400px を超えて、辞書は下端に埋もれる
+   （画面より高いので、繰らないと存在に気づけない）。上の帯は貼り付いたまま
+   なので、開いた瞬間に辞書があることが見える。 */
+function showSheetTab(which) {
+  const basic = which !== 'dict';
+  el.paneBasic.hidden = !basic;
+  el.paneDict.hidden = basic;
+  el.tabBasic.classList.toggle('on', basic);
+  el.tabDict.classList.toggle('on', !basic);
+  el.sheet.scrollTop = 0;                 // 前に見ていた位置を持ち込まない
+  store.set('sheetTab', basic ? 'basic' : 'dict');
+}
+el.tabBasic.onclick = () => showSheetTab('basic');
+el.tabDict.onclick = () => showSheetTab('dict');
+
 el.openSettings.onclick = async () => {
   el.sheet.hidden = false;
+  showSheetTab(store.get('sheetTab', 'basic'));
   await Promise.all([loadMics(), loadLangs(), loadTuning(), loadDict()]);
   el.dictNote.textContent = '';
 };
@@ -2717,79 +2728,6 @@ el.idleMuteOn.onchange = () => {
 };
 el.idleMute.oninput = () => { tuning.idle_mute_min = Number(el.idleMute.value); paintIdleMute(); queueTuning(); };
 
-/* ── 自動調整 ───────────────────────────
-   まわりが騒がしいと、既定のしきい値では声が一度も超えず
-   「喋っているのに何も送られない」状態になる。何 dB という話を
-   させたくないので、喋ってもらって黙ってもらい、その差から決める。
-
-   判定にはデーモンが出す RMS を使う（しきい値と同じ物差しでないと意味がない）。 */
-const CALIB = {speak: 6000, quiet: 4000};   // ミリ秒
-let calib = null;
-
-function onCalibSample(level) {
-  if (!calib) return;
-  calib.samples.push(level);
-}
-
-const pct = (arr, p) => {
-  if (!arr.length) return 0;
-  const s = [...arr].sort((a, b) => a - b);
-  return s[Math.min(s.length - 1, Math.floor(s.length * p))];
-};
-
-function calibSay(msg) { el.calibNote.textContent = msg; }
-
-async function runCalibration() {
-  if (calib) return;
-  const wasRoute = route;
-  if (route === 'off') await setRoute(lastMode);   // 切ったままでは音量が来ない
-
-  el.calibBtn.disabled = true;
-  el.calibBtn.classList.add('busy');
-
-  const phase = async (ms, label) => {
-    calib = {samples: []};
-    const started = Date.now();
-    while (Date.now() - started < ms) {
-      calibSay(label.replace('{n}', Math.ceil((ms - (Date.now() - started)) / 1000)));
-      await new Promise(r => setTimeout(r, 200));
-    }
-    const s = calib.samples;
-    calib = null;
-    return s;
-  };
-
-  const speech = await phase(CALIB.speak, t('calibSpeaking'));
-  const quiet  = await phase(CALIB.quiet, t('calibQuiet'));
-
-  el.calibBtn.disabled = false;
-  el.calibBtn.classList.remove('busy');
-
-  // 声は上澄み（本当に喋っていた部分）、雑音は上端（たまの物音まで含めて）を見る
-  const voice = pct(speech, 0.80);
-  const noise = pct(quiet, 0.95);
-
-  if (!speech.length || !quiet.length) { calibSay(t('calibNoData')); return; }
-
-  // 声が雑音に埋もれている。しきい値をどこに置いても誤爆するので直させる。
-  if (voice < noise * 1.8) { calibSay(t('calibTooNoisy')); return; }
-
-  // 雑音と声の相乗平均。ただし雑音のすぐ上には置かない。
-  const want = Math.max(noise * 2.5, Math.sqrt(noise * voice));
-  tuning.silence_threshold =
-    Math.min(threshHi, Math.max(threshLo, Math.round(want * 1000) / 1000));
-
-  paintTuning();
-  await putJSON('/api/tuning', tuning);
-  calibSay(t('calibDone', {
-    noise: Math.round(threshToPos(noise) / 10),
-    voice: Math.round(threshToPos(voice) / 10),
-    thr: Math.round(threshToPos(tuning.silence_threshold) / 10),
-  }));
-  if (wasRoute === 'off') setRoute('off');
-}
-
-el.calibBtn.onclick = runCalibration;
 
 /* メーターの印をつまんで感度を変える。
    設定を開かずに済むほうが早いので、本画面からも触れるようにする。
