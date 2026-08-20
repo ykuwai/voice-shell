@@ -854,6 +854,72 @@ def looks_like_other_command(text: str) -> bool:
                for i in range(min(len(t), 11)))
 
 
+def apply_voice_command(text: str, log_path, muted: bool, user_dict=None):
+    """発話が合図なら実行して、その種類を返す。合図でなければ None。
+
+    デーモン（手元のモデル）とビューア（ブラウザ認識）の両方がここを通る。
+    片方にしか無いと、認識のやり方によって効いたり効かなかったりする。
+    """
+    log_path = Path(log_path)
+    d = log_path.parent
+    mute_path = d / MUTE_FILE.name
+    pause_path = d / PAUSE_FILE.name
+    if user_dict is None:
+        user_dict = load_dictionary()
+
+    # 何台かで同時に使っているときは、この機械の呼び名が頭に付いたものだけ。
+    multi, names = machine_config()
+    cmd_text = text
+    if multi:
+        named = _strip_name(text, names)
+        if named is not None:
+            cmd_text = named
+        elif looks_like_other_command(text):
+            return "other_machine"       # 別の機械へ言ったもの。黙って捨てる
+        else:
+            cmd_text = ""                # 呼び名が無い合図はどれも動かさない
+    if not cmd_text:
+        return None
+
+    # 辞書を通した形でも見る。崩れて聞こえる語は
+    # 「ミュート回収 → ミュート解除」のように登録すれば拾える。
+    fixed = apply_replacements(cmd_text, user_dict["replace"])
+
+    cmd = voice_command(cmd_text, muted) or voice_command(fixed, muted)
+    if cmd:
+        if cmd == "mute":
+            mute_path.touch()
+        else:
+            mute_path.unlink(missing_ok=True)
+        note_voice_cmd(log_path, cmd, "", text)
+        return cmd
+
+    mode = mode_command(cmd_text)
+    if mode:
+        if mode == "hold":
+            pause_path.touch()
+        else:
+            pause_path.unlink(missing_ok=True)
+        note_voice_cmd(log_path, "mode_" + mode, "", text)
+        return "mode_" + mode
+
+    # 送信先。聞き手が1つなら選ぶ相手がいないので合図にしない
+    # （番号で答えただけの「2番」を食わないため）。
+    n = route_command(cmd_text) or route_command(fixed)
+    if n:
+        live = list_active_listeners(log_path)
+        if len(live) > 1:
+            if 1 <= n <= len(live):
+                write_atomic(route_file(log_path), str(live[n - 1]["pid"]))
+                note_voice_cmd(log_path, "route",
+                               f"{n}. {live[n - 1]['label']}", text)
+                return "route"
+            # 無い番号。黙って捨てると「言ったのに変わらない」になる。
+            note_voice_cmd(log_path, "route_missing", str(n), text)
+            return "route_missing"
+    return None
+
+
 def note_voice_cmd(log_path, kind: str, label: str = "", said: str = "") -> None:
     """声の合図に何が起きたかを画面へ渡す。
 
@@ -1479,77 +1545,14 @@ def main():
                 # 辞書は毎回読む。Web UI で直した内容が次の発話から効くようにする。
                 user_dict = load_dictionary()
 
-                # 何台かで同時に使っているときは、機械の名前が頭に付いた
-                # ものだけを自分宛ての合図とみなす。
-                multi, my_name = machine_config()
-                cmd_text = text
-                if multi:
-                    named = _strip_name(text, my_name)
-                    if named is not None:
-                        cmd_text = named            # この機械宛て
-                    elif looks_like_other_command(text):
-                        # 別の機械へ言ったもの。こちらの指示として届くと困る
-                        # ので黙って捨てる。
-                        print(f"(他の機械宛て) {text[:40]}",
-                              file=sys.stderr, flush=True)
-                        speaking_since = None
-                        continue
-                    else:
-                        cmd_text = ""               # 合図としては見ない
-
-                # 声だけの入切。合図はどれも短いので、最小文字数より前に見る。
-                # 辞書を通した形でも見るため、崩れて聞こえる語は
-                # 「ミュート回収 → ミュート解除」のように登録すれば拾える。
-                cmd = cmd_text and (
-                    voice_command(cmd_text, muted_now) or voice_command(
-                        apply_replacements(cmd_text, user_dict["replace"]),
-                        muted_now))
-                if cmd:
-                    if cmd == "mute":
-                        mute_path.touch()
-                    else:
-                        mute_path.unlink(missing_ok=True)
-                    note_voice_cmd(log_path, cmd)
-                    print(f"(声で{'切' if cmd == 'mute' else '入'}) {text[:40]}",
-                          file=sys.stderr, flush=True)
+                # 声だけの合図（入切・送り方・送信先）。合図はどれも短いので、
+                # 最小文字数や相槌の判定より前に見る。
+                kind = apply_voice_command(text, log_path, muted_now, user_dict)
+                if kind:
+                    print(f"(合図 {kind}) {text[:40]}", file=sys.stderr, flush=True)
                     # 合図そのものは発話ではないので送らない。was_muted は
                     # 触らない — 次の周回の頭で数え直させる（ここで先回りすると
                     # 世代が上がらず、切る前に始まった発話を落とせなくなる）。
-                    speaking_since = None
-                    continue
-
-                # 送り方（即時 / 手直し）も声で切り替える。
-                mode = cmd_text and mode_command(cmd_text)
-                if mode:
-                    if mode == "hold":
-                        pause_path.touch()
-                    else:
-                        pause_path.unlink(missing_ok=True)
-                    note_voice_cmd(log_path, "mode_" + mode, "", text)
-                    print(f"(声で{mode}) {text[:40]}", file=sys.stderr, flush=True)
-                    speaking_since = None
-                    continue
-
-                # 送信先も声で選ぶ。番号は画面に並ぶ順（「すべて」を除いた1番目から）。
-                # 切っている間も効かせる — どのみち短い語は聞いているので、
-                # 切ったまま次の相手を決めておける（解除するまで何も届かない）。
-                # 辞書を通した形でも見る（ミュートの合図と揃える）。
-                n = cmd_text and (route_command(cmd_text) or route_command(
-                    apply_replacements(cmd_text, user_dict["replace"])))
-                live = list_active_listeners(log_path) if n else []
-                # 聞き手が1つなら選ぶ相手がいない。ここで抜けないと、番号で
-                # 答えただけの「2番」まで合図として消えてしまう。
-                if n and len(live) > 1:
-                    if 1 <= n <= len(live):
-                        write_atomic(route_file(log_path),
-                                     str(live[n - 1]["pid"]))
-                        note_voice_cmd(log_path, "route",
-                                       f"{n}. {live[n - 1]['label']}", text)
-                    else:
-                        # 無い番号。黙って捨てると「言ったのに変わらない」に
-                        # なるので、画面に出して知らせる。
-                        note_voice_cmd(log_path, "route_missing", str(n), text)
-                    print(f"(声で送信先) {text[:40]}", file=sys.stderr, flush=True)
                     speaking_since = None
                     continue
 

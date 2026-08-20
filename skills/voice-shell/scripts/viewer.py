@@ -640,9 +640,31 @@ async def main_async(args):
         if engine_running():
             return web.json_response({"dropped": "daemon_running"}, status=409)
 
+        user_dict = vd.load_dictionary()
+
+        # 声だけの合図。デーモンと同じ関数を通すので、認識のやり方が変わっても
+        # 効き方は同じ（ただしブラウザ認識は切ると音声そのものを手放すので、
+        # 切ったあとの「ミュート解除」だけは聞けない）。
+        kind = vd.apply_voice_command(text, args.log_file,
+                                      mute_file.exists(), user_dict)
+        if kind:
+            return web.json_response({"command": kind})
+
         # マイクを切っているあいだは、どこにも残さない（デーモンと同じ扱い）
         if mute_file.exists():
             return web.json_response({"dropped": "muted"})
+
+        # 終わりの「キャンセル」「手直し」も同じ扱いにする
+        if vd.take_tail(text, vd.CANCEL_TAIL) is not None:
+            vd.note_voice_cmd(args.log_file, "cancelled", "", text)
+            return web.json_response({"dropped": "cancelled"})
+        body_text = vd.take_tail(text, vd.HOLD_TAIL)
+        force_hold = body_text is not None
+        if force_hold:
+            if not body_text:
+                vd.note_voice_cmd(args.log_file, "cancelled", "", text)
+                return web.json_response({"dropped": "cancelled"})
+            text = body_text
 
         try:
             tuning = json.loads(TUNING_FILE.read_text(encoding="utf-8"))
@@ -653,21 +675,23 @@ async def main_async(args):
         # polish は辞書の言い換えで文字数が変わるので、順序が違うと
         # 同じ発話でも認識のやり方によって届く／届かないが変わる。
         min_chars = tuning.get("min_chars", 15)
-        if isinstance(min_chars, (int, float)) and len(text) < int(min_chars):
+        if not force_hold and isinstance(min_chars, (int, float)) \
+                and len(text) < int(min_chars):
             return web.json_response({"dropped": "too_short"})
 
-        user_dict = vd.load_dictionary()
-        if vd.is_noise(text, user_dict["ignore"]):
+        if not force_hold and vd.is_noise(text, user_dict["ignore"]):
             return web.json_response({"dropped": "noise"})
 
         text = vd.polish(text, user_dict, False,
                          bool(tuning.get("strip_fillers")))
 
         stamp = time.strftime("%H:%M:%S")
-        if pause_file.exists():
+        if force_hold or pause_file.exists():
             with open(hold_file, "a", encoding="utf-8") as h:
                 h.write(json.dumps({"time": stamp, "text": text},
                                    ensure_ascii=False) + "\n")
+            if force_hold:
+                vd.note_voice_cmd(args.log_file, "held", "", text)
             return web.json_response({"held": text})
 
         # 宛先はデーモンと同じ決め方で付ける（ブラウザ認識も同じ扱い）
