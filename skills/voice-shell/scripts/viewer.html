@@ -2390,8 +2390,9 @@ async function editThisOne() {
   oneShot = true;
   await setRoute('hold');
   el.hint.textContent = t('hintOnce');
-  // 窓が小さいと、開いた欄と送るボタンが下にはみ出すことがある
-  el.tray.scrollIntoView({block: 'nearest'});
+  // ウィンドウが小さいと、開いた欄と送るボタンが下にはみ出す。
+  // 'nearest' だと足りない分しか動かず、送るボタンが折り返しに残る。
+  el.tray.scrollIntoView({block: 'end'});
 }
 
 el.editOnce.onclick = editThisOne;
