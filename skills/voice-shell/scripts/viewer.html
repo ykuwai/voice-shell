@@ -1742,6 +1742,28 @@ function currentBands() {
   }
   return smooth;
 }
+
+/* マイクの塗りにも同じ緩和を掛ける。素の値は 0.1 秒ごとにしか変わらない
+   （asr_mic.py が 0.1 秒ぶんずつ測り、viewer.py が 0.1 秒おきに流す）のに
+   描くのは毎コマなので、ひとつの値が 6 コマ居座って 7 コマ目で跳ぶ。棒は
+   48 本が互いに均し合うのでこの段差が消えるが、マイクは1つなので跳びが
+   そのままカタカタと見える。
+   上がりは 0.045 秒。次の値が届くころには 9 割方追いついているので、
+   0.1 秒ぶんの段が一本の坂になる。喋り出しが鈍って見えることはない。
+   下がりは 0.15 秒。棒と同じで、下がるときだけゆっくりにする。
+   係数ではなく秒で持つのは、120Hz の画面で倍の速さで追従しないため。 */
+const MIC_RISE = 0.045, MIC_FALL = 0.15;
+let micLevel = 0, micAt = 0;
+function stepMicLevel(now) {
+  const raw = amplitudeNow();
+  // 裏に回っている間はコマが来ない。空いた時間をそのまま使うと戻った瞬間に
+  // 一気に跳ぶので頭を抑える。fitCanvas からも呼ばれて時計の刻みが前後する
+  // ことがあるので、負にもならないようにする（符号が反転して発散する）。
+  const dt = micAt ? Math.min(Math.max((now - micAt) / 1000, 0), 0.1) : 0.1;
+  micAt = now;
+  micLevel += (raw - micLevel) * (1 - Math.exp(-dt / (raw > micLevel ? MIC_RISE : MIC_FALL)));
+  return micLevel;
+}
 // Material Symbols のパスをそのまま塗る。canvas に置くので Path2D にして
 // 使い回す（毎コマ作り直すと確保と破棄だけで重くなる）。
 const _micPaths = {};
@@ -1764,7 +1786,7 @@ function drawMic() {
   const midX = cw / 2, midY = ch / 2;
   const size = ch * 0.62;            // マイクの絵の高さ
   const ring = ch * 0.40;            // 囲みの輪の半径
-  const lv = amplitudeNow();
+  const lv = micLevel;               // 緩和した値。素の値だと段を踏んで動く
   const off = route === 'off';
 
   if (off) {
@@ -1825,6 +1847,7 @@ function paintFrame(now) {
   if (dead) smooth.fill(0);
   const bands = dead ? smooth : currentBands();
 
+  stepMicLevel(now);
   drawMic();
 
   // ロゴの波も同じ値で動かす（小さくしたときの手がかり）
@@ -2748,8 +2771,9 @@ function paintGauge() {
   // 本画面の細いメーターにも同じ目盛りで出す
   el.meterFill.style.width = lvl + '%';
   el.meterMark.style.left = mark + '%';
-  // マイクのボタン自体も、拾えている音量ぶんだけ下から満ちる
-  el.segOff.style.setProperty('--lv', Math.round(amplitudeNow() * 100) + '%');
+  // マイクのボタン自体も、拾えている音量ぶんだけ下から満ちる。
+  // 絵と同じ緩和した値を使う（別々に取ると同じ音で違う高さになる）。
+  el.segOff.style.setProperty('--lv', Math.round(micLevel * 100) + '%');
 }
 
 async function loadTuning() {
