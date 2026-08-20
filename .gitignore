@@ -11,3 +11,6 @@ sample_*.flac
 
 # swiftc の出力
 build/
+
+# 開発中の覚え書き。手元には残すが GitHub には出さない
+docs/

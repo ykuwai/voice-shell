@@ -81,8 +81,6 @@ voice-shell.sh engines                         # 選べる認識のやり方
 |---|---|
 | [SETUP.md](skills/voice-shell/SETUP.md) | 環境ごとの入れ方と、つまずいたときの対処 |
 | [SKILL.md](skills/voice-shell/SKILL.md) | エージェントが読む手順。細かい振る舞いはここ |
-| [docs/notes.md](docs/notes.md) | 作る過程で分かったこと。使うだけなら読まなくてよい |
-| [docs/viewer-design.md](docs/viewer-design.md) | 画面をそう決めた理由 |
 
 ## 参考
 
