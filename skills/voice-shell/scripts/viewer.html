@@ -927,7 +927,7 @@ const I18N = {
     hintNoMic:'No microphone access — the meter still shows the daemon level.',
     modeLive:'Instant', modeHold:'Review',
     unsent:'Unsent', history:'History', quiet:'(silence)',
-    needsTouch:'Click here to start listening',
+    needsTouch:'Click once — the browser will not open the microphone until you do',
     routeGone:'“{gone}” ended. Sending to “{next}” now.',
     routeGoneAll:'“{gone}” ended. Sending to everyone now.',
     uiUpdated:'Updated — tap to reload',
@@ -1041,7 +1041,7 @@ const I18N = {
     hintNoMic:'マイクを使えないため、波形はデーモンの音量で動かしています。',
     modeLive:'即時', modeHold:'手直し',
     unsent:'未送信', history:'送信履歴', quiet:'（無音）',
-    needsTouch:'ここを一度クリックすると認識が始まります',
+    needsTouch:'一度クリックしてください — ブラウザの決まりで、触るまでマイクを開けません',
     routeGone:'「{gone}」が終了したので、「{next}」に切り替えました。',
     routeGoneAll:'「{gone}」が終了したので、全員に戻しました。',
     uiUpdated:'画面が新しくなりました — 押すと反映',
@@ -3355,10 +3355,7 @@ if (canBrowserASR) {
   // 何を使うかはサーバが覚えている（loadEngines が読んで反映する）。
   // ここでは画面を組み立てるだけにする。
   paintBrowserAsr();
-  // 認識はマイクの許可が要るので、最初に触られた時点で始める
-  // 認識はマイクの許可が要るので、最初に触られた時点で始める。
-  // キーボードだけで操作する人もいるので、押鍵でも始める。
-  // 認識はマイクの許可が要るので、最初に触られた時点で始める。
+  // ブラウザの決まりで、一度触るまでマイクを開けない。触られた時点で始める。
   // キーボードだけで操作する人もいるので、押鍵でも始める。
   const arm = () => {
     vizArmed = true;
