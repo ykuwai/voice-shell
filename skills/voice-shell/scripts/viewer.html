@@ -951,9 +951,12 @@
       <span data-i18n="browserMicNote"></span>
       <button class="link" id="micSettingsLink">chrome://settings/content/microphone</button>
     </p>
-    <div class="field" id="idleMuteField" hidden>
-      <label for="idleMute" data-icon="timer" data-icon-size="17" data-i18n="idleMute">Turn off when idle</label>
-      <input type="range" id="idleMute" min="0" max="30" step="1">
+    <label class="toggle" id="idleMuteField" style="margin-top:.7rem" hidden>
+      <input type="checkbox" id="idleMuteOn"><span data-i18n="idleMute">Turn off when idle</span>
+    </label>
+    <div class="field" id="idleMinsField" style="margin-top:.6rem" hidden>
+      <label for="idleMute" data-icon="timer" data-icon-size="17" data-i18n="idleAfter">Silence before it turns off</label>
+      <input type="range" id="idleMute" min="1" max="30" step="1">
       <span class="val" id="idleMuteVal"></span>
     </div>
     <p class="range-note" id="idleMuteNote" data-i18n="idleMuteNote" hidden></p>
@@ -1132,9 +1135,9 @@ const I18N = {
     copied:'Copied',
     browserAsrWarn:'Audio is sent to Google servers for recognition. Keep this off if everything must stay on this machine — use the daemon instead.',
     idleMute:'Turn off when idle',
-    idleMuteNote:'With no speech for this long, the microphone turns itself off — the browser keeps reconnecting to Google otherwise. Press the mic to start again. 0 leaves it on.',
+    idleAfter:'Silence before it turns off',
+    idleMuteNote:'Left alone, the browser keeps reconnecting to Google. Turn this on and the microphone switches itself off once nobody has spoken for a while. Press the mic to start again.',
     idleMuted:'No speech for {n} min, so the microphone is off. Press it to start again.',
-    idleNever:'never',
     minutesShort:'{n} min',
     asrLang:'Spoken language',
     asrDenied:'Microphone access was refused, so recognition could not start.',
@@ -1252,9 +1255,9 @@ const I18N = {
     copied:'コピーしました',
     browserAsrWarn:'音声は認識のため Google のサーバへ送られます。ローカルだけで完結させたい場合は、ほかの認識に切り替えてください。',
     idleMute:'話さないと切る',
-    idleMuteNote:'これだけ声が無いと、マイクを自分で切ります。放っておくとブラウザが Google へ繋ぎ直し続けるためです。マイクを押せば戻ります。0 で切りません。',
+    idleAfter:'切るまでの無音',
+    idleMuteNote:'放っておくとブラウザが Google へ繋ぎ直し続けます。入れておくと、しばらく誰も喋らないところでマイクを自分で切ります。マイクを押せば戻ります。',
     idleMuted:'{n}分 声が無かったので、マイクを切りました。押すと戻ります。',
-    idleNever:'切らない',
     minutesShort:'{n}分',
     asrLang:'話す言語',
     asrDenied:'マイクの使用が許可されなかったため、認識を始められませんでした。',
@@ -1368,7 +1371,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'silence','silenceVal','minChars','minCharsVal','clean',
                   'calibBtn','calibNote',
                   'engineGroup','enginePick','engineNote','browserAsrWarn','browserMic','micSettingsLink','asrLang','asrLangField',
-                  'idleMute','idleMuteVal','idleMuteField','idleMuteNote',
+                  'idleMute','idleMuteVal','idleMuteField','idleMinsField','idleMuteOn','idleMuteNote',
                   'themeRow','langRow','multiOn','machineName','machineTag',
                   'scopePrivate','scopeNote','tabReplace','tabIgnore',
                   'paneReplace','paneIgnore','replaceRows','ignoreRows',
@@ -2627,9 +2630,7 @@ function paintTuning() {
   el.silenceVal.textContent = Number(tuning.silence_duration).toFixed(1) + 's';
   el.minCharsVal.textContent = tuning.min_chars;
   el.clean.checked = !!tuning.strip_fillers;
-  const idle = Number(tuning.idle_mute_min) || 0;
-  el.idleMute.value = idle;
-  el.idleMuteVal.textContent = idle ? t('minutesShort', {n: idle}) : t('idleNever');
+  paintIdleMute();
   paintGauge();
 }
 
@@ -2655,8 +2656,7 @@ async function loadTuning() {
     for (const [k, v] of Object.entries(d.tuning || {})) if (v != null) tuning[k] = v;
     for (const [k, r] of Object.entries(d.range || {})) {
       if (k === 'silence_threshold') { threshLo = r.min; threshHi = r.max; continue; }
-      const node = {silence_duration: el.silence, min_chars: el.minChars,
-                    idle_mute_min: el.idleMute}[k];
+      const node = {silence_duration: el.silence, min_chars: el.minChars}[k];
       if (node) { node.min = r.min; node.max = r.max; }
     }
     paintTuning();
@@ -2679,7 +2679,21 @@ el.thresh.oninput = () => {
 };
 el.silence.oninput = () => { tuning.silence_duration = Number(el.silence.value); paintTuning(); queueTuning(); };
 el.minChars.oninput = () => { tuning.min_chars = Number(el.minChars.value); paintTuning(); queueTuning(); };
-el.idleMute.oninput = () => { tuning.idle_mute_min = Number(el.idleMute.value); paintTuning(); queueTuning(); };
+/* 入切と長さを分ける。0 に「切らない」の意味を持たせると、つまみを
+   端まで動かした人が何を選んだのか分からない。 */
+function paintIdleMute() {
+  const idle = Number(tuning.idle_mute_min) || 0;
+  el.idleMuteOn.checked = idle > 0;
+  if (idle > 0) el.idleMute.value = idle;
+  else if (!el.idleMute.value || el.idleMute.value === '0') el.idleMute.value = 5;
+  el.idleMuteVal.textContent = t('minutesShort', {n: el.idleMute.value});
+  el.idleMinsField.hidden = el.idleMuteField.hidden || idle <= 0;
+}
+el.idleMuteOn.onchange = () => {
+  tuning.idle_mute_min = el.idleMuteOn.checked ? (Number(el.idleMute.value) || 5) : 0;
+  paintIdleMute(); queueTuning();
+};
+el.idleMute.oninput = () => { tuning.idle_mute_min = Number(el.idleMute.value); paintIdleMute(); queueTuning(); };
 
 /* ── 自動調整 ───────────────────────────
    まわりが騒がしいと、既定のしきい値では声が一度も超えず
@@ -3174,6 +3188,7 @@ function paintBrowserAsr() {
   el.asrLangField.hidden = !asrChosen;
   el.idleMuteField.hidden = !asrChosen;
   el.idleMuteNote.hidden = !asrChosen;
+  paintIdleMute();
   el.engineNote.textContent = t(asrChosen ? 'browserAsrNote' : 'localAsrNote');
   // 電源はローカルのモデルを積み下ろしするためのもの。
   // ブラウザで認識している間は積むものが無いので、出す意味がない。
