@@ -1775,14 +1775,22 @@ function paintMachine() {
   el.machineTag.textContent = all[0] || '';
   el.machineTag.title = t('multiOn');
 }
+/* 打っている最中は、サーバの値で上書きしない。3秒ごとの取り直しが
+   書きかけを消してしまう（浮かせた小窓では document.activeElement が
+   別の document を指すので、焦点で見分ける手も効かない）。
+   読み取りは離れたときだけ。 */
+let machineDirty = false;
+
 function saveMachine() {
+  machineDirty = false;
   paintMachine();
   putJSON('/api/machine', {multi: el.multiOn.checked, name: el.machineName.value.trim()})
-    .catch(() => {});
+    .catch(() => { machineDirty = true; });   // 書けなかったら書きかけのまま守る
 }
 el.multiOn.onchange = saveMachine;
-el.machineName.onchange = saveMachine;
-el.machineName.oninput = paintMachine;
+el.machineName.onchange = saveMachine;       // 離れた時点で読む
+el.machineName.onblur = saveMachine;         // change が出ない経路のため
+el.machineName.oninput = () => { machineDirty = true; paintMachine(); };
 
 // 手直し欄は、溜めるモードか書きかけがあるときだけ出す。
 // 即時モードでは認識中の文字だけが見えていればよい。
@@ -2149,8 +2157,9 @@ async function refreshState() {
       }
     }
 
-    // 何台かで使うときの設定（他の画面で変えられることもある）
-    if (document.activeElement !== el.machineName) {
+    // 何台かで使うときの設定（他の画面で変えられることもある）。
+    // 打っている最中は触らない。
+    if (!machineDirty) {
       el.multiOn.checked = !!s.multiMachine;
       el.machineName.value = s.machineName || '';
       paintMachine();
