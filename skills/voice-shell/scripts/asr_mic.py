@@ -421,17 +421,27 @@ def read_blocks(device: str, in_sr: int,
     if in_sr != SAMPLE_RATE:
         print(f"マイクを {in_sr}Hz で録音し {SAMPLE_RATE}Hz に変換します", file=sys.stderr)
 
-    # 録音の ffmpeg が理由もなく落ちることがある（Windows で稀に、パイプへの
-    # 書き込みが "Invalid argument" で失敗する現象を実測。再現条件は不明）。
-    # 頼んでもいない終了は「マイクが壊れた」ではなく「録音プロセスが死んだ」
-    # だけなので、デーモンごと落とさず同じデバイスで立て直す。
-    MAX_QUICK_CRASHES = 5     # これを超えたら本当に壊れているとみなして諦める
-    crash_count = 0
-    last_crash_at = 0.0
-    STALL_SEC = 4.0           # これだけ音が来なければ配線が切れたとみなす
-    MAX_QUICK_STALLS = 5
-    stall_count = 0
-    last_stall_at = 0.0
+    # 録音は止まる。ffmpeg が理由もなく落ちることもあれば（Windows で稀に、
+    # パイプへの書き込みが "Invalid argument" で失敗する現象を実測）、
+    # プロセスは生きたまま音だけ来なくなることもある（USB マイクを抜いた
+    # とき。avfoundation は開いた時点のデバイスに繋ぎっぱなしなので、
+    # 抜けても気づかず、EOF すら返さないまま黙る）。
+    #
+    # どちらでも同じことをする — 開き直して、また待つ。**諦めない。**
+    # 「5回試して駄目でした」と言われても、できることは結局「挿し直す」
+    # だけで、それは黙って待っていれば済む話なので。挿し直せば次の試行で
+    # 開けて、そのまま何事も無かったように続く。
+    #
+    # 静かな部屋と取り違えることはない。黙っていてもブロック自体は届き
+    # 続ける（マイク本体のミュートも同じで、無音のブロックが来る）。
+    # 何も届かなくなるのは、配線そのものが切れたときだけ。
+    #
+    # 待ち時間だけは伸ばす。挿さっていない間ずっと ffmpeg を起こし続けて
+    # も意味がない。上限は 5 秒なので、挿し直せば遅くとも 5 秒で戻る。
+    STALL_SEC = 4.0           # これだけ音が来なければ、繋がっていない
+    RETRY_MIN, RETRY_MAX = 0.5, 5.0
+    retry_wait = RETRY_MIN
+    lost = False              # いま繋がっていないか（ログを一度だけ出すため）
 
     try:
         while True:
@@ -447,45 +457,34 @@ def read_blocks(device: str, in_sr: int,
                     if on_switch is not None:
                         on_switch(current)
 
+            def relight(why: str):
+                """録音を開き直す。繋がるまで何度でも。"""
+                nonlocal proc, blocks, to_16k, retry_wait, lost
+                if not lost:
+                    lost = True
+                    print(f"{why}: {current} — 開き直して待ちます"
+                          "（挿し直せばそのまま戻ります）",
+                          file=sys.stderr, flush=True)
+                stop(proc)
+                time.sleep(retry_wait)
+                retry_wait = min(retry_wait * 2, RETRY_MAX)
+                proc, blocks = start(current)
+                to_16k = make_resampler()
+
             try:
                 raw = blocks.get(timeout=STALL_SEC)
             except queue.Empty:
-                now = time.monotonic()
-                if now - last_stall_at > 60:
-                    stall_count = 0
-                stall_count += 1
-                last_stall_at = now
-                if stall_count > MAX_QUICK_STALLS:
-                    print(f"マイクから音が来ない状態が続くため諦めます"
-                          f"（{MAX_QUICK_STALLS}回連続）。マイクの状態を確認してください。",
-                          file=sys.stderr, flush=True)
-                    return
-                print(f"マイクから {STALL_SEC:.0f} 秒ぶん音が来ないので、録音を開き直します"
-                      f"（{stall_count}/{MAX_QUICK_STALLS}）: {current}",
-                      file=sys.stderr, flush=True)
-                stop(proc)
-                proc, blocks = start(current)
-                to_16k = make_resampler()
+                relight(f"マイクから {STALL_SEC:.0f} 秒ぶん音が来ません")
                 continue
             if not raw:
-                now = time.monotonic()
-                # 短時間に何度も落ちるなら、立て直しても無駄なので諦める
-                if now - last_crash_at > 30:
-                    crash_count = 0
-                crash_count += 1
-                last_crash_at = now
-                if crash_count > MAX_QUICK_CRASHES:
-                    print(f"録音プロセスが繰り返し落ちるため諦めます"
-                          f"（{MAX_QUICK_CRASHES}回連続）。マイクの状態を確認してください。",
-                          file=sys.stderr, flush=True)
-                    return
-                print(f"録音プロセスが予期せず終了したため、立て直します"
-                      f"（{crash_count}/{MAX_QUICK_CRASHES}）: {current}",
-                      file=sys.stderr, flush=True)
-                time.sleep(0.5)   # 立て直し直後にまた即死するのを避ける
-                proc, blocks = start(current)
-                to_16k = make_resampler()
+                relight("録音が終了しました")
                 continue
+
+            if lost:
+                lost = False
+                print(f"マイクが戻りました: {current}", file=sys.stderr, flush=True)
+            retry_wait = RETRY_MIN
+
             block = to_16k(np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0)
             # block.dot(block) は二乗の一時配列を作らない
             rms = float(np.sqrt(block.dot(block) / block.size)) if block.size else 0.0
