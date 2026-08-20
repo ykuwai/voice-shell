@@ -1,56 +1,56 @@
 #!/usr/bin/env bash
-# 音声プロンプト常駐デーモンのラッパー。
-# どのプロジェクトからでも同じコマンドで起動できるようにする。
+# Wrapper around the voice prompt daemon.
+# So the same command starts it from any project.
 #
 #   voice-shell.sh start [--engine X] [--no-gui]
 #   voice-shell.sh stop
 #   voice-shell.sh status
 #   voice-shell.sh viewer / viewer-stop
 #   voice-shell.sh log-path / wait-ready
-#   voice-shell.sh listen                 発話ログを tail する（Monitor 用。多重起動を検知できる形）
-#   voice-shell.sh engines                選べる認識のやり方と、前回の選択
-#   voice-shell.sh listeners              いま listen しているセッションの一覧
-#   voice-shell.sh name "…"               このセッションの表示名を付ける
-#   voice-shell.sh whisper                Whisper で認識する（固有名詞に強い）
-#   voice-shell.sh apple                  macOS 26 付属の認識で動かす（軽い）
+#   voice-shell.sh listen                 tail the utterance log (for Monitor, shaped so double starts show)
+#   voice-shell.sh engines                the ways of recognizing on offer, and the last choice
+#   voice-shell.sh listeners              the sessions listening right now
+#   voice-shell.sh name "…"               give this session a display name
+#   voice-shell.sh whisper                recognize with Whisper (strong on proper nouns)
+#   voice-shell.sh apple                  run on the recognition that ships with macOS 26 (light)
 
 set -euo pipefail
 
-# スクリプト自身の場所を基準にする（シンボリックリンク経由でも実体を辿る）
+# Everything is relative to where the script itself sits (even through a symlink, follow to the real file)
 HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 
-# Git Bash (Windows) には pgrep/pkill/setsid が無い。無ければ機能を諦めて
-# 素通しする（プロセス確認・多重起動チェックが効かなくなるだけで、
-# 起動・停止そのものはできる）。
+# Git Bash (Windows) has no pgrep/pkill/setsid. When they are missing, give up
+# on the feature and let it pass through (only the process check and the double
+# start check stop working, starting and stopping themselves still do).
 have() { command -v "$1" >/dev/null 2>&1; }
 
-# Windows の Python は既定でファイル I/O にシステムのロケール（日本語版なら
-# cp932）を使う。UTF-8 で書いた JSON やログを cp932 で開こうとして
-# UnicodeDecodeError で落ちるため、UTF-8 モード（PEP 540）を強制する。
-# macOS / Linux では無害（すでに UTF-8 なので変化しない）。
+# Python on Windows uses the system locale for file I/O by default (cp932 on a
+# Japanese install). It tries to open JSON and logs written as UTF-8 with cp932
+# and dies with UnicodeDecodeError, so force UTF-8 mode (PEP 540).
+# Harmless on macOS / Linux (already UTF-8, so nothing changes).
 export PYTHONUTF8=1
 
-# Python 環境を探す。VOICE_SHELL_PYTHON で明示指定できる。
+# Look for a Python environment. VOICE_SHELL_PYTHON names one explicitly.
 find_python() {
   if [[ -n "${VOICE_SHELL_PYTHON:-}" ]]; then echo "$VOICE_SHELL_PYTHON"; return; fi
-  # リポジトリ直下の .venv（conda を使わない構成。macOS はこちらが標準）
+  # .venv at the top of the repo (a setup without conda, the standard one on macOS)
   if [[ -x "$HERE/../../../.venv/bin/python" ]]; then
     echo "$HERE/../../../.venv/bin/python"; return
   fi
-  # Windows の venv は Scripts/python.exe に入る（bin/ ではない）
+  # A venv on Windows keeps it in Scripts/python.exe, not bin/
   if [[ -x "$HERE/../../../.venv/Scripts/python.exe" ]]; then
     echo "$HERE/../../../.venv/Scripts/python.exe"; return
   fi
-  # conda / mamba を使っている人向け。環境の名前はこの道具の名前に揃える。
+  # For people on conda / mamba. The env name matches the name of this tool.
   for base in "$HOME/miniforge3" "$HOME/miniconda3" "$HOME/anaconda3" \
               "$HOME/mambaforge" "/opt/homebrew/Caskroom/miniforge/base" "/opt/conda"; do
     [[ -x "$base/envs/voice-shell/bin/python" ]] && { echo "$base/envs/voice-shell/bin/python"; return; }
   done
-  # 見つからなければ、動かすのに足りる python を探す。
+  # If nothing turns up, look for a python that is enough to run this.
   #
-  # 既定のブラウザ認識に要るのは numpy と aiohttp だけで、認識のモデルは
-  # 要らない。ここでモデルの有無を条件にすると、「何も入れずに動く」はずの
-  # 既定が、モデルの無い機械では起動すらできなくなる（実際そうなっていた）。
+  # The default browser recognition needs only numpy and aiohttp, no model.
+  # Gating on a model here means the default, the one that should run with
+  # nothing installed, cannot start on a machine without one. That really happened.
   for c in python3 python; do
     command -v "$c" >/dev/null || continue
     if "$c" -c "import numpy, aiohttp" 2>/dev/null; then
@@ -59,26 +59,26 @@ find_python() {
   done
 }
 
-# 前回どのエンジンで起動したかを覚えておく。ビューアの「聞き取りを
-# 始める」は engine-start を呼ぶが、そちらは元のコマンドを知らない。
-# 覚えていないと、前回 whisper を選んだのに別のモデルが載ってしまう。
+# Remember which engine was used last time. The viewer's "start listening"
+# calls engine-start, and engine-start does not know the original command.
+# Without the memory, whisper chosen last time loads some other model.
 #
-# 結果を文字列ではなく配列 ENGINE_ARGS に入れる。Whisper のモデルには
-# 手元のフォルダの場所も渡せて、そこには空白が入りうる。文字列にして
-# 単語分割へ任せると、そこで壊れる。
+# The result goes into the array ENGINE_ARGS, not a string. A Whisper model
+# can also be a folder on this machine, and that path can contain spaces.
+# Make it a string, leave it to word splitting, and it breaks right there.
 ENGINE_ARGS=()
 set_engine_args() {
   ENGINE_ARGS=()
-  # 覚えている選択（~/.config/voice-shell/config.json）を正とする。
-  # 以前は /tmp のファイルを見ていたが、再起動で消えると黙って
-  # コンパイル時の既定に戻り、config と食い違っていた。
+  # The remembered choice (~/.config/voice-shell/config.json) is the truth.
+  # It used to read a file under /tmp, and when a reboot wiped that, it
+  # quietly fell back to the built-in default and disagreed with config.
   local e m
   e="$("$PY" "$APP" --resolve-engine "" 2>/dev/null || true)"
   [[ -n "$e" && "$e" != "browser" ]] || return 0
   ENGINE_ARGS=(--engine "$e")
-  # モデルを選べるのは Whisper だけ。空のまま --model を渡すと
-  # faster-whisper が空文字をモデル名として受け取って落ちるので、
-  # 覚えているものがあるときだけ足す。
+  # Whisper is the only one where a model can be picked. Passing --model
+  # empty makes faster-whisper take the empty string as a model name and
+  # die, so add it only when there is something remembered.
   if [[ "$e" == "whisper" ]]; then
     m="$("$PY" "$APP" --resolve-model 2>/dev/null || true)"
     [[ -n "$m" ]] && ENGINE_ARGS+=(--model "$m")
@@ -89,10 +89,10 @@ set_engine_args() {
 PY="$(find_python || true)"
 APP="$HERE/voice_daemon.py"
 
-# ビューアへの問い合わせ。curl は環境によって弾かれる（Windows で
-# 「Permission denied」が出た）。Python は必ずあるので、そちらで叩く。
-#   http_get <パス>        本文を標準出力へ。届かなければ 1 を返す
-#   port_open              ポートが開いているかだけ見る
+# Asking the viewer. curl gets turned away in some environments (it printed
+# "Permission denied" on Windows). Python is always there, so knock with that.
+#   http_get <path>        body to stdout. returns 1 when nothing arrives
+#   port_open              only looks at whether the port is open
 http_get() {
   "$PY" - "http://127.0.0.1:8090$1" <<'HTTPGET' 2>/dev/null
 import sys, urllib.request
@@ -124,9 +124,9 @@ sys.exit(0 if s.connect_ex(("127.0.0.1", 8090)) == 0 else 1)
 PORT
 }
 
-# プロセスを呼び出し元の系統から切り離して起動する。
-# macOS には setsid が無いので、その場合は nohup だけで済ませる
-# （デーモンの子 kill は pgrep -P による直接の子だけなので、これで足りる）。
+# Start a process cut loose from the caller's process tree.
+# macOS has no setsid, so there we make do with nohup alone
+# (the daemon only kills its direct children via pgrep -P, so that is enough).
 detach() {
   if command -v setsid >/dev/null; then
     setsid nohup "$@"
@@ -143,9 +143,9 @@ if [[ -z "$PY" ]]; then
   echo "  場所を直接指定するなら export VOICE_SHELL_PYTHON=/path/to/python と書きます" >&2
   exit 1
 fi
-# 以前は認識モデルの名前を取って "qwen-voice" と呼んでいた。道具の名前へ改めたが、
-# 動いているものを壊さないよう、古い方が残っていて新しい方が無ければそちらを
-# 使い続ける（/tmp が空けば新しい名前へ移る）。
+# Named after the recognition model once, so it was "qwen-voice". It now takes
+# the name of the tool, but so nothing already running breaks, the old one stays
+# in use when it is there and the new one is not (it moves once /tmp empties).
 STATE_DIR="${XDG_RUNTIME_DIR:-/tmp}/voice-shell"
 _legacy_state="${XDG_RUNTIME_DIR:-/tmp}/qwen-voice"
 if [ ! -d "$STATE_DIR" ] && [ -d "$_legacy_state" ]; then
@@ -154,25 +154,25 @@ fi
 LOG_FILE="$STATE_DIR/utterances.jsonl"
 BOOT_LOG="$STATE_DIR/daemon.out"
 
-# Windows(Git Bash) では bash が見る "/tmp" と、素の Python が単独で解釈する
-# "/tmp" が別の実ディレクトリになる（前者は MSYS がマウント変換した実フォルダ、
-# 後者は pathlib がドライブ直下として扱う C:\tmp）。ここで確定した実パスを
-# cygpath で Windows 形式に変換し、子の Python プロセスへ明示的に渡す
-# （そうしないとデーモンの書き込み先と Monitor の tail 先がずれ、
-# 発話がどこにも届かなくなる）。
+# On Windows (Git Bash) the "/tmp" bash sees and the "/tmp" plain Python resolves
+# on its own are different real directories (the first is the real folder MSYS
+# mount-translates to, the second is C:\tmp, which pathlib puts at the drive
+# root). Convert the real path settled on here into Windows form with cygpath and
+# hand it explicitly to the child Python process (otherwise where the daemon
+# writes and where Monitor tails drift apart, and utterances arrive nowhere).
 if command -v cygpath >/dev/null 2>&1; then
   export VOICE_SHELL_STATE_DIR="$(cygpath -w "$STATE_DIR")"
 fi
 
 cmd="${1:-status}"; shift || true
 
-# ビューアを独立したウィンドウで開く。
+# Open the viewer in a window of its own.
 #
-# Chrome の --app はタブもURL欄も無い窓になり、コマンドから開ける。
-# 「常に最前面」にしたい場合は、開いた窓のヘッダから手で浮かせる
-# （Document Picture-in-Picture は人が触らないと開けない決まりのため）。
-# 独立した窓で開く。一度開いたら覚えておく。start や viewer を打ち直す
-# たびに新しい窓が出て、実際に10個並んだ。窓はビューア1つにつき1つでよい。
+# Chrome's --app gives a window with no tabs and no URL bar, and it opens from
+# the command line. To keep it always on top, float it by hand from the header of
+# the window that opened (the rule is that Document Picture-in-Picture only opens
+# when a person acts on it). Own window, and remember once opened. Every retype of
+# start or viewer popped a new one, and 10 really lined up. One window per viewer.
 open_gui() {
   local url="http://127.0.0.1:8090"
   local flag="$STATE_DIR/gui_opened"
@@ -204,24 +204,24 @@ open_gui() {
   return 1
 }
 
-# 発話ログを追尾しているセッションを一覧する。
+# List the sessions tailing the utterance log.
 #
-# Monitor を止め忘れると、古いセッションに音声が届き続ける。tail は -F なので
-# デーモンを入れ直してもつながり直してしまい、本人は気づけない。実際に8日前の
-# セッションが生きていて、同じ発話が2つのセッションへ配られていたことがある。
-# `voice-shell.sh listen` が起動時に自分を登録したファイル（$STATE_DIR/listeners/
-# 以下、ファイル名がその聞き手の PID）を Python 側（_pid_alive で生存確認、
-# Windows でも動く）に数えさせる。pgrep には頼らない。
+# Forget to stop Monitor and voice keeps reaching the old session. tail is -F, so
+# it reconnects even when the daemon is reinstalled, and the person cannot notice.
+# A session from 8 days back really was alive, and the same utterance went out to
+# two sessions. Have Python count the files `voice-shell.sh listen` registers at
+# startup (under $STATE_DIR/listeners/, the filename being that listener's PID).
+# Python checks life with _pid_alive and works on Windows too. Do not lean on pgrep.
 list_listeners() {
   "$PY" "$APP" --listeners
 }
 
 case "$cmd" in
   start)
-    # 使うエンジンを決める（指定 > 前回の選択 > 自動）。
-    # 「前回の選択」は ~/.config/voice-shell/config.json に残るので、
-    # 再起動しても選び直しにならない。
-    # 初回かどうか（覚えている選択がまだ無い）を、解決する前に見ておく
+    # Decide which engine to use (given > last choice > automatic).
+    # The last choice stays in ~/.config/voice-shell/config.json, so a
+    # restart does not mean choosing all over again.
+    # Look at whether this is a first run (nothing remembered yet) before resolving
     conf="${XDG_CONFIG_HOME:-$HOME/.config}/voice-shell/config.json"
     first_run=0; [[ -f "$conf" ]] || first_run=1
 
@@ -234,11 +234,11 @@ case "$cmd" in
       case "$1" in
         --engine) want="${2:-}"; shift 2 ;;
         --engine=*) want="${1#*=}"; shift ;;
-        # Whisper のモデルもエンジンと同じく覚える。ビューアの
-        # 「聞き取りを始める」は元のコマンドを知らないので、ここで
-        # 覚えておかないと画面から立て直した時点で既定へ戻ってしまう。
-        # 空で渡されたら「既定に戻す」の意味なので、渡されたかどうかを
-        # 中身とは別に覚えておく。
+        # Remember the Whisper model the same way as the engine. The
+        # viewer's "start listening" does not know the original command, so
+        # without remembering here it drops back to the default the moment
+        # it is brought up again from the screen. Passed empty means back to
+        # the default, so track whether it was passed apart from what it held.
         --model) want_model="${2:-}"; model_given=1; shift 2 ;;
         --model=*) want_model="${1#*=}"; model_given=1; shift ;;
         --no-gui) no_gui=1; shift ;;
@@ -251,23 +251,23 @@ case "$cmd" in
     "$PY" "$APP" --remember-engine "$engine"
     [[ "$model_given" == 1 ]] && "$PY" "$APP" --remember-model "$want_model"
 
-    # ブラウザで認識するなら、この機械にモデルを積む必要がない。
-    # ビューアだけ立ち上げて終わる（画面を開いた時点で認識が始まる）。
+    # Recognizing in the browser means no model has to be loaded here.
+    # Bring up only the viewer and finish (opening the screen starts it).
     if [[ "$engine" == "browser" ]]; then
       mkdir -p "$STATE_DIR"
-      # デーモン起動と揃える。残しておくと前回の発話が画面に並び直す。
+      # Same as daemon startup. Leave it and last time's utterances line up again.
       : > "$LOG_FILE"
-      # ここでは画面そのものが認識役なので、立ち上がってから伝える。
-      # 出力は捨てる。URL は画面が自分で開くので読み上げる相手がおらず、
-      # 開けなかったときだけ viewer 側が stderr に出す。
+      # Here the screen itself does the recognizing, so speak up once it is up.
+      # Drop the output. The screen opens the URL itself, so there is nobody to
+      # read it out to, and only when that fails does viewer print to stderr.
       "$0" viewer >/dev/null
-      # 出すのは「始まったか」と「次に何をすればよいか」だけにする。
-      # ログの場所も、他に聞いているセッションの一覧も status で取れる。
+      # Print only whether it started and what to do next.
+      # The log path and the list of other listening sessions both come from status.
       echo "聞き取りを始めました。"
       echo "Chrome の画面を開いてマイクを許可すると届き始めます。"
-      # 初回だけ、音声の行き先と、この機械で使える代わりを名指しで伝える。
-      # 一般論だと「では何を選べば」で止まるので、具体名まで出す。
-      # 2 回目からは出さない。毎回言うと、読む側の邪魔にしかならない。
+      # On a first run only, name where the audio goes and the stand-in this
+      # machine can use. General wording stalls at "so which do I pick", so go
+      # all the way to the name. Never after that. It only gets in the way.
       if [[ "$first_run" == 1 ]]; then
         echo
         echo "※ 音声は認識のため Google のサーバへ送られます。"
@@ -283,24 +283,24 @@ case "$cmd" in
       echo "すでに稼働しています。"; exit 0
     fi
     mkdir -p "$STATE_DIR"
-    # 古いパスで動いているビューアを片付ける（構成を変えたときの取り残し）
+    # Clear away a viewer running under the old path (left behind by a layout change)
     have pkill && pkill -f "voice-shell/scripts/viewer\.p[y]" 2>/dev/null || true
-    # 日本語に固定する。自動判定だと物音を中国語などに誤認識しやすい（実測）。
-    # 英語を話しても認識自体は追従する（単語間に入る読点はビューア側で除去）。
-    # 別言語を主に使うなら `voice-shell.sh start --language English` のように渡す。
-    # setsid で切り離す。付けないと呼び出し元と同じプロセスグループに残り、
-    # このスクリプトの終了時に一緒に片付けられてしまう（ビューアだけ残る）。
+    # Pin it to Japanese. Auto detection easily hears noise as Chinese and such
+    # (measured). Speaking English still follows (the commas that land between
+    # words get stripped viewer side). For another main language, pass it like
+    # `voice-shell.sh start --language English`. Detach with setsid, or it stays
+    # in the caller's process group and dies with this script (viewer survives).
     set_engine_args
     detach "$PY" "$APP" --language Japanese "${ENGINE_ARGS[@]+"${ENGINE_ARGS[@]}"}" "$@" \
       > "$BOOT_LOG" 2>&1 &
-    # 出すのは「始まったか」と「次に何をすればよいか」だけにする。
-    # ログの場所も、他に聞いているセッションの一覧も status で取れる。
-    # ビューアより先に出す。ここまで来ればデーモンは動き出しているので、
-    # 画面の立ち上げに失敗しても、始まったことは伝わってほしい。
+    # Print only whether it started and what to do next.
+    # The log path and the list of other listening sessions both come from status.
+    # Print before the viewer. By this point the daemon is on its way, so even
+    # if bringing up the screen fails, the fact that it started should land.
     echo "聞き取りを始めました。"
     echo "モデルの用意ができるまで少しかかります。voice-shell.sh wait-ready で待てます。"
-    # ビューアも一緒に立ち上げる（毎回 viewer を打つのを忘れないように）。
-    # マイクを使わないので、常駐と同時に動いてよい。出力は捨てる。
+    # Bring the viewer up alongside it (so nobody has to remember to type viewer).
+    # It does not use the mic, so it can run with the daemon. Drop the output.
     "$0" viewer >/dev/null
     ;;
   stop)
@@ -308,20 +308,21 @@ case "$cmd" in
     "$0" viewer-stop
     ;;
   engine-stop)
-    # 認識だけ止める。マイクを手放し、Whisper ならモデルのぶんの
-    # メモリも戻る。ビューアは残すので、画面から動かし直せる。
+    # Stop only the recognition. It lets go of the mic, and with Whisper the
+    # memory the model took comes back too. The viewer stays, so it can be
+    # started again from the screen.
     #
-    # 喋っている最中に落とすと、その発話は丸ごと失われる。長く話すほど
-    # 巻き込みやすいので、途中経過が消えるまで少し待つ（--now で待たない）。
+    # Cut it mid speech and that whole utterance is lost. The longer someone
+    # talks the easier that is, so wait for the partial to clear (--now skips it).
     if [[ "${1:-}" != "--now" ]]; then
-      for _ in $(seq 1 60); do          # 最大 15 秒
+      for _ in $(seq 1 60); do          # at most 15 seconds
         [ -s "$STATE_DIR/partial.txt" ] || break
         sleep 0.25
       done
     fi
     "$PY" "$APP" --stop 2>/dev/null || true
-    # PID ファイルは読み込み完了後に書かれる。起動途中で止めると
-    # ファイルが無いまま本体が残るので、名前でも確実に落とす。
+    # The PID file is written after loading finishes. Stop it mid startup and
+    # the process is left with no file, so kill by name as well to be sure.
     if have pkill; then
       pkill -f "voice_daemon\.p[y] --language" 2>/dev/null || true
       sleep 1
@@ -333,12 +334,12 @@ case "$cmd" in
       echo "ブラウザ認識が選ばれています。この機械にモデルは積みません。" >&2
       exit 0
     fi
-    # 認識だけ立ち上げ直す（ビューアには触らない）。
-    # setsid で切り離す。デーモンは終了時に自分の子を全部 kill するので、
-    # 呼び出し元（ビューア）にぶら下げると巻き込まれる。
+    # Bring only the recognition back up (leave the viewer alone).
+    # Detach with setsid. The daemon kills every one of its children when it
+    # exits, so hanging off the caller (the viewer) gets caught in that.
     #
-    # ここの確認は PID ファイル頼みなので、読み込み中はすり抜ける。
-    # 二重起動はデーモン側のロックで確実に止めている。
+    # This check leans on the PID file, so it slips through during loading.
+    # A double start is stopped for certain by the lock on the daemon side.
     if "$PY" "$APP" --status | grep -q 稼働中; then
       echo "すでに稼働しています。"; exit 0
     fi
@@ -349,17 +350,17 @@ case "$cmd" in
     echo "起動中… (モデル読み込みに1〜2分かかります)"
     ;;
   whisper)
-    # 認識に Whisper を使う。固有名詞に強い。
+    # Use Whisper for recognition. Strong on proper nouns.
     "$0" start --engine whisper "$@"
     ;;
   apple)
-    # macOS 26 付属のオンデバイス認識を使う。モデルを積まないので起動が速い。
+    # Use the on-device recognition that ships with macOS 26. No model to load, so it starts fast.
     "$0" start --engine apple "$@"
     ;;
   status)
-    # ブラウザで認識しているときは、この機械にデーモンが居ないのが正常。
-    # 素の「停止しています」だけだと壊れているように読めるので、
-    # 何で認識しているのかを先に言う。
+    # When the browser is doing the recognizing, having no daemon on this
+    # machine is normal. A bare 「停止しています」 on its own reads as broken,
+    # so say what is doing the recognizing first.
     engine="$("$PY" "$APP" --resolve-engine "")"
     if [[ "$engine" == "browser" ]]; then
       echo "このブラウザで認識します（この機械にモデルは積みません）"
@@ -367,8 +368,8 @@ case "$cmd" in
         echo "  ビューアが動いていません → voice-shell.sh viewer" >&2
       else
         echo "  ビューアは http://127.0.0.1:8090"
-        # 画面が実際に聞いているかまで見る。ここを見ないと、開いていない・
-        # マイクを拒否された状態と、ちゃんと聞いている状態を区別できない。
+        # Go as far as whether the screen is really listening. Without this,
+        # not open or mic refused cannot be told from properly listening.
         http_get /api/asr-status \
           | "$PY" "$HERE/asr_status.py" || echo "  画面の状態を確認できませんでした"
       fi
@@ -383,7 +384,7 @@ case "$cmd" in
     else echo "  なし（音声はどこにも届いていません）"; fi
     ;;
   engines)
-    # 選べる認識のやり方。何が入っていて、前回どれを選んだかを出す。
+    # The ways of recognizing on offer. Prints what is installed and what was picked last time.
     "$PY" "$APP" --list-engines
     ;;
   listeners)
@@ -392,21 +393,21 @@ case "$cmd" in
     else echo "  なし（音声はどこにも届いていません）"; fi
     ;;
   listen)
-    # Monitor から使う。発話ログを tail しつつ、自分がいることを
-    # $STATE_DIR/listeners/ に登録する（ファイル名は自分の PID）。
-    # デーモン側（Python）はこのファイル名を実 PID として生存確認するため、
-    # Windows(Git Bash/MSYS) では $$ ではなく /proc/$$/winpid の値を使う
-    # （$$ は MSYS 内部の仮想 PID で、実際の Win32 PID とは別物。素の $$
-    # を使うと生存確認が常に失敗し、登録した瞬間に「死んでいる」とみなされて
-    # 消されてしまう）。
+    # Used from Monitor. Tails the utterance log and registers its own presence
+    # in $STATE_DIR/listeners/ (the filename is its own PID).
+    # The daemon side (Python) checks life by treating that filename as a real
+    # PID, so on Windows (Git Bash/MSYS) it uses the value in /proc/$$/winpid
+    # rather than $$ ($$ is MSYS's internal virtual PID, a different thing from
+    # the real Win32 PID. With plain $$ the life check always fails, and the
+    # moment it registers it counts as dead and gets deleted).
     reg_pid="$$"
     [[ -r "/proc/$$/winpid" ]] && reg_pid="$(cat "/proc/$$/winpid" 2>/dev/null || echo "$$")"
     mkdir -p "$STATE_DIR/listeners"
     reg="$STATE_DIR/listeners/$reg_pid"
 
-    # どの道具から呼ばれたかと、その会話の id を控える。
-    # 会話に題名が付いたら、デーモンがそれを引いて表示名に使う
-    # （起動した時点では、何の作業か本人にも決まっていないため）。
+    # Note down which tool called this and the id of that conversation.
+    # Once the conversation gets a title, the daemon pulls it in as the display
+    # name (at start time not even the person knows what the work is yet).
     agent=""; session=""
     if [[ -n "${CLAUDE_CODE_SESSION_ID:-}" ]]; then
       agent="claude"; session="$CLAUDE_CODE_SESSION_ID"
@@ -415,15 +416,15 @@ case "$cmd" in
     elif [[ -n "${CODEX_SESSION_ID:-}" ]]; then
       agent="codex"; session="$CODEX_SESSION_ID"
     fi
-    # どの道具でも名乗れる逃げ道。VOICE_SHELL_NAME があれば最優先。
+    # An escape hatch so any tool can name itself. VOICE_SHELL_NAME wins outright.
     "$PY" - "$reg" "$agent" "$session" "${VOICE_SHELL_NAME:-}" <<'REG' || true
 import json, os, sys, time
 from pathlib import Path
 reg, agent, session, name = sys.argv[1:5]
 now = time.time()
 
-# 画面に並ぶ順は「その会話が最初に聞き始めた時刻」で決める。登録し直した
-# 時刻で並べると、音声モードを入れ直すたびに番号が後ろへ動いてしまう。
+# The order on screen comes from when that conversation first started listening.
+# Ordering by re-registration time pushes the number back on every voice restart.
 first_seen = now
 if session:
     conf = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "voice-shell"
@@ -435,9 +436,9 @@ if session:
         seen = {}
     first_seen = seen.get(session)
     if first_seen is None:
-        # まだ覚えていない会話。いま生きている登録に同じ会話があれば、
-        # そちらの時刻を引き継ぐ（古い版で登録したものが張り直したとき、
-        # 「今日が初めて」になって番号が最後尾へ飛ぶのを防ぐ）。
+        # A conversation not remembered yet. If a live registration holds the
+        # same conversation, take its time over (this keeps something registered
+        # by an older build from looking brand new and jumping to the end).
         for other in Path(reg).parent.glob("*"):
             try:
                 info = json.loads(other.read_text(encoding="utf-8"))
@@ -456,23 +457,23 @@ json.dump({"started": time.strftime("%Y-%m-%d %H:%M:%S"), "since": now,
            "agent": agent, "session": session, "name": name},
           open(reg, "w", encoding="utf-8"), ensure_ascii=False)
 REG
-    # exec すると trap が引き継がれず（プロセス置き換えで bash 自体が
-    # 消えるため）終了時の自動削除が効かなくなる。
+    # With exec the trap is not carried over (process replacement makes bash
+    # itself disappear), so the automatic cleanup on exit stops working.
     #
-    # tail は背景に回して wait する。前面のまま置くと、SIGTERM で bash だけ
-    # 死んで tail が孤児として残る（登録は消えているのに発話は受け取れる、
-    # という多重検知から漏れる状態になる）。
-    # 宛先の絞り込みを挟む。行に "to" があって自分宛てでなければ落とす
-    # （宛先の指定が無い行は全員へ）。
+    # Put tail in the background and wait on it. Left in the foreground,
+    # SIGTERM kills only bash and tail is left an orphan (the registration is
+    # gone yet utterances still come in, which slips past the double detection).
+    # Slot in the addressee filter. Drop a line that has "to" and is not for us
+    # (a line with no addressee named goes to everyone).
     tail -F -n 0 "$LOG_FILE" | "$PY" -u "$HERE/listen_filter.py" "$reg_pid" &
     tail_pid=$!
     trap 'rm -f "$reg"; kill "$tail_pid" 2>/dev/null || true' EXIT INT TERM HUP
     wait "$tail_pid"
     ;;
   name)
-    # このセッションの表示名を手で付ける。エージェントが題名を付けない
-    # 道具から使うときや、自動の題名が実態と合わないときのため。
-    # listen とは別のシェルから呼ばれるので、PID ではなく会話の id で探す。
+    # Put a display name on this session by hand. For use from tools where the
+    # agent gives no title, or when the automatic title does not fit the work.
+    # Called from a different shell than listen, so look up by conversation id, not PID.
     "$PY" - "$STATE_DIR/listeners" "${CLAUDE_CODE_SESSION_ID:-${CODEX_THREAD_ID:-${CODEX_SESSION_ID:-}}}" "${1:-}" <<'NAMEIT'
 import json, os, sys
 from pathlib import Path
@@ -481,8 +482,8 @@ if not session:
     sys.exit("この道具はセッションの id を持っていません。"
              "VOICE_SHELL_NAME を設定して listen し直してください。")
 
-# 設定側にも残す。音声モードを入れ直すと登録ファイルは作り直されるので、
-# ここに置いておかないと、付けた名前が毎回消えて自動の題名に戻ってしまう。
+# Keep it on the config side too. Restarting voice mode rebuilds the registration
+# file, so without this the name given here vanishes and the auto title comes back.
 conf = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "voice-shell"
 conf.mkdir(parents=True, exist_ok=True)
 names_file = conf / "names.json"
@@ -493,7 +494,7 @@ except (OSError, ValueError):
 if name:
     names[session] = name
 else:
-    names.pop(session, None)          # 空で呼んだら自動の題名に戻す
+    names.pop(session, None)          # called empty means back to the auto title
 names_file.write_text(json.dumps(names, ensure_ascii=False, indent=2) + "\n",
                       encoding="utf-8")
 
@@ -518,17 +519,17 @@ else:
 NAMEIT
     ;;
   hold)
-    # 発話を溜める側に回す。Claude 自身が呼ぶことを想定している
-    # （雑談や通話が続いていて、届く内容が指示ではないとき）。
-    # ミュートにはしない。切ると発話がどこにも残らず、画面を見ていない
-    # ユーザーは届いていないことに気づけないため。
+    # Switch to the side that holds utterances back. Meant for Claude itself to
+    # call (small talk or a phone call is going on and what lands is no order).
+    # Do not mute. Cut it and the utterance is left nowhere, and a user who is
+    # not watching the screen cannot tell that nothing is getting through.
     http_post /api/pause \
       "$(printf '{"paused":true,"note":%s}' "$(printf '%s' "${1:-}" | "$PY" -c 'import json,sys; print(json.dumps(sys.stdin.read()))')")" \
       && echo "溜める側に切り替えました（画面から送れます）" \
       || { echo "ビューアが動いていません" >&2; exit 1; }
     ;;
   live)
-    # そのまま届く側に戻す
+    # Back to the side where utterances land as they come
     http_post /api/pause '{"paused":false}' \
       && echo "そのまま届く側に戻しました" \
       || { echo "ビューアが動いていません" >&2; exit 1; }
@@ -537,9 +538,9 @@ NAMEIT
     echo "$LOG_FILE"
     ;;
   viewer)
-    # ログを追尾するだけのビューア。マイクを使わないので常駐と共存できる。
+    # A viewer that only tails the log. No mic, so it lives alongside the daemon.
     [[ "${1:-}" == "--no-gui" ]] && { export VOICE_SHELL_NO_GUI=1; shift; }
-    # pgrep が無い環境（Windows/Git Bash 等）ではポートへの応答で代用する。
+    # Where pgrep is missing (Windows/Git Bash and such), a reply on the port stands in.
     viewer_running() {
       if have pgrep; then
         pgrep -f "voice-shell/scripts/viewer\.p[y]" >/dev/null
@@ -548,20 +549,20 @@ NAMEIT
       fi
     }
     if viewer_running; then
-      # ここで窓を開かない。既に開いているものがあるはずで、開くと増える。
+      # Do not open a window here. One should be open already, and opening adds more.
       echo "すでに起動しています → http://127.0.0.1:8090"
       exit 0
     fi
     mkdir -p "$STATE_DIR"
-    rm -f "$STATE_DIR/gui_opened"      # 立ち上げ直したので窓も1つ開く
-    # setsid で切り離す。デーモンが終了時に自分の子を全部 kill するため、
-    # 同じ系統にいるとデーモンを止めたときビューアまで落ちる。
+    rm -f "$STATE_DIR/gui_opened"      # started fresh, so open one window too
+    # Detach with setsid. The daemon kills every one of its children when it
+    # exits, so on the same line stopping the daemon takes the viewer down too.
     detach "$PY" "$HERE/viewer.py" "$@" \
       > "$STATE_DIR/viewer.out" 2>&1 &
     sleep 2
     if viewer_running; then
       echo "ビューアを起動しました → http://127.0.0.1:8090"
-      # 独立したウィンドウで開く（--no-gui なら開かない）
+      # Open in a window of its own (--no-gui means do not open)
       [[ "${VOICE_SHELL_NO_GUI:-0}" == "1" ]] || open_gui || true
     else
       echo "起動に失敗しました。" >&2; tail -5 "$STATE_DIR/viewer.out" >&2; exit 1
@@ -578,11 +579,11 @@ NAMEIT
     fi
     ;;
   wait-ready)
-    # ブラウザで認識するなら、積むモデルが無いので待つものも無い
+    # Recognizing in the browser loads no model, so there is nothing to wait for
     if [[ "$("$PY" "$APP" --resolve-engine "")" == "browser" ]]; then
       echo READY; exit 0
     fi
-    # 起動完了（またはエラー）まで待つ
+    # Wait until startup finishes (or errors out)
     for _ in $(seq 1 90); do
       if grep -q "聞いています" "$BOOT_LOG" 2>/dev/null; then echo READY; exit 0; fi
       if grep -qE "Traceback|Error:|すでに動いて" "$BOOT_LOG" 2>/dev/null; then
