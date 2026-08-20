@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""ブラウザ認識がいま実際に聞いているかを、人が読める形で出す。
+"""Say, in a form a person can read, whether browser recognition is listening.
 
-voice-shell.sh status が使う。標準入力に /api/asr-status の応答を渡す。
+voice-shell.sh status uses this. Feed it the /api/asr-status response on stdin.
 
-これを見ないと、「画面を開いていない」「マイクを拒否された」状態と、
-ちゃんと聞いている状態を外から区別できない。区別できないまま
-「どうぞ話してください」と言うと、届かない先に話させることになる。
+Without this there is no way from outside to tell the "page never opened" and
+"mic was denied" states apart from actually listening. Telling someone to go
+ahead and speak while those look the same sends them talking into a void.
 """
 import json
 import sys

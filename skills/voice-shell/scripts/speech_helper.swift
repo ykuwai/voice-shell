@@ -2,33 +2,34 @@ import Foundation
 import AVFoundation
 import Speech
 
-// macOS 26 の SpeechAnalyzer / SpeechTranscriber を voice-shell から使うための常駐ヘルパ。
+// Resident helper that lets voice-shell use the macOS 26 SpeechAnalyzer / SpeechTranscriber.
 //
-// stdin から 1 行 1 リクエスト（WAV のパス）を受け取り、認識結果を JSON 1 行で返す。
-//   受け取るもの
-//     /path/to/utterance.wav\n     … その音声を認識する
-//     QUIT\n                       … 終了
-//   返すもの
+// It takes one request per line on stdin (a WAV path) and answers with one line of JSON.
+//   What it takes
+//     /path/to/utterance.wav\n     … recognize that audio
+//     QUIT\n                       … quit
+//   What it gives back
 //     {"text":"...","language":"ja-JP"}\n
 //     {"error":"..."}\n
-// 起動が済むと {"ready":true,"locale":"ja-JP"} を 1 行出す。
+// Once startup is done it puts out one line, {"ready":true,"locale":"ja-JP"}.
 //
-// 使い方は次のとおり。
+// Usage is as follows.
 //   ./speech_helper [--locale ja-JP]
 //
-// ## マイクは触らない
+// ## It never touches the mic
 //
-// 録音と発話の区切り（VAD）は Python 側が持っている。ここは音声を受け取って
-// 文字にするだけ。マイクを触らなければ TCC の許可も .app 化も要らず、
-// swiftc で作った素の実行ファイルのまま動く。
+// Recording and the utterance boundaries (VAD) belong to the Python side. This
+// only takes audio in and turns it into text. Never touching the mic means no
+// TCC permission and no .app wrapper, so a bare swiftc binary runs as it is.
 //
-// ## ストリーム給餌ではなくファイル渡しにしている
+// ## Files are handed over rather than a stream fed in
 //
-// SpeechAnalyzer には AsyncStream に音声を流し込む API もあるが、
-// この構成（署名なしの CLI）では start(inputSequence:) が nilError で落ちた。
-// analyzeSequence(from: AVAudioFile) は同じ条件で問題なく動くので、
-// 発話 1 つ分を WAV に書いて渡す形にしている。認識は RTF 0.03 ほどなので、
-// 途中経過のために発話全体を何度も認識し直しても十分に間に合う。
+// SpeechAnalyzer also has an API for pouring audio into an AsyncStream, but in
+// this setup (an unsigned CLI) start(inputSequence:) died with nilError.
+// analyzeSequence(from: AVAudioFile) works fine under the same conditions, so
+// one utterance is written to a WAV and handed over. Recognition runs at about
+// RTF 0.03, so re-recognizing the whole utterance again and again for partials
+// keeps up with room to spare.
 
 @main
 struct SpeechHelper {
@@ -44,9 +45,9 @@ struct SpeechHelper {
             exit(1)
         }
 
-        // モデル資産は端末に無ければここで落としてくる（初回のみ数十秒）。
-        // status は毎回の起動で .supported に戻ることがあるので、
-        // installationRequest が nil を返すかどうかで判断する。
+        // Model assets get downloaded here if the machine lacks them (tens of
+        // seconds, first time only). status can drop back to .supported on any
+        // launch, so judge by whether installationRequest hands back nil.
         do {
             if let request = try await AssetInventory.assetInstallationRequest(
                 supporting: [makeTranscriber(locale)]) {
@@ -75,19 +76,20 @@ struct SpeechHelper {
     }
 
     static func makeTranscriber(_ locale: Locale) -> SpeechTranscriber {
-        // 確定結果しか使わないので volatileResults は要らない。
-        // 途中経過は Python 側が「溜まったぶんを認識し直す」形で作る。
+        // Only final results are used, so volatileResults is not needed.
+        // Partials come from the Python side re-recognizing what has piled up.
         SpeechTranscriber(locale: locale,
                           transcriptionOptions: [],
                           reportingOptions: [],
                           attributeOptions: [])
     }
 
-    /// WAV 1 本を認識して、確定テキストと言語を返す。
+    /// Recognize one WAV and hand back the final text and the language.
     ///
-    /// SpeechTranscriber と SpeechAnalyzer は毎回作り直す。results は
-    /// 1 回の解析で終わる AsyncSequence なので、使い回すと 2 回目が取れない。
-    /// モデル資産はプロセス内で温まったままなので、作り直しても数ミリ秒で済む。
+    /// SpeechTranscriber and SpeechAnalyzer are rebuilt every time. results is
+    /// an AsyncSequence that ends with a single analysis, so reusing it means
+    /// the second round never arrives. The model assets stay warm inside the
+    /// process, so rebuilding costs only a few milliseconds.
     static func transcribe(path: String, locale: Locale) async throws -> (String, String) {
         let transcriber = makeTranscriber(locale)
         let analyzer = SpeechAnalyzer(modules: [transcriber])
@@ -111,7 +113,7 @@ struct SpeechHelper {
                 locale.identifier(.bcp47))
     }
 
-    /// JSON を 1 行で書き出す。Python 側が 1 行ずつ読むので、必ず流し切る。
+    /// Write the JSON on one line. Python reads line by line, so always flush it out.
     static func emit(_ object: [String: Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject: object),
               var line = String(data: data, encoding: .utf8) else { return }

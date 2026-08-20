@@ -1,23 +1,24 @@
-"""macOS 26 の音声認識(SpeechAnalyzer)を使うエンジン。
+"""Engine that uses the macOS 26 speech recognition (SpeechAnalyzer).
 
-`--engine apple` で使う(macOS では既定)。OS 付属のオンデバイスモデルなので、
-数 GB のモデルを落とす必要がなく、音声は端末の外に出ない。
+Picked with `--engine apple` (the default on macOS). It is the on-device model
+that ships with the OS, so there is no multi-GB model to download and the audio
+never leaves the machine.
 
-実測では(Apple Silicon / macOS 26)、3.5 秒の日本語音声で認識 0.2 秒ほど、
-句読点まで含めて正しく出る。
+Measured (Apple Silicon / macOS 26), 3.5 seconds of Japanese speech takes about
+0.2 seconds to recognize, and comes out right down to the punctuation.
 
-## Swift のヘルパ経由で呼んでいる
+## Called through a Swift helper
 
-SpeechAnalyzer は Swift の API しかないので、speech_helper.swift を常駐させ、
-WAV のパスを渡して結果を JSON で受け取る。ヘルパは初回に自動でビルドする
-(swiftc は Xcode か Command Line Tools に付属)。
+SpeechAnalyzer only has a Swift API, so speech_helper.swift is kept resident,
+handed a WAV path, and hands back the result as JSON. The helper builds itself
+the first time (swiftc ships with Xcode or the Command Line Tools).
 
-## 途中経過は「発話全体の認識し直し」
+## A partial is "recognize the whole utterance again"
 
-溜まった音声を頭から認識し直して state.text を差し替える。
-1 回が速いので、更新間隔を詰めても追いつく。
-認識をワーカースレッドに逃がしているのはマイク読み取りを止めないため
-(メインループで待つと ffmpeg のパイプが詰まり、長い発話を取りこぼす)。
+The audio collected so far is recognized from the top and state.text replaced.
+One pass is fast, so it keeps up even at a tight refresh interval.
+Recognition is pushed onto a worker thread to keep the mic read running
+(waiting in the main loop clogs the ffmpeg pipe and long utterances get lost).
 """
 import json
 import os
@@ -35,14 +36,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SOURCE = os.path.join(HERE, "speech_helper.swift")
 BINARY = os.path.join(HERE, "build", "speech_helper")
 
-# これ以上の新しい音声が溜まったら途中経過を出し直す
+# Put out a fresh partial once this much new audio has piled up
 _REFRESH_SEC = 0.5
 
-# 認識が短すぎる音声で暴れないための下限
+# Floor that keeps recognition from thrashing on audio that is too short
 _MIN_SEC = 0.3
 
-# voice-shell はどのエンジンにも言語を綴りで渡してくる。
-# SpeechTranscriber は BCP 47 なので直す。
+# voice-shell hands every engine the language spelled out.
+# SpeechTranscriber wants BCP 47, so fix it up here.
 _LOCALE = {
     "japanese": "ja-JP", "english": "en-US", "chinese": "zh-CN",
     "korean": "ko-KR", "french": "fr-FR", "german": "de-DE",
@@ -51,7 +52,7 @@ _LOCALE = {
 
 
 def _locale_id(name):
-    """「Japanese」「ja」「ja-JP」のどれで来ても BCP 47 にする。"""
+    """Turn "Japanese", "ja" or "ja-JP" into BCP 47, whichever one arrives."""
     if not name:
         return "ja-JP"
     s = str(name).strip()
@@ -61,7 +62,7 @@ def _locale_id(name):
 
 
 def _ensure_binary():
-    """ヘルパを必要ならビルドする。ソースより新しければそのまま使う。"""
+    """Build the helper if it is needed. Newer than the source, use it as is."""
     if (os.path.exists(BINARY) and
             os.path.getmtime(BINARY) >= os.path.getmtime(SOURCE)):
         return BINARY
@@ -78,7 +79,7 @@ def _ensure_binary():
 
 
 def load(args):
-    """ヘルパを起こして、asr_mic が扱える形のアダプタを返す。"""
+    """Wake the helper and hand back an adapter in the shape asr_mic wants."""
     if sys.platform != "darwin":
         sys.exit("--engine apple は macOS 専用です")
 
@@ -91,7 +92,7 @@ def load(args):
 
 
 class _State:
-    """asr_mic が触る3つの属性(text / language / audio_accum)だけ持つ。"""
+    """Holds only the 3 attributes asr_mic touches (text / language / audio_accum)."""
 
     __slots__ = ("text", "language", "audio_accum", "_decoded_upto", "_final")
 
@@ -99,12 +100,12 @@ class _State:
         self.text = ""
         self.language = language
         self.audio_accum = np.empty(0, dtype=np.float32)
-        self._decoded_upto = 0   # 最後に認識を始めた時点のサンプル数
+        self._decoded_upto = 0   # sample count when the last run started
         self._final = False
 
 
 class _AppleModel:
-    """asr_mic が呼ぶ 3 つのメソッドを備えた SpeechAnalyzer アダプタ。"""
+    """SpeechAnalyzer adapter carrying the 3 methods asr_mic calls."""
 
     def __init__(self, binary, locale):
         self._locale = locale
@@ -112,7 +113,7 @@ class _AppleModel:
             [binary, "--locale", locale],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             text=True, bufsize=1)
-        # 起動完了(モデル資産の用意を含む)まで待つ。初回は数十秒かかる。
+        # Wait for startup, model assets included. The first run takes tens of seconds.
         first = self._proc.stdout.readline()
         try:
             ready = json.loads(first)
@@ -121,15 +122,15 @@ class _AppleModel:
         if "error" in ready:
             sys.exit(f"speech_helper でエラーが起きました。{ready['error']}")
 
-        self._io_lock = threading.Lock()   # パイプは 1 往復ずつ
-        self._lock = threading.Lock()      # state の付け替えと追記を守る
+        self._io_lock = threading.Lock()   # one round trip on the pipe at a time
+        self._lock = threading.Lock()      # guards swapping state and appending
         self._wake = threading.Event()
         self._state = None
         self._tmpdir = tempfile.mkdtemp(prefix="voice-shell-apple-")
         self._seq = 0
         threading.Thread(target=self._worker, daemon=True).start()
 
-    # 使わない引数は、他のエンジンと口を揃えるためだけに受け取る
+    # The unused arguments are taken only to match the other engines
     def init_streaming_state(self, language=None, **_ignored):
         st = _State(_locale_id(language) if language else self._locale)
         with self._lock:
@@ -137,30 +138,31 @@ class _AppleModel:
         return st
 
     def streaming_transcribe(self, block, state):
-        """音声を溜めてワーカーを起こすだけ(認識はワーカーがやる)。"""
+        """Just pile up audio and wake the worker (the worker recognizes)."""
         with self._lock:
             state.audio_accum = np.concatenate(
                 [state.audio_accum, np.asarray(block, dtype=np.float32)])
         self._wake.set()
 
     def finish_streaming_transcribe(self, state):
-        """発話全体をまとめて認識し直して確定する。
+        """Recognize the whole utterance again in one go and settle it.
 
-        途中経過は最後まで聞き終える前の結果なので、確定はここで出し直す。
+        A partial is a result from before the end was heard, so the settled
+        text is put out fresh here.
         """
         with self._lock:
             state._final = True
-            self._state = None     # 以後ワーカーはこの state に書かない
+            self._state = None     # from here the worker writes no more here
         if len(state.audio_accum) < SAMPLE_RATE * _MIN_SEC:
             return
         text = self._transcribe(state.audio_accum)
         if text:
             state.text = text
 
-    # ── 内部 ─────────────────────────────
+    # ── Internals ────────────────────────
 
     def _transcribe(self, audio):
-        """WAV に書いてヘルパへ渡し、認識結果を受け取る。"""
+        """Write a WAV, hand it to the helper, take the recognized text back."""
         with self._io_lock:
             self._seq += 1
             path = os.path.join(self._tmpdir, f"{self._seq % 4}.wav")
@@ -184,7 +186,7 @@ class _AppleModel:
         return (r.get("text") or "").strip()
 
     def _worker(self):
-        """溜まった音声を発話の頭から認識し直し、state.text を更新し続ける。"""
+        """Re-recognize the collected audio from the top, keeping state.text fresh."""
         while True:
             self._wake.wait()
             with self._lock:
@@ -192,13 +194,14 @@ class _AppleModel:
                 if (state is None or state._final or
                         len(state.audio_accum) - state._decoded_upto
                         < SAMPLE_RATE * _REFRESH_SEC):
-                    # いま起きる理由がない。次の追記まで眠る。
-                    # clear はロック内で行う。外だと「clear の直前に追記された
-                    # 分」の起こし損ねが起きる(追記もロック内なので競合しない)
+                    # No reason to be awake now. Sleep until the next append.
+                    # clear runs inside the lock. Outside it, a chunk appended
+                    # right before the clear misses its wakeup (appending is
+                    # inside the lock too, so the two never race)
                     self._wake.clear()
                     continue
-                audio = state.audio_accum          # 追記は配列を作り直すので
-                state._decoded_upto = len(audio)   # この参照は不変で安全
+                audio = state.audio_accum          # appending rebuilds the array,
+                state._decoded_upto = len(audio)   # so this reference is safe
             if len(audio) < SAMPLE_RATE * _MIN_SEC:
                 continue
             text = self._transcribe(audio)
@@ -208,7 +211,7 @@ class _AppleModel:
 
 
 def _write_wav(path, audio):
-    """float32(-1..1) を 16bit モノラル 16kHz の WAV にする。"""
+    """Turn float32 (-1..1) into a 16bit mono 16kHz WAV."""
     pcm = np.clip(np.asarray(audio, dtype=np.float32), -1.0, 1.0)
     with wave.open(path, "wb") as w:
         w.setnchannels(1)
