@@ -31,6 +31,12 @@
     --ok:#34d399;             /* 送信済み */
     --warn:#fb923c;           /* 一時停止 */
     --danger:#f87171;
+    /* 色を薄く敷いた札の、文字だけに使う色。地と文字が同じ色だと、どちらを
+       動かしても比が上がらない（送信済みの札はライトで 2.96:1 だった）。
+       敷く方は色そのものが意味なので触らず、文字の方だけを動かして小さい
+       文字の下限 4.5:1 を取る。 */
+    --ok-ink:#34d399;         /* 敷いた地の上で 6.98:1。ダークは --ok のままで足りる */
+    --accent-2-ink:#c084fc;   /* 同 5.71:1（--accent-2 のままだと 3.81:1） */
     --glow:0 0 14px;
     --radius:20px;
   --pill:999px;
@@ -65,6 +71,8 @@
     --ok:#059669;
     --warn:#d97706;
     --danger:#dc2626;
+    --ok-ink:#066a4b;         /* 敷いた地の上で 5.20:1（--ok のままだと 2.96:1） */
+    --accent-2-ink:#6d28d9;   /* 同 5.36:1（--accent-2 のままだと 4.30:1） */
     --glow:0 0 0;
   }
   @media (prefers-color-scheme: light) {
@@ -74,7 +82,7 @@
       --line:#78869b; --line-soft:#d9e0ea; --track:#dce2ec;
       --text:#101826; --dim:#4d5a6c; --faint:#636f80;
       --accent:#04608b; --accent-2:#7c3aed; --ok:#059669; --warn:#d97706;
-      --danger:#dc2626; --glow:0 0 0;
+      --danger:#dc2626; --ok-ink:#066a4b; --accent-2-ink:#6d28d9; --glow:0 0 0;
     }
   }
 
@@ -205,7 +213,7 @@
      設定の中だけだと、間違った機械へ話しかけていても気づけない。 */
   .machine {
     font-size:.66rem; font-weight:600; padding:.1rem .5rem; border-radius:var(--pill);
-    color:var(--accent-2); background:color-mix(in srgb, var(--accent-2) 16%, transparent);
+    color:var(--accent-2-ink); background:color-mix(in srgb, var(--accent-2) 16%, transparent);
     max-width:9rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   }
   .route-chip:hover { color:var(--text); }
@@ -398,8 +406,9 @@
     padding:.05rem .4rem; border-radius:5px; font-size:.64rem; font-weight:600;
   }
   .entry .mark::before { content:"✓"; font-size:.7em; }
-  .entry .mark.sent   { color:var(--ok);       background:color-mix(in srgb, var(--ok) 14%, transparent); }
-  .entry .mark.edited { color:var(--accent-2); background:color-mix(in srgb, var(--accent-2) 14%, transparent); }
+  /* 地は色そのものが意味なので薄いまま置き、文字だけ「文字用」の色にする */
+  .entry .mark.sent   { color:var(--ok-ink);       background:color-mix(in srgb, var(--ok) 14%, transparent); }
+  .entry .mark.edited { color:var(--accent-2-ink); background:color-mix(in srgb, var(--accent-2) 14%, transparent); }
   /* どのセッションへ送ったか。複数の作業で使っているとき、履歴を見て
      「これはどっちに言ったんだっけ」が分からなくなるのを防ぐ。 */
   .entry .to {
@@ -423,6 +432,7 @@
   /* 縦に並べておくと、席が足りないときに認識中のテキストだけを詰められる。
      残りは動かないので、ボタンの位置が勝手に変わらない。 */
   .draft-card {
+    position:relative;                /* 下端の線を札の中に置くため */
     display:flex; flex-direction:column;
     margin:0 calc(var(--pad) - .25rem) .4rem;
     background:var(--panel-2);
@@ -469,6 +479,25 @@
     padding:.05rem .4rem; border-radius:5px; font-size:.64rem; font-weight:600;
     color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, transparent);
   }
+  /* 送られるまでの間。喋り終えてから「確定までの無音」が経つと送られるが、
+     これまで画面には何も出ていなかったので、まだ送られていないのか、もう
+     送られたのかが分からなかった。数字（1.5 → 1.0 → 0.5）は正確でも読ませる
+     ことになる。この画面は喋りながら横目で見るものなので、地と塗りで量だけを
+     見せる（音量メーターと同じ作り）。喋り直すと塗りは消えて最初に戻る。
+     場所は札の下端。面で塗ると一息ごとに画面の下半分が明滅する。
+     溜める側と一時停止では無音で送られないので、そのときは置かない。 */
+  /* 角の丸みに食い込ませない。半径 20px の内側に収まる位置に置く
+     （左右 .8rem・下 3px なら、線の下端がちょうど丸みの内側に入る）。 */
+  .send-rail {
+    position:absolute; left:.8rem; right:.8rem; bottom:3px;
+    height:2px; border-radius:var(--pill); background:var(--track);
+    pointer-events:none;
+  }
+  .send-rail i {
+    display:block; height:100%; width:0; border-radius:var(--pill);
+    background:var(--accent);
+  }
+
   /* 認識中の生テキスト。編集欄とは別に置き、確定した分だけ下へ落とす。
      ここを編集欄に直接流し込むと、手直し中の文字を上書きしてしまう。 */
   /* 一息で長く喋ると、認識中のテキストだけで画面が埋まる。上限を決めて、
@@ -508,7 +537,9 @@
     box-shadow:0 0 0 1px color-mix(in srgb, var(--accent-2) 22%, transparent);
   }
   .draft-card.editing .mark {
-    color:var(--accent-2); background:color-mix(in srgb, var(--accent-2) 16%, transparent);
+    /* 履歴の「手直し」の札と同じ作りなので、同じく文字用の色を使う。
+       敷いた地の上では --accent-2 のままだと 4.0 と 4.47 で下限を割る。 */
+    color:var(--accent-2-ink); background:color-mix(in srgb, var(--accent-2) 16%, transparent);
   }
 
   #draft {
@@ -957,6 +988,9 @@
       <button class="round go" id="send" data-icon="send" data-icon-size="20"
               data-i18n-title="sendTitle"></button>
     </div>
+    <!-- 送られるまでの間。塗り終わったところで送られる。読み上げには乗せない
+         （耳で聞いても間に合わせようがなく、喋っている最中に割り込むだけ）。 -->
+    <div class="send-rail" id="sendRail" aria-hidden="true" hidden><i id="sendRailFill"></i></div>
   </section>
 
   <div class="log-head">
@@ -1055,6 +1089,15 @@
       <select id="enginePick"></select>
     </div>
     <p class="range-note" id="engineNote"></p>
+    <!-- Whisper のモデル。名前（large-v3-turbo など）でも、手元のフォルダの
+         場所でも受ける。積み直しが要るので、置き場は 0.5 秒おきに読み直す
+         tuning.json ではなく config.json の方（サーバがそう分けている）。 -->
+    <div class="field" id="whisperModelField" hidden>
+      <label for="whisperModel" data-icon="tune" data-icon-size="17"
+             data-i18n="whisperModel">Model</label>
+      <input class="filter" id="whisperModel" style="margin:0">
+    </div>
+    <p class="range-note" id="whisperModelNote" data-i18n="whisperModelNote" hidden></p>
     <div class="field" id="asrLangField" hidden>
       <label for="asrLang" data-icon="language" data-icon-size="17" data-i18n="asrLang">Spoken language</label>
       <select id="asrLang"></select>
@@ -1078,7 +1121,9 @@
         <button class="btn" id="power" data-icon="power_settings_new"
                 data-icon-size="17"><span id="powerLabel"></span></button>
       </div>
-      <p class="range-note" data-i18n="powerNote"></p>
+      <!-- 何が戻るのかはエンジンで違う（Apple はマイク、Whisper はメモリ）。
+           状態でも変わるので、文言は paintPower() が入れる。 -->
+      <p class="range-note" id="powerNote"></p>
     </div>
   </div>
 
@@ -1187,8 +1232,8 @@ const I18N = {
     hintLive:'Whatever you say goes straight to Claude Code.',
     hintHold:'Speech collects below. Edit it, then send.',
     hintOff:'Nothing is recorded while paused.',
-    hintBooting:'Loading the model. This takes about 40 seconds.',
-    hintStopping:'Releasing the GPU.',
+    hintBooting:'Loading the model. The first time can take a while.',
+    hintStopping:'Stopping recognition.',
     hintStopped:'Start listening again from Settings → Recognition.',
     hintNoMic:'No microphone access — the meter still shows the daemon level.',
     modeLive:'Instant', modeHold:'Review',
@@ -1212,7 +1257,9 @@ const I18N = {
     pauseTitle:'Turn the microphone off', resumeTitle:'Turn the microphone on',
     settingsTitle:'Settings',
     powerStop:'Stop listening', powerStart:'Start listening',
-    powerNote:'Frees the memory the local model holds. Not needed for browser recognition.',
+    powerNoteStart:'Start listening again from here.',
+    powerNoteApple:'Stopping it hands the microphone back. Nothing else is held.',
+    powerNoteWhisper:'Stopping it frees the memory the model holds.',
     settings:'Settings', back:'Back',
     floatBtn:'Float on top', unfloatBtn:'Back to the tab',
     floatAsk:'Keep this window on top',
@@ -1233,6 +1280,8 @@ const I18N = {
     engineBrowser:'This browser (nothing to install)',
     engineNone:'No recognition available',
     localAsrNote:'Runs on this machine. Audio never leaves it.',
+    whisperModel:'Model',
+    whisperModelNote:'A name from Hugging Face, or a folder on this machine. Leave it empty for the default shown faintly in the box. A new one loads when you stop and start listening below.',
     browserAsrNote:'Chrome’s own recognition. Nothing to install.',
     browserMicNote:'The microphone above does not apply here — Chrome’s own default is used:',
     copied:'Copied',
@@ -1300,8 +1349,8 @@ const I18N = {
     hintLive:'話すとそのまま Claude Code に届きます。',
     hintHold:'話した分は下に溜まります。直してから送ってください。',
     hintOff:'一時停止中は何も記録されません。',
-    hintBooting:'モデルを読み込んでいます。40秒ほどかかります。',
-    hintStopping:'GPU を解放しています。',
+    hintBooting:'モデルを読み込んでいます。初めてのときは少し待ちます。',
+    hintStopping:'聞き取りを止めています。',
     hintStopped:'設定 → 認識のやり方 から、聞き取りを再開できます。',
     hintNoMic:'マイクを使えないため、波形はデーモンの音量で動かしています。',
     modeLive:'即時', modeHold:'手直し',
@@ -1325,7 +1374,9 @@ const I18N = {
     pauseTitle:'マイクを切る', resumeTitle:'マイクを入れる',
     settingsTitle:'設定',
     powerStop:'聞き取りを止める', powerStart:'聞き取りを始める',
-    powerNote:'手元のモデルが抱えているメモリを解放します。ブラウザ認識のときは要りません。',
+    powerNoteStart:'ここから、もう一度聞き取りを始められます。',
+    powerNoteApple:'止めるとマイクを手放します。抱えているものは他にありません。',
+    powerNoteWhisper:'止めるとモデルが抱えているメモリを解放します。',
     settings:'設定', back:'戻る',
     floatBtn:'手前に浮かせる', unfloatBtn:'タブに戻す',
     floatAsk:'このウィンドウを手前に固定する',
@@ -1346,6 +1397,8 @@ const I18N = {
     engineBrowser:'このブラウザ（何も入れずに動く）',
     engineNone:'使える認識がありません',
     localAsrNote:'ローカル（この機械の中）で認識します。音声は外へ出ません。',
+    whisperModel:'モデル',
+    whisperModelNote:'Hugging Face の名前でも、この機械のフォルダの場所でも受けます。空にすると、欄に薄く出ている既定のモデルを使います。入れ替えたぶんは、下の「聞き取りを止める」と「始める」で積み直したときに効きます。',
     browserAsrNote:'Chrome の認識を使います。入れるものはありません。',
     browserMicNote:'上のマイクはここには効きません。Chrome 自体の既定が使われます:',
     copied:'コピーしました',
@@ -1463,15 +1516,16 @@ function applyI18n(root = uiDoc()) {
 const $ = id => document.getElementById(id);
 const el = {};
 for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
-                  'power','powerLabel','powerRow','openSettings','sheet','closeSettings','floatBtn','page',
+                  'power','powerLabel','powerRow','powerNote','openSettings','sheet','closeSettings','floatBtn','page',
                   'miniMic','miniViz',
                   'routes','routeChips','routePick','viz','meter','meterHit','meterFill','meterMark','logoMark',
                   'tray','stream','draft','draftTime','draftActions','send','discard',
-                  'editOnce','dropOne','draftMark',
+                  'editOnce','dropOne','draftMark','sendRail','sendRailFill',
                   'hint','note','log','none','count','fresh','floatAsk','taken','takeBack',
                   'mic','recogLang','recogLangField','thresh','threshVal','gaugeFill','gaugeMark',
                   'silence','silenceVal','minChars','minCharsVal','clean',
-                  'engineGroup','enginePick','engineNote','browserAsrWarn','browserMic','micSettingsLink','asrLang','asrLangField',
+                  'engineGroup','enginePick','engineNote','whisperModel','whisperModelField','whisperModelNote',
+                  'browserAsrWarn','browserMic','micSettingsLink','asrLang','asrLangField',
                   'idleMute','idleMuteVal','idleMuteField','idleMinsField','idleMuteOn','idleMuteNote',
                   'themeRow','langRow','multiOn','machineName','machineNameField','machineTag',
                   'tabReplace','tabIgnore',
@@ -1896,6 +1950,8 @@ function drawMic(ctx, w, h, tone) {
 let frameFailed = false;
 function frame(now) {
   requestAnimationFrame(frame);
+  // 絵が描けない状態（箱の寸法が取れない等）でも、送られるまでの気配は出す
+  paintSendRail(now);
   if (!cw || !ch) return;
   try { paintFrame(now); } catch (err) {
     // 一コマ失敗しても止めない。次のコマで描き直す。
@@ -2171,6 +2227,34 @@ function paintDraft() {
   el.draftActions.hidden = !want;
 }
 
+/* ── 送られるまでの間 ───────────────────
+   デーモンは「基準の音量を下回っている時間」が確定までの無音に達したところで
+   ひと区切りにする（asr_mic.stream_utterances）。同じ勘定をこちらでもして、
+   残りを札の下端の線で見せる。材料は level.txt の rms と speaking だけで足りる。 */
+let voiceSeen = false;   // いまの一言で、基準を超える声を拾ったか
+let silentAt = 0;        // 声が途切れた時刻。0 なら数えていない
+
+/* 数えてよいのは、そのまま届く側で、デーモンが聞いているときだけ。
+   溜める側と「この一言だけ直す」では黙っても送られないし、一時停止では
+   そもそも拾っていない。ブラウザ認識は区切りを自分で決めるので、
+   こちらの「確定までの無音」とは関係がない。 */
+const sendCountdownOn = () =>
+  route === 'live' && !oneShot && engineOnish() && !asrActive();
+
+function clearSendCountdown() { voiceSeen = false; silentAt = 0; }
+
+function paintSendRail(now) {
+  const on = sendCountdownOn();
+  if (!on) clearSendCountdown();          // 条件が外れたら毎コマ自分で戻る
+  el.sendRail.hidden = !on;
+  const wait = (Number(tuning.silence_duration) || 0) * 1000;
+  const r = (silentAt && wait > 0) ? Math.min(1, (now - silentAt) / wait) : 0;
+  el.sendRailFill.style.width = (r * 100).toFixed(1) + '%';
+  // 塗り終わったら数えるのをやめる。最小文字数や無視する語で捨てられた一言は
+  // 確定が返ってこないので、待っていると満ちたままの線が残る。
+  if (r >= 1) clearSendCountdown();
+}
+
 async function setRoute(next) {
   const prev = route;
   route = next;
@@ -2333,6 +2417,12 @@ function connect() {
     const m = JSON.parse(ev.data);
 
     if ('level' in m) {
+      // 声が出た・途切れた瞬間だけを拾う。level は同じ値なら送られてこないが、
+      // 無音のあいだも音量は揺れるので、変わり目を自分で見分ける。
+      if (m.speaking !== daemonSpeaking) {
+        if (m.speaking) { voiceSeen = sendCountdownOn(); silentAt = 0; }
+        else if (voiceSeen) silentAt = performance.now();
+      }
       daemonLevel = m.level; daemonSpeaking = m.speaking;
       el.meterFill.classList.toggle('on', m.speaking);
       paintGauge();
@@ -2405,10 +2495,13 @@ function connect() {
       paintTinyButtons();
 
     } else if ('held' in m) {
-      // 一時停止中の発話。編集中でも壊さないよう末尾に足すだけにする
+      // 一時停止中の発話。編集中でも壊さないよう末尾に足すだけにする。
+      // 溜める側では下の線をそもそも出さないので、ここの片付けは念のため。
+      clearSendCountdown();
       appendHeld(m.held);
 
     } else if (m.text != null) {
+      clearSendCountdown();   // ひと区切りついた。次の声からまた数える
       // 本文のある行だけ履歴にする。制御用の知らせ（level / muted / paused /
       // voice_cmd …）が増えるたび、古い画面がそれを発話として並べて空の札を
       // 作っていた。知らない鍵は黙って捨てる方が安全。
@@ -2456,12 +2549,17 @@ function appendHeld(text) {
 }
 
 /* ── 認識エンジンの入切 ─────────────────
-   止めると GPU（vLLM 版で約12GB）が解放される。macOS 既定の apple エンジンは
-   そもそも確保しないが、止めればマイクも完全に手放せる。
+   止めると、そのエンジンが抱えていたものが戻る。Whisper はモデルのぶんの
+   メモリ、Apple はマイクそのもの（メモリは元から抱えていない）。戻る量は
+   選んだモデルで変わるので、画面には数字を出さない。
    'on' / 'booting' / 'stopping' / 'off' の4状態。押した瞬間に on↔off へ
    書き換えると完了前にラベルが変わってしまうので、途中の状態を挟む。 */
 let engine = 'on';
 const engineOnish = () => engine === 'on';
+/* いま選ばれているエンジン。ボタンを出すかどうかも、止めると何が戻るのかも
+   これで決まる。サーバが覚えている値を loadEngines() が 5 秒おきに入れる。
+   読めるまでは空。空のあいだは何が戻るのかを言わない（言い当てられない）。 */
+let chosenEngine = '';
 
 let startedAt = 0;     // 起動を押した時刻
 const BOOT_SEC = 40;   // 実測でおよそ40秒
@@ -2486,6 +2584,18 @@ function paintPower() {
   // ただしブラウザで認識しているなら、デーモンが止まっていても操作できる。
   const usable = engineOnish() || asrActive();
   for (const b of [el.segLive, el.segHold, el.segOff, el.mic]) b.disabled = !usable;
+
+  /* 押しても何も起きないボタンは出さない。ブラウザ認識のときは積むものが
+     無く、押しても engine-start が「ブラウザ認識が選ばれています」で終わる。
+     Apple と Whisper では常に出す。止まっているときの動かし直しは、画面に
+     残る唯一の道でもある（エンジンを選び直す方は、同じものをもう一度
+     選んでも onchange が起きないので復帰には使えない）。 */
+  el.powerRow.hidden = chosenEngine === BROWSER_ENGINE;
+  el.powerNote.textContent =
+      engine === 'off'                   ? t('powerNoteStart')
+    : chosenEngine === WHISPER_ENGINE    ? t('powerNoteWhisper')
+    : chosenEngine === APPLE_ENGINE      ? t('powerNoteApple')
+    : '';
 }
 
 el.power.onclick = async () => {
@@ -2723,7 +2833,7 @@ el.openSettings.onclick = async () => {
   el.sheet.hidden = false;
   fitMini();                        // 隠れている間は寸法が取れない
   showSheetTab(store.get('sheetTab', 'basic'));
-  await Promise.all([loadMics(), loadLangs(), loadTuning(), loadDict()]);
+  await Promise.all([loadMics(), loadLangs(), loadTuning(), loadDict(), loadWhisperModel()]);
   el.dictNote.textContent = '';
 };
 el.closeSettings.onclick = () => { saveDict(); el.sheet.hidden = true; };
@@ -2824,6 +2934,29 @@ async function loadLangs() {
 }
 
 el.recogLang.onchange = () => putJSON('/api/tuning', {language: el.recogLang.value});
+
+/* Whisper のモデル。名前が正しいかは読み込んでみるまで分からないので、
+   ここでは確かめない。既定の名前は薄い字（プレースホルダ）で見せて、
+   空欄が「既定のまま」だと分かるようにする。 */
+let whisperModelSaved = '';
+async function loadWhisperModel() {
+  try {
+    const d = await (await fetch('/api/whisper-model')).json();
+    whisperModelSaved = d.model || '';
+    el.whisperModel.placeholder = d.default || '';
+    // 打っている最中は触らない（設定を開き直したときの取り直しで消える）
+    if (uiDoc().activeElement !== el.whisperModel) el.whisperModel.value = whisperModelSaved;
+  } catch {}
+}
+function saveWhisperModel() {
+  const name = el.whisperModel.value.trim();
+  el.whisperModel.value = name;
+  if (name === whisperModelSaved) return;   // 触っただけなら書かない
+  whisperModelSaved = name;
+  putJSON('/api/whisper-model', {model: name});
+}
+el.whisperModel.onchange = saveWhisperModel;
+el.whisperModel.onblur = saveWhisperModel;   // change が出ない経路のため
 
 /* ── 感度と区切り ───────────────────────
    3つとも保存すると即座にデーモンへ効く（0.5秒おきに読み直している）。 */
@@ -3354,6 +3487,9 @@ function paintAsrLangs() {
 
    両方を同時に動かすと同じ発話ログに2回書かれるので、選ぶのは常に1つ。 */
 const BROWSER_ENGINE = 'browser';
+// 手元で動く2つ。止めたときに戻るものが違うので、名前で見分ける。
+const APPLE_ENGINE = 'apple';
+const WHISPER_ENGINE = 'whisper';
 let localEngines = [];
 
 function paintBrowserAsr() {
@@ -3364,10 +3500,15 @@ function paintBrowserAsr() {
   el.idleMuteNote.hidden = !asrChosen;
   paintIdleMute();
   el.engineNote.textContent = t(asrChosen ? 'browserAsrNote' : 'localAsrNote');
-  // 電源はローカルのモデルを積み下ろしするためのもの。
-  // ブラウザで認識している間は積むものが無いので、出す意味がない。
-  el.powerRow.hidden = asrChosen;
+  // 聞き取りの入切は、出すかどうかも文言も paintPower() が決める
+  // （エンジンだけでなく、動いているかどうかでも変わるため）。
+  paintPower();
   if (el.recogLangField) el.recogLangField.hidden = asrChosen || el.recogLangField.hidden;
+  /* Whisper のモデルの欄。止まっている間も出す。入れ替えてから積み直す、
+     という順で使うので、止めた途端に欄が消えると手が届かない。 */
+  const whisper = chosenEngine === WHISPER_ENGINE;
+  el.whisperModelField.hidden = !whisper;
+  el.whisperModelNote.hidden = !whisper;
 }
 
 async function loadEngines() {
@@ -3388,6 +3529,7 @@ async function loadEngines() {
   // 覚えている選択はサーバが持っている。localStorage を正にすると、
   // ブラウザを変えたときに起動時の分岐と食い違う。
   const cur = d.chosen || BROWSER_ENGINE;
+  chosenEngine = cur;
   asrChosen = canBrowserASR && cur === BROWSER_ENGINE;
   recWanted = asrChosen && !asrPausedByRoute;
 
@@ -3409,6 +3551,8 @@ async function loadEngines() {
 
 el.enginePick.onchange = async () => {
   const pick = el.enginePick.value;
+  // 5秒おきの loadEngines を待たずに、選んだ瞬間から出し分けを合わせる
+  chosenEngine = pick;
   el.enginePick.disabled = true;
   try {
     if (pick === BROWSER_ENGINE) {
