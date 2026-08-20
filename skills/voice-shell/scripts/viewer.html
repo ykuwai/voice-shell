@@ -951,6 +951,12 @@
       <span data-i18n="browserMicNote"></span>
       <button class="link" id="micSettingsLink">chrome://settings/content/microphone</button>
     </p>
+    <div class="field" id="idleMuteField" hidden>
+      <label for="idleMute" data-icon="timer" data-icon-size="17" data-i18n="idleMute">Turn off when idle</label>
+      <input type="range" id="idleMute" min="0" max="30" step="1">
+      <span class="val" id="idleMuteVal"></span>
+    </div>
+    <p class="range-note" id="idleMuteNote" data-i18n="idleMuteNote" hidden></p>
     <p class="warn-note" id="browserAsrWarn" data-i18n="browserAsrWarn" hidden></p>
     <div id="powerRow">
       <div class="btn-row" style="margin-top:.7rem">
@@ -1125,6 +1131,11 @@ const I18N = {
     browserMicNote:'The microphone above does not apply here — Chrome’s own default is used:',
     copied:'Copied',
     browserAsrWarn:'Audio is sent to Google servers for recognition. Keep this off if everything must stay on this machine — use the daemon instead.',
+    idleMute:'Turn off when idle',
+    idleMuteNote:'With no speech for this long, the microphone turns itself off — the browser keeps reconnecting to Google otherwise. Press the mic to start again. 0 leaves it on.',
+    idleMuted:'No speech for {n} min, so the microphone is off. Press it to start again.',
+    idleNever:'never',
+    minutesShort:'{n} min',
     asrLang:'Spoken language',
     asrDenied:'Microphone access was refused, so recognition could not start.',
     asrFailed:'Recognition kept failing, so it was turned off. Check your connection and the microphone.',
@@ -1240,6 +1251,11 @@ const I18N = {
     browserMicNote:'上のマイクはここには効きません。Chrome 自体の既定が使われます:',
     copied:'コピーしました',
     browserAsrWarn:'音声は認識のため Google のサーバへ送られます。ローカルだけで完結させたい場合は、ほかの認識に切り替えてください。',
+    idleMute:'話さないと切る',
+    idleMuteNote:'これだけ声が無いと、マイクを自分で切ります。放っておくとブラウザが Google へ繋ぎ直し続けるためです。マイクを押せば戻ります。0 で切りません。',
+    idleMuted:'{n}分 声が無かったので、マイクを切りました。押すと戻ります。',
+    idleNever:'切らない',
+    minutesShort:'{n}分',
     asrLang:'話す言語',
     asrDenied:'マイクの使用が許可されなかったため、認識を始められませんでした。',
     asrFailed:'認識が続けて失敗したので切りました。回線とマイクを確認してください。',
@@ -1352,6 +1368,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'silence','silenceVal','minChars','minCharsVal','clean',
                   'calibBtn','calibNote',
                   'engineGroup','enginePick','engineNote','browserAsrWarn','browserMic','micSettingsLink','asrLang','asrLangField',
+                  'idleMute','idleMuteVal','idleMuteField','idleMuteNote',
                   'themeRow','langRow','multiOn','machineName','machineTag',
                   'scopePrivate','scopeNote','tabReplace','tabIgnore',
                   'paneReplace','paneIgnore','replaceRows','ignoreRows',
@@ -2589,7 +2606,7 @@ el.recogLang.onchange = () => putJSON('/api/tuning', {language: el.recogLang.val
 
 /* ── 感度と区切り ───────────────────────
    3つとも保存すると即座にデーモンへ効く（0.5秒おきに読み直している）。 */
-let tuning = {silence_threshold: 0.015, silence_duration: 1.5,
+let tuning = {idle_mute_min: 5, silence_threshold: 0.015, silence_duration: 1.5,
               min_chars: 15, strip_fillers: false};
 
 // しきい値のつまみは対数目盛り。よく使う 0.003〜0.03 が
@@ -2610,6 +2627,9 @@ function paintTuning() {
   el.silenceVal.textContent = Number(tuning.silence_duration).toFixed(1) + 's';
   el.minCharsVal.textContent = tuning.min_chars;
   el.clean.checked = !!tuning.strip_fillers;
+  const idle = Number(tuning.idle_mute_min) || 0;
+  el.idleMute.value = idle;
+  el.idleMuteVal.textContent = idle ? t('minutesShort', {n: idle}) : t('idleNever');
   paintGauge();
 }
 
@@ -2635,7 +2655,8 @@ async function loadTuning() {
     for (const [k, v] of Object.entries(d.tuning || {})) if (v != null) tuning[k] = v;
     for (const [k, r] of Object.entries(d.range || {})) {
       if (k === 'silence_threshold') { threshLo = r.min; threshHi = r.max; continue; }
-      const node = {silence_duration: el.silence, min_chars: el.minChars}[k];
+      const node = {silence_duration: el.silence, min_chars: el.minChars,
+                    idle_mute_min: el.idleMute}[k];
       if (node) { node.min = r.min; node.max = r.max; }
     }
     paintTuning();
@@ -2658,6 +2679,7 @@ el.thresh.oninput = () => {
 };
 el.silence.oninput = () => { tuning.silence_duration = Number(el.silence.value); paintTuning(); queueTuning(); };
 el.minChars.oninput = () => { tuning.min_chars = Number(el.minChars.value); paintTuning(); queueTuning(); };
+el.idleMute.oninput = () => { tuning.idle_mute_min = Number(el.idleMute.value); paintTuning(); queueTuning(); };
 
 /* ── 自動調整 ───────────────────────────
    まわりが騒がしいと、既定のしきい値では声が一度も超えず
@@ -2948,6 +2970,25 @@ setInterval(() => {
   try { rec.stop(); } catch {}
 }, 1000);
 
+/* しばらく誰も喋らなければ、こちらからマイクを切る。
+
+   ブラウザ認識は 7〜10 秒でセッションが切れる仕様で、こちらは黙っている
+   あいだも先回りして張り直している。つまり席を外しているだけで、Google へ
+   延々と繋ぎ直し続ける。使っていない時間まで持たせる筋合いは無い。
+
+   切ったことは音と一言で伝える。黙って切ると、戻ってきて喋っても届かない
+   状態に気づけない（今日それで2時間半を溶かしたばかり）。 */
+setInterval(() => {
+  if (!asrActive() || route === 'off' || inFlight) return;
+  const mins = Number(tuning.idle_mute_min) || 0;
+  if (!mins) return;
+  if (performance.now() - lastVoiceAt < mins * 60000) return;
+  setRoute('off').then(() => {
+    chime('down');
+    say(t('idleMuted', {n: mins}), 30);
+  });
+}, 5000);
+
 /* 確定した発話をサーバへ。辞書・無視語・最小文字数・保留の判定は
    サーバ側でデーモンと同じ道を通す（認識のやり方で結果が変わらないように）。
 
@@ -3131,6 +3172,8 @@ function paintBrowserAsr() {
   el.browserAsrWarn.hidden = !asrChosen;
   el.browserMic.hidden = !asrChosen;
   el.asrLangField.hidden = !asrChosen;
+  el.idleMuteField.hidden = !asrChosen;
+  el.idleMuteNote.hidden = !asrChosen;
   el.engineNote.textContent = t(asrChosen ? 'browserAsrNote' : 'localAsrNote');
   // 電源はローカルのモデルを積み下ろしするためのもの。
   // ブラウザで認識している間は積むものが無いので、出す意味がない。
