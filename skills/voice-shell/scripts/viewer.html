@@ -13,9 +13,16 @@
     --bg:#070a10;
     --panel:#0d121b;
     --panel-2:#121927;
-    --raise:#18202f;
-    --line:#1d2735;
-    --line-soft:#151d29;
+    /* 面と線には役割がある。ここを取り違えると、上げなくてよい線まで濃くなって
+       画面が騒がしくなる。
+       --raise    選ばれている面・触れている面。--dim を載せるので 4.5:1 が上限
+       --line     部品の輪郭。押せる範囲を示すので 3:1 が下限
+       --line-soft 区切り線と札の縁。同じ種類のものを並べる境目なので 3:1 は要らない
+       --track    メーターとつまみの地。上げると中の塗りが埋もれて量が読めなくなる */
+    --raise:#31405b;    /* 土台との差 1.69:1。--dim が 4.75:1、--faint が 3.06:1 */
+    --line:#5e6a7e;     /* 地との差 3.43:1 */
+    --line-soft:#232e40;
+    --track:#1d2735;
     --text:#e8eef7;
     --dim:#a3b0c4;      /* 8.6:1  項目名 */
     --faint:#7d8ca4;    /* 5.4:1  説明・見出し。小さい文字の下限 4.5:1 を満たす */
@@ -43,13 +50,17 @@
     --bg:#eef1f6;
     --panel:#ffffff;
     --panel-2:#f4f6fa;
-    --raise:#e9edf4;
-    --line:#dce2ec;
-    --line-soft:#e8ecf3;
+    --raise:#ccd5e3;    /* 土台との差 1.37:1。--dim が 4.74:1 */
+    --line:#78869b;     /* 地との差 3.70:1 */
+    --line-soft:#d9e0ea;
+    --track:#dce2ec;
     --text:#101826;
-    --dim:#4d5a6c;      /* 7.2:1 */
-    --faint:#6b7889;    /* 4.6:1  小さい文字の下限を満たす */
-    --accent:#0891b2;
+    --dim:#4d5a6c;      /* 7.0:1 */
+    --faint:#636f80;    /* 4.7:1  タブの土台の上でも小さい文字の下限を満たす */
+    /* 白地の上では、明るい青は白抜きの文字を載せられない（塗りのボタンが
+       読めなくなる）。明るさではなく、色みと鮮やかさで澄ませる。
+       色相を 192 度から 199 度へ寄せ、彩度を上げた。白地に 6.9:1。 */
+    --accent:#04608b;
     --accent-2:#7c3aed;
     --ok:#059669;
     --warn:#d97706;
@@ -59,10 +70,10 @@
   @media (prefers-color-scheme: light) {
     :root:not([data-theme="dark"]) {
       color-scheme: light;
-      --bg:#eef1f6; --panel:#ffffff; --panel-2:#f4f6fa; --raise:#e9edf4;
-      --line:#dce2ec; --line-soft:#e8ecf3;
-      --text:#101826; --dim:#4d5a6c; --faint:#6b7889;
-      --accent:#0891b2; --accent-2:#7c3aed; --ok:#059669; --warn:#d97706;
+      --bg:#eef1f6; --panel:#ffffff; --panel-2:#f4f6fa; --raise:#ccd5e3;
+      --line:#78869b; --line-soft:#d9e0ea; --track:#dce2ec;
+      --text:#101826; --dim:#4d5a6c; --faint:#636f80;
+      --accent:#04608b; --accent-2:#7c3aed; --ok:#059669; --warn:#d97706;
       --danger:#dc2626; --glow:0 0 0;
     }
   }
@@ -99,7 +110,7 @@
   header {
     display:flex; align-items:center; gap:.6rem;
     padding:.85rem var(--pad) .7rem;
-    border-bottom:1px solid var(--line);
+    border-bottom:1px solid var(--line-soft);
   }
   .brand { display:flex; align-items:center; gap:.55rem; margin-right:auto; min-width:0; }
   .brand h1 {
@@ -248,7 +259,7 @@
   .meter-hit { padding:12px 0; cursor:ew-resize; touch-action:none; }
   .meter {
     position:relative; height:3px;
-    border-radius:var(--pill); background:var(--line);
+    border-radius:var(--pill); background:var(--track);
   }
   .meter-hit:hover .meter-mark, .meter-hit.dragging .meter-mark {
     height:14px; top:-5.5px; width:3px;
@@ -342,14 +353,21 @@
   /* ── 履歴 ─────────────────────────────── */
   .log-head {
     display:flex; align-items:center; gap:.5rem;
-    padding:.7rem var(--pad) .55rem; border-top:1px solid var(--line);
+    padding:.7rem var(--pad) .55rem; border-top:1px solid var(--line-soft);
   }
   .log-head h2 {
     margin:0; margin-right:auto; font-size:.8rem; font-weight:600;
     display:flex; align-items:center; gap:.35rem;
   }
   .log-head h2 svg { opacity:.75; }
-  .filters { display:flex; gap:.15rem; background:var(--panel-2); padding:3px; border-radius:var(--pill); }
+  /* タブの土台。地の色を 3:1 まで持ち上げると、静かな画面が灰色の階段になる。
+     形は輪郭の方で見せて、土台の色は静かなままにする。選ばれているものは
+     --raise の塗りと文字の濃さで示す。輪郭は内側に描くので、背丈は変わらない。
+     .seg-row と .dict-tabs も同じ作りにしてある。 */
+  .filters {
+    display:flex; gap:.15rem; background:var(--panel-2); padding:3px;
+    border-radius:var(--pill); box-shadow:inset 0 0 0 1px var(--line);
+  }
   .filters button {
     font-size:.7rem; padding:.25rem .7rem; border-radius:var(--pill); color:var(--faint);
     transition:background .15s, color .15s;
@@ -380,9 +398,17 @@
     display:inline-flex; align-items:center; gap:.2rem; min-width:0;
     padding:.05rem .4rem; border-radius:5px; font-size:.64rem;
     color:var(--dim); background:var(--raise);
+    /* 隣の「送信済み」「手直し」の札は色で地が見えるが、こちらは送り先という
+       ただの覚え書きなので色を持てない。地を濃くするだけでは、上に載る --dim が
+       4.5:1 を割る。輪郭で形を見せて、地は文字が読める濃さに留める。
+       輪郭を内側に描くのは、隣の札と背丈を揃えたままにするため。 */
+    box-shadow:inset 0 0 0 1px var(--line);
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:12rem;
   }
-  .entry .to svg { opacity:.75; }
+  /* 紙飛行機は塗りにする。輪郭のままだと 10px の札の中で線が消える。
+     薄めるのもやめる（もともと弱い絵をさらに弱くしていた）。 */
+  .entry .to svg .solid { display:inline; }
+  .entry .to svg .line { display:none; }
   .entry .text { font-size:.88rem; line-height:1.65; word-break:break-word; }
 
   /* 未送信カード。認識中のテキストもここに出る（一等地に置く） */
@@ -534,7 +560,7 @@
     position:sticky; top:0; z-index:1;
     display:flex; align-items:center; gap:.4rem;
     padding:.7rem var(--pad) .7rem .5rem; background:var(--panel);
-    border-bottom:1px solid var(--line);
+    border-bottom:1px solid var(--line-soft);
   }
   .sheet-head .icon::after { display:none; }   /* 状態を示す点は要らない */
   .sheet-head h2 { margin:0; font-size:1rem; font-weight:600; margin-right:auto; }
@@ -578,7 +604,7 @@
 
   input[type=range] {
     flex:1; min-width:0; -webkit-appearance:none; appearance:none;
-    height:4px; border-radius:3px; background:var(--line);
+    height:4px; border-radius:3px; background:var(--track);
   }
   input[type=range]::-webkit-slider-thumb {
     -webkit-appearance:none; width:17px; height:17px; border-radius:50%;
@@ -597,7 +623,7 @@
   /* 感度を決めるための実測メーター。しきい値の位置に印を出す。 */
   .gauge {
     position:relative; height:6px; border-radius:var(--pill);
-    background:var(--line); overflow:visible;
+    background:var(--track); overflow:visible;
     margin:.1rem 0 .5rem calc(6.5rem + .6rem);
   }
   .gauge-fill {
@@ -610,7 +636,10 @@
     background:var(--warn); box-shadow:var(--glow) var(--warn);
   }
 
-  .seg-row { display:flex; flex:1; gap:.2rem; background:var(--panel-2); padding:3px; border-radius:var(--pill); }
+  .seg-row {
+    display:flex; flex:1; gap:.2rem; background:var(--panel-2); padding:3px;
+    border-radius:var(--pill); box-shadow:inset 0 0 0 1px var(--line);
+  }
   .seg-row button {
     flex:1; white-space:nowrap; font-size:.8rem; padding:.4rem .5rem;
     border-radius:var(--pill); color:var(--faint);
@@ -655,7 +684,11 @@
   .btn-row .spacer { flex:1; }
 
   /* 辞書 */
-  .dict-tabs { display:flex; gap:.2rem; background:var(--panel-2); padding:3px; border-radius:var(--pill); margin-bottom:.6rem; }
+  .dict-tabs {
+    display:flex; gap:.2rem; background:var(--panel-2); padding:3px;
+    border-radius:var(--pill); box-shadow:inset 0 0 0 1px var(--line);
+    margin-bottom:.6rem;
+  }
   .dict-tabs button {
     display:inline-flex; align-items:center; justify-content:center; gap:.35rem;
     flex:1; white-space:nowrap; font-size:.8rem; padding:.4rem;
@@ -736,7 +769,7 @@
     :root { --stream-max:6em; }
     .hint { display:none; }
     .log-head { display:none; }
-    .log-wrap { border-top:1px solid var(--line); }   /* 見出しの区切りを引き継ぐ */
+    .log-wrap { border-top:1px solid var(--line-soft); }   /* 見出しの区切りを引き継ぐ */
     .status { padding-top:.3rem; padding-bottom:.1rem; }
   }
 
