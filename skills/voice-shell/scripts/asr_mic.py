@@ -7,8 +7,10 @@ realtime.py（端末表示）と webapp.py（ブラウザ表示）が共有す�
 import re
 import os
 import shutil
+import queue
 import subprocess
 import sys
+import threading
 import time
 from collections import deque
 from typing import Iterator, Tuple
@@ -363,8 +365,47 @@ def read_blocks(device: str, in_sr: int,
     「本当に切り替わったか」を確定情報として表示できるようにするため
     （ブラウザ側の楽観的な表示だけだと、実際に切り替わったかは分からない）。
     """
+    nbytes = int(in_sr * BLOCK_SEC) * 2  # 16bit モノラル
+
+    # 録音プロセスは、生きたまま音だけ来なくなることがある。USB マイクを
+    # 抜き差しすると実測で起きた（avfoundation は開いた時点のデバイスに
+    # 繋ぎっぱなしなので、既定が入れ替わると無音すら届かなくなる）。
+    # このとき proc.stdout.read() は EOF も来ないので永久に待つ。実測では
+    # そのまま2時間半、画面は「届いています」のまま何も起きなかった。
+    #
+    # 読む側を別スレッドへ移し、決めた時間だけ待って来なければ立て直す。
+    # 静かな部屋と取り違えることはない。黙っていてもブロック自体は届き、
+    # 届かなくなるのは配線が切れたときだけなので。
     def start(dev):
-        return subprocess.Popen(mic_command(dev, in_sr), stdout=subprocess.PIPE)
+        p = subprocess.Popen(mic_command(dev, in_sr), stdout=subprocess.PIPE)
+        q = queue.Queue(maxsize=100)          # 10秒分。溢れればパイプ側で待つ
+        def pump():
+            try:
+                while True:
+                    b = p.stdout.read(nbytes)
+                    while True:
+                        try:
+                            q.put(b, timeout=1.0)
+                            break
+                        except queue.Full:
+                            if p.poll() is not None:
+                                return        # もう止めた録音。抱えた分は捨てる
+                    if not b:                 # 空バイト列 ＝ 相手が終了した
+                        return
+            except (OSError, ValueError):
+                pass
+        threading.Thread(target=pump, daemon=True).start()
+        return p, q
+
+    def stop(p):
+        try:
+            p.terminate()
+            p.wait(timeout=1.5)
+        except (OSError, subprocess.SubprocessError):
+            try:
+                p.kill()
+            except OSError:
+                pass
 
     def make_resampler():
         if in_sr == SAMPLE_RATE:
@@ -375,8 +416,7 @@ def read_blocks(device: str, in_sr: int,
         return soxr.ResampleStream(in_sr, SAMPLE_RATE, 1, dtype="float32").resample_chunk
 
     current = device
-    proc = start(current)
-    nbytes = int(in_sr * BLOCK_SEC) * 2  # 16bit モノラル
+    proc, blocks = start(current)
     to_16k = make_resampler()
     if in_sr != SAMPLE_RATE:
         print(f"マイクを {in_sr}Hz で録音し {SAMPLE_RATE}Hz に変換します", file=sys.stderr)
@@ -388,6 +428,10 @@ def read_blocks(device: str, in_sr: int,
     MAX_QUICK_CRASHES = 5     # これを超えたら本当に壊れているとみなして諦める
     crash_count = 0
     last_crash_at = 0.0
+    STALL_SEC = 4.0           # これだけ音が来なければ配線が切れたとみなす
+    MAX_QUICK_STALLS = 5
+    stall_count = 0
+    last_stall_at = 0.0
 
     try:
         while True:
@@ -395,15 +439,34 @@ def read_blocks(device: str, in_sr: int,
             if want_device is not None:
                 asked = want_device()
                 if asked and asked != current:
-                    proc.terminate()
+                    stop(proc)
                     current = asked
-                    proc = start(current)
+                    proc, blocks = start(current)
                     to_16k = make_resampler()   # 履歴を持たせない
                     print(f"マイクを切り替えました: {current}", file=sys.stderr, flush=True)
                     if on_switch is not None:
                         on_switch(current)
 
-            raw = proc.stdout.read(nbytes)
+            try:
+                raw = blocks.get(timeout=STALL_SEC)
+            except queue.Empty:
+                now = time.monotonic()
+                if now - last_stall_at > 60:
+                    stall_count = 0
+                stall_count += 1
+                last_stall_at = now
+                if stall_count > MAX_QUICK_STALLS:
+                    print(f"マイクから音が来ない状態が続くため諦めます"
+                          f"（{MAX_QUICK_STALLS}回連続）。マイクの状態を確認してください。",
+                          file=sys.stderr, flush=True)
+                    return
+                print(f"マイクから {STALL_SEC:.0f} 秒ぶん音が来ないので、録音を開き直します"
+                      f"（{stall_count}/{MAX_QUICK_STALLS}）: {current}",
+                      file=sys.stderr, flush=True)
+                stop(proc)
+                proc, blocks = start(current)
+                to_16k = make_resampler()
+                continue
             if not raw:
                 now = time.monotonic()
                 # 短時間に何度も落ちるなら、立て直しても無駄なので諦める
@@ -420,7 +483,7 @@ def read_blocks(device: str, in_sr: int,
                       f"（{crash_count}/{MAX_QUICK_CRASHES}）: {current}",
                       file=sys.stderr, flush=True)
                 time.sleep(0.5)   # 立て直し直後にまた即死するのを避ける
-                proc = start(current)
+                proc, blocks = start(current)
                 to_16k = make_resampler()
                 continue
             block = to_16k(np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0)
@@ -428,7 +491,7 @@ def read_blocks(device: str, in_sr: int,
             rms = float(np.sqrt(block.dot(block) / block.size)) if block.size else 0.0
             yield block, len(block) / SAMPLE_RATE, rms
     finally:
-        proc.terminate()
+        stop(proc)
 
 
 def stream_utterances(model, args, should_stop=lambda: False):
