@@ -27,6 +27,13 @@
     --glow:0 0 14px;
     --radius:20px;
   --pill:999px;
+    /* 窓の大きさで変わる寸法。色と違いテーマでは変えないので、
+       ここだけを見れば「どこが縮むのか」が分かる。 */
+    --pad:1rem;                            /* 左右の余白 */
+    --viz-h:clamp(72px, 20vh, 124px);      /* マイクの絵の高さ */
+    --viz-pad:.4rem;
+    --ring:clamp(42px, 11vh, 64px);        /* 即時 / 手直しの丸 */
+    --stream-max:11em;                     /* 認識中テキストの高さの上限 */
   }
   :root[data-theme="light"] {
     color-scheme: light;
@@ -69,17 +76,26 @@
   button { cursor:pointer; background:none; border:none; padding:0; }
   button:disabled { cursor:default; }
 
+  /* 縦は画面いっぱいに固定して、余りも不足も履歴だけが引き受ける。
+     窓を縮めたときに先に削られるのが履歴になり、マイク・送り先・
+     未送信の札は最後まで画面に残る。 */
   .page {
-    max-width:460px; margin:0 auto; min-height:100vh;
+    max-width:460px; margin:0 auto; height:100vh; height:100dvh;
     background:var(--panel);
     border-left:1px solid var(--line-soft); border-right:1px solid var(--line-soft);
     display:flex; flex-direction:column;
+    overflow-x:hidden; overflow-y:auto;
   }
+  .page > * { flex:none; }          /* 潰れると中の文字が切れる。縮むのは下の2つだけ */
+  /* 履歴がゼロになってもまだ足りないときは、未送信の札が次に譲る
+     （中の認識中テキストは1行まで縮み、続きはその中で繰れる）。 */
+  .page > .draft-card { flex:0 1 auto; min-height:0; }
+  .log-wrap { flex:1 1 0; min-height:0; overflow-y:auto; overscroll-behavior:contain; }
 
   /* ── ヘッダ ───────────────────────────── */
   header {
     display:flex; align-items:center; gap:.6rem;
-    padding:.85rem 1rem .7rem;
+    padding:.85rem var(--pad) .7rem;
     border-bottom:1px solid var(--line);
   }
   .brand { display:flex; align-items:center; gap:.55rem; margin-right:auto; min-width:0; }
@@ -123,7 +139,8 @@
   /* 状態 */
   .status {
     display:flex; align-items:center; gap:.45rem;
-    padding:.5rem 1rem .3rem; font-size:.75rem; color:var(--dim);
+    padding:.5rem var(--pad) .3rem; font-size:.75rem; color:var(--dim);
+    white-space:nowrap; overflow:hidden;
   }
   .beacon { width:8px; height:8px; border-radius:50%; background:var(--faint); flex:none; }
   .beacon.live { background:var(--ok); box-shadow:var(--glow) var(--ok); }
@@ -139,9 +156,9 @@
      （1つしか無いなら選ばせる意味がなく、場所を取るだけ）。 */
   /* 横に流すと、窓が狭いときに右端のものへ手が届かない。折り返して
      全部見せる。長い名前は詰めるが、頭の番号だけは必ず残す。 */
-  .routes {
-    display:flex; flex-wrap:wrap; gap:.25rem; padding:.1rem 1rem .5rem;
-  }
+  .routes { padding:.1rem var(--pad) .5rem; }
+  .route-chips { display:flex; flex-wrap:wrap; gap:.25rem; }
+  .route-pick { display:none; }
   .route-chip {
     flex:0 1 auto; min-width:0; max-width:100%;
     display:inline-flex; align-items:center; gap:.3rem;
@@ -153,6 +170,7 @@
   .route-chip .nm {
     min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   }
+  .route-chip .no { font-weight:700; font-variant-numeric:tabular-nums; flex:none; }
   /* 何台かで同時に使っているときに、いまどの機械を見ているかを本体に出す。
      設定の中だけだと、間違った機械へ話しかけていても気づけない。 */
   .machine {
@@ -176,19 +194,19 @@
   }
 
   /* ── ビジュアライザ ───────────────────── */
-  .viz { position:relative; padding:.4rem 0 .1rem; }
+  .viz { position:relative; padding:var(--viz-pad) 0 .1rem; }
   /* 大きなマイクの当たり判定。絵は canvas 側が描くので、ここは透明。 */
   .mic-hit {
-    position:absolute; left:50%; top:calc(.4rem + 62px);
+    position:absolute; left:50%; top:calc(var(--viz-pad) + var(--viz-h) / 2);
     transform:translate(-50%, -50%);
-    width:100px; height:100px; border-radius:50%;
+    width:calc(var(--viz-h) * .8); height:calc(var(--viz-h) * .8); border-radius:50%;
     background:transparent; cursor:pointer;
   }
   .mic-hit:disabled { cursor:default; }
   /* マイク表示でないときは押せる場所を作らない（波形は操作対象ではない） */
-  #viz { display:block; width:100%; height:124px; }
+  #viz { display:block; width:100%; height:var(--viz-h); }
   /* マイクの入切と音量メーターを1行に並べる */
-  .meter-row { display:flex; align-items:center; gap:.55rem; padding:0 1rem; }
+  .meter-row { display:flex; align-items:center; gap:.55rem; padding:0 var(--pad); }
   .meter-row .meter-hit { flex:1; min-width:0; padding-left:0; padding-right:0; }
 
   /* デーモンが拾えている音量。ブラウザ側の波形とは別の経路なので、
@@ -218,14 +236,14 @@
   /* ── 送り先（即時 / 手直し） ───────────── */
   .modes {
     display:flex; align-items:center; justify-content:center; gap:0;
-    padding:1rem 1rem .9rem;
+    padding:1rem var(--pad) .9rem;
   }
   .mode {
     flex:1; display:flex; flex-direction:column; align-items:center; gap:.5rem;
     color:var(--faint); transition:color .18s;
   }
   .mode .ring {
-    width:64px; height:64px; border-radius:50%;
+    width:var(--ring); height:var(--ring); border-radius:50%;
     display:grid; place-items:center;
     border:2px solid var(--line);
     background:var(--panel-2);
@@ -233,9 +251,13 @@
   }
 
   .mode span { font-size:.8rem; font-weight:600; }
+  /* 中の絵も丸に合わせる。iconSvg が寸法を inline style で付けるので、
+     こちらから決め直すには !important が要る。 */
+  .mode .ring svg {
+    width:calc(var(--ring) * .44) !important; height:calc(var(--ring) * .44) !important;
+  }
   .mode:hover:not(:disabled) .ring { transform:translateY(-1px); }
   .mode:disabled { opacity:.4; }
-  .sep { width:1px; align-self:stretch; margin:.5rem .2rem; background:var(--line); flex:none; }
 
   /* 一時停止のボタンは、押したら何が起きるかを絵で示す。
      聞いている間は「止める」、止めている間は「再開する」。 */
@@ -263,13 +285,13 @@
   }
 
   .hint {
-    margin:0; padding:0 1rem .6rem; min-height:1.4em;
+    margin:0; padding:0 var(--pad) .6rem; min-height:1.4em;
     font-size:.72rem; color:var(--faint);
   }
   /* Claude 側で送り先を切り替えたときの一言。
      自分で押していない変更は、理由が無いと戸惑うだけになる。 */
   .note {
-    margin:0 1rem .6rem; padding:.5rem .75rem;
+    margin:0 var(--pad) .6rem; padding:.5rem .75rem;
     border-radius:12px; font-size:.76rem; line-height:1.5;
     color:var(--accent-2);
     background:color-mix(in srgb, var(--accent-2) 12%, transparent);
@@ -283,7 +305,7 @@
   /* ── 履歴 ─────────────────────────────── */
   .log-head {
     display:flex; align-items:center; gap:.5rem;
-    padding:.7rem 1rem .55rem; border-top:1px solid var(--line);
+    padding:.7rem var(--pad) .55rem; border-top:1px solid var(--line);
   }
   .log-head h2 {
     margin:0; margin-right:auto; font-size:.8rem; font-weight:600;
@@ -297,7 +319,7 @@
   }
   .filters button.on { background:var(--raise); color:var(--text); }
 
-  #log { padding:0 .75rem .5rem; display:flex; flex-direction:column; gap:.4rem; }
+  #log { padding:0 calc(var(--pad) - .25rem) .5rem; display:flex; flex-direction:column; gap:.4rem; }
 
   .entry {
     background:var(--panel-2); border:1px solid var(--line-soft);
@@ -327,8 +349,11 @@
   .entry .text { font-size:.88rem; line-height:1.65; word-break:break-word; }
 
   /* 未送信カード。認識中のテキストもここに出る（一等地に置く） */
+  /* 縦に並べておくと、席が足りないときに認識中のテキストだけを詰められる。
+     残りは動かないので、ボタンの位置が勝手に変わらない。 */
   .draft-card {
-    margin:0 .75rem .4rem;
+    display:flex; flex-direction:column;
+    margin:0 calc(var(--pad) - .25rem) .4rem;
     background:var(--panel-2);
     border:1.5px solid color-mix(in srgb, var(--accent) 55%, var(--line));
     border-radius:var(--radius); padding:.6rem .75rem;
@@ -340,6 +365,8 @@
     font-variant-numeric:tabular-nums;
   }
   .draft-card .gutter .spacer { flex:1; }
+  .draft-card .gutter, .draft-card .draft-actions { flex:none; }
+  .draft-card > textarea { flex:0 1 auto; }   /* 席が足りなければここも詰まる */
   /* 「直す」「消す」。小さな道具なので、ひとつずつ輪郭を描くと騒がしい。
      本体のモード切り替えと同じ「ひとつの台の上に並ぶ」形にして、台がある
      ことでボタンだと分かるようにする。色は触れたときにだけ出す。 */
@@ -373,7 +400,13 @@
   }
   /* 認識中の生テキスト。編集欄とは別に置き、確定した分だけ下へ落とす。
      ここを編集欄に直接流し込むと、手直し中の文字を上書きしてしまう。 */
-  .stream { font-size:.88rem; line-height:1.65; color:var(--text); min-height:1.5em; }
+  /* 一息で長く喋ると、認識中のテキストだけで画面が埋まる。上限を決めて、
+     はみ出した分はここだけを繰る（末尾を見せる処理は JS 側）。 */
+  .stream {
+    flex:1 1 auto; font-size:.88rem; line-height:1.65; color:var(--text);
+    min-height:1.5em; max-height:var(--stream-max);
+    overflow-y:auto; overscroll-behavior:contain;
+  }
   /* 合図として受け取った言葉。指示ではなく操作として扱ったことを、
      その言葉自体を光らせて示す。 */
   .stream mark.cmd {
@@ -408,8 +441,8 @@
   #draft {
     display:block; width:100%; margin-top:.5rem; padding:.6rem .75rem;
     background:var(--panel); border:1px solid var(--line); border-radius:16px;
-    font-size:.88rem; line-height:1.65; resize:none; overflow:hidden;
-    min-height:3.4em;
+    font-size:.88rem; line-height:1.65; resize:none; overflow-y:auto;
+    min-height:3.4em; max-height:var(--stream-max);
   }
   #draft:focus { outline:none; border-color:var(--accent-2); }
   .draft-actions { display:flex; align-items:center; gap:.4rem; margin-top:.5rem; }
@@ -424,7 +457,7 @@
   .round.go { border-color:var(--accent); color:var(--accent); }
   .round.go:hover { box-shadow:var(--glow) color-mix(in srgb, var(--accent) 50%, transparent); }
 
-  .none { padding:1.5rem 1rem; text-align:center; font-size:.78rem; color:var(--faint); }
+  .none { padding:1.5rem var(--pad); text-align:center; font-size:.78rem; color:var(--faint); }
 
   /* 画面そのものが更新されたときだけ出る。常設のボタンは置かない。
      浮かせた小窓には再読み込みの手立てが無いので、ここから促す。 */
@@ -461,13 +494,13 @@
   .sheet-head {
     position:sticky; top:0; z-index:1;
     display:flex; align-items:center; gap:.4rem;
-    padding:.7rem 1rem .7rem .5rem; background:var(--panel);
+    padding:.7rem var(--pad) .7rem .5rem; background:var(--panel);
     border-bottom:1px solid var(--line);
   }
   .sheet-head .icon::after { display:none; }   /* 状態を示す点は要らない */
   .sheet-head h2 { margin:0; font-size:1rem; font-weight:600; margin-right:auto; }
 
-  .group { padding:1.1rem 1rem; border-bottom:1px solid var(--line-soft); }
+  .group { padding:1.1rem var(--pad); border-bottom:1px solid var(--line-soft); }
   .group > h3 {
     display:flex; align-items:center; gap:.4rem;
     margin:0 0 .8rem; font-size:.75rem; font-weight:700; letter-spacing:.06em;
@@ -605,6 +638,99 @@
   .link:hover { color:var(--text); }
   .dict-note, .scope-note { font-size:.75rem; line-height:1.5; color:var(--faint); margin:.5rem 0 0; }
 
+
+  /* ── 窓を小さくしたとき ─────────────────
+     残す順に優先度がある。マイクの入切 ＞ 即時 / 手直し ＞ 送信先 ＞
+     認識中のテキスト。
+
+     文字と押す場所の大きさは変えない。読めない・狙えないボタンでは
+     小さくした意味が無い。削るのは上の帯・余白・説明の行、そして
+     マイクと送り方を横に並べ替えて縦を空けること。
+     履歴は .log-wrap が flex で伸び縮みするので、ここでは触らない。 */
+
+  /* 幅が狭い。左右の余白から詰める */
+  @media (max-width: 379px) {
+    :root { --pad:.7rem; }
+    .machine { max-width:7rem; }
+  }
+  @media (max-width: 279px) {
+    :root { --pad:.55rem; }
+    .brand h1, #logoMark { display:none; }   /* 名札だけ残す */
+    .machine { max-width:100%; }
+    /* 設定も同じ幅に畳む。項目名を上の段へ逃がして、つまみに幅を渡す */
+    .field { flex-wrap:wrap; gap:.35rem .6rem; }
+    .field > label { flex:1 0 100%; min-width:0; }
+    .field .val { margin-left:0; }
+    .gauge { margin-left:0; }
+  }
+
+  /* 背が低い。履歴の見出しと説明の行を畳んで、縦の余白を詰める */
+  @media (max-height: 639px) {
+    :root { --viz-pad:.25rem; --stream-max:6em; }
+    .hint { display:none; }
+    .log-head { display:none; }
+    .log-wrap { border-top:1px solid var(--line); }   /* 見出しの区切りを引き継ぐ */
+    .status { padding-top:.3rem; padding-bottom:.1rem; }
+  }
+
+  /* さらに低い。感度の線は設定からも変えられるので、ここで譲る */
+  @media (max-height: 479px) {
+    :root { --stream-max:4.5em; }
+    .meter-row { display:none; }
+    /* 手直しの欄を開いている間は、認識中の行を1行に抑える。
+       直している文と送るボタンの方が先に見えていてほしい。 */
+    .draft-card:has(> textarea:not([hidden])) .stream { max-height:1.7em; }
+    #draft { min-height:2.4em; }
+  }
+
+  /* ほとんど余地が無い。状態の一行は残す — ここを消すと、
+     届いていないことに気づく手がかりが画面から無くなる */
+  @media (max-height: 429px) {
+    /* 手直しの欄を開いている間は、認識中の行は引っ込める。直している文と
+       送るボタンが先に見えていてほしい。聞こえているかはマイクの絵で分かる。 */
+    .draft-card:has(> textarea:not([hidden])) .stream { display:none; }
+    .draft-card:has(> textarea:not([hidden])) .draft-actions { margin-top:.3rem; }
+  }
+
+  @media (max-height: 379px) {
+    :root { --stream-max:3em; }
+    #draft { min-height:2em; }
+    .mode span:not(.ring) { display:none; }   /* 丸の絵で区別がつく */
+    .mode { gap:0; }
+    .routes { padding-bottom:.35rem; }
+    /* 送信先の札は1つずつ行を使う。ここまで低いとそれだけで埋まるので、
+       名前は省かずに、ひとまとめの選び方へ替える。 */
+    .route-chips { display:none; }
+    .route-pick {
+      display:block; width:100%; padding:.32rem .7rem; font-size:.8rem;
+      border-color:color-mix(in srgb, var(--accent) 55%, var(--line));
+      color:var(--text);
+    }
+    .draft-card { margin-bottom:.25rem; }
+  }
+
+  /* 横に並べ替える。マイクを左に大きく置き、丸2つを右へ。
+     縦に積むと、この2つだけで 200px 以上を使ってしまう。
+     ここは他の段より後に置く（余白の決め方をこちらで上書きするため）。 */
+  @media (max-height: 559px) {
+    :root {
+      --viz-pad:.25rem;
+      --viz-h:clamp(78px, 26vh, 112px);
+      --ring:clamp(46px, 15vh, 60px);
+    }
+    .control-row {
+      display:flex; align-items:center; gap:.5rem;
+      padding:0 var(--pad) .1rem;
+    }
+    .viz { flex:none; width:calc(var(--viz-h) * .95); padding:var(--viz-pad) 0; }
+    .modes { flex:1; min-width:0; padding:.15rem 0; }
+    /* 上の帯は名札だけでよい。題も波も、いま見る必要がない */
+    header { padding:.35rem var(--pad) .25rem; gap:.35rem; }
+    .brand h1, #logoMark { display:none; }
+    .machine { max-width:100%; }
+    .status { padding:.15rem var(--pad) .1rem; }
+  }
+
   [hidden] { display:none !important; }
 </style>
 </head>
@@ -629,35 +755,39 @@
     <span class="beacon" id="beacon"></span><span id="stateText" data-i18n="connecting">Connecting…</span>
   </div>
 
-  <div class="viz">
-    <canvas id="viz"></canvas>
-    <!-- 大きなマイクを押すと入切する。絵は canvas なので、
-         押せる範囲だけ透明な丸を重ねる。 -->
-    <button class="mic-hit" id="segOff" aria-pressed="false"></button>
-    <!-- デーモンが拾えている音量。ブラウザの波形とは別経路なので、
-         波形が動くのにここが動かなければ認識側が落ちていると分かる。 -->
-    <!-- 印をつまむと感度が変わる。細い線のままでは掴めないので、
-         見た目より広い当たり判定を親に持たせている。 -->
-    <div class="meter-row">
+  <!-- マイクと送り方。窓が小さいときは縦に積まず、マイクを左に置いて
+       丸2つを右へ並べる（縦を使い切らないため）。 -->
+  <div class="control-row">
+    <div class="viz">
+      <canvas id="viz"></canvas>
+      <!-- 大きなマイクを押すと入切する。絵は canvas なので、
+           押せる範囲だけ透明な丸を重ねる。 -->
+      <button class="mic-hit" id="segOff" aria-pressed="false"></button>
+    </div>
+
+    <div class="modes" id="modes">
+      <button class="mode on" id="segLive" role="radio" aria-checked="true">
+        <span class="ring" data-icon="bolt" data-icon-size="28"></span>
+        <span data-i18n="modeLive">Instant</span>
+      </button>
+      <button class="mode" id="segHold" role="radio" aria-checked="false">
+        <span class="ring" data-icon="edit" data-icon-size="28"></span>
+        <span data-i18n="modeHold">Review</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- デーモンが拾えている音量。ブラウザの波形とは別経路なので、
+       波形が動くのにここが動かなければ認識側が落ちていると分かる。
+       印をつまむと感度が変わる。細い線のままでは掴めないので、
+       見た目より広い当たり判定を親に持たせている。 -->
+  <div class="meter-row">
     <div class="meter-hit" id="meterHit" data-i18n-title="thresholdMark">
       <div class="meter" id="meter">
         <div class="meter-fill" id="meterFill"></div>
         <div class="meter-mark" id="meterMark"></div>
       </div>
     </div>
-    </div>
-  </div>
-
-  <div class="modes" id="modes">
-    <button class="mode on" id="segLive" role="radio" aria-checked="true">
-      <span class="ring" data-icon="bolt" data-icon-size="28"></span>
-      <span data-i18n="modeLive">Instant</span>
-    </button>
-    <span class="sep" aria-hidden="true"></span>
-    <button class="mode" id="segHold" role="radio" aria-checked="false">
-      <span class="ring" data-icon="edit" data-icon-size="28"></span>
-      <span data-i18n="modeHold">Review</span>
-    </button>
   </div>
 
   <p class="note" id="note" hidden></p>
@@ -666,7 +796,12 @@
   <!-- 送信先。複数の作業で同時に使うときに、どれへ届けるかを選ぶ。
        未送信の札のすぐ上に置く（次に喋る一言がどこへ行くかの話なので、
        送る手前で目に入る位置がよい）。 -->
-  <div class="routes" id="routes" hidden></div>
+  <div class="routes" id="routes" hidden>
+    <div class="route-chips" id="routeChips"></div>
+    <!-- 高さが尽きたら、札を並べる代わりにこちらを出す（CSS が切り替える）。
+         札は1つずつ行を使うので、相手が増えると縦を食い切ってしまう。 -->
+    <select class="route-pick" id="routePick" data-i18n-title="routePick"></select>
+  </div>
 
   <!-- 未送信カード。認識中のテキストと手直し欄をここにまとめる。 -->
   <section class="draft-card idle" id="tray" aria-live="polite">
@@ -696,8 +831,10 @@
     <h2 data-icon="list_alt" data-icon-size="15" data-i18n="history">History</h2>
   </div>
 
-  <div id="log"></div>
-  <p class="none" id="none" data-i18n="empty">Nothing sent yet. Speak and it shows up here.</p>
+  <div class="log-wrap">
+    <div id="log"></div>
+    <p class="none" id="none" data-i18n="empty">Nothing sent yet. Speak and it shows up here.</p>
+  </div>
 
   <button class="fresh" id="fresh" data-icon="auto_awesome" data-icon-size="15"
           data-i18n="uiUpdated" hidden>Updated — tap to reload</button>
@@ -1002,6 +1139,7 @@ const I18N = {
     machineName:'Names', machineNamePh:'mac, Mac, マック',
     multiNote:'When two machines listen at once, “mute” stops both. Turn this on and say the name first — “work mute”, “work 2”. List several names separated by commas: recognition spells the same word differently each time. Signals meant for other machines are ignored here.',
     disconnectTitle:'Stop {name} from listening',
+    routePick:'Where speech goes',
     disconnectAsk:'Stop listening?',
     disconnected:'{name} stopped listening',
     voiceHeld:'Held for editing — fix it and send',
@@ -1051,9 +1189,9 @@ const I18N = {
     powerNote:'手元のモデルが抱えているメモリを解放します。ブラウザ認識のときは要りません。',
     settings:'設定', back:'戻る',
     floatBtn:'手前に浮かせる', unfloatBtn:'タブに戻す',
-    floatAsk:'この窓を手前に固定する',
-    takenOver:'別の窓で開いています。画面は1つだけ動かす作りなので、こちらは引き下がりました。',
-    takeBack:'この窓で使う',
+    floatAsk:'このウィンドウを手前に固定する',
+    takenOver:'別のウィンドウで開いています。画面は1つだけ動かす作りなので、こちらは引き下がりました。',
+    takeBack:'このウィンドウで使う',
     floatFailed:'浮かせられませんでした。ボタンを直接押してもう一度お試しください。',
     grpInput:'入力', micDevice:'マイク',
     recogLang:'認識言語', recogLangAuto:'自動判定',
@@ -1116,6 +1254,7 @@ const I18N = {
     machineName:'呼び名', machineNamePh:'例: マック, Mac, まっく',
     multiNote:'2台が同時に聞いていると「ミュート」で両方が切れます。入れておくと、呼び名を頭に付けた合図（「会社用ミュート」「会社用2番」）だけを受けます。**読点で区切って何通りでも書けます** — 同じ言葉でも認識のたびに綴りが揺れるためです。他の機械宛ての合図は、こちらでは指示にしません。',
     disconnectTitle:'{name} に聞くのをやめさせる',
+    routePick:'発話の届き先',
     disconnectAsk:'解除しますか？',
     disconnected:'{name} が聞くのをやめました',
     voiceHeld:'下書きに回しました — 直して送れます',
@@ -1176,7 +1315,7 @@ const $ = id => document.getElementById(id);
 const el = {};
 for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'power','powerLabel','powerRow','openSettings','sheet','closeSettings','floatBtn','page',
-                  'routes','viz','meter','meterHit','meterFill','meterMark','logoMark',
+                  'routes','routeChips','routePick','viz','meter','meterHit','meterFill','meterMark','logoMark',
                   'tray','stream','draft','draftTime','draftActions','send','discard',
                   'editOnce','dropOne','draftMark',
                   'hint','note','log','none','count','copy','fresh','floatAsk','taken','takeBack',
@@ -1875,6 +2014,13 @@ function say(text, sec = 6) {
    文章で「合図として扱いました」と説明するより、言った言葉そのものが
    色づいて見える方が、何が起きたのかが一目で分かる。 */
 let flashTimer = null;
+// 認識中のテキストには高さの上限がある。長く喋ると上へ流れていくので、
+// いま喋っている末尾が見えるところまで繰り下げる。
+function streamTail() {
+  const box = el.stream.parentElement;      // .stream の枠（#stream は中の span）
+  if (box) box.scrollTop = box.scrollHeight;
+}
+
 function flashCommand(text, kind) {
   if (!text) return;
   const mark = document.createElement('mark');
@@ -2012,6 +2158,7 @@ function connect() {
       const s = m.partial.trim();
       el.stream.textContent = s;
       el.tray.classList.toggle('idle', !s);
+      streamTail();
       paintTinyButtons();
 
     } else if ('held' in m) {
@@ -2243,6 +2390,8 @@ async function editThisOne() {
   oneShot = true;
   await setRoute('hold');
   el.hint.textContent = t('hintOnce');
+  // 窓が小さいと、開いた欄と送るボタンが下にはみ出すことがある
+  el.tray.scrollIntoView({block: 'nearest'});
 }
 
 el.editOnce.onclick = editThisOne;
@@ -2675,6 +2824,7 @@ function newRecognition() {
     }
     el.stream.textContent = interim;
     el.tray.classList.toggle('idle', !interim);
+    streamTail();
     paintTinyButtons();
     if (interim.trim()) lastVoiceAt = performance.now();
   };
@@ -2828,19 +2978,34 @@ function paintRoutes() {
   //
   // 「すべてへ」は置かない。2つのセッションが同じ指示を受け取って別々に
   // 動き出す状況に使い道が無く、間違って選ぶと気づきにくいだけだった。
-  const items = knownListeners.map((l, i) => ({...l, label: `${i + 1}. ${l.label}`}));
-  el.routes.replaceChildren(...items.map(l => {
+  const items = knownListeners.map((l, i) => ({...l, no: i + 1}));
+  const pick = l => routeTo ? String(l.pid) === routeTo : String(l.pid) === effectiveTo;
+
+  // 窓が低いときはこちらが出る。札と同じ番号・同じ名前を並べる。
+  el.routePick.replaceChildren(...items.map(l => {
+    const o = document.createElement('option');
+    o.value = String(l.pid);
+    o.textContent = `${l.no}. ${l.label}`;
+    o.selected = pick(l);
+    return o;
+  }));
+
+  el.routeChips.replaceChildren(...items.map(l => {
     // 実際に届く先を光らせる。未選択のときはサーバが「あとで起動した方」に
     // 決めるので、選んだ覚えが無くてもどこへ届くかが見える。
-    const on = routeTo ? String(l.pid) === routeTo
-                       : String(l.pid) === effectiveTo;
+    const on = pick(l);
     const b = document.createElement('button');
     b.className = 'route-chip' + (on ? ' on' : '');
+    // 番号は声の合図（「2番」）と同じもの。窓が狭くて名前を畳むときも、
+    // ここだけは必ず残す。
+    const no = document.createElement('b');
+    no.className = 'no';
+    no.textContent = l.no + '.';
     const nm = document.createElement('span');
     nm.className = 'nm';
     nm.textContent = l.label;
-    b.append(nm);
-    b.title = `${l.label}\n${l.cwd || ''}`;
+    b.append(no, nm);
+    b.title = `${l.no}. ${l.label}\n${l.cwd || ''}`;
     b.onclick = () => setRoute2(String(l.pid));
 
     // 聞くのをやめさせる。セッション自体は終わらない。
@@ -2864,6 +3029,8 @@ function paintRoutes() {
     return b;
   }));
 }
+
+el.routePick.onchange = () => setRoute2(el.routePick.value);
 
 async function setRoute2(to) {
   routeTo = to;
