@@ -560,6 +560,15 @@ def is_allowed_short(text: str, allow=()) -> bool:
 # 合図の語は短いので、最小文字数や相槌の判定より前に見る。誤爆すると
 # 話しかけているのに届かない状態になるので、その一言だけを喋ったときに
 # 限る（部分一致はしない）。
+#
+# 合図はどの言語で言っても効く。**認識する言語にも画面の言語にも従わない。**
+# 画面をスペイン語にしたまま日本語で喋る人も、英語の画面で「ミュート」と
+# 言う人もいる。どちらかで絞ると、その人たちの合図が黙って効かなくなる。
+# 画面の言語で絞るのは「？」の一覧だけで、そこは「何と言えばよいか」に
+# ひとつ答える場所なので、読める言語のものを出す（command_catalog）。
+#
+# **日本語と英語以外は下書き。**その言語を話す人がまだ目を通していない。
+# 画面の一覧にもその旨を出してある（viewer.html の cmdDraft）。
 COMMAND_WORDS = {
     # マイクを切る。
     # 切っている間も認識は動いている（録ってはいるが送らない）ので解除の
@@ -579,6 +588,29 @@ COMMAND_WORDS = {
         "en": [
             "mute", "mute me", "mute the mic", "mic off",
             "turn off the mic", "turn the mic off",
+        ],
+        # 「silencio」「silence」のような、部屋の人へ向けて言う語は入れない。
+        # 機械へ向けた言い方（不定詞や画面のボタンの文言）だけにする。
+        "es": [
+            "silenciar", "silenciar el micro", "silenciar el micrófono",
+            "apagar el micro", "apagar el micrófono",
+        ],
+        "fr": [
+            "couper le micro", "couper le microphone", "coupe le micro",
+            "micro off", "mode muet",
+        ],
+        # ドイツ語は大文字で書いておく。判定は command_key が畳むので当たるし、
+        # 画面の一覧には書いた形がそのまま出る。
+        "de": [
+            "Mikro aus", "Mikrofon aus", "Stumm", "Stummschalten",
+            "Mikrofon ausschalten",
+        ],
+        "zh": [
+            "静音", "开启静音", "关闭麦克风", "关掉麦克风", "麦克风静音",
+        ],
+        # 「마이크 꺼」のような、相手へ言う形は入れない。名詞で止める形だけ。
+        "ko": [
+            "음소거", "음소거 켜기", "마이크 끄기", "마이크 음소거",
         ],
     },
     # マイクを入れる。
@@ -600,6 +632,32 @@ COMMAND_WORDS = {
             "unmute", "unmute me", "unmute the mic", "mic on",
             "turn on the mic", "turn the mic on",
         ],
+        # ここだけは言語ごとに足す基準を厳しくしてある。「マイクを入れて」に
+        # 当たる言い方は、通話中の相手へ言う一言でもあるからで、その語で開くと
+        # 失うのが発話1つではなく、切っていたつもりの時間ぜんぶになる。
+        #
+        # 入れてあるのは、二人称の命令形ではない形だけ。不定詞（activar /
+        # réactiver / einschalten）と、画面のボタンに書いてある名詞の形
+        # （解除静音 / 음소거 해제）は、人へ向けてそのまま言うことがまず無い。
+        # 「enciende el micro」「마이크 켜줘」「打开麦克风」のような、相手へ
+        # 頼む形は入れていない。
+        "es": [
+            "quitar silencio", "quitar el silencio", "dejar de silenciar",
+            "activar el micro", "activar el micrófono", "reactivar el micro",
+        ],
+        "fr": [
+            "réactiver le micro", "réactiver le microphone",
+            "rouvrir le micro", "activer le micro", "micro on",
+        ],
+        "de": [
+            "Stummschaltung aufheben", "Stumm aus", "Mikrofon einschalten",
+            "Mikro einschalten", "Mikrofon an",
+        ],
+        # 中国語と韓国語は、画面のボタンの文言だけにしてある。日常の通話で
+        # 何と言うかまでは確かめられていないので、広げるのは実際に使う人が
+        # 出てからでよい。
+        "zh": ["解除静音", "取消静音"],
+        "ko": ["음소거 해제", "음소거 풀기"],
     },
     # そのまま届く側へ戻す。
     # 即時 / 手直しの切り替えも声でできるようにする。どちらもこの道具に対して
@@ -613,6 +671,13 @@ COMMAND_WORDS = {
             "食事", "しょくじ", "食事モード", "速時", "則時",
         ],
         "en": ["live", "live mode", "instant", "instant mode", "send live"],
+        "es": ["directo", "modo directo", "en directo", "enviar directo"],
+        "fr": ["direct", "mode direct", "en direct", "envoi direct"],
+        # 「Sofort」「Direkt」を単体で入れていないのは、どちらも返事として
+        # そのまま口から出るため（「Sofort.」＝すぐやります）。
+        "de": ["Sofortmodus", "Direktmodus", "Direkt senden", "Sofort senden"],
+        "zh": ["即时模式", "直接发送", "实时发送", "立刻发送"],
+        "ko": ["바로 전달", "바로 보내기", "즉시 모드", "바로 전달 모드"],
     },
     # 溜めて手直しする側へ回す。
     "hold": {
@@ -621,6 +686,14 @@ COMMAND_WORDS = {
             "てなおし", "てなおしもーど", "手直しに", "ためて", "溜める", "ためる",
         ],
         "en": ["hold", "hold mode", "draft", "draft mode"],
+        # 「guardar」「Prüfen」「存下来」のような、Claude への指示として
+        # そのまま言いそうな動詞は外してある。
+        "es": ["revisar", "modo revisar", "modo revisión", "borrador",
+               "modo borrador"],
+        "fr": ["relecture", "mode relecture", "brouillon", "mode brouillon"],
+        "de": ["Entwurf", "Entwurfsmodus", "Sammelmodus", "Zum Ändern sammeln"],
+        "zh": ["草稿模式", "暂存模式", "先存着改", "改完再发"],
+        "ko": ["모아 두기", "초안 모드", "모으기 모드", "고쳐서 보내기"],
     },
     # 言い終わってから「やっぱりなし」「これは直してから送りたい」と思うことが
     # ある。発話の**終わり**に合図が来たら、その一言をそのように扱う。途中に
@@ -638,6 +711,15 @@ COMMAND_WORDS = {
             "なかったことに", "なかったことにして", "やっぱなし", "やっぱりなし",
         ],
         "en": ["cancel", "cancel that", "scratch that", "never mind", "nevermind"],
+        # 足した言語では、動詞1語だけの形（cancelar / annuler / abbrechen /
+        # 取消 / 취소）を入れていない。文の終わりに当てる合図なので、その語で
+        # 終わる普通の指示（「これはキャンセルしたい」に当たる文）が丸ごと
+        # 消える。「これは要らない」と分かる形だけにする。
+        "es": ["cancela eso", "cancelar eso", "olvida eso", "olvídalo"],
+        "fr": ["annule ça", "annuler ça", "oublie ça"],
+        "de": ["streich das", "vergiss das", "vergiss es"],
+        "zh": ["刚才那句取消", "取消刚才那句", "取消这句", "这句不要了"],
+        "ko": ["방금 말 취소", "방금 건 취소", "지금 말 취소", "이건 취소"],
     },
     # こちらは捨てずに、画面の下書きへ回す（直してから送れる）
     "hold_tail": {
@@ -648,6 +730,13 @@ COMMAND_WORDS = {
             "直してから", "なおしてから", "あとで直す", "ちょっと直す",
         ],
         "en": ["edit", "edit this", "let me edit", "hold this"],
+        # 「à corriger」「para editar」のように、目的語の後ろに付く形は入れない。
+        # 「直すべき一覧」に当たる文がそのまま消える。自分が直すと言う形にする。
+        "es": ["déjame editarlo", "lo edito yo", "quiero editarlo"],
+        "fr": ["je corrige", "je le corrige", "laisse-moi corriger"],
+        "de": ["das ändere ich", "lass mich das ändern"],
+        "zh": ["这句我来改", "这句留着改", "先留着改"],
+        "ko": ["고쳐서 보낼게", "내가 고칠게", "이건 고쳐서"],
     },
 }
 
@@ -861,6 +950,21 @@ NUMBER_WORDS = {
     },
     "en": {"zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
            "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10},
+    "es": {"cero": 0, "uno": 1, "una": 1, "dos": 2, "tres": 3, "cuatro": 4,
+           "cinco": 5, "seis": 6, "siete": 7, "ocho": 8, "nueve": 9,
+           "diez": 10},
+    # 綴りの揺れ（zéro と zero）は両方持つ。認識がどちらで書くか決まらない。
+    "fr": {"zéro": 0, "zero": 0, "un": 1, "une": 1, "deux": 2, "trois": 3,
+           "quatre": 4, "cinq": 5, "six": 6, "sept": 7, "huit": 8, "neuf": 9,
+           "dix": 10},
+    "de": {"null": 0, "eins": 1, "zwei": 2, "drei": 3, "vier": 4, "fünf": 5,
+           "funf": 5, "sechs": 6, "sieben": 7, "acht": 8, "neun": 9,
+           "zehn": 10},
+    "zh": {"零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
+           "六": 6, "七": 7, "八": 8, "九": 9, "十": 10},
+    # 韓国語の読み（일 이 삼 …）は載せていない。「이번」が「今回」の意味で
+    # 日常語なので、これを2番と読むと普通の話が送信先の切り替えになる。
+    # 数字で言われたときだけ拾う（「2번」は下の ROUTE_PARTS で通る）。
 }
 # 「ひとつ目」の形の前にだけ立つ和語の読み。ここに入れた語は「つ目」が
 # 続くときしか数として読まない。上の表へ混ぜると「いつに変更」が5番への
@@ -888,6 +992,37 @@ ROUTE_PARTS = {
         "prefix": ["switchto", "sendto", "routeto", "goto", "target",
                    "session", "destination", "route", "number"],
     },
+    # 以下も畳んだ鍵と比べるので空白なしで書く。記号は落ちるが、アクセント
+    # （é à ü）は落ちないので、認識が付ける形と付けない形を両方持つ。
+    "es": {
+        "prefix": ["sesión", "sesion", "destino", "número", "numero",
+                   "objetivo", "cambiaa", "cambiara", "vea", "envíaa",
+                   "enviaa", "mandaa", "pasaa"],
+    },
+    "fr": {
+        "prefix": ["session", "destination", "cible", "numéro", "numero",
+                   "passeà", "passea", "passerà", "passera", "basculevers",
+                   "envoieà", "envoiea", "vaà", "vaa"],
+    },
+    "de": {
+        "prefix": ["sitzung", "ziel", "nummer", "wechslezu", "wechselzu",
+                   "gehzu", "sendean", "sendezu", "schaltezu"],
+    },
+    "zh": {
+        # 「切换到2」「会话2」「第2个」。数のうしろに付く語だけの形
+        # （「一个」「十号」）は持たない。どちらも普通の言葉として出てくる。
+        "prefix": ["切换到", "切换成", "切到", "换到", "发送到", "发到",
+                   "发给", "会话", "目标", "第"],
+        "tail": ["个", "号", "会话", "吧"],
+    },
+    "ko": {
+        # 「2번」「세션 2」「2번으로 보내」。数の読みを持たないので、番号は
+        # アラビア数字で来たときだけ通る（NUMBER_WORDS の韓国語の欄を見よ）。
+        "prefix": ["세션", "대상", "목적지", "번호"],
+        "counter": ["번", "번째"],
+        "tail": ["으로", "로", "으로보내", "로보내", "으로보내줘", "로보내줘",
+                 "으로바꿔", "로바꿔", "보내줘", "보내"],
+    },
 }
 
 # 画面の一覧に出す代表例。送信先だけは語の表ではなく型なので、組み込みの
@@ -897,6 +1032,11 @@ ROUTE_EXAMPLES = {
     "ja": ["2番", "2番目", "2つ目", "送信先を2", "セッション2", "ナンバー2",
            "2に切り替え"],
     "en": ["switch to 2", "session 2", "number two", "send to 2"],
+    "es": ["sesión 2", "número dos", "cambia a 2", "destino 2"],
+    "fr": ["session 2", "numéro deux", "passe à 2", "destination 2"],
+    "de": ["Sitzung 2", "Nummer zwei", "wechsle zu 2", "Ziel 2"],
+    "zh": ["切换到2", "会话2", "第2个", "发送到2"],
+    "ko": ["2번", "세션 2", "2번으로 보내", "번호 2"],
 }
 
 _NUM_WORDS = {w: n for tbl in NUMBER_WORDS.values() for w, n in tbl.items()}
@@ -943,6 +1083,44 @@ _ROUTE_RXS = [re.compile(rx) for rx in (
 )]
 
 
+def _lang_num_alt(lang: str) -> str:
+    """その言語の数の読みと、アラビア数字だけを引く選択肢。
+
+    表を全部混ぜないのは、別の言語の読みが日常語と当たったときに、
+    当てにいく型が増えるだけ誤爆が広がるため。
+    """
+    words = dict(NUMBER_WORDS["any"])
+    words.update(NUMBER_WORDS.get(lang) or {})
+    return _alt(words)
+
+
+def _route_patterns(lang: str, parts: dict) -> list:
+    """足した言語の型を、部品から組み立てる。
+
+    見るのは「前に付く語＋数」と「数＋後ろに付く語」の2つだけ。日本語の
+    ように助詞や語尾がいくつも付く形は言語ごとに違うので、ひとつの型へ
+    まとめると読めなくなる。広げるのは、その言語で実際に使う人が出てから
+    でよい。
+    """
+    num = _lang_num_alt(lang)
+    tail = f"{_alt(parts['tail'])}?" if parts.get("tail") else ""
+    counter = _alt(parts["counter"]) if parts.get("counter") else ""
+    out = []
+    if parts.get("prefix"):
+        opt = f"{counter}?" if counter else ""
+        out.append(rf"^{_alt(parts['prefix'])}({num}){opt}{tail}$")
+    if counter:
+        out.append(rf"^({num}){counter}{tail}$")
+    return out
+
+
+# 日本語と英語の型は上にそのまま置いてある。触ると、いま効いている言い方が
+# 静かに効かなくなる。足した言語はここで後ろへ継ぎ足す。
+_ROUTE_RXS += [re.compile(rx)
+               for lang, parts in ROUTE_PARTS.items() if lang not in ("ja", "en")
+               for rx in _route_patterns(lang, parts)]
+
+
 def _route_rx(key: str):
     """足された言い方から、数を拾う型を作る。{n} の場所に数が入る。"""
     head, _, tail = key.partition(ROUTE_SLOT)
@@ -980,18 +1158,24 @@ def route_command(text: str):
 def command_catalog(lang: str = "en") -> list:
     """画面に出す一覧。読む人の言語の言い方だけを並べる。
 
-    その言語の欄が無い合図は英語で出す（何も出ないより読める）。判定は
-    どの言語の語でも通るので、ここに出ていない言い方も効く。一覧は
+    その言語の欄が無い合図は英語で出し、fallback を立てる。画面はそれを
+    見て「あなたの言語の言い方はまだ無い。この英語がそのまま効く」と添える。
+    黙って英語を出すと、その言語では別の言い方があるのに読めていないのか、
+    そもそも無いのかが読む人に分からない。
+
+    判定はどの言語の語でも通るので、ここに出ていない言い方も効く。一覧は
     「何と言えばよいか」に1つ答えるためのもので、全部を数え上げる場所
     ではない。
     """
     out = []
     for kind in COMMAND_KINDS:
-        if kind == "route":
-            words = ROUTE_EXAMPLES.get(lang) or ROUTE_EXAMPLES["en"]
-        else:
-            words = builtin_words(kind, lang) or builtin_words(kind, "en")
-        out.append({"id": kind, "phrases": list(words),
+        words = (ROUTE_EXAMPLES.get(lang) if kind == "route"
+                 else builtin_words(kind, lang))
+        fallback = not words
+        if fallback:
+            words = (ROUTE_EXAMPLES["en"] if kind == "route"
+                     else builtin_words(kind, "en"))
+        out.append({"id": kind, "phrases": list(words), "fallback": fallback,
                     "editable": kind in USER_COMMAND_KINDS})
     return out
 # 合図だと分かるように「コマンド◯◯」と言う人がいる。前置きは落とす。
@@ -1004,7 +1188,9 @@ def take_tail(text: str, tails):
     body = text.strip().rstrip(_TAIL_TRIM)
     low = body.lower()
     for w in tails:
-        if not low.endswith(w):
+        # 表の側も小文字にして比べる。ドイツ語のように名詞を大文字で書く
+        # 言語では、表に書いた形のまま比べると永久に当たらない。
+        if not low.endswith(w.lower()):
             continue
         rest = body[: len(body) - len(w)].rstrip(_TAIL_TRIM)
         for pre in _TAIL_PREFIX:          # 「〜。コマンド手直し」の前置き
