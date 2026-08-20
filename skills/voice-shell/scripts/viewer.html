@@ -220,7 +220,12 @@
   }
   .mic-hit:disabled { cursor:default; }
   /* マイク表示でないときは押せる場所を作らない（波形は操作対象ではない） */
-  #viz { display:block; width:100%; height:var(--viz-h); }
+  /* 箱は常に正方形にする。横長の箱にすると、縦並びと横並びの境目を跨いだ
+     瞬間に、ブラウザが描き直す前の絵をそのまま新しい箱へ引き伸ばす。
+     460px 幅の絵が 110px の箱に入る（またはその逆）ので、マイクが極端な
+     楕円に見える一コマが挟まる。正方形どうしなら伸び縮みが縦横で同じ
+     比率になるため、その一コマがあっても形が崩れない。 */
+  #viz { display:block; width:var(--viz-h); height:var(--viz-h); margin:0 auto; }
   /* マイクの入切と音量メーターを1行に並べる */
   .meter-row { display:flex; align-items:center; gap:.55rem; padding:0 var(--pad); }
   .meter-row .meter-hit { flex:1; min-width:0; padding-left:0; padding-right:0; }
@@ -793,7 +798,7 @@
       display:flex; align-items:center; gap:.5rem;
       padding:0 var(--pad) .1rem;
     }
-    .viz { flex:none; width:calc(var(--viz-h) * .95); padding:var(--viz-pad) 0; }
+    .viz { flex:none; width:var(--viz-h); padding:var(--viz-pad) 0; }
     .modes { flex:1; min-width:0; padding:.15rem 0; }
     /* 上の帯は名札だけでよい。題も波も、いま見る必要がない */
     header { padding:.35rem var(--pad) .25rem; gap:.35rem; }
