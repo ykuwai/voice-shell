@@ -1644,6 +1644,17 @@ def main():
                     rec["to"] = to
                 f.write(json.dumps(rec, ensure_ascii=False) + "\n")
                 print(f"[{stamp}] {text}", file=sys.stderr, flush=True)
+
+            # ここへ落ちてくるのは、録音を立て直しても音が戻らなかったとき
+            # （マイクを抜いたまま、など）。黙って終わると画面では「認識が
+            # 止まっている」としか見えないので、理由を書き残す。
+            f.write(json.dumps({
+                "system_warning":
+                    "マイクから音が来なくなり、録音を立て直しても戻らなかったため"
+                    "認識を終了しました。マイクの接続を確かめてから "
+                    "`voice-shell.sh engine-start` で再開してください。"
+            }, ensure_ascii=False) + "\n")
+            print("マイクが戻らないため終了します。", file=sys.stderr, flush=True)
     except KeyboardInterrupt:
         print("\n終了します。", file=sys.stderr)
     finally:
