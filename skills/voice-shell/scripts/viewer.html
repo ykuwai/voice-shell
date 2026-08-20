@@ -1360,13 +1360,24 @@ const store = {
   set(k, v) { try { localStorage.setItem('vs.' + k, v); } catch {} },
 };
 
+/* 手前に浮かせている間、画面の中身は小窓の document へ移してある。テーマも
+   言語も色も、そちらの :root に書かないと効かない。開いた瞬間に一度だけ写す
+   やり方だと、あとから切り替えたぶんが小窓に届かず、戻すまで古いままになる。
+   閉じかけの窓は 'pagehide' の中でもまだ残っているので、そのつど
+   documentPictureInPicture を見るのではなく、自分で覚えて自分で外す。
+   （識別子に直接触れないので、この機能が無いブラウザでも落ちない） */
+let pipDoc = null;
+const uiDoc = () => (pipDoc && pipDoc.defaultView) ? pipDoc : document;
+
 let langPref = store.get('lang', 'auto');
 let lang = 'en';
 function resolveLang() {
   lang = langPref !== 'auto' ? langPref
        : ((navigator.language || 'en').toLowerCase().startsWith('ja') ? 'ja' : 'en');
   if (!I18N[lang]) lang = 'en';
-  document.documentElement.lang = lang;
+  // 浮かせている間は小窓にも書く。元の document にも残さないと、
+  // 戻したときに開いた時の言語へ巻き戻る。
+  for (const d of new Set([document, uiDoc()])) d.documentElement.lang = lang;
 }
 // {name} のような差し込みも一緒に扱う
 const t = (key, vars) => {
@@ -1375,7 +1386,9 @@ const t = (key, vars) => {
   return s;
 };
 
-function applyI18n(root = document) {
+// 既定の宛先は「いま中身が居る document」。浮かせている間に document を
+// 探しても [data-i18n] は1つも見つからず、言語を変えても文字が変わらない。
+function applyI18n(root = uiDoc()) {
   for (const n of root.querySelectorAll('[data-i18n]')) {
     // アイコンを入れた要素は文字の部分だけ差し替える（svg を消さない）
     const svg = n.querySelector(':scope > svg');
@@ -1565,7 +1578,13 @@ function fitCanvas() {
 }
 new ResizeObserver(fitCanvas).observe(canvas);
 
-const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+// 色も「いま中身が居る document」から読む。元の document から読むと、浮かせて
+// いる間にテーマを変えたときに canvas のマイクだけ新しい色になり、周りの
+// HTML だけ古い色のまま残る。
+const cssVar = n => {
+  const d = uiDoc();
+  return d.defaultView.getComputedStyle(d.documentElement).getPropertyValue(n).trim();
+};
 // テーマの色をそのまま薄める（#rrggbb 前提。それ以外はそのまま返す）
 const color = (hex, alpha) => {
   const m = /^#([0-9a-f]{6})$/i.exec(hex);
@@ -2591,9 +2610,13 @@ el.openSettings.onclick = async () => {
 el.closeSettings.onclick = () => { el.sheet.hidden = true; };
 
 // テーマ。自動のときは OS の設定に従う（data-theme を外しておく）
+// 浮かせている間は小窓と元の document の両方に書く。小窓だけだと戻した瞬間に
+// 前の色へ跳ね返り、元だけだと浮かせている間ずっと変わらない。
 function applyTheme(choice) {
-  if (choice === 'auto') document.documentElement.removeAttribute('data-theme');
-  else document.documentElement.setAttribute('data-theme', choice);
+  for (const d of new Set([document, uiDoc()])) {
+    if (choice === 'auto') d.documentElement.removeAttribute('data-theme');
+    else d.documentElement.setAttribute('data-theme', choice);
+  }
   for (const b of el.themeRow.children) b.classList.toggle('on', b.dataset.themeChoice === choice);
   store.set('theme', choice);
 }
@@ -3300,6 +3323,9 @@ el.asrLang.onchange = () => {
    Chrome の Document Picture-in-Picture を使うので追加の実行環境は要らない。 */
 const canFloat = 'documentPictureInPicture' in window;
 el.floatBtn.hidden = !canFloat;
+// 小窓へ移す中身。増やすときはここだけ書き足す。開くときと戻すときで並びが
+// 食い違うと、戻したときに書き足したぶんだけ小窓と一緒に消える。
+const floatParts = [el.page, el.sheet];
 paintFloatAsk();
 
 // 浮いているかどうかで、絵と説明を入れ替える。
@@ -3393,11 +3419,13 @@ el.floatBtn.onclick = async () => {
   for (const node of document.querySelectorAll('style')) {
     win.document.head.appendChild(node.cloneNode(true));
   }
-  win.document.documentElement.lang = document.documentElement.lang;
-  const theme = document.documentElement.getAttribute('data-theme');
-  if (theme) win.document.documentElement.setAttribute('data-theme', theme);
+  // ここから先は小窓が宛先になる。写すのではなく、いつもの道で塗り直す。
+  // 「自動」は data-theme が無い状態なので、写す形だと外す道が無くなる。
+  pipDoc = win.document;
+  resolveLang();
+  applyTheme(store.get('theme', 'auto'));
   // 要素ごと移す。参照は生きたままなので JS は書き換えなくてよい。
-  win.document.body.append(el.page, el.sheet);
+  win.document.body.append(...floatParts);
   el.sheet.hidden = true;
   fitCanvas();
   paintFloat(true);
@@ -3405,7 +3433,10 @@ el.floatBtn.onclick = async () => {
   paintFloatAsk();
   paint();                    // 小窓にも同じ題を付ける
   win.addEventListener('pagehide', () => {
-    document.body.append(el.page, el.sheet);
+    // 先に宛先を戻す。閉じかけの小窓はまだ残っているので、そのままだと
+    // 消える document へテーマや色を書きに行く。
+    pipDoc = null;
+    document.body.append(...floatParts);
     paintFloat(false);          // 閉じる最中は window がまだ残っている
     paintFloatAsk();
     fitCanvas();
