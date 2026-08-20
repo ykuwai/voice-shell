@@ -461,7 +461,10 @@ def read_config() -> dict:
 
 
 def write_config(**kw) -> dict:
-    """選択を覚える。渡した項目だけ差し替える。"""
+    """選択を覚える。渡した項目だけ差し替える。
+
+    None は「触らない」の意味。空文字や False は消す／切るの意味なので通す。
+    """
     cur = read_config()
     cur.update({k: v for k, v in kw.items() if v is not None})
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -794,6 +797,53 @@ def take_tail(text: str, tails):
                 break
         return rest
     return None
+
+
+# ── 何台かで同時に使うとき ──────────────────────
+#
+# 会社の Windows とこの Mac が両方聞いていると、「ミュート」と言えば両方が
+# 切れてしまう。機械に名前を付けて「開発用ミュート」のように頭に添えると、
+# その機械だけが反応する。
+#
+# 名前が付いていない合図は、どの機械のものか決められないので**どれも動かない**。
+# ただし黙って捨てる（別の機械へ言ったものが、こちらの指示として届くと困る）。
+_NAME_SEP = " \t\u3000、,:：のは"
+
+
+def machine_config() -> tuple:
+    """(複数台モードか, この機械の名前) を返す。"""
+    cfg = read_config()
+    return bool(cfg.get("multi_machine")), (cfg.get("machine_name") or "").strip()
+
+
+def _strip_name(text: str, name: str):
+    """頭がこの機械の名前なら、それを外した残りを返す。違えば None。"""
+    body = text.strip()
+    if not name or not body.lower().startswith(name.lower()):
+        return None
+    return body[len(name):].lstrip(_NAME_SEP)
+
+
+def looks_like_any_command(text: str) -> bool:
+    """その一言が、何かの合図に見えるか。"""
+    t = text.strip()
+    if not t:
+        return False
+    return bool(voice_command(t, False) or voice_command(t, True)
+                or mode_command(t) or route_command(t))
+
+
+def looks_like_other_command(text: str) -> bool:
+    """別の機械へ言った合図に見えるか。
+
+    相手の名前は知りようがないので、頭を少しずつ削って合図の形が出てくるかで
+    見る。短い一言に限る（長い文の末尾がたまたま合図と同じ形でも拾わない）。
+    """
+    t = text.strip()
+    if not t or len(t) > 24:
+        return False
+    return any(looks_like_any_command(t[i:].lstrip(_NAME_SEP))
+               for i in range(min(len(t), 11)))
 
 
 def note_voice_cmd(log_path, kind: str, label: str = "", said: str = "") -> None:
@@ -1421,11 +1471,31 @@ def main():
                 # 辞書は毎回読む。Web UI で直した内容が次の発話から効くようにする。
                 user_dict = load_dictionary()
 
+                # 何台かで同時に使っているときは、機械の名前が頭に付いた
+                # ものだけを自分宛ての合図とみなす。
+                multi, my_name = machine_config()
+                cmd_text = text
+                if multi:
+                    named = _strip_name(text, my_name)
+                    if named is not None:
+                        cmd_text = named            # この機械宛て
+                    elif looks_like_other_command(text):
+                        # 別の機械へ言ったもの。こちらの指示として届くと困る
+                        # ので黙って捨てる。
+                        print(f"(他の機械宛て) {text[:40]}",
+                              file=sys.stderr, flush=True)
+                        speaking_since = None
+                        continue
+                    else:
+                        cmd_text = ""               # 合図としては見ない
+
                 # 声だけの入切。合図はどれも短いので、最小文字数より前に見る。
                 # 辞書を通した形でも見るため、崩れて聞こえる語は
                 # 「ミュート回収 → ミュート解除」のように登録すれば拾える。
-                cmd = voice_command(text, muted_now) or voice_command(
-                    apply_replacements(text, user_dict["replace"]), muted_now)
+                cmd = cmd_text and (
+                    voice_command(cmd_text, muted_now) or voice_command(
+                        apply_replacements(cmd_text, user_dict["replace"]),
+                        muted_now))
                 if cmd:
                     if cmd == "mute":
                         mute_path.touch()
@@ -1441,7 +1511,7 @@ def main():
                     continue
 
                 # 送り方（即時 / 手直し）も声で切り替える。
-                mode = mode_command(text)
+                mode = cmd_text and mode_command(cmd_text)
                 if mode:
                     if mode == "hold":
                         pause_path.touch()
@@ -1456,12 +1526,12 @@ def main():
                 # 切っている間も効かせる — どのみち短い語は聞いているので、
                 # 切ったまま次の相手を決めておける（解除するまで何も届かない）。
                 # 辞書を通した形でも見る（ミュートの合図と揃える）。
-                n = route_command(text) or route_command(
-                    apply_replacements(text, user_dict["replace"]))
-                live = list_active_listeners(log_path) if n is not None else []
+                n = cmd_text and (route_command(cmd_text) or route_command(
+                    apply_replacements(cmd_text, user_dict["replace"])))
+                live = list_active_listeners(log_path) if n else []
                 # 聞き手が1つなら選ぶ相手がいない。ここで抜けないと、番号で
                 # 答えただけの「2番」まで合図として消えてしまう。
-                if n is not None and len(live) > 1:
+                if n and len(live) > 1:
                     if 1 <= n <= len(live):
                         write_atomic(route_file(log_path),
                                      str(live[n - 1]["pid"]))
