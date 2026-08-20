@@ -669,7 +669,9 @@
   .arrow { color:var(--faint); font-size:.8rem; flex:none; }
   .filter { width:100%; margin-bottom:.5rem; padding:.45rem .85rem;
     background:var(--panel-2); border:1px solid var(--line); border-radius:var(--pill); font-size:.83rem; }
-  .rows { display:flex; flex-direction:column; gap:.25rem; max-height:15rem; overflow-y:auto; }
+  /* 枠の中でスクロールさせない。シートが既に縦に繰れるので、入れ子にすると
+     43 件のうち 9 行しか見えず、残りは内側を掻き分けないと出てこない。 */
+  .rows { display:flex; flex-direction:column; gap:.25rem; }
   .row { display:flex; align-items:center; gap:.3rem; }
   .row.hit input { border-color:var(--accent); }
   .row input { flex:1; min-width:0; padding:.4rem .8rem;
@@ -1106,12 +1108,12 @@
     </div>
 
     <div class="btn-row" style="margin-top:.6rem">
-      <button class="btn go" id="dictSave" data-icon="check" data-icon-size="17" data-i18n="save">Save</button>
       <span class="spacer"></span>
       <button class="btn" id="dictExport" data-icon="download" data-icon-size="17" data-i18n="exportCsv">Export CSV</button>
       <button class="btn" id="dictImport" data-icon="upload" data-icon-size="17" data-i18n="importCsv">Import CSV</button>
       <input type="file" id="dictFile" accept=".csv,text/csv" hidden>
     </div>
+    <p class="dict-note" data-i18n="dictCsvHelp"></p>
     <p class="dict-note" id="dictNote"></p>
   </div>
 
@@ -1210,13 +1212,13 @@ const I18N = {
     dictHeard:'heard as', dictSendAs:'send as',
     dictFilter:'Filter saved entries',
     dictIgnorePh:'skip when said alone',
-    dictBuiltin:'Ignored out of the box — tap one to stop ignoring it',
+    dictBuiltin:'Ignored out of the box. Tap one to stop ignoring it, and it takes effect right away',
     dictBuiltinDrop:'Stop ignoring “{w}”',
     dictBuiltinBack:'Ignore “{w}” again',
-    add:'Add', save:'Save', exportCsv:'Export CSV', importCsv:'Import CSV',
-    dictPending:'Press Save to apply.',
-    dictSaved:'Saved ({r} replacements / {i} ignored). Effective from the next utterance.',
-    dictLoaded:'Loaded ({r} replacements / {i} ignored). Press Save to apply.',
+    add:'Add', exportCsv:'Export CSV', importCsv:'Import CSV',
+    dictCsvHelp:'One entry per line, written as replace,heard,sent or ignore,skipped word. Export CSV writes the same shape, and importing adds to the list you already have.',
+    dictSaved:'Saved.',
+    dictLoaded:'Imported and saved ({a} added, {u} changed{s}).',
     dictSkipped:' / {n} unreadable rows',
     grpLog:'Transcript', items:'items', copyAll:'Copy all', copied:'Copied',
     micSwitched:'Switched microphone: {name}',
@@ -1322,13 +1324,13 @@ const I18N = {
     dictHeard:'聞こえた語', dictSendAs:'送る語',
     dictFilter:'絞り込み（登録済みを探す）',
     dictIgnorePh:'この語だけなら送らない',
-    dictBuiltin:'最初から無視している語 — 押すと無視しなくなります',
+    dictBuiltin:'はじめから無視している語。押すとその場で無視しなくなります',
     dictBuiltinDrop:'「{w}」を無視しない',
     dictBuiltinBack:'「{w}」をまた無視する',
-    add:'追加', save:'保存する', exportCsv:'CSV で保存', importCsv:'CSV を読み込む',
-    dictPending:'「保存する」を押すと有効になります。',
-    dictSaved:'保存しました（言い換え {r} 件 / 無視 {i} 件）。次の発話から効きます。',
-    dictLoaded:'読み込みました（言い換え {r} 件 / 無視 {i} 件{s}）。「保存する」で確定します。',
+    add:'追加', exportCsv:'CSV で保存', importCsv:'CSV を読み込む',
+    dictCsvHelp:'1行1件。replace,聞こえた語,送る語 か ignore,無視する語 と書きます。「CSV で保存」で出てくる形と同じです。読み込むと、いまの一覧に足します。',
+    dictSaved:'保存しました。',
+    dictLoaded:'読み込んで保存しました（追加 {a} 件、書き換え {u} 件{s}）。',
     dictSkipped:' / 読めない行 {n} 件',
     grpLog:'ログ', items:'件', copyAll:'全部コピー', copied:'コピーしました',
     micSwitched:'マイクを切り替えました: {name}',
@@ -1428,7 +1430,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'paneReplace','paneIgnore','replaceRows','ignoreRows',
                   'addReplace','addIgnore','newFrom','newTo','newIgnore','filterReplace',
                   'builtinChips','builtinCount',
-                  'dictSave','dictNote','dictExport','dictImport','dictFile',
+                  'dictNote','dictExport','dictImport','dictFile',
                   'paneBasic','paneDict','tabBasic','tabDict'])
   el[id] = $(id);
 
@@ -2618,6 +2620,7 @@ function showSheetTab(which) {
   el.paneDict.hidden = basic;
   el.tabBasic.classList.toggle('on', basic);
   el.tabDict.classList.toggle('on', !basic);
+  saveDict();                             // 隠すと焦点が消える。その前に書く
   el.sheet.scrollTop = 0;                 // 前に見ていた位置を持ち込まない
   store.set('sheetTab', basic ? 'basic' : 'dict');
 }
@@ -2630,7 +2633,7 @@ el.openSettings.onclick = async () => {
   await Promise.all([loadMics(), loadLangs(), loadTuning(), loadDict()]);
   el.dictNote.textContent = '';
 };
-el.closeSettings.onclick = () => { el.sheet.hidden = true; };
+el.closeSettings.onclick = () => { saveDict(); el.sheet.hidden = true; };
 
 // テーマ。自動のときは OS の設定に従う（data-theme を外しておく）
 // 浮かせている間は小窓と元の document の両方に書く。小窓だけだと戻した瞬間に
@@ -3489,7 +3492,8 @@ function replaceRow(from = '', to = '') {
   const del = document.createElement('button');
   del.className = 'del'; del.title = t('remove');
   del.appendChild(iconSvg('close', 17));
-  del.onclick = () => row.remove();
+  // 消しても焦点は動かないので、ここから呼ばないと保存の機会が来ない
+  del.onclick = () => { row.remove(); saveDict(); };
   row.append(a, arrow, b, del);
   return row;
 }
@@ -3502,7 +3506,7 @@ function ignoreRow(word = '') {
   const del = document.createElement('button');
   del.className = 'del'; del.title = t('remove');
   del.appendChild(iconSvg('close', 17));
-  del.onclick = () => row.remove();
+  del.onclick = () => { row.remove(); saveDict(); };
   row.append(a, del);
   return row;
 }
@@ -3531,7 +3535,9 @@ function renderDict(d) {
         b.title = t(gone ? 'dictBuiltinBack' : 'dictBuiltinDrop', {w});
       };
       paint();
-      b.onclick = () => { b.classList.toggle('off'); paint(); };
+      // 札は焦点を持たないまま切り替わる。押した時点で書かないと、線が引かれた
+      // 見た目と実際に効いている状態がずれたままになる。
+      b.onclick = () => { b.classList.toggle('off'); paint(); saveDict(); };
       return b;
     }));
     el.builtinCount.textContent = d.builtin.length;
@@ -3557,6 +3563,38 @@ function collectDict() {
   return {ignore, unignore, replace};
 }
 
+/* ── 保存 ───────────────────────────────
+   焦点が外れた時点で書く。上半分のつまみは動かした時点で黙って保存されるのに、
+   下半分だけボタンを押さないと消える、という揃わなさが事故のもとだった。 */
+let dictReady = false;                // 一度読むまでは書かない
+let dictLast = '';                    // 最後に書いた中身。同じなら投げない
+let dictSaving = Promise.resolve();   // 書き込みを一本の列にする
+let noteTimer = null;
+
+// 印は出しっぱなしにしない。消えないと、いつの保存の話か分からなくなる。
+function flashNote(msg, ms) {
+  clearTimeout(noteTimer);
+  el.dictNote.textContent = msg;
+  noteTimer = setTimeout(() => { el.dictNote.textContent = ''; }, ms);
+}
+
+async function saveDict(quiet = false) {
+  // 読み込む前に書くと、まだ空の画面で本物の辞書を上書きしてしまう
+  if (!dictReady) return;
+  const d = collectDict();
+  const body = JSON.stringify(d);
+  // 打っている最中も焦点が外れるたびに呼ばれる。中身が同じなら何もしない。
+  if (body === dictLast) return;
+  dictLast = body;
+  // 前の書き込みが終わってから次を投げる。行を消してすぐ札を押すと、
+  // 並べて投げた古い中身が後から着いて、消したはずの行が戻ることがある。
+  const mine = dictSaving = dictSaving.then(() => putJSON('/api/dictionary', d))
+                                      .then(r => r.ok, () => false);
+  if (!await mine) { dictLast = ''; return; }   // 次に触ったときに投げ直す
+  loadDictPairs();       // 認識途中の表示にも、次の一言から効かせる
+  if (!quiet) flashNote(t('dictSaved'), 1600);
+}
+
 function showDictTab(which) {
   const isReplace = which === 'replace';
   el.paneReplace.hidden = !isReplace;
@@ -3569,7 +3607,13 @@ el.tabIgnore.onclick = () => showDictTab('ignore');
 
 async function loadDict() {
   renderDict(await (await fetch('/api/dictionary')).json());
+  // 読んだ直後の姿を控える。ここを飛ばすと、開いただけで一度書きに行く。
+  dictLast = JSON.stringify(collectDict());
+  dictReady = true;
 }
+
+// 打っている最中は書かない。焦点が外れた時点でだけ書く。
+el.paneDict.addEventListener('focusout', () => saveDict());
 
 // 追加は一覧の先頭に入れる（下までスクロールしなくてよい）
 function addReplaceEntry() {
@@ -3578,7 +3622,8 @@ function addReplaceEntry() {
   el.replaceRows.prepend(replaceRow(from, to));
   el.newFrom.value = el.newTo.value = '';
   el.newFrom.focus();
-  el.dictNote.textContent = t('dictPending');
+  // 足した行には焦点が乗らない。ここで書かないと、閉じた時点で消える。
+  saveDict();
 }
 
 function addIgnoreEntry() {
@@ -3587,7 +3632,7 @@ function addIgnoreEntry() {
   el.ignoreRows.prepend(ignoreRow(w));
   el.newIgnore.value = '';
   el.newIgnore.focus();
-  el.dictNote.textContent = t('dictPending');
+  saveDict();
 }
 
 el.addReplace.onclick = addReplaceEntry;
@@ -3611,15 +3656,6 @@ el.filterReplace.addEventListener('input', () => {
     row.classList.toggle('hit', !!hit);
   }
 });
-
-el.dictSave.onclick = async () => {
-  const d = collectDict();
-  await putJSON('/api/dictionary', d);
-  el.dictNote.textContent = t('dictSaved', {
-    r: Object.keys(d.replace).length, i: d.ignore.length,
-  });
-  loadDictPairs();       // 認識途中の表示にも、次の一言から効かせる
-};
 
 /* ── CSV ─────────────────────────────────
    1行1件。列は type,from,to
@@ -3667,23 +3703,38 @@ el.dictFile.onchange = async ev => {
   if (!file) return;
   const text = (await file.text()).replace(/^﻿/, '');
 
-  const replace = {}, ignore = [];
-  let skipped = 0;
+  // いま画面にあるものへ足す。丸ごと置き換えると、3件のファイルを読んだだけで
+  // 手元の 43 件が消える。読み込みは押した時点で保存されるので引き返せない。
+  const cur = collectDict();
+  const replace = {...cur.replace}, ignore = [...cur.ignore];
+  let skipped = 0, added = 0, updated = 0, first = true;
   for (const raw of text.split(/\r?\n/)) {
     if (!raw.trim()) continue;
     const [type, from, to] = parseCsvLine(raw);
-    if (/^type$/i.test(type)) continue;            // 見出し行
-    if (type === 'replace' && from && to) replace[from] = to;
-    else if (type === 'ignore' && from) ignore.push(from);
+    // 見出し行。表計算から出すと必ず付くので、列の名前が何であっても飛ばす。
+    // 1行目だけを見る。中身の行は必ず replace か ignore で始まるので消えない。
+    if (first) {
+      first = false;
+      if (type !== 'replace' && type !== 'ignore') continue;
+    }
+    if (type === 'replace' && from && to) {
+      if (!(from in replace)) added++;
+      else if (replace[from] !== to) updated++;
+      replace[from] = to;
+    }
+    else if (type === 'ignore' && from) {
+      if (!ignore.includes(from)) { ignore.push(from); added++; }
+    }
     else skipped++;
   }
 
   renderDict({replace, ignore});
   el.dictFile.value = '';                          // 同じファイルを選び直せるように
-  el.dictNote.textContent = t('dictLoaded', {
-    r: Object.keys(replace).length, i: ignore.length,
+  await saveDict(true);                            // 印は出さない。下の件数の方が伝わる
+  flashNote(t('dictLoaded', {
+    a: added, u: updated,
     s: skipped ? t('dictSkipped', {n: skipped}) : '',
-  });
+  }), 6000);
 };
 
 // つなぎ言葉を落とすかどうかはデーモンの設定。次の発話から効く。

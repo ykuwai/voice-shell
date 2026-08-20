@@ -101,10 +101,9 @@ NOISE_ONLY = {
     "えっ", "お", "おー", "おお", "おっ", "ん", "んー", "んん", "は", "はっ",
     "ふ", "ふう", "ふん", "ふーん", "ふむ", "へ", "へえ", "ほう", "ほー",
     "まあ", "ねえ", "あの", "あのー", "えっと", "えーと", "なんか",
-    # 無音のときに ASR が出しがちな定型句。本人が言うことはまず無いものだけ。
-    # （「ありがとうございました」「お疲れ様でした」は実際に言うので入れない）
-    "ご視聴ありがとうございました", "チャンネル登録をお願いします",
-    "最後までご視聴ありがとうございました", "ご覧いただきありがとうございます",
+    # 動画の定型句（「ご視聴ありがとうございました」など）はここに入れない。
+    # どの国の人も使う道具に、日本語の動画で出る言い回しが最初から並んでいると、
+    # 初めて見た人には何のための一覧か分からなくなる。要る人は辞書側で足せる。
     # 英語でも同種の相槌が出る
     "yeah", "yes", "yep", "ok", "okay", "uh", "uh-huh", "um", "umm",
     "hmm", "hm", "mm", "mhm", "oh", "ah", "ahh", "eh", "huh",
@@ -251,7 +250,12 @@ def save_default_dictionary():
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
     if not DICT_FILE.exists():
-        DICT_FILE.write_text(json.dumps(DEFAULT_DICT, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        # 作った時点で「配った語」を控えておく。ここを省くと、初回に配った語を
+        # 消した人のところへ、次の更新で同じ語がそのまま戻ってくる。
+        first = dict(DEFAULT_DICT)
+        first["_seen"] = sorted(DEFAULT_DICT["replace"])
+        first["_seen_ignore"] = sorted(DEFAULT_DICT["ignore"])
+        DICT_FILE.write_text(json.dumps(first, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return
 
     try:
@@ -260,19 +264,31 @@ def save_default_dictionary():
         return                      # 壊れていれば触らない（ユーザーが直せる）
 
     # 既定に新しく増えた語だけを補う。ユーザーが値を変えたものは変えない。
+    # 「一度でも既定として配った語」は言い換えと無視で別に控える。ひとつの
+    # 入れ物にまとめると、同じ語が両方にあったときに片方を消しただけで
+    # もう片方も配られなくなる。控えを言い換えだけにすると、利用者が消した
+    # 既定の無視語が更新のたびに戻ってくる。
     known = set(cur.get("_seen", []))
+    known_ignore = set(cur.get("_seen_ignore", []))
     replace = dict(cur.get("replace", {}))
+    ignore = list(cur.get("ignore", []))
     added = 0
     for k, v in DEFAULT_DICT["replace"].items():
         if k not in replace and k not in known:
             replace[k] = v
+            added += 1
+    for w in DEFAULT_DICT["ignore"]:
+        if w not in ignore and w not in known_ignore:
+            ignore.append(w)
             added += 1
 
     if not added:
         return
 
     cur["replace"] = replace
+    cur["ignore"] = ignore
     cur["_seen"] = sorted(known | set(DEFAULT_DICT["replace"]))
+    cur["_seen_ignore"] = sorted(known_ignore | set(DEFAULT_DICT["ignore"]))
     DICT_FILE.write_text(json.dumps(cur, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"辞書に既定の項目を {added} 件追加しました", file=sys.stderr)
 

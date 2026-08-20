@@ -86,6 +86,23 @@ def _read_dict(raw: bool = False, path: Path = None) -> dict:
             "replace": data.get("replace", {}) or {}}
 
 
+def _keep_unignore(sent, prev: dict) -> list:
+    """組み込みから外した語をまとめる。
+
+    画面は「いま組み込みにある語」の札しか出せないので、送られてくるのは
+    その範囲だけになる。届いた分で丸ごと置き換えると、組み込みから語が
+    消えた日や、一覧をうまく読めなかったときに、利用者が外したはずの語が
+    黙って無視へ戻る。札にできなかったぶんは前のまま残して足し合わせる。
+    """
+    builtin = set(_builtin_noise())
+    now = {s.strip() for s in sent if isinstance(s, str) and s.strip()}
+    # 札が出ていた語は、押し直して戻したぶんが届かないので、届いた分で決める。
+    # 札に出せなかった語（組み込みから消えた、一覧が読めなかった）は前のを残す。
+    kept = {s.strip() for s in prev.get("unignore", []) or []
+            if isinstance(s, str) and s.strip() and s.strip() not in builtin}
+    return sorted(now | kept)
+
+
 def parse_args():
     p = argparse.ArgumentParser(description="音声プロンプトのライブビューア")
     p.add_argument("--log-file", default=str(DEFAULT_LOG), help="追尾する JSONL")
@@ -742,25 +759,26 @@ async def main_async(args):
         target = DICT_FILE
 
         body = await req.json()
+        prev = _read_dict(raw=True, path=target)
         data = {
             "ignore": sorted({s.strip() for s in body.get("ignore", [])
                               if isinstance(s, str) and s.strip()}),
-            # 組み込みから外した語。組み込みの一覧に無いものは持たない
-            # （語が入れ替わったときに、古い名残が残り続けないように）。
-            "unignore": sorted({s.strip() for s in body.get("unignore", [])
-                                if isinstance(s, str) and s.strip()}
-                               & set(_builtin_noise())),
+            "unignore": _keep_unignore(body.get("unignore", []), prev),
             "replace": {k.strip(): v.strip() for k, v in body.get("replace", {}).items()
                         if isinstance(k, str) and isinstance(v, str) and k.strip()},
         }
         # 既定項目の追加履歴は内部用。消すと消した項目が復活してしまうので残す。
-        prev = _read_dict(raw=True, path=target)
+        # 言い換えと無視で別に持つ。voice_daemon.py が種類ごとに見ている。
         seen = set(prev.get("_seen", [])) | set(prev.get("replace", {}))
         data["_seen"] = sorted(seen | set(data["replace"]))
+        seen_ignore = set(prev.get("_seen_ignore", [])) | set(prev.get("ignore", []) or [])
+        data["_seen_ignore"] = sorted(seen_ignore | set(data["ignore"]))
 
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        return web.json_response({k: v for k, v in data.items() if k != "_seen"})
+        # 内部用のキー（_ で始まるもの）は返さない。画面へ渡すと、次の保存で
+        # そのまま送り返され、こちらが持っている控えを画面側が塗り替えられる。
+        return web.json_response({k: v for k, v in data.items() if not k.startswith("_")})
 
     mic_file = state / "mic"
     engine_active_file = state / "engine_active"
