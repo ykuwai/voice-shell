@@ -29,7 +29,7 @@ HARD_UTTERANCE_CAP = 300.0
 
 # 発話の頭に付ける「しきい値を超える直前」の長さ。
 # 子音の立ち上がりは RMS が低く、超えた瞬間から渡すと語頭が欠ける
-# （実測: 「反応がなかったので」が「なかったので」に、
+# （実測では「反応がなかったので」が「なかったので」に、
 #  「Apple の認識が」が「の認識が」になった）。0.3 秒では足りず 0.6 秒にした。
 # 無音を余分に渡すことになるが、認識側は無音を無視するので実害はない。
 PREROLL_SEC = 0.6
@@ -97,7 +97,7 @@ def add_common_args(p):
                         "手元に置いたフォルダの場所でも受ける。"
                         "省略すると large-v3-turbo を使う")
     p.add_argument("--language", default=None,
-                   help="言語を固定 (例: Japanese)。省略で自動判定")
+                   help="言語を固定する。Japanese のように書く。省略すると自動判定")
     p.add_argument("--device", default=DEFAULT_DEVICE,
                    help="録音デバイス。Linux は arecord の -D（pipewire, plughw:2,0）、"
                         "macOS は avfoundation の番号（:0）、Windows は dshow の名前"
@@ -143,7 +143,8 @@ def load_model(args):
 def _kill_engine_on_exit():
     """終了時に子プロセスを確実に落とす。
 
-    Ctrl-C や kill で親が終わっても、子が残って資源を掴んだままになる:
+    Ctrl-C や kill で親が終わっても、子が残って資源を掴んだままになる。
+    残るのは次の2つ。
 
     - 録音の ffmpeg / arecord がマイクを開けっぱなしにする（全エンジン共通）
     - 認識ヘルパが残る（apple）
@@ -283,7 +284,7 @@ def mic_command(device: str, in_sr: int) -> list:
         if shutil.which("ffmpeg") is None:
             sys.exit("ffmpeg が見つかりません (brew install ffmpeg)")
         # avfoundation は ":<音声デバイス番号>" 形式。":default" も受け付ける
-        # （実測: システムの既定入力から録れる）。
+        # （実測でも、システムの既定入力から録れている）。
         if device == SYSTEM_DEFAULT:
             src = ":default"
         else:
@@ -295,7 +296,7 @@ def mic_command(device: str, in_sr: int) -> list:
     if sys.platform.startswith("win"):
         if shutil.which("ffmpeg") is None:
             sys.exit("ffmpeg が見つかりません (winget install ffmpeg)")
-        # dshow はデバイス名指定。一覧は:
+        # dshow はデバイス名指定。一覧は次のコマンドで出せる。
         #   ffmpeg -list_devices true -f dshow -i dummy
         # avfoundation と違い「既定」を表す綴りが無いので、
         # 一覧の先頭（通常はシステムの既定）に解決する。
@@ -405,7 +406,7 @@ def read_blocks(device: str, in_sr: int,
     # とき。avfoundation は開いた時点のデバイスに繋ぎっぱなしなので、
     # 抜けても気づかず、EOF すら返さないまま黙る）。
     #
-    # どちらでも同じことをする — 開き直して、また待つ。**諦めない。**
+    # どちらでも同じことをする。開き直して、また待つ。**諦めない。**
     # 「5回試して駄目でした」と言われても、できることは結局「挿し直す」
     # だけで、それは黙って待っていれば済む話なので。挿し直せば次の試行で
     # 開けて、そのまま何事も無かったように続く。
@@ -444,7 +445,7 @@ def read_blocks(device: str, in_sr: int,
                     # 持ち越すと、諦めたあとに選び直した装置がまた無音だったとき、
                     # 速い試行を一度もしないまま長い間隔で待つことになる。
                     dead_run, dead_tries, gave_up = 0.0, 0, False
-                    print(f"マイクを切り替えました: {current}", file=sys.stderr, flush=True)
+                    print(f"マイクを {current} に切り替えました", file=sys.stderr, flush=True)
                     if on_switch is not None:
                         on_switch(current)
 
@@ -462,7 +463,7 @@ def read_blocks(device: str, in_sr: int,
                 nonlocal lost
                 if not lost:
                     lost = True
-                    print(f"{why}: {current} — 開き直して待ちます"
+                    print(f"{why}（{current}）。開き直して待ちます"
                           "（挿し直せばそのまま戻ります）",
                           file=sys.stderr, flush=True)
                 reopen()
@@ -512,7 +513,7 @@ def read_blocks(device: str, in_sr: int,
                 dead_run, dead_tries, gave_up = 0.0, 0, False
                 if lost:
                     lost = False
-                    print(f"マイクが戻りました: {current}", file=sys.stderr, flush=True)
+                    print(f"マイクが戻りました（{current}）", file=sys.stderr, flush=True)
                 retry_wait = RETRY_MIN
 
             block = to_16k(np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0)
@@ -526,7 +527,7 @@ def read_blocks(device: str, in_sr: int,
 def stream_utterances(model, args, should_stop=lambda: False):
     """マイクを読み、認識イベントを yield する。
 
-    yield されるイベント（辞書）:
+    yield されるイベント（辞書）は次の3つ。
         {"type": "level",   "rms": float, "speaking": bool}   毎ブロック
         {"type": "partial", "text": str, "language": str}     認識途中
         {"type": "final",   "text": str, "language": str}     発話確定
@@ -608,8 +609,8 @@ def stream_utterances(model, args, should_stop=lambda: False):
 
         accum_sec = len(state.audio_accum) / SAMPLE_RATE
 
-        # 話し終わった（無音が続いた）なら確定する。喋っている最中は切らない
-        # — 一息で伝えたいのに途中で送られる方が困る。
+        # 話し終わった（無音が続いた）なら確定する。喋っている最中は切らない。
+        # 一息で伝えたいのに途中で送られる方が困るため。
         done_talking = silence_run >= args.silence_duration
         way_too_long = accum_sec >= HARD_UTTERANCE_CAP
 

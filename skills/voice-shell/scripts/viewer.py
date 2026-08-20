@@ -651,7 +651,7 @@ async def main_async(args):
     async def handle_utterance(req):
         """ブラウザ側（Web Speech API）で認識した発話を受け取る。
 
-        デーモンが認識したときと同じ道を通す — 辞書の言い換え、無視する発話、
+        デーモンが認識したときと同じ道を通す。辞書の言い換え、無視する発話、
         最小文字数、つなぎ言葉の除去、一時停止中の保留。ここを通さないと、
         認識のやり方によって届く文が変わってしまう。
         """
@@ -794,7 +794,7 @@ async def main_async(args):
 
         言い方はデーモンが持っている表から取る。画面に別の控えを持つと、
         書いてあるのに効かない語ができる。何が起きるかの説明の方は画面の
-        i18n にある — 言い方と説明は訳す先が違うので、置き場所も分ける。
+        i18n にある。言い方と説明は訳す先が違うので、置き場所も分ける。
         """
         import voice_daemon as vd
         return web.json_response({
@@ -957,7 +957,7 @@ async def main_async(args):
     await web.TCPSite(runner, args.host, args.port).start()
 
     print(f"\n  ブラウザで開いてください →  http://{args.host}:{args.port}"
-          f"\n  追尾中: {args.log_file}\n", file=sys.stderr, flush=True)
+          f"\n  追尾しているログは {args.log_file}\n", file=sys.stderr, flush=True)
 
     tasks = [asyncio.create_task(tail.watch()),
              asyncio.create_task(tail.watch_partial()),

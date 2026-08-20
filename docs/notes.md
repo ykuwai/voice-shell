@@ -12,28 +12,28 @@
 `voice_daemon.py` / `voice-shell.sh` は元々 Linux/macOS しか想定しておらず、
 Windows（Git Bash 上の bash）で動かすと以下がすべて刺さった。いずれも修正済み。
 
-- **`import fcntl`** — POSIX 専用モジュールで Windows には無く、起動直後に
+- **`import fcntl`** は POSIX 専用のモジュール。Windows には無いので、起動直後に
   `ModuleNotFoundError` で落ちる。Windows では `msvcrt.locking` で
   二重起動防止ロックを代替した
-- **`os.kill(pid, 0)`**（生存確認）— Windows では未対応で `SystemError` になる。
+- **`os.kill(pid, 0)`**（生存確認）は Windows では未対応で、`SystemError` になる。
   `OpenProcess` が取れるかで代替した
-- **`pgrep` / `pkill` / `setsid`** — Git Bash に無い。`voice-shell.sh` は
+- **`pgrep` / `pkill` / `setsid`** は Git Bash に無い。`voice-shell.sh` は
   リスナー一覧・二重起動チェック・停止処理でこれらに依存していたため、
   無ければその機能だけ諦めて素通しするようガードを入れた
   （ビューアの起動確認は pgrep が無ければポートへの応答で代用する）
-- **`/tmp` の解釈が bash と Python でずれる** — Git Bash（MSYS）の `/tmp` は
-  実際の Windows パス（例: `...\AppData\Local\Temp`）へマウント変換されるが、
+- **`/tmp` の解釈が bash と Python でずれる。** Git Bash（MSYS）の `/tmp` は
+  実際の Windows パス（`...\AppData\Local\Temp` のような場所）へマウント変換されるが、
   素の Windows Python が同じ文字列 `"/tmp"` を受け取ると `C:\tmp` と解釈する。
   両者が同じ意味のつもりで別ディレクトリを見てしまい、デーモンの書き込み先と
   Monitor の `tail -F` 先がずれて**発話がどこにも届かない**という壊れ方をする。
   `voice-shell.sh` が `cygpath -w` で実パスに変換し、`VOICE_SHELL_STATE_DIR`
   環境変数で子プロセスへ明示的に渡すことで解決した
-- **文字コード** — Windows の Python はファイル I/O に既定でシステムの
+- **文字コードも食い違う。** Windows の Python はファイル I/O に既定でシステムの
   ロケール（日本語版なら cp932）を使う。UTF-8 で書いた JSON やログを
   読もうとして `UnicodeDecodeError` になり、状態確認の文字列比較
   （`grep -q 稼働中` 等）も一致しなくなる。`voice-shell.sh` で
   `PYTHONUTF8=1` を強制して回避した（macOS/Linux では無害）
-- **ffmpeg の dshow マイク名** — 当初の既定値だった `audio=default` は
+- **ffmpeg の dshow マイク名も違う。** 当初の既定値だった `audio=default` は
   実際には認識されない。`ffmpeg -list_devices true -f dshow -i dummy` で
   出てくる実際のデバイス名をそのまま `--device audio=<名前>` に渡す必要がある
 
@@ -98,7 +98,7 @@ PipeWire がマイクを握っている環境で、PortAudio が PulseAudio バ�
 認識は発話が終わってから確定するため、確定時点だけを見てミュート判定すると、
 **切っている間に話した内容が解除後にまとめて流れ込む**（ところてん現象）。
 
-単純な「一度でも切られたらフラグを立てる」方式も破綻する:
+単純な「一度でも切られたらフラグを立てる」方式も破綻する。破れ方は2通りある。
 
 - 無音のままミュートしただけでフラグが立ち、**解除後の最初の発話が消える**
 - ミュート中に物音が発話として確定すると、そこでフラグが消費され、
@@ -106,8 +106,8 @@ PipeWire がマイクを握っている環境で、PortAudio が PulseAudio バ�
 
 `voice_daemon.py` では「マイクを切られた回数」(`mute_generation`) を数え、
 発話が始まった時点の値を覚えて、確定時に変化していたらその発話を捨てている。
-検証済みシナリオ: 無音ミュート→解除→発話 / ミュート中の物音→解除→発話 /
-発話中にミュート / ミュートをまたぐ発話 / 通常。
+確かめたのは、無音ミュート→解除→発話 / ミュート中の物音→解除→発話 /
+発話中にミュート / ミュートをまたぐ発話 / 通常、の5通り。
 
 ## 無音でも相槌が出力される
 
@@ -130,7 +130,7 @@ PipeWire がマイクを握っている環境で、PortAudio が PulseAudio バ�
 ## ストリーミングは音声全体を毎回再投入する
 
 `streaming_transcribe()` はチャンクごとに「それまでの全音声」をモデルに再投入する。
-1発話でエンコードされる音声量は `発話長² / (2 × チャンク長)` に比例する:
+1発話でエンコードされる音声量は `発話長² / (2 × チャンク長)` に比例する。下の表がその増え方。
 
 | 発話長 | チャンク | エンコード量 | 増幅率 |
 |---|---|---|---|

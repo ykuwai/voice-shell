@@ -3,7 +3,7 @@
 `--engine apple` で使う(macOS では既定)。OS 付属のオンデバイスモデルなので、
 数 GB のモデルを落とす必要がなく、音声は端末の外に出ない。
 
-実測(Apple Silicon / macOS 26): 3.5 秒の日本語音声で認識 0.2 秒ほど、
+実測では(Apple Silicon / macOS 26)、3.5 秒の日本語音声で認識 0.2 秒ほど、
 句読点まで含めて正しく出る。
 
 ## Swift のヘルパ経由で呼んでいる
@@ -84,7 +84,7 @@ def load(args):
 
     binary = _ensure_binary()
     locale = _locale_id(getattr(args, "language", None))
-    print(f"認識エンジン: apple({locale} / OS 付属のオンデバイスモデル)",
+    print(f"認識エンジンは apple({locale} / OS 付属のオンデバイスモデル)",
           file=sys.stderr)
     print("  音声はこの Mac の中だけで処理されます。", file=sys.stderr, flush=True)
     return _AppleModel(binary, locale)
@@ -117,9 +117,9 @@ class _AppleModel:
         try:
             ready = json.loads(first)
         except ValueError:
-            sys.exit(f"speech_helper の応答が読めません: {first!r}")
+            sys.exit(f"speech_helper の応答が読めません。{first!r}")
         if "error" in ready:
-            sys.exit(f"speech_helper: {ready['error']}")
+            sys.exit(f"speech_helper でエラーが起きました。{ready['error']}")
 
         self._io_lock = threading.Lock()   # パイプは 1 往復ずつ
         self._lock = threading.Lock()      # state の付け替えと追記を守る
@@ -179,7 +179,7 @@ class _AppleModel:
         except ValueError:
             return ""
         if "error" in r:
-            print(f"speech_helper: {r['error']}", file=sys.stderr, flush=True)
+            print(f"speech_helper でエラーが起きました。{r['error']}", file=sys.stderr, flush=True)
             return ""
         return (r.get("text") or "").strip()
 
@@ -193,7 +193,7 @@ class _AppleModel:
                         len(state.audio_accum) - state._decoded_upto
                         < SAMPLE_RATE * _REFRESH_SEC):
                     # いま起きる理由がない。次の追記まで眠る。
-                    # clear はロック内で行う — 外だと「clear の直前に追記された
+                    # clear はロック内で行う。外だと「clear の直前に追記された
                     # 分」の起こし損ねが起きる(追記もロック内なので競合しない)
                     self._wake.clear()
                     continue
