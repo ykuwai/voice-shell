@@ -64,9 +64,6 @@ else:
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME",
                                  Path.home() / ".config")) / "voice-shell"
 DICT_FILE = CONFIG_DIR / "dictionary.json"
-# 手元だけに置く辞書。社名・取引先・個人的な語など、公開したくないものを入れる。
-# リポジトリには入らない（.gitignore で除外）。
-PRIVATE_DICT_FILE = CONFIG_DIR / "dictionary.private.json"
 # マイクの感度と「何秒黙ったら確定するか」。辞書と同じく設定ディレクトリに
 # 置き、ビューアから変えられる。デーモンが 0.5 秒おきに読み直すので再起動は要らない。
 TUNING_FILE = CONFIG_DIR / "tuning.json"
@@ -195,7 +192,7 @@ DEFAULT_DICT = {
 }
 
 
-_dict_cache = (None, None)   # (更新時刻の組, 中身)
+_dict_cache = (None, None)   # (更新時刻, 中身)
 
 
 def _read_one(path: Path) -> dict:
@@ -218,40 +215,30 @@ def _read_one(path: Path) -> dict:
     }
 
 
-def _mtimes():
-    out = []
-    for p in (DICT_FILE, PRIVATE_DICT_FILE):
-        try:
-            out.append(p.stat().st_mtime)
-        except OSError:
-            out.append(None)
-    return tuple(out)
+def _mtime():
+    try:
+        return DICT_FILE.stat().st_mtime
+    except OSError:
+        return None
 
 
 def load_dictionary() -> dict:
-    """共有辞書と手元辞書を合わせて返す。
+    """辞書を返す。
 
     発話ごとに呼ばれるので、更新時刻が変わったときだけ読み直す。
     これにより Web UI での編集がデーモン再起動なしで反映される。
-    手元辞書（private）が優先される。
     """
     global _dict_cache
-    mtimes = _mtimes()
-    if _dict_cache[0] == mtimes:
+    mtime = _mtime()
+    # 先に無い場合を弾く。cache の初期値も None なので、順を逆にすると
+    # 「まだ何も読んでいない」と「ファイルが無い」が同じ顔になる。
+    if mtime is None:
+        return DEFAULT_DICT
+    if _dict_cache[0] == mtime:
         return _dict_cache[1]
 
-    if mtimes == (None, None):
-        return DEFAULT_DICT
-
-    shared = _read_one(DICT_FILE)
-    private = _read_one(PRIVATE_DICT_FILE)
-
-    d = {
-        "ignore": shared["ignore"] + private["ignore"],
-        "unignore": shared["unignore"] + private["unignore"],
-        "replace": {**shared["replace"], **private["replace"]},
-    }
-    _dict_cache = (mtimes, d)
+    d = _read_one(DICT_FILE)
+    _dict_cache = (mtime, d)
     return d
 
 
