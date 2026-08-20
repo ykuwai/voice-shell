@@ -429,8 +429,20 @@ if session:
         seen = json.loads(f.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         seen = {}
-    first_seen = seen.get(session) or now
-    if seen.get(session) != first_seen:
+    first_seen = seen.get(session)
+    if first_seen is None:
+        # まだ覚えていない会話。いま生きている登録に同じ会話があれば、
+        # そちらの時刻を引き継ぐ（古い版で登録したものが張り直したとき、
+        # 「今日が初めて」になって番号が最後尾へ飛ぶのを防ぐ）。
+        for other in Path(reg).parent.glob("*"):
+            try:
+                info = json.loads(other.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if info.get("session") == session:
+                first_seen = info.get("first_seen") or info.get("since")
+                break
+        first_seen = first_seen or now
         seen[session] = first_seen
         f.write_text(json.dumps(seen, ensure_ascii=False, indent=2) + "\n",
                      encoding="utf-8")
