@@ -701,11 +701,15 @@
     /* 送信先の札は1つずつ行を使う。ここまで低いとそれだけで埋まるので、
        名前は省かずに、ひとまとめの選び方へ替える。 */
     .route-chips { display:none; }
+    /* 選ばれている札と同じ見た目にする。ここだけ地の色に戻ると、
+       いまどこへ届くのかが札のときより弱く見えてしまう。 */
     .route-pick {
       display:block; width:100%; padding:.32rem .7rem; font-size:.8rem;
-      border-color:color-mix(in srgb, var(--accent) 55%, var(--line));
-      color:var(--text);
+      font-weight:600; border-color:transparent; color:var(--panel);
+      background:linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, var(--accent-2)));
     }
+    /* 開いた一覧は地の色に戻す（塗りのままだと文字が読めない） */
+    .route-pick option { background:var(--panel-2); color:var(--text); font-weight:400; }
     .draft-card { margin-bottom:.25rem; }
   }
 
