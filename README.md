@@ -86,8 +86,6 @@ Everything you set stays in `~/.config/voice-shell/` and survives a restart.
 |---|---|
 | [SETUP.md](skills/voice-shell/SETUP.md) | How to install it per environment, and what to do when you get stuck |
 | [SKILL.md](skills/voice-shell/SKILL.md) | The steps the agent reads. The fine behavior is here |
-| [docs/notes.md](docs/notes.md) | What we found out while building it. Skip it if you only want to use the tool |
-| [docs/viewer-design.md](docs/viewer-design.md) | Why the window turned out the way it did |
 
 ## References
 
