@@ -14,7 +14,6 @@ Claude Code 側は Monitor でこのログを tail し、行が来たらプロ�
     python voice_daemon.py --stop      # 停止する
 """
 import argparse
-import contextlib
 import json
 import os
 import re
@@ -49,10 +48,9 @@ import asr_mic
 if os.environ.get("VOICE_SHELL_STATE_DIR"):
     STATE_DIR = Path(os.environ["VOICE_SHELL_STATE_DIR"])
 else:
-    # 以前は "qwen-voice" という名前だった。Qwen3-ASR は数ある選択肢の
-    # ひとつになったので名前を改めたが、動いているものを壊さないよう、
-    # 古い方が残っていて新しい方が無ければそちらを使い続ける
-    # （/tmp が空けば自然に新しい名前へ移る）。
+    # 以前は認識モデルの名前を取って "qwen-voice" と呼んでいた。道具の名前へ
+    # 改めたが、動いているものを壊さないよう、古い方が残っていて新しい方が
+    # 無ければそちらを使い続ける（/tmp が空けば自然に新しい名前へ移る）。
     _base = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp"))
     STATE_DIR = _base / "voice-shell"
     _legacy = _base / "qwen-voice"
@@ -393,42 +391,6 @@ def collapse_letter_acronyms(text: str) -> str:
     return _SPELLED_RE.sub(sub, text)
 
 
-class LockedModel:
-    """モデルへの呼び出しを1つずつに並べる。
-
-    streaming_transcribe は共有の vllm.LLM を素で呼んでおり、ロックが無い。
-    ローカルマイクと LAN からの接続が同時に触ると壊れるので、モデルに
-    触る経路をここへ集める。asr_mic 側は元のモデルと同じ顔で使える。
-
-    推論は1発話 0.1〜0.5 秒で、人は喋り続けない（GPU 利用率は 1% 程度）。
-    数人であれば直列でも待ちは体感できない。
-    """
-
-    def __init__(self, model):
-        self._model = model
-        self._lock = threading.Lock()
-
-    def __getattr__(self, name):
-        """包んでいないメソッドはそのまま通す（設定値の参照など）。"""
-        return getattr(self._model, name)
-
-    def init_streaming_state(self, *a, **kw):
-        with self._lock:
-            return self._model.init_streaming_state(*a, **kw)
-
-    def streaming_transcribe(self, *a, **kw):
-        with self._lock:
-            return self._model.streaming_transcribe(*a, **kw)
-
-    def finish_streaming_transcribe(self, *a, **kw):
-        with self._lock:
-            return self._model.finish_streaming_transcribe(*a, **kw)
-
-    def transcribe(self, *a, **kw):
-        with self._lock:
-            return self._model.transcribe(*a, **kw)
-
-
 def apply_replacements(text: str, replace: dict) -> str:
     """辞書の置換を適用する。長い語から当てて部分一致の取りこぼしを防ぐ。"""
     for src in sorted(replace, key=len, reverse=True):
@@ -488,8 +450,6 @@ def resolve_engine(want: str = "") -> str:
     --engine auto を渡してくるので、そのときは入っているモデルから選ぶ。
     """
     known = {"browser"} | {e["id"] for e in asr_mic.available_engines()}
-    # クラウド/LAN のエンジンは import では見えないので名前で通す
-    known |= {"cloud", "home-lan"}
 
     if want and want != "auto":
         if want not in known:
@@ -509,7 +469,7 @@ def resolve_engine(want: str = "") -> str:
         return "browser"
     # want == "auto": 入っているモデルの中から選ぶ
     have = [e["id"] for e in asr_mic.available_engines()]
-    for pick in ("apple", "whisper", "local", "mlx", "home-lan"):
+    for pick in ("apple", "whisper"):
         if pick in have:
             return pick
     # auto は「画面を開けないので手元のモデルで」という意味。
@@ -521,9 +481,8 @@ def resolve_engine(want: str = "") -> str:
 
 def polish(text: str, user_dict: dict, keep_kanji_numbers: bool = False,
            drop_fillers: bool = False) -> str:
-    """認識したテキストを読みやすく整える。ローカルと LAN の両方で通す。
+    """認識したテキストを読みやすく整える。
 
-    辞書はクラウドの API に対するこちらの取り柄なので、リモートでも効かせる。
     略語を先に詰めるのは、辞書が完全一致で当たるため。「G P U」のまま
     だと登録済みの「G.P.U.」に当たらない。
     """
@@ -535,84 +494,6 @@ def polish(text: str, user_dict: dict, keep_kanji_numbers: bool = False,
     if drop_fillers:
         text = strip_fillers(text)
     return text
-
-
-@contextlib.contextmanager
-def _remote_tokens(model, limit: int):
-    """この中だけ生成トークンの上限を伸ばす。
-
-    モデルは max_new_tokens=64 で読み込んである。ローカルは 2 秒ごとに
-    区切って認識するので足りるが、LAN 経由は発話をまとめて渡すため
-    100 文字あたりで頭打ちになる。ロックの内側で呼ぶので、差し替えて
-    いる間に他のスレッドが割り込むことはない。
-    """
-    sp = getattr(model, "sampling_params", None)
-    if sp is None or getattr(sp, "max_tokens", None) is None:
-        yield                      # 触れないなら何もしない
-        return
-    before = sp.max_tokens
-    sp.max_tokens = limit
-    try:
-        yield
-    finally:
-        sp.max_tokens = before
-
-
-def start_remote_server(model, args) -> None:
-    """LAN からの接続を受けるサーバを別スレッドで立てる。
-
-    認識はこのプロセスのモデルを使う。GPU に載るモデルは1つだけなので、
-    別プロセスにはできない（voice-shell.sh の二重起動ガードにも掛かる）。
-    """
-    import remote_server
-
-    conf = remote_server.load_conf()
-
-    def make_session():
-        """接続1本ぶんの認識係を作る。
-
-        ローカルマイクと同じく streaming_transcribe を回す。溜めてから
-        一度に投げると喋り終わるまで何も返せず、届いているのかどうかが
-        手元で分からない。state は接続ごとに持つので混ざらない。
-        """
-        state = model.init_streaming_state(
-            language=args.language,
-            unfixed_chunk_num=args.unfixed_chunk_num,
-            unfixed_token_num=args.unfixed_token_num,
-            chunk_size_sec=args.chunk_size_sec,
-        )
-
-        def feed(pcm):
-            """届いた音を認識に流して、現時点のテキストを返す。"""
-            model.streaming_transcribe(pcm, state)
-            return state.text or ""
-
-        def finish():
-            """発話の終わり。確定させて後処理を通す。"""
-            model.finish_streaming_transcribe(state)
-            text = (state.text or "").strip()
-            # 次の発話のために作り直す（state は使い回せない）
-            state.__dict__.update(model.init_streaming_state(
-                language=args.language,
-                unfixed_chunk_num=args.unfixed_chunk_num,
-                unfixed_token_num=args.unfixed_token_num,
-                chunk_size_sec=args.chunk_size_sec,
-            ).__dict__)
-            if not text:
-                return ""
-            # ローカルと同じ後処理を通す。辞書は毎回読むので編集が即効く。
-            return polish(text, load_dictionary(), args.keep_kanji_numbers,
-                          getattr(args, "strip_fillers", False))
-
-        return feed, finish
-
-    ready = threading.Event()
-    t = threading.Thread(
-        target=lambda: remote_server.serve(conf, make_session, ready=ready),
-        name="remote-server", daemon=True)
-    t.start()
-    # 待ち受けに入るまで待つ。失敗しても本体は動かしたいので通す。
-    ready.wait(timeout=10)
 
 
 def is_noise(text: str, extra=(), allow=()) -> bool:
@@ -986,12 +867,6 @@ def parse_args():
     p.add_argument("--drop-non-japanese", action="store_true",
                    help="中国語・韓国語等を含む発話を捨てる（既定では送る。"
                         "意図して他言語を話すことがあるため既定は無効）")
-    p.add_argument("--remote-max-tokens", type=int, default=512,
-                   help="LAN 経由の認識で生成するトークンの上限。"
-                        "既定の 64 だと長い発話が 100 文字ほどで切れる")
-    p.add_argument("--remote", action="store_true",
-                   help="LAN の端末から音声を受ける（~/.config/voice-shell/"
-                        "remote.json の設定で待ち受ける）")
     p.add_argument("--status", action="store_true", help="稼働状況を表示して終了")
     p.add_argument("--stop", action="store_true", help="常駐プロセスを停止して終了")
     p.add_argument("--listeners", action="store_true",
@@ -1002,6 +877,12 @@ def parse_args():
                    help="次回もこのエンジンで起動するよう覚える")
     p.add_argument("--list-engines", action="store_true",
                    help="選べるエンジンを一覧して終了")
+    # Whisper のモデルもエンジンと同じく覚える。画面の「聞き取りを始める」は
+    # 元のコマンドを知らないので、覚えていないと立て直した時点で既定へ戻る。
+    p.add_argument("--resolve-model", action="store_true",
+                   help="覚えている Whisper のモデルを表示して終了する")
+    p.add_argument("--remember-model", metavar="NAME", default=None,
+                   help="次回もこのモデルで起動するよう覚える（空文字で既定に戻す）")
     return p.parse_args()
 
 
@@ -1297,6 +1178,16 @@ def main():
         print(resolve_engine(args.resolve_engine))
         return
 
+    if args.remember_model is not None:
+        write_config(whisper_model=args.remember_model.strip())
+        return
+
+    if args.resolve_model:
+        # 覚えていなければ何も出さない。呼ぶ側は空かどうかで
+        # 「--model を足すか」を決められる。
+        print(read_config().get("whisper_model") or "")
+        return
+
     if args.list_engines:
         remembered = read_config().get("engine", "")
         have = asr_mic.available_engines()
@@ -1350,8 +1241,8 @@ def main():
     STATE_DIR.mkdir(parents=True, exist_ok=True)
 
     # 二重起動を確実に防ぐ。PID ファイルは読み込みが終わってから書かれるので、
-    # 起動中（1分ほど）は上の確認をすり抜けてしまう。GPU を 12GB 使うため
-    # 二つ動くと両方とも中途半端に壊れる。ロックは起動の瞬間から効き、
+    # 起動中（1分ほど）は上の確認をすり抜けてしまう。二つ動くとマイクを
+    # 奪い合って両方とも中途半端に壊れる。ロックは起動の瞬間から効き、
     # 異常終了しても OS が解放するので取り残しの心配がない。
     _lock = open(STATE_DIR / "daemon.lock", "w")
     try:
@@ -1442,14 +1333,6 @@ def main():
 
     print("モデルを読み込み中… (初回は数分かかります)", file=sys.stderr)
     model = asr_mic.load_model(args)
-
-    # LAN からの接続とローカルマイクが同じモデルを触るので、ロックで並べる。
-    # クラウドのエンジンを使うときは接続情報しか持たないので包まない。
-    if args.remote and args.engine == "local":
-        model = LockedModel(model)
-
-    if args.remote:
-        start_remote_server(model, args)
 
     PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
     print(f"\n  聞いています — 喋ると {log_path} に追記します"

@@ -432,8 +432,9 @@ async def main_async(args):
     async def handle_engine(req):
         """認識を止める / 動かす。
 
-        止めると GPU（約12GB）が解放される。ビューアは動いたままなので、
-        ここから動かし直せる（モデル読み込みに1〜2分）。
+        止めるとマイクが解放され、Whisper のときはモデルのぶんのメモリも
+        戻る。ビューアは動いたままなので、ここから動かし直せる
+        （Whisper はモデル読み込みに1〜2分）。
         """
         body = await req.json()
         want = bool(body.get("running"))
@@ -846,6 +847,31 @@ async def main_async(args):
             "current": cur,
         })
 
+    async def handle_whisper_model_get(_req):
+        """Whisper のモデル。覚えているものと、既定の名前を返す。
+
+        入れ替えには積み直しが要るので、置き場は tuning.json ではなく
+        config.json（起動時に一度だけ読む方）。0.5 秒おきに読み直す
+        tuning.json に混ぜると、書いた側は効いたつもりになってしまう。
+        """
+        import voice_daemon as vd
+        return web.json_response({
+            "model": vd.read_config().get("whisper_model") or "",
+            "default": "large-v3-turbo",
+        })
+
+    async def handle_whisper_model_put(req):
+        """Whisper のモデルを覚える。空で送ると既定へ戻す。
+
+        名前が正しいかはここでは見ない。Hugging Face の名前も手元の
+        フォルダの場所も受けるので、読み込んでみるまで分からない。
+        """
+        import voice_daemon as vd
+        body = await req.json()
+        name = (body.get("model") or "").strip()
+        vd.write_config(whisper_model=name)
+        return web.json_response({"model": name})
+
     async def handle_mics(_req):
         """使えるマイクの一覧と、いま選ばれているものを返す。"""
         import asr_mic
@@ -869,6 +895,8 @@ async def main_async(args):
     app.router.add_get("/api/tuning", handle_tuning_get)
     app.router.add_put("/api/tuning", handle_tuning_put)
     app.router.add_get("/api/languages", handle_languages)
+    app.router.add_get("/api/whisper-model", handle_whisper_model_get)
+    app.router.add_put("/api/whisper-model", handle_whisper_model_put)
     app.router.add_put("/api/mics", handle_mic_put)
     app.router.add_get("/api/dictionary", handle_dict_get)
     app.router.add_put("/api/dictionary", handle_dict_put)

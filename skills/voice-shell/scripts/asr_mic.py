@@ -1,8 +1,8 @@
 """マイク入力 → ストリーミング認識の共通処理。
 
-realtime.py（端末表示）と webapp.py（ブラウザ表示）が共有する。
-両者の違いは「認識イベントをどう出力するか」だけなので、この module は
-イベントを yield するところまでを受け持つ。
+常駐デーモン（voice_daemon.py）とビューア（viewer.py）が共有する。
+どこへ出すかは呼ぶ側の都合なので、この module は認識イベントを
+yield するところまでを受け持つ。
 """
 import re
 import os
@@ -17,8 +17,8 @@ from typing import Iterator, Tuple
 
 import numpy as np
 
-# 音声認識モデルが期待するサンプルレート。クラウドの API を使うときは
-# qwen_asr が入っていないので、その場合も動くよう固定値で持つ。
+# 認識エンジンが期待するサンプルレート。どのエンジンが入っているかに
+# よらず同じ値なので、ライブラリから引かずに固定値で持つ。
 SAMPLE_RATE = 16000
 
 BLOCK_SEC = 0.1  # マイクを読む単位
@@ -67,23 +67,23 @@ SYSTEM_DEFAULT = "default"
 DEFAULT_DEVICE = SYSTEM_DEFAULT
 
 
-# macOS には CUDA が無く vLLM 版は動かない。MLX 版(mlx)も動くが約4GB 積むので、
-# OS 付属のオンデバイス認識(apple)を既定にする。
-# 直接 asr_mic を叩いたときの既定。通常の経路（voice-shell.sh start）は
+# この module を直接叩いたときの既定。通常の経路（voice-shell.sh start）は
 # voice_daemon.resolve_engine が「指定 > 前回の選択 > このブラウザ」で決めるので、
 # ここには来ない。
-_DEFAULT_ENGINE = "apple" if sys.platform == "darwin" else "local"
+# ここに browser は置けない。ブラウザ認識は画面の中で完結していて、
+# この機械にモデルを積まない。デーモンにその分岐が無いのはそのため。
+# macOS は OS 付属のオンデバイス認識が追加の用意なしで動くので apple、
+# それ以外は Whisper にする。
+_DEFAULT_ENGINE = "apple" if sys.platform == "darwin" else "whisper"
 
 
 def add_common_args(p):
     """各スクリプトで共通の引数を登録する。"""
     p.add_argument("--engine", default=os.environ.get("VOICE_SHELL_ENGINE", _DEFAULT_ENGINE),
-                   help="認識エンジン。local（Qwen3-ASR を NVIDIA GPU + vLLM で動かす）、"
-                        "apple（macOS 26 付属のオンデバイス認識。軽い）、"
-                        "mlx（Qwen3-ASR を Apple Silicon の GPU で動かす）、"
-                        "whisper（Whisper を GPU で動かす。固有名詞に強い）、"
-                        "home-lan（家の LAN にある GPU 機に任せる）、"
-                        "クラウドの API 名。macOS の既定は apple。"
+                   help="認識エンジン。apple（macOS 26 付属のオンデバイス認識。軽い）、"
+                        "whisper（faster-whisper。固有名詞に強い）。"
+                        "どちらも音声はこの機械から出ない。"
+                        "ブラウザ認識（browser）は画面の中で動くので、ここでは選べない。"
                         "VOICE_SHELL_ENGINE でも指定できる")
     p.add_argument("--whisper-compute", default=None,
                    help="Whisper の精度と VRAM の兼ね合い（float16 / int8）")
@@ -92,11 +92,10 @@ def add_common_args(p):
     p.add_argument("--whisper-language", default=None,
                    help="Whisper の言語を固定する（ja / en）。既定は自動判定。"
                         "固定すると、その言語に訳されて出るので普段は指定しない")
-    p.add_argument("--server", default=os.environ.get("VOICE_SHELL_SERVER"),
-                   help="--engine home-lan のときの接続先。"
-                        "VOICE_SHELL_SERVER でも指定できる")
     p.add_argument("--model", default=None,
-                   help="モデル名。省略するとエンジンごとの既定値を使う")
+                   help="Whisper のモデル。Hugging Face の名前でも、"
+                        "手元に置いたフォルダの場所でも受ける。"
+                        "省略すると large-v3-turbo を使う")
     p.add_argument("--language", default=None,
                    help="言語を固定 (例: Japanese)。省略で自動判定")
     p.add_argument("--device", default=DEFAULT_DEVICE,
@@ -105,16 +104,6 @@ def add_common_args(p):
                         "（audio=マイク名）")
     p.add_argument("--input-samplerate", type=int, default=44100,
                    help="マイクの録音レート。16kHz に変換して推論する")
-    p.add_argument("--chunk-size-sec", type=float, default=1.0,
-                   help="推論する音声チャンク長（秒）。小さいほど低遅延・高負荷")
-    p.add_argument("--unfixed-chunk-num", type=int, default=2,
-                   help="先頭 N チャンクは直前の認識結果を prompt に使わない")
-    p.add_argument("--unfixed-token-num", type=int, default=5,
-                   help="prompt 再利用時に末尾 K トークンを捨てて揺れを抑える")
-    p.add_argument("--max-model-len", type=int, default=16384,
-                   help="vLLM の最大シーケンス長。VRAM が少ない場合は下げる")
-    p.add_argument("--gpu-memory-utilization", type=float, default=0.85,
-                   help="vLLM が使う VRAM の割合")
     p.add_argument("--silence-threshold", type=float, default=DEFAULT_SILENCE_THRESHOLD,
                    help="この RMS 未満を無音とみなす（マイクのノイズフロアに合わせる）")
     p.add_argument("--silence-duration", type=float, default=1.5,
@@ -125,14 +114,13 @@ def add_common_args(p):
 def load_model(args):
     """認識エンジンを用意する。
 
-    local なら Qwen3-ASR を vLLM で、mlx なら Qwen3-ASR を MLX（Apple
-    Silicon）で、whisper なら Whisper を、それぞれこの PC の GPU で動かす。
-    apple は macOS 26 付属のオンデバイス認識（GPU メモリを積まない）。
-    それ以外はクラウドの API か、家の GPU 機を使う。
+    apple は macOS 26 付属のオンデバイス認識で、モデルを積まない。
+    whisper は faster-whisper をこの機械で動かす。
+    どちらも音声はこの機械から出ない。
     """
     # 後片付けはどのエンジンでも要る。録音の ffmpeg / arecord はエンジンに
     # 関係なく子プロセスとして走るため、分岐に入る前に登録する。
-    # （ここが local の中にあった頃、macOS の apple / mlx は登録を通らず、
+    # （ここがエンジン別の分岐の中にあった頃、apple は登録を通らず、
     #   stop のたびに録音プロセスだけが孤児として残り続けていた）
     _kill_engine_on_exit()
 
@@ -144,25 +132,12 @@ def load_model(args):
         import whisper_engine
         return whisper_engine.load(args)
 
-    if args.engine == "mlx":
-        import engine_mlx
-        return engine_mlx.load(args)
-
-    if args.engine != "local":
-        import engines
-        return engines.load(args)
-
-    # max_model_len を明示しないと既定値 65536 が KV キャッシュに 7GiB 要求し、
-    # 16GB GPU では起動に失敗する。
-    from qwen_asr import Qwen3ASRModel
-
-    model = Qwen3ASRModel.LLM(
-        model=args.model or "Qwen/Qwen3-ASR-1.7B",
-        gpu_memory_utilization=args.gpu_memory_utilization,
-        max_model_len=args.max_model_len,
-        max_new_tokens=64,
-    )
-    return model
+    # 知らない名前は、ここで黙って None を返さずに止める。
+    # 返してしまうと、この先の init_streaming_state で
+    # 「NoneType に属性が無い」という無関係な例外になって理由が伝わらない。
+    sys.exit(f"「{args.engine}」はこの機械で動かせるエンジンではありません。\n"
+             "  選べるのは apple と whisper です。\n"
+             "  ブラウザ認識は voice-shell.sh start --engine browser から使えます。")
 
 
 def _kill_engine_on_exit():
@@ -171,7 +146,6 @@ def _kill_engine_on_exit():
     Ctrl-C や kill で親が終わっても、子が残って資源を掴んだままになる:
 
     - 録音の ffmpeg / arecord がマイクを開けっぱなしにする（全エンジン共通）
-    - vLLM の VLLM::EngineCore が VRAM を 12GB 掴む（local）
     - 認識ヘルパが残る（apple）
 
     SIGTERM は既定で atexit を通らないため、sys.exit に変換してから
@@ -207,9 +181,6 @@ def _kill_engine_on_exit():
 ENGINE_LABELS = {
     "apple":    "Apple のオンデバイス認識（軽い・ローカル）",
     "whisper":  "Whisper（固有名詞に強い・ローカル）",
-    "mlx":      "Qwen3-ASR / MLX（ローカル）",
-    "local":    "Qwen3-ASR / GPU（ローカル）",
-    "home-lan": "LAN の GPU 機に任せる",
 }
 
 
@@ -240,15 +211,6 @@ def available_engines() -> list:
         out.append("apple")
     if have("faster_whisper"):
         out.append("whisper")
-    if sys.platform == "darwin" and have("mlx_qwen3_asr"):
-        out.append("mlx")
-    if have("qwen_asr"):
-        out.append("local")
-    import pathlib
-    conf = pathlib.Path(os.environ.get("XDG_CONFIG_HOME",
-                                       pathlib.Path.home() / ".config"))
-    if (conf / "voice-shell" / "remote.json").exists():
-        out.append("home-lan")
     return [{"id": e, "label": ENGINE_LABELS.get(e, e)} for e in out]
 
 
@@ -573,20 +535,10 @@ def stream_utterances(model, args, should_stop=lambda: False):
     （HARD_UTTERANCE_CAP だけが歯止め）。ライブラリ側に発話区切り（VAD）は
     無いため、ここで RMS を見て判定している。
     """
-    # クラウドの API と家の GPU 機は自前でストリームを持つので、そちらに任せる。
-    # local / apple / mlx / whisper はこの下の共通処理を通る（同じ 3 メソッドを持つ）。
-    if args.engine not in ("local", "apple", "mlx", "whisper"):
-        import engines
-        yield from engines.stream(model, args, should_stop)
-        return
-
+    # apple も whisper も同じ 3 メソッドを持つので、この下は共通で通る。
+    # load_model が知らない名前で止めるので、ここまで来るのはこの 2 つだけ。
     def new_state():
-        return model.init_streaming_state(
-            language=args.language,
-            unfixed_chunk_num=args.unfixed_chunk_num,
-            unfixed_token_num=args.unfixed_token_num,
-            chunk_size_sec=args.chunk_size_sec,
-        )
+        return model.init_streaming_state(language=args.language)
 
     state = new_state()
     # ビューアから変えられる調整値（感度・確定までの無音秒数）を読み直す。

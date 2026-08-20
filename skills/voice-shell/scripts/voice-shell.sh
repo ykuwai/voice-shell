@@ -13,9 +13,6 @@
 #   voice-shell.sh name "…"               このセッションの表示名を付ける
 #   voice-shell.sh whisper                Whisper で認識する（固有名詞に強い）
 #   voice-shell.sh apple                  macOS 26 付属の認識で動かす（軽い）
-#   voice-shell.sh remote                 LAN の端末からも受ける
-#   voice-shell.sh remote-conf            設定ファイルの場所
-#   voice-shell.sh remote-log             届いた発話の置き場
 
 set -euo pipefail
 
@@ -64,31 +61,31 @@ find_python() {
   done
 }
 
-# 残った vLLM ワーカーを落とす。kill -9 を撃つので誤爆は許されない:
-#   - パターンを [V] と書いて pgrep 自身のコマンドラインに当たらないようにする
-#   - 呼び出し元のシェル（自分の親やプロセスグループ）は明示的に除外する
-# 素の `pgrep -f "VLLM::EngineCore" | xargs kill -9` はこの行を含むシェルに
-# マッチしうるため、自分自身を撃って停止処理ごと落ちることがある。
-kill_engine_cores() {
-  have pgrep || return 0
-  local pid
-  for pid in $(pgrep -f "[V]LLM::EngineCore" 2>/dev/null); do
-    [[ "$pid" == "$$" || "$pid" == "$PPID" ]] && continue
-    kill -9 "$pid" 2>/dev/null || true
-  done
-  return 0
-}
-
 # 前回どのエンジンで起動したかを覚えておく。ビューアの「聞き取りを
 # 始める」は engine-start を呼ぶが、そちらは元のコマンドを知らない。
 # 覚えていないと、前回 whisper を選んだのに別のモデルが載ってしまう。
-engine_args() {
+#
+# 結果を文字列ではなく配列 ENGINE_ARGS に入れる。Whisper のモデルには
+# 手元のフォルダの場所も渡せて、そこには空白が入りうる。文字列にして
+# 単語分割へ任せると、そこで壊れる。
+ENGINE_ARGS=()
+set_engine_args() {
+  ENGINE_ARGS=()
   # 覚えている選択（~/.config/voice-shell/config.json）を正とする。
   # 以前は /tmp のファイルを見ていたが、再起動で消えると黙って
   # コンパイル時の既定に戻り、config と食い違っていた。
-  local e
+  local e m
   e="$("$PY" "$APP" --resolve-engine "" 2>/dev/null || true)"
-  [[ -n "$e" && "$e" != "browser" ]] && echo "--engine $e"
+  [[ -n "$e" && "$e" != "browser" ]] || return 0
+  ENGINE_ARGS=(--engine "$e")
+  # モデルを選べるのは Whisper だけ。空のまま --model を渡すと
+  # faster-whisper が空文字をモデル名として受け取って落ちるので、
+  # 覚えているものがあるときだけ足す。
+  if [[ "$e" == "whisper" ]]; then
+    m="$("$PY" "$APP" --resolve-model 2>/dev/null || true)"
+    [[ -n "$m" ]] && ENGINE_ARGS+=(--model "$m")
+  fi
+  return 0
 }
 
 PY="$(find_python || true)"
@@ -148,9 +145,9 @@ if [[ -z "$PY" ]]; then
   echo "  場所を直接指定する場合: export VOICE_SHELL_PYTHON=/path/to/python" >&2
   exit 1
 fi
-# 以前は "qwen-voice" という名前だった。Qwen3-ASR は数ある選択肢のひとつに
-# なったので名前を改めたが、動いているものを壊さないよう、古い方が残っていて
-# 新しい方が無ければそちらを使い続ける（/tmp が空けば新しい名前へ移る）。
+# 以前は認識モデルの名前を取って "qwen-voice" と呼んでいた。道具の名前へ改めたが、
+# 動いているものを壊さないよう、古い方が残っていて新しい方が無ければそちらを
+# 使い続ける（/tmp が空けば新しい名前へ移る）。
 STATE_DIR="${XDG_RUNTIME_DIR:-/tmp}/voice-shell"
 _legacy_state="${XDG_RUNTIME_DIR:-/tmp}/qwen-voice"
 if [ ! -d "$STATE_DIR" ] && [ -d "$_legacy_state" ]; then
@@ -231,12 +228,21 @@ case "$cmd" in
     first_run=0; [[ -f "$conf" ]] || first_run=1
 
     want=""
+    want_model=""
+    model_given=0
     no_gui=0
     rest=()
     while [[ $# -gt 0 ]]; do
       case "$1" in
         --engine) want="${2:-}"; shift 2 ;;
         --engine=*) want="${1#*=}"; shift ;;
+        # Whisper のモデルもエンジンと同じく覚える。ビューアの
+        # 「聞き取りを始める」は元のコマンドを知らないので、ここで
+        # 覚えておかないと画面から立て直した時点で既定へ戻ってしまう。
+        # 空で渡されたら「既定に戻す」の意味なので、渡されたかどうかを
+        # 中身とは別に覚えておく。
+        --model) want_model="${2:-}"; model_given=1; shift 2 ;;
+        --model=*) want_model="${1#*=}"; model_given=1; shift ;;
         --no-gui) no_gui=1; shift ;;
         *) rest+=("$1"); shift ;;
       esac
@@ -245,6 +251,7 @@ case "$cmd" in
     set -- "${rest[@]+"${rest[@]}"}"
     engine="$("$PY" "$APP" --resolve-engine "$want")"
     "$PY" "$APP" --remember-engine "$engine"
+    [[ "$model_given" == 1 ]] && "$PY" "$APP" --remember-model "$want_model"
 
     # ブラウザで認識するなら、この機械にモデルを積む必要がない。
     # ビューアだけ立ち上げて終わる（画面を開いた時点で認識が始まる）。
@@ -252,45 +259,32 @@ case "$cmd" in
       mkdir -p "$STATE_DIR"
       # デーモン起動と揃える。残しておくと前回の発話が画面に並び直す。
       : > "$LOG_FILE"
-      echo "このブラウザ（Chrome）で認識します。モデルの読み込みはありません。"
-      echo "  発話ログ: $LOG_FILE"
+      # ここでは画面そのものが認識役なので、立ち上がってから伝える。
+      # 出力は捨てる。URL は画面が自分で開くので読み上げる相手がおらず、
+      # 開けなかったときだけ viewer 側が stderr に出す。
+      "$0" viewer >/dev/null
+      # 出すのは「始まったか」と「次に何をすればよいか」だけにする。
+      # ログの場所も、他に聞いているセッションの一覧も status で取れる。
+      echo "聞き取りを始めました。"
+      echo "Chrome の画面を開いてマイクを許可すると届き始めます。"
       # 初回だけ、音声の行き先と、この機械で使える代わりを名指しで伝える。
       # 一般論だと「では何を選べば」で止まるので、具体名まで出す。
+      # 2 回目からは出さない。毎回言うと、読む側の邪魔にしかならない。
       if [[ "$first_run" == 1 ]]; then
         echo
         echo "※ 音声は認識のため Google のサーバへ送られます。"
         alt="$("$PY" "$APP" --list-engines | sed -n '2p' | awk '{print $1}')"
         if [[ -n "$alt" ]]; then
-          echo "   手元だけで完結させたい場合、この機械では次も使えます:"
+          echo "   手元だけで完結させたいなら、この機械では次も使えます。"
           echo "     voice-shell.sh start --engine $alt"
         fi
       fi
-      listeners_now="$(list_listeners)"
-      if [ -n "$listeners_now" ]; then
-        echo
-        echo "他にも聞いているセッションがあります（並行して使えます）:"
-        echo "$listeners_now"
-        echo "  発話は、あとから起動したこちらへ届きます。"
-        echo "  送信先は画面の上部から選び直せます。"
-      fi
-      "$0" viewer
-      echo
-      echo "Chrome でビューアを開き、マイクを許可すると認識が始まります。"
-      echo "開くまでは、話しても何も届きません。"
       exit 0
     fi
     if "$PY" "$APP" --status | grep -q 稼働中; then
       echo "すでに稼働しています。"; exit 0
     fi
     mkdir -p "$STATE_DIR"
-    # GPU を占有する他のプロセスがいると起動に失敗するので先に知らせる。
-    # パターンを [V] と書くのは自己マッチ避け。pgrep -f はコマンドライン全体を
-    # 見るため、素で書くとこの行を実行しているシェル自身に当たって誤検知する。
-    if have pgrep && pgrep -f "[V]LLM::EngineCore" >/dev/null; then
-      echo "警告: 別のプロセスが GPU を使用中です。" >&2
-      echo "  同じ GPU を使う音声プロセスを止めてから再実行してください。" >&2
-      exit 1
-    fi
     # 古いパスで動いているビューアを片付ける（構成を変えたときの取り残し）
     have pkill && pkill -f "voice-shell/scripts/viewer\.p[y]" 2>/dev/null || true
     # 日本語に固定する。自動判定だと物音を中国語などに誤認識しやすい（実測）。
@@ -298,34 +292,26 @@ case "$cmd" in
     # 別言語を主に使うなら `voice-shell.sh start --language English` のように渡す。
     # setsid で切り離す。付けないと呼び出し元と同じプロセスグループに残り、
     # このスクリプトの終了時に一緒に片付けられてしまう（ビューアだけ残る）。
-    detach "$PY" "$APP" --language Japanese $(engine_args) "$@" \
+    set_engine_args
+    detach "$PY" "$APP" --language Japanese "${ENGINE_ARGS[@]+"${ENGINE_ARGS[@]}"}" "$@" \
       > "$BOOT_LOG" 2>&1 &
-    echo "起動中… (モデル読み込みに1〜2分かかります)"
-    echo "  発話ログ: $LOG_FILE"
-    echo "  起動ログ: $BOOT_LOG"
-    # 並行して別の作業で使うのは想定した使い方（宛先はデーモンが決める）。
-    # 異常ではないので、声がどちらへ行くかだけ書いて、停止は促さない。
-    listeners_now="$(list_listeners)"
-    if [ -n "$listeners_now" ]; then
-      echo
-      echo "他にも聞いているセッションがあります（並行して使えます）:"
-      echo "$listeners_now"
-      echo "  発話は、あとから起動したこちらへ届きます。"
-      echo "  送信先は画面の上部から選び直せます。"
-    fi
+    # 出すのは「始まったか」と「次に何をすればよいか」だけにする。
+    # ログの場所も、他に聞いているセッションの一覧も status で取れる。
+    # ビューアより先に出す。ここまで来ればデーモンは動き出しているので、
+    # 画面の立ち上げに失敗しても、始まったことは伝わってほしい。
+    echo "聞き取りを始めました。"
+    echo "モデルの用意ができるまで少しかかります。voice-shell.sh wait-ready で待てます。"
     # ビューアも一緒に立ち上げる（毎回 viewer を打つのを忘れないように）。
-    # GPU もマイクも使わないので、常駐と同時に動いてよい。
-    "$0" viewer
+    # マイクを使わないので、常駐と同時に動いてよい。出力は捨てる。
+    "$0" viewer >/dev/null
     ;;
   stop)
     "$PY" "$APP" --stop
-    # vLLM ワーカーが残ることがあるので確実に落とす
-    kill_engine_cores
     "$0" viewer-stop
     ;;
   engine-stop)
-    # 認識だけ止めて GPU を解放する。ビューアは残すので、
-    # ブラウザから「聞き取りを再開」で戻せる。
+    # 認識だけ止める。マイクを手放し、Whisper ならモデルのぶんの
+    # メモリも戻る。ビューアは残すので、画面から動かし直せる。
     #
     # 喋っている最中に落とすと、その発話は丸ごと失われる。長く話すほど
     # 巻き込みやすいので、途中経過が消えるまで少し待つ（--now で待たない）。
@@ -343,7 +329,6 @@ case "$cmd" in
       sleep 1
       pkill -9 -f "voice_daemon\.p[y] --language" 2>/dev/null || true
     fi
-    kill_engine_cores
     ;;
   engine-start)
     if [[ "$("$PY" "$APP" --resolve-engine "")" == "browser" ]]; then
@@ -360,7 +345,8 @@ case "$cmd" in
       echo "すでに稼働しています。"; exit 0
     fi
     mkdir -p "$STATE_DIR"
-    detach "$PY" "$APP" --language Japanese $(engine_args) "$@" \
+    set_engine_args
+    detach "$PY" "$APP" --language Japanese "${ENGINE_ARGS[@]+"${ENGINE_ARGS[@]}"}" "$@" \
       > "$BOOT_LOG" 2>&1 &
     echo "起動中… (モデル読み込みに1〜2分かかります)"
     ;;
@@ -369,29 +355,8 @@ case "$cmd" in
     "$0" start --engine whisper "$@"
     ;;
   apple)
-    # macOS 26 付属のオンデバイス認識を使う。GPU メモリを積まないので Mac 向け。
+    # macOS 26 付属のオンデバイス認識を使う。モデルを積まないので起動が速い。
     "$0" start --engine apple "$@"
-    ;;
-  remote)
-    # LAN の端末からも音声を受ける形で立ち上げる。
-    # 設定は ~/.config/voice-shell/remote.json（無ければ雛形を作って止まる）。
-    #
-    # これは「エンジン」ではなく「モード」。この機械が認識役になるので、
-    # ブラウザ認識では成立しない。新規環境（覚えている選択が無い）だと
-    # browser に解決されて --remote ごと捨てられていたので、auto を強制する。
-    if [[ "$("$PY" "$APP" --resolve-engine "")" == "browser" ]]; then
-      "$0" start --engine auto --remote "$@"
-    else
-      "$0" start --remote "$@"
-    fi
-    ;;
-  remote-conf)
-    # 設定ファイルの場所を教える（編集しやすいように）
-    echo "${XDG_CONFIG_HOME:-$HOME/.config}/voice-shell/remote.json"
-    ;;
-  remote-log)
-    # LAN から届いた発話の置き場。Monitor で追うときに使う。
-    echo "${XDG_STATE_HOME:-$HOME/.local/state}/voice-shell/remote"
     ;;
   status)
     # ブラウザで認識しているときは、この機械にデーモンが居ないのが正常。
@@ -632,7 +597,7 @@ NAMEIT
   *)
     echo "使い方: voice-shell.sh {start [--engine X] [--no-gui]|stop|status|engines}" >&2
     echo "        voice-shell.sh {listen|listeners|name|hold|live|log-path|wait-ready|viewer}" >&2
-    echo "        voice-shell.sh {apple|whisper|remote|remote-conf|remote-log}" >&2
+    echo "        voice-shell.sh {apple|whisper}" >&2
     exit 1
     ;;
 esac

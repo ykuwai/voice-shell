@@ -2,7 +2,6 @@
 
 `--engine apple` で使う(macOS では既定)。OS 付属のオンデバイスモデルなので、
 数 GB のモデルを落とす必要も GPU メモリを積む必要もなく、音声は端末の外に出ない。
-Qwen3-ASR(vLLM 版で約12GB、MLX 版でも約4GB)が重すぎる Mac 向け。
 
 実測(M4 Pro / macOS 26.5.2): 3.5 秒の日本語音声で認識 0.2 秒ほど、
 句読点まで含めて正しく出る。
@@ -15,8 +14,8 @@ WAV のパスを渡して結果を JSON で受け取る。ヘルパは初回に�
 
 ## 途中経過は「発話全体の認識し直し」
 
-engine_mlx と同じ作りにしてある。溜まった音声を頭から認識し直して
-state.text を差し替える。1 回が速いので、更新間隔を詰めても追いつく。
+溜まった音声を頭から認識し直して state.text を差し替える。
+1 回が速いので、更新間隔を詰めても追いつく。
 認識をワーカースレッドに逃がしているのはマイク読み取りを止めないため
 (メインループで待つと ffmpeg のパイプが詰まり、長い発話を取りこぼす)。
 """
@@ -42,7 +41,7 @@ _REFRESH_SEC = 0.5
 # 認識が短すぎる音声で暴れないための下限
 _MIN_SEC = 0.3
 
-# voice-shell は Qwen3-ASR に合わせて言語を綴りで渡してくる。
+# voice-shell はどのエンジンにも言語を綴りで渡してくる。
 # SpeechTranscriber は BCP 47 なので直す。
 _LOCALE = {
     "japanese": "ja-JP", "english": "en-US", "chinese": "zh-CN",
@@ -79,7 +78,7 @@ def _ensure_binary():
 
 
 def load(args):
-    """ヘルパを起こして、qwen_asr 互換のアダプタを返す。"""
+    """ヘルパを起こして、asr_mic が扱える形のアダプタを返す。"""
     if sys.platform != "darwin":
         sys.exit("--engine apple は macOS 専用です")
 
@@ -105,7 +104,7 @@ class _State:
 
 
 class _AppleModel:
-    """qwen_asr.Qwen3ASRModel と同じ顔をした SpeechAnalyzer アダプタ。"""
+    """asr_mic が呼ぶ 3 つのメソッドを備えた SpeechAnalyzer アダプタ。"""
 
     def __init__(self, binary, locale):
         self._locale = locale
@@ -130,7 +129,7 @@ class _AppleModel:
         self._seq = 0
         threading.Thread(target=self._worker, daemon=True).start()
 
-    # unfixed_chunk_num 等は vLLM 版と口を揃えるためだけに受け取り、使わない
+    # 使わない引数は、他のエンジンと口を揃えるためだけに受け取る
     def init_streaming_state(self, language=None, **_ignored):
         st = _State(_locale_id(language) if language else self._locale)
         with self._lock:
