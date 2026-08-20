@@ -1,6 +1,6 @@
 ---
 name: "voice-shell"
-description: "音声でプロンプトを送れるようにする。マイクを聞き続ける常駐プロセスを起動し、ユーザーが喋った内容を Monitor 経由で受け取って指示として扱う。「音声モード」「声で指示したい」「マイクで話す」「ハンズフリー」「音声で操作」、または \"voice mode\", \"talk to me\", \"hands-free\", \"dictate my prompts\", \"speak instead of typing\" と言われたときに使う。停止は「音声モード終了」/ \"stop voice mode\"。「voice-shell をセットアップして」と言われた場合は SETUP.md の手順で環境（macOS 26 以降かどうか）を判別して案内する。"
+description: "Let the user send prompts by voice. Start a resident process that keeps listening to the microphone, take what the user says through Monitor, and treat it as an instruction. Use it when the user says \"voice mode\", \"talk to me\", \"hands-free\", \"dictate my prompts\", \"speak instead of typing\", or 「音声モード」「声で指示したい」「マイクで話す」「ハンズフリー」「音声で操作」. To stop, \"stop voice mode\" or 「音声モード終了」. If the user asks to set voice-shell up (\"set up voice-shell\" / 「voice-shell をセットアップして」), follow SETUP.md, work out which environment this is (macOS 26 or newer, or not), and guide them from there."
 version: "0.1.0"
 license: "MIT"
 argument-hint: "[start | stop | status]"
@@ -11,386 +11,439 @@ allowed-tools:
   - Monitor
 ---
 
-# 音声プロンプトモード
+# Voice prompt mode
 
-ユーザーが喋った内容を、キーボードを使わずにプロンプトとして受け取る。
+Take what the user speaks and receive it as a prompt, without the keyboard.
 
-マイクを聞く仕組みが、発話が確定するたびに JSONL へ1行追記する。そのログを
-Monitor で追い、届いた行をユーザーからの指示として扱う。
+The part that listens to the microphone appends one line to a JSONL file every
+time an utterance is finalized. Follow that log with Monitor and treat each line
+that arrives as an instruction from the user.
 
-**認識のやり方は3つ。** 選べるのはこれで全部で、他は無い。
+**There are three ways of recognizing speech.** These are all you can pick from,
+there is no other.
 
-| 名前 | 中身 | 音声の行き先 |
+| Name | What it is | Where the audio goes |
 |---|---|---|
-| `browser`（既定） | Chrome の Web Speech API。何も入れずに動く | **Google のサーバ** |
-| `apple` | macOS 26 付属のオンデバイス認識。軽い | この機械の中だけ |
-| `whisper` | faster-whisper。固有名詞に強い | この機械の中だけ |
+| `browser` (default) | Chrome's Web Speech API. Works with nothing installed | **Google's servers** |
+| `apple` | On-device recognition that ships with macOS 26. Light | Only inside this machine |
+| `whisper` | faster-whisper. Strong on proper nouns | Only inside this machine |
 
-引数は `$ARGUMENTS`（`start` / `stop` / `status` / `setup`。省略時は `start`）
+The argument is `$ARGUMENTS` (`start` / `stop` / `status` / `setup`. `start` when omitted)
 
-## まだセットアップされていないとき
+## When it is not set up yet
 
-`start` が「Python が見つかりません」で失敗した場合、またはユーザーが
-「セットアップして」と言った場合は [SETUP.md](SETUP.md) の手順で案内する。
+If `start` fails with 「Python が見つかりません」, or if the user says
+"set it up", walk them through [SETUP.md](SETUP.md).
 
-macOS 26 以降なら入れるものは無く、それ以外は Whisper を入れることになる。
-調べてからどちらで進めるか確認する。勝手に全部入れない。
+On macOS 26 or newer there is nothing to install, anywhere else it means
+installing Whisper. Check first, then confirm which way to go. Do not install
+everything on your own.
 
-## 開始する
+## Starting
 
-**迷ったら `start` を打つだけでよい。** 使う認識のやり方は前回の選択を
-覚えていて（`~/.config/voice-shell/config.json`）、初回は「このブラウザ」
-（Chrome の Web Speech API）になる。何も入れずに動くので待ち時間が無い。
+**When in doubt, just run `start`.** It remembers which way of recognizing was
+picked last time (`~/.config/voice-shell/config.json`), and the first time it is
+"This browser" (Chrome's Web Speech API). Nothing to install, so there is no wait.
 
-1. 起動する。
+1. Start it.
 
    ```bash
    ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh start
    ```
 
-   **ブラウザ自動操作の道具（claude-in-chrome 等）が使えない環境**では、
-   画面を開けないので既定のブラウザ認識が成立しない。その場合だけ、
-   入っているモデルから選ばせる。
+   **Where browser automation tools (claude-in-chrome and the like) are not
+   available**, the viewer cannot be opened, so the default browser recognition
+   does not hold up. Only in that case, have the user pick from the models that
+   are installed.
 
    ```bash
    ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh start --engine auto
    ```
 
-   **音声の行き先は、初回の一度だけ伝える。** その機械で初めて `start` した
-   ときに限り、`start` 自身が「音声は Google のサーバへ送られます」と、
-   この機械で使える手元のやり方の名前を出す。その行はそのままユーザーへ渡す。
-   **2 回目以降は言わない。** 毎回添えても選択は変わらず、読む量が増えるだけ。
+   **Say where the audio goes once, the first time only.** The first time
+   `start` runs on that machine, and only then, `start` itself prints
+   「音声は Google のサーバへ送られます」 along with the name of a local way that
+   machine can use. Pass that line straight through to the user.
+   **Do not say it again after that.** Repeating it every time does not change
+   the choice, it only adds more to read.
 
-   **こちらから手元のモデルへの乗り換えを勧めない。** 何も入れずにその場で
-   使えることが既定の値打ちで、乗り換えにはダウンロードと 1〜2 分の待ちが
-   伴う。快適に動くかどうかは、その機械で試すまで分からない。
+   **Do not push the user toward a local model yourself.** Working right away
+   with nothing installed is what the default is worth, and switching brings a
+   download and a wait of 1 to 2 minutes. Whether it runs comfortably is not
+   known until it is tried on that machine.
 
-   ユーザーが「手元だけで認識したい」「クラウドに送りたくない」と言ったときは、
-   `voice-shell.sh engines` で一覧を見せ、**ユーザーに選んでもらってから**
-   `--engine <選ばれたもの>` を渡す。macOS 26 以降なら `apple` が入っている
-   はずで、追加のダウンロードなしにその場で切り替えて比べられる。
+   When the user says "I want recognition to stay local" or "I do not want it
+   sent to the cloud", show the list with `voice-shell.sh engines` and pass
+   `--engine <the one they picked>` **after they have picked it**. On macOS 26
+   or newer `apple` should already be there, so they can switch on the spot and
+   compare with no extra download.
 
-   **失敗からの復旧のために勝手に `--engine X` を渡さないこと。** 渡した名前は
-   次回以降の既定として記憶されるので、黙って渡すとユーザーの選択を恒久的に
-   書き換えてしまう。渡すのは確認を取った後だけ。
+   **Do not pass `--engine X` on your own to recover from a failure.** The name
+   you pass is remembered as the default from then on, so passing it silently
+   rewrites the user's choice for good. Pass it only after you have confirmed.
 
-2. 起動完了まで待つ。
+2. Wait until it has finished starting.
 
    ```bash
    ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh wait-ready
    ```
 
-   ブラウザ認識なら積むモデルが無いので即座に返る。ローカルのモデルを
-   選んだときだけ1〜2分かかる（その間は他の作業を進めてよい）。
-   `FAILED` が返ったら、表示されたエラーをユーザーに伝える。
+   With browser recognition there is no model to load, so it returns at once.
+   Only when a local model was picked does it take 1 to 2 minutes (other work
+   can go on in the meantime). If `FAILED` comes back, tell the user the error
+   that was shown.
 
-3. ビューアは `start` が**独立したウィンドウで自動的に開く**（タブも URL 欄も
-   無い窓）。自分で開き直す必要はない。ユーザーが要らないと言ったときだけ
-   `--no-gui` を付ける。
+3. `start` **opens the viewer automatically in its own window** (a window with
+   no tabs and no URL bar). There is no need to open it again yourself. Add
+   `--no-gui` only when the user says they do not want it.
 
-   **ブラウザ認識のときは、画面を開くまで一切届かない。** 自動で開けなかった
-   ときは（`ブラウザを自動で開けませんでした` と出る）、URL を案内する。
+   **With browser recognition nothing arrives at all until the viewer is open.**
+   When it could not be opened automatically (`ブラウザを自動で開けませんでした`
+   is printed), point the user at the URL.
 
-   **常に最前面**にしたい場合は、開いた窓のヘッダにある「手前に浮かせる」を
-   ユーザーに押してもらう（ブラウザの決まりで、人が触らないと開けない）。
+   To keep it **always on top**, ask the user to press "Float on top" in the
+   header of the window that opened (a browser rule, it cannot be opened unless
+   a person acts).
 
-4. 発話ログを Monitor で監視する。**`persistent: true` を必ず指定する**
-   （音声モードはセッション中ずっと続くため）。`tail` を直接使わず、必ず
-   `voice-shell.sh listen` を経由すること。これを通すと、自分が聞いていることを
-   `$STATE_DIR/listeners/` へ自動登録し、Monitor が終了（TaskStop /
-   セッション終了）すれば登録も消える。生の `tail -F` では登録されないので、
-   送信先の選択肢に出てこない。
+4. Watch the utterance log with Monitor. **Always set `persistent: true`**
+   (voice mode goes on for the whole session). Do not use `tail` directly,
+   always go through `voice-shell.sh listen`. Going through it registers the
+   fact that you are listening under `$STATE_DIR/listeners/`, and the
+   registration disappears once Monitor ends (TaskStop or the end of the
+   session). A raw `tail -F` is not registered, so it never shows up as a
+   choice of where to send.
 
    ```
    Monitor(
      command: "${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh listen",
-     description: "ユーザーの音声プロンプト",
+     description: "The user's voice prompts",
      persistent: true
    )
    ```
 
-**自分の Monitor は1つだけにする。** 張り直すときは、新しいものを作る前に古い方を
-TaskStop で止める。2つ生きていると同じ発話が二重に届く。
+**Keep only one Monitor of your own.** When re-attaching, stop the old one with
+TaskStop before making a new one. With two alive the same utterance arrives twice.
 
-**他のセッションが聞いていても正常。** 別の作業と並行して使うのは想定した使い方で、
-発話は**あとから起動した方**（＝いま起動したこちら）へ届く。`start` は他の
-セッションの一覧を出さない。知る必要が無く、報告も停止の持ちかけも要らないため。
-送信先はユーザーが画面上部からいつでも選び直せる。誰が聞いているかを尋ねられた
-ときだけ `voice-shell.sh listeners` で見せる。他のセッションを止めるのは、
-ユーザーに頼まれたときだけ。
+**It is normal for other sessions to be listening too.** Using it alongside
+other work is the intended way, and speech goes to **whichever started later**
+(that is, the one you just started). `start` does not list the other sessions.
+There is no need to know, and no report or offer to stop them is wanted. The
+user can pick a different destination at any time from the top of the viewer.
+Show `voice-shell.sh listeners` only when asked who is listening. Stop another
+session only when the user asks for it.
 
-**`voice-shell.sh listen` を pkill で止めない。** 自分の Monitor も同じパターンに
-一致して、巻き添えで落ちる。
+**Do not stop `voice-shell.sh listen` with pkill.** Your own Monitor matches the
+same pattern and goes down with it.
 
-## うまくいかないとき
+## When it does not work
 
-| 見えたもの | 起きていること | どうする |
+| What was seen | What is going on | What to do |
 |---|---|---|
-| ブラウザ認識で `status` が「このブラウザで認識します」 | **正常**（この機械にデーモンは居ない） | 何もしない。デーモンを起動しようとしないこと |
-| ブラウザ認識で話しても何も届かない | 画面が開いていない / マイクを拒否した / Chrome 以外 | 「Chrome で画面を開いて、マイクを許可してください」と伝える。画面に赤い注意が出ていないかも聞く |
-| `動かせる Python が見つかりません` | 何も入っていない | `pip install numpy aiohttp` で足りる旨を伝える（ブラウザ認識だけなら） |
-| `wait-ready` が `FAILED` | モデルの起動に失敗 | エラーをそのまま伝える。`engines` で入っているものを見せ、切り替えは**確認してから** |
-| `wait-ready` が `TIMEOUT` | 初回のモデル取得などで長引いている | `daemon.out` の末尾を見て状況を伝える |
-| 素の `start` が毎回同じエラー | 覚えている選択が失敗する状態 | 「前回の選択が失敗しています」と伝え、確認の上で戻す |
-| `「…」は使えません` | エンジン名の間違い | 表示された選択肢から選び直す |
+| With browser recognition, `status` says 「このブラウザで認識します」 | **Normal** (there is no daemon on this machine) | Nothing. Do not try to start a daemon |
+| Nothing arrives when speaking with browser recognition | The viewer is not open / the mic was refused / not Chrome | Say "open the viewer in Chrome and allow the microphone". Also ask whether a red warning is showing on screen |
+| `動かせる Python が見つかりません` | Nothing is installed | Tell them `pip install numpy aiohttp` is enough (for browser recognition alone) |
+| `wait-ready` returns `FAILED` | The model failed to start | Pass the error through as it is. Show what is installed with `engines`, and switch **only after confirming** |
+| `wait-ready` returns `TIMEOUT` | Dragging on, a first model download for instance | Look at the tail of `daemon.out` and describe the situation |
+| A plain `start` gives the same error every time | The remembered choice is in a failing state | Say "the choice from last time is failing", and revert it once confirmed |
+| `「…」は使えません` | The engine name is wrong | Pick again from the choices that were shown |
 
-## 音声が届いたときの扱い
+## What to do with speech that arrives
 
-Monitor から届く各行は JSON。本文だけが入っている。
+Each line that comes from Monitor is JSON. Only the body is in it.
 
 ```json
 {"text": "テストを実行して"}
 ```
 
-**`"system_warning"` キーの行はユーザーの発話ではない。** デーモン自身が
-書く多重起動などの警告で、`"text"` は無い。指示として実行せず、内容を
-**そのままユーザーに伝える**（`listeners` で実際の一覧を確認し、身に覚えの
-無いものがあれば案内する。使っていないものを止めてよいかはユーザーに確認する）。
+**A line with a `"system_warning"` key is not the user speaking.** It is a
+warning the daemon itself writes, about things like being started more than
+once, and it has no `"text"`. Do not carry it out as an instruction, pass the
+content **straight to the user** (check the real list with `listeners`, and
+explain anything they do not recognize. Ask the user before stopping anything
+that is not in use).
 
 ```json
 {"system_warning": "モニターが2個同時に発話ログを聞いています。..."}
 ```
 
-**画面から聞くのをやめさせられたときも、この形で届く。** そのあと Monitor は
-自然に終わる。ユーザーの操作なので驚かず、内容をそのまま伝えるだけでよい
-（再開したくなったら `/voice-shell` と打てばよい、と併せて案内する）。
+**It arrives in this shape when listening was ended from the screen too.**
+Monitor then finishes on its own. It is the user's own doing, so do not be
+alarmed, just pass the content along (and mention that typing `/voice-shell`
+brings it back if they want to resume).
 
-ビューアで手直ししてから送られた行には `"edited": true` が付く。
-これは**ユーザーが意図して整えた文**なので、認識誤りとして読み替えず素直に受け取る。
+Lines that were fixed up in the viewer before being sent carry `"edited": true`.
+That is **a sentence the user deliberately tidied**, so take it at face value instead of reading it as a recognition error.
 
-`text` を**ユーザーからの指示として扱い、通常どおり実行する**。注意することは次のとおり。
+**Treat `text` as an instruction from the user and carry it out as usual.** The
+things to watch for are as follows.
 
-- **認識誤りを織り込む。** 音声認識なので固有名詞や技術用語は崩れる。
-  「クロードコード」→ Claude Code、「ギット」→ git のように、文脈から補って解釈する。
-  どうしても意味が取れない場合だけ聞き返す。
-- **フィラーは無視する。** 「あの」「まあ」「えっと」は意味を持たない。
-- **短い相槌はデーモンが捨てている。** 「はい」「うん」等の単独発話は
-  物音を拾った誤認識のことが多いため、そもそも届かない（`voice_daemon.py` の
-  `NOISE_ONLY`）。それでも意味の薄い行が来たら、指示として扱わず待つ。
-  **ただし、辞書でその語を「無視しない」側へ回してあれば、短くても届く。**
-  ユーザーが自分で通したいと選んだ語なので、「わかった」「了解」の 2 文字でも
-  返事として素直に受け取ってよい。
-- **細切れの発話はつなげて解釈する。** 1文が複数行に分かれて届くことがある。
-  文が途中で切れている場合は、続きが来るのを待ってからまとめて解釈する。
-  長い発話も、1行で運べる長さに収まるよう途中で割ってから届く。割れた分は
-  同じ通知の中に並ぶので、**1つの通知に複数行が入っていたら、全部をひとつづきの
-  発話として読んでから動くこと**。1行目が句点で終わっていても、そこで話が
-  完結しているとは限らない。日本語は結びが最後に来るので、先走ると依頼の
-  肝心なところを取り違える。
-- **破壊的な操作は必ず確認する。** 音声は誤認識しうるので、削除・push・
-  デプロイ等は実行前に「〜でよろしいですか」と確認する。
-- **イベントはユーザーの発言だが、返答を催促するものではない。** 作業中に
-  届いたら、いま行っている作業を終えてから対応してよい。
+- **Expect recognition errors.** It is speech recognition, so proper nouns and
+  technical terms break. Read them back from context, 「クロードコード」→ Claude Code,
+  「ギット」→ git. Ask again only when the meaning really cannot be recovered.
+- **Ignore fillers.** 「あの」「まあ」「えっと」 carry no meaning.
+- **Short acknowledgements are dropped by the daemon.** A standalone 「はい」
+  「うん」 and the like is often a stray noise misheard as speech, so it never
+  arrives in the first place (`NOISE_ONLY` in `voice_daemon.py`). Even so, if a
+  thin line does come through, wait instead of treating it as an instruction.
+  **But if the dictionary has moved that word to the "do not ignore" side, it
+  arrives even when short.** The user chose to let that word through, so even a
+  two-character 「わかった」「了解」 can be taken at face value as a reply.
+- **Read chopped-up speech as one piece.** One sentence can arrive across
+  several lines. When a sentence is cut off partway, wait for the rest before
+  reading it as a whole. Long speech is also split before it arrives, so that
+  each piece fits what one line can carry. The pieces line up inside the same
+  notification, so **when one notification holds several lines, read all of them
+  as one continuous utterance before acting**. Even if the first line ends with
+  a full stop, that does not mean the point is finished there. Japanese puts the
+  conclusion at the end, so running ahead gets the crucial part of the request
+  wrong.
+- **Always confirm destructive operations.** Speech can be misheard, so confirm
+  with "shall I go ahead with ..." before deleting, pushing, deploying and so on.
+- **An event is the user speaking, but it is not a demand for an answer.** When
+  one arrives mid-task, it is fine to finish what you are doing first.
 
-## 複数の作業で同時に使われることがある
+## It may be used by several pieces of work at once
 
-別の作業で別のセッションが同時に音声モードを使っていることがある。
-聞き手が2つ以上になると、**既定であとで起動した方へ届く**（並行して別の作業を
-始めたら、そちらへ向くのが自然なため）。届くのは常にどれか1つで、「全員へ」は無い。
+Another session may be using voice mode at the same time for different work.
+Once there are two or more listeners, speech **goes by default to the one that
+started later** (when parallel work begins, turning to it is the natural thing).
+Exactly one gets it, there is no "everyone".
 
-つまり**自分が古い方なら、発話は届かなくなる**。これは正常で、取りこぼしでは
-ない。届かなくなったからといって起動し直したり、送信先を勝手に変えたりしない
-こと。ユーザーはビューアの上に並ぶ送信先から、いつでも選び直せる。
+So **if you are the older one, speech stops arriving**. That is normal, nothing
+is being dropped. Do not restart because it stopped arriving, and do not change
+the destination on your own. The user can pick again at any time from the
+destinations lined up at the top of the viewer.
 
-並ぶ順は「その会話が最初に聞き始めた時刻」で決まる。音声モードを入れ直しても
-番号は変わらない（声で「2番目」と指せるようにするため）。既定の届け先は
-これとは別で、**いま起動した方**になる。
+The order they line up in is decided by "when that conversation first started
+listening". Putting voice mode back on does not change the number (so that "the
+second one" can be said out loud). The default destination is separate from
+this, it is **the one that just started**.
 
-チップの × を押すと、そのセッションは聞くのをやめる（セッション自体は
-終わらない）。押し間違い防止に2回押しになっている。
+Pressing the × on a chip makes that session stop listening (the session itself
+does not end). It takes two presses so it is not hit by mistake.
 
-表示名は自動で付く。最初はフォルダ名で、その会話に題名が付いたらそちらへ移る。
-リポジトリを1か所へまとめている人は同じ親フォルダから何本も動かすので、
-フォルダ名だけでは見分けられないことがある。
+The display name is assigned automatically. It starts as the folder name, and
+moves to the conversation's title once it has one. People who keep their
+repositories in one place run several from the same parent folder, so the folder
+name alone is not always enough to tell them apart.
 
-**「セッションの名前を◯◯にして」と言われたら、この場で付け替える。**
-会話の題名は自動で付くもので、実際にやっていることとずれることがある。
-自分で気づいたときに付け替えてもよい。
-
-```bash
-${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh name "認証まわりを直す"
-${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh name ""      # 自動の題名に戻す
-```
-
-付けた名前は `~/.config/voice-shell/names.json` に残るので、音声モードを
-入れ直しても消えない。
-
-## 指示ではない発話が続いたら、溜める側へ回す
-
-マイクは部屋の音を拾い続ける。ユーザーが電話に出たり、同席者と雑談を始めると、
-こちらへの指示ではない発話が流れ込む。そのまま受け続けると、関係の無い内容に
-反応してしまう。
+**When told "name this session X", rename it right there.** The conversation
+title is assigned automatically, so it can drift from what is actually being
+done. Renaming it yourself when you notice is fine too.
 
 ```bash
-${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh hold "電話中のようなので、いったん溜める側にしました"
-${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh live      # 戻す
+${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh name "Fixing the auth code"
+${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh name ""      # back to the automatic title
 ```
 
-`hold` は**ミュートではない**。発話は画面に溜まり続け、ユーザーが必要な分だけ
-送れる。何も失われない。**ミュートは使わないこと。** 切ると発話がどこにも残らず、
-画面を見ていないユーザーは届いていないことに気づけない。
+The name that was set stays in `~/.config/voice-shell/names.json`, so it
+survives putting voice mode back on.
 
-添えた一言は画面に出る。自分で押していないモード変更は、理由が無いと戸惑うだけ
-なので、必ず何か書く。
+## When speech that is not an instruction keeps coming, move it to holding
 
-**切り替える条件はかなり厳しくする。** 誤って切り替えると、ユーザーは話しかけて
-いるのに届かない状態になる。次がすべて揃ったときだけにする。
+The microphone keeps picking up the room. When the user takes a phone call or
+starts chatting with someone next to them, speech that is not meant for you
+flows in. Keeping all of it means reacting to things that have nothing to do
+with the work.
 
-- **2回以上続けて**、明らかにこちらへの指示ではない発話が届いた
-  （第三者との会話、「もしもし」、こちらの作業と無関係な話題）
-- 直前にこちらが質問を投げていない（返事を待っている最中ではない）
-- ユーザーが「これは独り言」「ちょっと電話」などと言ったわけではない
-  （言ったならその通りにすればよく、推測は要らない）
+```bash
+${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh hold "Sounds like a phone call, so I moved this to holding for now"
+${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh live      # back again
+```
 
-**迷ったら切り替えない。** 受け取ったうえで「いまのは私宛ではないようなので
-待機します」と伝えるだけでよい。切り替えたときは、チャットにも必ず書く
-（画面を見ていないかもしれないため）。戻すのはユーザーが話しかけてきた時点で
-すぐに行う。
+`hold` is **not mute**. Speech keeps collecting on screen and the user sends as
+much of it as they want. Nothing is lost. **Do not use mute.** Cutting it leaves
+the speech nowhere, and a user who is not watching the screen cannot tell that
+nothing got through.
 
-## ライブビューア
+The note that is passed along shows on screen. A mode change the user did not
+press is only confusing without a reason, so always write something.
 
-`start` で一緒に立ち上がる（**http://127.0.0.1:8090**）。起動を伝えるときは
-この URL も併せて案内する。ログを追尾するだけでマイクを使わないため、
-常駐と同時に動いてよい。
+**Keep the bar for switching high.** Switching by mistake leaves the user
+talking with nothing getting through. Do it only when all of the following hold.
 
-できることは次のとおり。
-- 認識途中のテキストが「未送信」カードの中で伸びる
-- 送った発話がカードで積まれる
-- 送り先を **即時**（そのまま届く）と **手直し**（溜めて直してから送る）で選べる。
-  **下書きに手を入れてから送った行にだけ** `"edited": true` が付く。手直しに回した
-  だけで一字も触らずに送った行には付かない
-- **一時停止**（ヘッダの ⏸）。止めている間の発話はどこにも残らない（別作業中に使う）
-- **声だけで操作できる。** 「ミュート」「ミュート解除」（`mute` / `unmute`）、
-  「手直し」「即時」（`hold` / `instant`）で送り方の切り替え、
-  **文の最後の**「キャンセル」でその発話ごと取り消し、同じく最後の「手直し」で
-  送らずに下書きへ、
-  「2番目」「2番」「2に切り替え」「ナンバー2」「番号2」「1つ目」（`switch to 2` /
-  `number two`）で送信先の変更。
-  **その一言だけ**喋ったときに限る（文の中で言っても効かない）。
-  数の読みの揺れ（に／ツー／two）は吸収する。切り替わると短い音が鳴る。
-  **使える言い方の一覧は画面の「？」から読める。** 利用者は自分の言い方を足せる
-  （`~/.config/voice-shell/commands.json`）。足せるのは丸ごと一言で言う合図だけで、
-  ミュート解除と、文の最後に付ける合図には足せない。誤爆すると失うものが大きいため。
-  **何台かで同時に使うときは、設定の「複数台で使う」を入れて機械に名前を付ける。**
-  そうすると「会社用ミュート」のように、名前を頭に添えた合図だけを受けるようになる
-  （入れていないと、片方で言った合図で全部の機械が反応する）。送信先の
-  番号は画面のチップに出ている順で、切っている間も切り替えられる。**送信先の合図は
-  聞き手が2つ以上のときだけ効く**（番号で答えただけの一言を食わないため）。判定は
-  ブラウザ認識でも手元のモデルでも同じ処理を通る。**ブラウザ認識で切ったあとの
-  「ミュート解除」だけは聞けない**（切ると音声そのものを手放すため）。画面から戻す
-- **キーボードでも操作できる。** 素のキーは画面を動かすだけで、`Shift` を添えた
-  キーが声の行き先を変える。`Shift`+`M` でマイクの入切、`Shift`+`L` で即時、
-  `Shift`+`H` で手直し、`Shift`+`E` でその一言だけ手直し、`Shift`+`Backspace` で
-  未送信を捨てる、`Shift`+`1` から `Shift`+`9` で送信先。素のキーは `,` で設定、
-  `?` で合図の一覧、`Esc` で開いているものを閉じる。`Ctrl`（`Cmd`）+`Enter` で
-  下書きを送る。**文字を打っている最中はどれも効かない。**
-  一覧は画面の「？」の下の方に出ている
-- **今回だけ直す。** 未送信カードの鉛筆を押すと、その一言だけ溜めて直せる。
-  送り先の表示は即時のまま（恒久的に切り替わったように見せない）。送るか消すと戻る
-- **手前に浮かせる。** 常に最前面の小窓へ移す（ヘッダのアイコン。Chrome のみ）
-- **小さくしても使える。** ウィンドウを縮めるとマイクと送り方が横並びになり、
-  上の帯は名札だけ、さらに小さくすると帯ごと消える（状態はウィンドウの題に出る）。
-  送信先は札からひとまとめの選び方へ替わる。文字とボタンは縮まない。残す順は
-  マイクの入切 ＞ 即時 / 手直し ＞ 送信先 ＞ 認識中のテキスト。広げれば戻る
-- **感度はマイクの下の印をつまんでも変えられる**（設定を開かなくてよい）
-- 画面ファイルに手を入れると、開いている画面の下に「新しくなりました」と出る。
-  押すと読み直す（浮かせた小窓には再読み込みの手立てが無いため）
+- **Twice or more in a row**, speech arrived that is plainly not an instruction
+  for you (a conversation with a third person, 「もしもし」, a topic unrelated to
+  the work here)
+- You have not just asked a question (you are not in the middle of waiting for
+  an answer)
+- The user did not say something like 「これは独り言」 or 「ちょっと電話」
+  (if they did, just do as they said, no guessing needed)
 
-### 認識のやり方
+**When in doubt, do not switch.** It is enough to take it and say "that did not
+seem to be for me, so I will wait". When you do switch, always write it in the
+chat as well (they may not be watching the screen). Go back the moment the user
+speaks to you again.
 
-設定の「認識するのは」で選ぶ。**既定は「このブラウザ」**（Chrome の Web Speech
-API）で、モデルを積まないので非力な端末でも動き、デーモンが動いていなくても
-使える。手元で完結させたい場合は Apple か Whisper へ切り替える。
-入っていないものは選択肢に出ない。
+## The live viewer
 
-**ただし音声は Google のサーバへ送られる。** 手元だけで完結させたいという話が
-出ている相手には勧めないこと。画面にも同じ注意を出している。
+It comes up together with `start` (**http://127.0.0.1:8090**). Pass this URL
+along when you tell the user it started. It only follows the log and does not
+use the microphone, so it can run alongside the resident process.
 
-Whisper を選んだときは、使うモデルも指定できる。Hugging Face の名前も、手元に
-置いたフォルダの場所も受ける。指定は覚えるので、次からは `start` だけでよい。
+What it can do is as follows.
+- Text still being recognized grows inside an "Unsent" card
+- Speech that was sent stacks up as cards
+- The destination can be set to **Instant** (goes straight through) or **Review**
+  (collects, gets fixed, then sent). `"edited": true` is attached **only to lines
+  that were touched in the draft before sending**. A line that went to review but
+  was sent without a single character changed does not get it
+- **Pause** (the ⏸ in the header). Speech while it is stopped is kept nowhere (for use during other work)
+- **It can be driven by voice alone.** 「ミュート」「ミュート解除」 (`mute` /
+  `unmute`), 「手直し」「即時」 (`hold` / `instant`) to switch how things are sent,
+  「キャンセル」 **at the end of a sentence** to take that whole utterance back,
+  and 「手直し」 likewise at the end to send it to the draft instead,
+  「2番目」「2番」「2に切り替え」「ナンバー2」「番号2」「1つ目」 (`switch to 2` /
+  `number two`) to change the destination.
+  It only counts when **that phrase alone** is spoken (saying it inside a
+  sentence does nothing). Variations in how numbers are read (に／ツー／two) are
+  absorbed. A short sound plays when it switches.
+  **The list of phrases that work can be read from the "?" on screen.** Users can
+  add their own wording (`~/.config/voice-shell/commands.json`). Only phrases said
+  as a whole utterance can be added, not unmute and not the ones tacked onto the
+  end of a sentence, because a false trigger costs too much.
+  **When several machines are in use at once, turn on "Several machines" in the
+  settings and give each machine a name.** Then only a phrase with the name in
+  front, like 「会社用ミュート」, is taken (without it, a phrase said at one machine
+  sets off every machine). The destination numbers follow the order of the chips
+  on screen, and they can be switched while the mic is off too. **Destination
+  phrases only work when there are two or more listeners** (so that an utterance
+  which was just an answer with a number in it is not eaten). The same code
+  decides this for browser recognition and local models alike. **The one thing
+  that cannot be heard is 「ミュート解除」 after browser recognition was cut**
+  (cutting it lets go of the audio itself). Turn it back on from the screen
+- **It can be driven from the keyboard too.** Bare keys only move around the
+  screen, keys with `Shift` change where the voice goes. `Shift`+`M` turns the
+  mic on and off, `Shift`+`L` is instant, `Shift`+`H` is review, `Shift`+`E`
+  reviews just that one utterance, `Shift`+`Backspace` throws away what is
+  unsent, `Shift`+`1` through `Shift`+`9` pick the destination. As bare keys, `,`
+  opens the settings, `?` the list of phrases, `Esc` closes whatever is open.
+  `Ctrl` (`Cmd`)+`Enter` sends the draft. **None of them work while text is
+  being typed.** The list is further down under the "?" on screen
+- **Fix just this one.** Pressing the pencil on the unsent card holds that one
+  utterance so it can be fixed. The destination display stays on instant (so it
+  does not look like a permanent switch). Sending it or clearing it puts it back
+- **Float on top.** Moves it to a small always-on-top window (the icon in the
+  header. Chrome only)
+- **It works small too.** Shrinking the window puts the microphone and the send
+  mode side by side, the top strip keeps only the name tags, and shrinking
+  further drops the strip altogether (the state shows in the window title). The
+  destinations change from tags to a single picker. Text and buttons do not
+  shrink. What is kept, in order, is the mic on and off > instant / review >
+  destination > the text being recognized. Widening it brings everything back
+- **Sensitivity can also be changed by dragging the mark under the microphone**
+  (no need to open the settings)
+- Editing the viewer file makes "Updated. Tap to reload" appear at the bottom of
+  an open screen. Pressing it reloads (a floated small window has no way to reload)
+
+### Ways of recognizing
+
+Picked under "Recognized by" in the settings. **The default is "This browser"**
+(Chrome's Web Speech API), which loads no model, so it runs even on a weak
+machine and works with no daemon running. To keep everything local, switch to
+Apple or Whisper. Anything not installed does not appear as a choice.
+
+**But the audio goes to Google's servers.** Do not recommend it to anyone who
+has raised wanting everything to stay local. The same warning is shown on the
+screen.
+
+When Whisper is picked, the model can be named as well. Both a Hugging Face name
+and the path of a folder on this machine are accepted. What is given is
+remembered, so `start` alone is enough from then on.
 
 ```bash
 ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh start --engine whisper --model /path/to/my-model
 ```
 
-7〜10 秒の無音でセッションが切れる仕様だが、黙っているあいだに先回りして
-張り直すので取りこぼさない。認識した文はサーバ側でデーモンと同じ絞り込みを通る。
+The session is cut by 7 to 10 seconds of silence by design, but it is re-armed
+ahead of time while nobody is speaking, so nothing is missed. Recognized text
+goes through the same filtering as the daemon, on the server side.
 
-**しばらく声が無ければ、こちらからマイクを切る**（既定 5 分。設定の
-「話さないと切る」で 0〜30 分、0 なら切らない）。席を外しているだけで
-Google へ繋ぎ直し続けないため。切るときは音と一言で知らせる。マイクを
-押せば戻る。
+**If there is no voice for a while, the mic is turned off from this side**
+(5 minutes by default, 0 to 30 minutes under "Turn off when idle" in the
+settings, 0 never turns it off). That way it does not keep reconnecting to
+Google while the user is away from the desk. A sound and a note say when it is
+turned off. Pressing the microphone brings it back.
 
-### 設定（歯車）
+### Settings (the gear)
 
-つまみを動かした時点で効く。デーモンの再起動は要らない。
+Moving a control takes effect right then. No daemon restart is needed.
 
-| 項目 | 何を決めるか | 既定 |
+| Item | What it decides | Default |
 |---|---|---|
-| マイク | 使う入力装置 | システムの既定 |
-| 感度 | 0〜100。大きいほど微かな音まで拾う | macOS 59 / Linux 26 |
-| 確定までの無音 | これだけ黙るとひと区切りとして確定する | 1.5 秒 |
-| 最小文字数 | これより短い認識結果は捨てる | 15 文字 |
-| 「えーと」を消す | つなぎ言葉を落としてから送る（**送信内容にも効く**） | 切 |
-| テーマ / 言語 | 見た目 | 自動 |
+| Microphone | Which input device to use | The system default |
+| Sensitivity | 0 to 100. Higher picks up fainter sounds | macOS 59 / Linux 26 |
+| Pause to send | Being quiet this long marks the end of a chunk | 1.5 seconds |
+| Min length | Recognition results shorter than this are dropped | 15 characters |
+| Strip filler words | Drops the connecting words before sending (**this affects what is sent too**) | Off |
+| Theme / Language | Looks | Automatic |
 
-感度は**マイクの下の印をつまんで**決める。すぐ上のバーが今の音量なので、
-喋りながら、声のときだけ印を超えるところへ置いてもらえばよい。
-「話しているのに何も届かない」と言われたら、まず**感度を上げる**よう勧める。
-数字が大きいほど小さな音まで拾う。印は音の大きさの目盛りの上にあるので、
-感度を上げると印は左へ動く。
+Sensitivity is set by **dragging the mark under the microphone**. The bar just
+above it is the current level, so have the user talk and put the mark where only
+their voice crosses it. When they say "I am talking but nothing arrives", the
+first thing to suggest is **raising the sensitivity**. The larger the number,
+the fainter the sound it picks up. The mark sits on a scale of loudness, so
+raising the sensitivity moves the mark to the left.
 
-実体は `~/.config/voice-shell/tuning.json`。デーモンが 0.5 秒おきに読み直す。
+It lives in `~/.config/voice-shell/tuning.json`. The daemon re-reads it every
+0.5 seconds.
 
 ```bash
 ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh viewer        # → http://127.0.0.1:8090
 ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh viewer-stop
 ```
 
-## 状態を確認する
+## Checking the state
 
 ```bash
 ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh status
 ```
 
-## 停止する
+## Stopping
 
 ```bash
 ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh stop
 ```
 
-停止したら Monitor も TaskStop で止める。マイクが解放され、Whisper を選んで
-いればモデルのぶんのメモリも戻る。apple は OS 側が認識するので、
-そもそもメモリを抱えていない。
+Once it is stopped, stop Monitor with TaskStop as well. The microphone is
+released, and if Whisper was picked the memory the model took comes back. apple
+has the OS do the recognizing, so it was never holding memory in the first place.
 
-## ユーザー辞書
+## The user dictionary
 
-誤認識しやすい語の言い換えと、無視する発話を登録できる。ビューアの
-**設定（歯車）→ 辞書** から編集する。**焦点が外れた時点で自動的に保存され、
-次の発話から効く**（保存ボタンは無い。デーモンの再起動も要らない）。
+Words that are often misheard can be registered with a replacement, and
+utterances to ignore can be registered too. Edit them from **Settings (the gear)
+→ Dictionary** in the viewer. **It saves automatically the moment focus leaves,
+and takes effect from the next utterance** (there is no save button, and no
+daemon restart either).
 
-認識している最中の文字にも当たるので、**送る前の札の中で既に置き換わって
-見える**（「クロードコード」→ `Claude Code`）。置き換えているのは見た目だけで、
-送る本文はサーバが作り直す。言い直されればそのまま追従する。
+It also hits the text while it is still being recognized, so **it already looks
+replaced inside the card before it is sent** (「クロードコード」→ `Claude Code`).
+What is being replaced is only the look. The server rebuilds the body that gets
+sent. If the user says it again differently, it follows along.
 
-組み込みで無視している語（`NOISE_ONLY`）は、札を押して外せる。**外した語は
-最小文字数の関門も素通しする** ので、「わかった」「了解」のような短い返事が
-消えなくなる。ユーザーが「返事が届いていないようだ」と言ったら、ここを案内する。
+Words ignored by default (`NOISE_ONLY`) can be turned off by pressing their tag.
+**A word that was turned off passes straight through the minimum length gate
+too**, so short replies like 「わかった」「了解」 stop disappearing. When the user
+says "my replies do not seem to be getting through", point them here.
 
-実体は `~/.config/voice-shell/dictionary.json`。CSV の読み込み・書き出しもできる。
-ユーザーが同じ誤認識を繰り返し直しているようなら、辞書への登録を提案してよい。
+It lives in `~/.config/voice-shell/dictionary.json`. CSV can be read in and
+written out too. If the user keeps correcting the same misrecognition, it is
+fine to suggest adding it to the dictionary.
 
-## 制約
+## Limits
 
-**既定（このブラウザ）には何の制約も無い。** 以下はローカルのモデルを
-選んだときの話。
+**The default (this browser) has no limits at all.** What follows is about
+picking a local model.
 
-- ブラウザ認識は**画面を開いている間だけ**動く。閉じると届かなくなる
-- Whisper は**モデルを落として積む**。初回はダウンロードの待ちがあり、
-  起動にも 1〜2 分かかる。使うメモリはモデルの大きさで決まる
-  - `--engine apple`（macOS 26 以降・OS 付属の認識）はモデルを積まないので、
-    この制約に当たらない
-- マイクは `arecord`（Linux）または `ffmpeg`（macOS / Windows）経由で取得する
-- ローカルのモデルを選んだのに環境が整っていないと、`start` が
-  「Python が見つかりません」で失敗する。ブラウザ認識に戻すか
-  （`start --engine browser`）、[SETUP.md](SETUP.md) の手順を案内する
+- Browser recognition runs **only while the viewer is open**. Close it and
+  nothing arrives
+- Whisper **downloads a model and loads it**. The first time there is a download
+  to wait for, and starting takes 1 to 2 minutes as well. How much memory it
+  uses is decided by the size of the model
+  - `--engine apple` (macOS 26 or newer, the recognition that ships with the OS)
+    loads no model, so this limit does not apply to it
+- The microphone is taken through `arecord` (Linux) or `ffmpeg` (macOS / Windows)
+- When a local model was picked but the environment is not in place, `start`
+  fails with 「Python が見つかりません」. Either go back to browser recognition
+  (`start --engine browser`) or walk them through [SETUP.md](SETUP.md)
