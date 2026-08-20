@@ -176,8 +176,14 @@ cmd="${1:-status}"; shift || true
 # Chrome の --app はタブもURL欄も無い窓になり、コマンドから開ける。
 # 「常に最前面」にしたい場合は、開いた窓のヘッダから手で浮かせる
 # （Document Picture-in-Picture は人が触らないと開けない決まりのため）。
+# 独立した窓で開く。一度開いたら覚えておく — start や viewer を打ち直す
+# たびに新しい窓が出て、実際に10個並んだ。窓はビューア1つにつき1つでよい。
 open_gui() {
   local url="http://127.0.0.1:8090"
+  local flag="$STATE_DIR/gui_opened"
+  [ -f "$flag" ] && return 0
+  mkdir -p "$STATE_DIR"
+  : > "$flag"
   local args=(--app="$url" --window-size=420,780)
   case "$(uname)" in
     Darwin)
@@ -579,11 +585,12 @@ NAMEIT
       fi
     }
     if viewer_running; then
+      # ここで窓を開かない。既に開いているものがあるはずで、開くと増える。
       echo "すでに起動しています → http://127.0.0.1:8090"
-      [[ "${VOICE_SHELL_NO_GUI:-0}" == "1" ]] || open_gui || true
       exit 0
     fi
     mkdir -p "$STATE_DIR"
+    rm -f "$STATE_DIR/gui_opened"      # 立ち上げ直したので窓も1つ開く
     # setsid で切り離す。デーモンが終了時に自分の子を全部 kill するため、
     # 同じ系統にいるとデーモンを止めたときビューアまで落ちる。
     detach "$PY" "$HERE/viewer.py" "$@" \
@@ -599,6 +606,7 @@ NAMEIT
     ;;
   viewer-stop)
     if have pkill; then
+      rm -f "$STATE_DIR/gui_opened"
       pkill -f "voice-shell/scripts/viewer\.p[y]" && echo "ビューアを停止しました" \
         || echo "動いていません"
     else
