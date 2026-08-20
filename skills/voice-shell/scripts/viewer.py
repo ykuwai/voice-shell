@@ -42,11 +42,14 @@ TUNING_FILE = _CONFIG / "tuning.json"
 # サーバ側でも必ず挟む（環境ノイズは 0.003 前後、macOS の既定は 0.015）。
 TUNING_RANGE = {"silence_threshold": (0.003, 0.15),
                 "silence_duration": (0.5, 3.0),
-                "min_chars": (1, 40)}
+                "min_chars": (1, 40),
+                # ブラウザ認識で、これだけ声が無ければ自分でマイクを切る。
+                # 0 は切らない。使わない時間まで Google へ繋ぎ直し続けない。
+                "idle_mute_min": (0, 30)}
 # 数ではなく入切で持つもの
 TUNING_FLAGS = {"strip_fillers"}
 # 整数で持つもの。小数のまま渡すと文字数の比較が分かりにくくなる。
-TUNING_INT = {"min_chars"}
+TUNING_INT = {"min_chars", "idle_mute_min"}
 
 
 def _builtin_noise() -> list:
