@@ -698,7 +698,8 @@ async def main_async(args):
         # 同じ発話でも認識のやり方によって届く／届かないが変わる。
         min_chars = tuning.get("min_chars", 15)
         if not force_hold and isinstance(min_chars, (int, float)) \
-                and len(text) < int(min_chars):
+                and len(text) < int(min_chars) \
+                and not vd.is_allowed_short(text, user_dict.get("unignore", ())):
             return web.json_response({"dropped": "too_short"})
 
         if not force_hold and vd.is_noise(text, user_dict["ignore"],

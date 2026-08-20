@@ -3,6 +3,10 @@
 作る過程で分かったこと。使うだけなら読まなくてよい。同じ落とし穴を
 踏み直さないための記録として残してある。
 
+実測を書くときは、機種名ではなく**条件**で書く。「M◯ Pro で 0.1 秒」は
+その機械を持っている人にしか意味が無いが、「Apple Silicon で RTF 0.03」なら
+自分の環境と比べられる。数字は残す価値があるので落とさない。書き方だけ変える。
+
 ## Windows（Git Bash）で動かすには何点か直しが要った
 
 `voice_daemon.py` / `voice-shell.sh` は元々 Linux/macOS しか想定しておらず、
@@ -29,7 +33,7 @@ Windows（Git Bash 上の bash）で動かすと以下がすべて刺さった�
   読もうとして `UnicodeDecodeError` になり、状態確認の文字列比較
   （`grep -q 稼働中` 等）も一致しなくなる。`voice-shell.sh` で
   `PYTHONUTF8=1` を強制して回避した（macOS/Linux では無害）
-- **ffmpeg の dshow マイク名** — README/SETUP.md の既定値 `audio=default` は
+- **ffmpeg の dshow マイク名** — 当初の既定値だった `audio=default` は
   実際には認識されない。`ffmpeg -list_devices true -f dshow -i dummy` で
   出てくる実際のデバイス名をそのまま `--device audio=<名前>` に渡す必要がある
 
@@ -37,10 +41,10 @@ Windows（Git Bash 上の bash）で動かすと以下がすべて刺さった�
 
 Mac では `--engine apple`（`engine_apple.py`）を既定にしている。macOS 26 の
 `SpeechAnalyzer` / `SpeechTranscriber` を使うので、モデルの追加ダウンロードも
-メモリの確保も要らない。実測（M4 Pro / macOS 26.5.2）で 3.1 秒の日本語音声が
+メモリの確保も要らない。実測（Apple Silicon / macOS 26）で 3.1 秒の日本語音声が
 0.10 秒、句読点まで含めて正しく出た（RTF 0.03）。起動も 0.83 秒で、モデルを
 落として積むやり方の 1〜2 分と比べ物にならない。
-音声はこの Mac の中だけで処理される。
+音声はその機械の中だけで処理される。
 
 Swift の API しか無いので、`speech_helper.swift` を常駐させて WAV のパスを
 渡し、結果を JSON で受け取る形にした。ヘルパは初回起動時に `swiftc` で
@@ -60,7 +64,7 @@ RTF 0.03 なので、途中経過のために全体を何度も認識し直し�
 TCC の許可も `.app` 化も要らず、`swiftc` で作った素の実行ファイルのまま動く。
 録音と発話の区切り（VAD）は従来どおり `asr_mic.py` の担当。
 
-（この構成は同じ Mac で先に検証した
+（この構成は、先に同じ API を試した
 [live-dictation](https://github.com/ykuwai/live-dictation) の知見を使っている。）
 
 ## 認識はワーカースレッドに逃がす
@@ -79,11 +83,12 @@ Ctrl-C や kill で親が死ぬと、録音の ffmpeg / arecord がマイクを�
 中にあり、モデルを積まない apple では登録を通らず、stop のたびに録音
 プロセスだけが孤児として残り続けていた。
 
-## マイクは arecord 経由で取得している
+## Linux ではマイクを arecord 経由で取得している
 
-PipeWire がマイクを占有しており、conda 版 PortAudio は PulseAudio バックエンド無しで
-ビルドされているため、`sounddevice` からは USB マイクが見えない。
-`arecord -D pipewire` で録音し、soxr で 16kHz に変換している。
+PipeWire がマイクを握っている環境で、PortAudio が PulseAudio バックエンド無しで
+ビルドされていると、`sounddevice` からは入力装置が一つも見えない（配布によっては
+既定でこの組み合わせになる）。`arecord -D pipewire` で録音し、soxr で 16kHz に
+変換すれば、どちらの事情も避けられる。
 
 リサンプルは `soxr.ResampleStream` を使い回す。ブロックごとに `soxr.resample()` を
 呼ぶとフィルタの生成・破棄が毎回走り、実測で約5倍遅い。
