@@ -1066,7 +1066,11 @@ def label_listeners(entries):
     並びは「その会話が最初に聞き始めた時刻」。登録し直した時刻で並べると、
     音声モードを入れ直すたびに番号が動いて、声で指す番号が当てにならない。
     """
-    entries = sorted(entries, key=lambda e: e.get("first_seen") or e.get("since", 0))
+    # 同じ時刻で並んだときは PID で決める。ここを決めておかないと、
+    # 登録ファイルを読む順（OS 任せ）で番号が入れ替わる。
+    entries = sorted(entries,
+                     key=lambda e: (e.get("first_seen") or e.get("since", 0),
+                                    e.get("pid", 0)))
     seen = {}
     for e in entries:
         base = listener_title(e) or os.path.basename(e.get("cwd", "")) or "?"
