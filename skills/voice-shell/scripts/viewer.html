@@ -137,17 +137,21 @@
 
   /* 送信先。聞いているセッションが2つ以上のときだけ出す
      （1つしか無いなら選ばせる意味がなく、場所を取るだけ）。 */
+  /* 横に流すと、窓が狭いときに右端のものへ手が届かない。折り返して
+     全部見せる。長い名前は詰めるが、頭の番号だけは必ず残す。 */
   .routes {
-    display:flex; gap:.25rem; overflow-x:auto; padding:.1rem 1rem .5rem;
-    scrollbar-width:none;
+    display:flex; flex-wrap:wrap; gap:.25rem; padding:.1rem 1rem .5rem;
   }
-  .routes::-webkit-scrollbar { display:none; }
   .route-chip {
-    flex:none; display:inline-flex; align-items:center; gap:.3rem;
+    flex:0 1 auto; min-width:0; max-width:100%;
+    display:inline-flex; align-items:center; gap:.3rem;
     padding:.3rem .7rem; border-radius:var(--pill);
     font-size:.75rem; white-space:nowrap;
     border:1.5px solid var(--line); color:var(--faint);
     transition:border-color .15s, color .15s, background .15s;
+  }
+  .route-chip .nm {
+    min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   }
   .route-chip:hover { color:var(--text); }
   /* 聞くのをやめさせる×。1回目で確かめ、2回目で実行する（小窓では
@@ -606,9 +610,6 @@
     <span class="beacon" id="beacon"></span><span id="stateText" data-i18n="connecting">Connecting…</span>
   </div>
 
-  <!-- 送信先。複数の作業で同時に使うときに、どれへ届けるかを選ぶ。 -->
-  <div class="routes" id="routes" hidden></div>
-
   <div class="viz">
     <canvas id="viz"></canvas>
     <!-- 大きなマイクを押すと入切する。絵は canvas なので、
@@ -642,6 +643,11 @@
 
   <p class="note" id="note" hidden></p>
   <p class="hint" id="hint"></p>
+
+  <!-- 送信先。複数の作業で同時に使うときに、どれへ届けるかを選ぶ。
+       未送信の札のすぐ上に置く（次に喋る一言がどこへ行くかの話なので、
+       送る手前で目に入る位置がよい）。 -->
+  <div class="routes" id="routes" hidden></div>
 
   <!-- 未送信カード。認識中のテキストと手直し欄をここにまとめる。 -->
   <section class="draft-card idle" id="tray" aria-live="polite">
@@ -2706,8 +2712,11 @@ function paintRoutes() {
                        : String(l.pid) === effectiveTo;
     const b = document.createElement('button');
     b.className = 'route-chip' + (on ? ' on' : '');
-    b.textContent = l.label;
-    b.title = l.cwd || '';
+    const nm = document.createElement('span');
+    nm.className = 'nm';
+    nm.textContent = l.label;
+    b.append(nm);
+    b.title = `${l.label}\n${l.cwd || ''}`;
     b.onclick = () => setRoute2(String(l.pid));
 
     // 聞くのをやめさせる。セッション自体は終わらない。
@@ -2719,7 +2728,7 @@ function paintRoutes() {
       ev.stopPropagation();
       if (!b.classList.contains('asking')) {
         b.classList.add('asking');
-        b.firstChild.textContent = t('disconnectAsk');
+        nm.textContent = t('disconnectAsk');
         setTimeout(() => { if (b.classList.contains('asking')) loadListeners(); }, 4000);
         return;
       }
