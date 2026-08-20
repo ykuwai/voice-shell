@@ -38,7 +38,7 @@ something else.
 
 Even with your hands full, **you can switch by voice alone.** "Mute" and "unmute"
 turn the mic off and on, "hold" and "live" change how it sends. End a sentence with
-"cancel" and that one utterance is dropped instead of sent. (Only with browser
+"cancel that" and that one utterance is dropped instead of sent. (Only with browser
 recognition, muting lets go of the audio itself, so turn the mic back on from the
 window.)
 

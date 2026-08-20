@@ -727,20 +727,28 @@ COMMAND_WORDS = {
     # The words are kept few. Put in phrasings that also end an ordinary sentence,
     # like 「やめて」 or 「なし」, and instructions you meant to send get taken too.
     #
+    # **A word has to clear that bar in every language, not just the column it sits
+    # in.** Matching never narrows by language (the head of this table says why), so a
+    # word that closes no Japanese sentence still eats every Chinese one it happens to
+    # close. 「取消」 sat in the Japanese column and took 「把会议取消」 whole, and the
+    # speaker never got that sentence back.
+    #
     # The order matters. Matching runs from the tail and strips the first hit, so they
     # are checked in written order (so a long phrasing is not eaten by a short one).
     "cancel_tail": {
+        # Single-verb forms (cancel / cancelar / annuler / abbrechen / 取消 / 취소)
+        # are in no column. This command matches the end of a sentence, so an ordinary
+        # instruction closing on that verb (「これはキャンセルしたい」, "I want to
+        # cancel") would vanish whole. Only forms that read as "I do not want this"
+        # go in. 「キャンセル」 stays because a bare katakana noun almost never closes a
+        # Japanese sentence, and "cancel that" because the trailing "that" points back
+        # at what was just said.
         "ja": [
             "キャンセル", "きゃんせる", "キャンセルで", "キャンセルして",
-            "取り消し", "取消", "取り消して", "とりけし", "とりけして",
+            "取り消し", "取り消して", "とりけし", "とりけして",
             "なかったことに", "なかったことにして", "やっぱなし", "やっぱりなし",
         ],
-        "en": ["cancel", "cancel that", "scratch that", "never mind", "nevermind"],
-        # In the added languages, single-verb forms (cancelar / annuler / abbrechen /
-        # 取消 / 취소) are not in. This command matches the end of a sentence, so an
-        # ordinary instruction ending in that word (a sentence along the lines of
-        # 「これはキャンセルしたい」) would vanish whole. Only forms that clearly read
-        # as "I do not want this" go in.
+        "en": ["cancel that", "scratch that", "never mind", "nevermind"],
         "es": ["cancela eso", "cancelar eso", "olvida eso", "olvídalo"],
         "fr": ["annule ça", "annuler ça", "oublie ça"],
         "de": ["streich das", "vergiss das", "vergiss es"],
@@ -755,7 +763,12 @@ COMMAND_WORDS = {
             "出直し", "でなおし", "出直して",
             "直してから", "なおしてから", "あとで直す", "ちょっと直す",
         ],
-        "en": ["edit", "edit this", "let me edit", "hold this"],
+        "en": ["edit this", "let me edit", "hold this"],
+        # Bare "edit" is in no column either, for the same reason as bare "cancel".
+        # "please edit" reached the draft as the single word "please" and the rest of
+        # the instruction was gone. Every form kept carries something after the verb,
+        # and that trailing part is what marks it as spoken at this tool.
+        #
         # Forms that trail an object, like 「à corriger」 or 「para editar」, are left
         # out. A sentence meaning "the list to fix" would vanish as it stands. Use the
         # forms that say the speaker will do the fixing.
