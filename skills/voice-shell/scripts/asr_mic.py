@@ -34,6 +34,21 @@ HARD_UTTERANCE_CAP = 300.0
 # 無音を余分に渡すことになるが、認識側は無音を無視するので実害はない。
 PREROLL_SEC = 0.6
 
+# 中身が全部ゼロのブロックが、これだけ続いたら繋がっていないとみなす。
+# 生きている装置なら、どんなに静かな部屋でも暗騒音が乗る（実測で 0.0005 前後、
+# いま動いている機械でも 0.0022 だった）。16bit が全ビットゼロで並ぶのは装置が
+# 死んでいるときだけなので、静かな部屋と取り違えることはない。
+# 数秒では短すぎる。マイク本体のミュートでもゼロを出す装置があり、黙るたびに
+# 開き直すことになる。長すぎれば戻るまで黙り続ける。その間を取って 20 秒。
+DEAD_SEC = 20.0
+# 速い開き直しはここまで。既定の入力が別の装置へ移ってしまった場合などは
+# 何度開き直しても直らず、開き直すたびに録音を欠くだけになる。
+DEAD_TRIES = 3
+# 諦めたあとに、それでも試し続ける間隔。完全にやめると挿し直しても戻る道が
+# 無くなる。ゼロが届き続ける限りブロックは途切れず、STALL_SEC の見張りは
+# 一度も働かないので、こちらが手を止めたら誰も気づけない。
+DEAD_SLOW_SEC = 300.0
+
 # 無音とみなす RMS の既定値。マイクごとに違うので実測して決める値だが、
 # 開発機の値をそのまま持ってくると別の環境で「全く反応しない」になる。
 # Linux 機の 0.054 は Mac の USB マイク（Samson Go Mic）には高すぎ、
@@ -376,6 +391,7 @@ def read_blocks(device: str, in_sr: int,
     # 読む側を別スレッドへ移し、決めた時間だけ待って来なければ立て直す。
     # 静かな部屋と取り違えることはない。黙っていてもブロック自体は届き、
     # 届かなくなるのは配線が切れたときだけなので。
+    # ただし「届くのに中身がゼロ」という切れ方もある（DEAD_SEC の方で見る）。
     def start(dev):
         p = subprocess.Popen(mic_command(dev, in_sr), stdout=subprocess.PIPE)
         q = queue.Queue(maxsize=100)          # 10秒分。溢れればパイプ側で待つ
@@ -434,7 +450,13 @@ def read_blocks(device: str, in_sr: int,
     #
     # 静かな部屋と取り違えることはない。黙っていてもブロック自体は届き
     # 続ける（マイク本体のミュートも同じで、無音のブロックが来る）。
-    # 何も届かなくなるのは、配線そのものが切れたときだけ。
+    #
+    # ただし「ブロックが来るかどうか」だけでは足りない。挿し直したあとに
+    # 「ブロックは届くが中身は全部ゼロ」という三つ目の状態を実測した。
+    # ffmpeg は :default を開き直せているのに、値は 0.0000 のまま 10 分経っても
+    # 戻らず、この見張りは素通りしていた（届いてはいるので永久に満たされる）。
+    # そちらは下でゼロそのものを数えて、同じく切れているものとして扱う。
+    # 開き直しても直らないことがある切れ方なので、そちらだけは手を止める。
     #
     # 待ち時間だけは伸ばす。挿さっていない間ずっと ffmpeg を起こし続けて
     # も意味がない。上限は 5 秒なので、挿し直せば遅くとも 5 秒で戻る。
@@ -442,6 +464,9 @@ def read_blocks(device: str, in_sr: int,
     RETRY_MIN, RETRY_MAX = 0.5, 5.0
     retry_wait = RETRY_MIN
     lost = False              # いま繋がっていないか（ログを一度だけ出すため）
+    dead_run = 0.0            # 中身が全部ゼロのブロックが続いている秒数
+    dead_tries = 0            # ゼロを理由に開き直した回数
+    gave_up = False           # 速い開き直しを諦めたか（ログを一度だけ出すため）
 
     try:
         while True:
@@ -453,23 +478,32 @@ def read_blocks(device: str, in_sr: int,
                     current = asked
                     proc, blocks = start(current)
                     to_16k = make_resampler()   # 履歴を持たせない
+                    # 別の装置になったのだから、前の装置のゼロの数え方は捨てる。
+                    # 持ち越すと、諦めたあとに選び直した装置がまた無音だったとき、
+                    # 速い試行を一度もしないまま長い間隔で待つことになる。
+                    dead_run, dead_tries, gave_up = 0.0, 0, False
                     print(f"マイクを切り替えました: {current}", file=sys.stderr, flush=True)
                     if on_switch is not None:
                         on_switch(current)
 
-            def relight(why: str):
-                """録音を開き直す。繋がるまで何度でも。"""
-                nonlocal proc, blocks, to_16k, retry_wait, lost
-                if not lost:
-                    lost = True
-                    print(f"{why}: {current} — 開き直して待ちます"
-                          "（挿し直せばそのまま戻ります）",
-                          file=sys.stderr, flush=True)
+            def reopen():
+                """録音プロセスだけ立て直す。モデルは載せたままにする。"""
+                nonlocal proc, blocks, to_16k, retry_wait
                 stop(proc)
                 time.sleep(retry_wait)
                 retry_wait = min(retry_wait * 2, RETRY_MAX)
                 proc, blocks = start(current)
                 to_16k = make_resampler()
+
+            def relight(why: str):
+                """録音を開き直す。繋がるまで何度でも。"""
+                nonlocal lost
+                if not lost:
+                    lost = True
+                    print(f"{why}: {current} — 開き直して待ちます"
+                          "（挿し直せばそのまま戻ります）",
+                          file=sys.stderr, flush=True)
+                reopen()
 
             try:
                 raw = blocks.get(timeout=STALL_SEC)
@@ -480,10 +514,44 @@ def read_blocks(device: str, in_sr: int,
                 relight("録音が終了しました")
                 continue
 
-            if lost:
-                lost = False
-                print(f"マイクが戻りました: {current}", file=sys.stderr, flush=True)
-            retry_wait = RETRY_MIN
+            # 中身が全部ゼロなら、届いていても繋がっていない。rms を出す前に
+            # バイト列をそのまま見る。割り算より安いうえ、丸めの余地が無い。
+            if raw.count(0) == len(raw):
+                dead_run += len(raw) / 2 / in_sr   # 16bit モノラル
+                if dead_run >= (DEAD_SLOW_SEC if gave_up else DEAD_SEC):
+                    dead_run = 0.0
+                    dead_tries += 1
+                    lost = True
+                    if dead_tries == 1:
+                        print("マイクから届く音が全部ゼロです。"
+                              f"{current} を開き直します",
+                              file=sys.stderr, flush=True)
+                    if dead_tries > DEAD_TRIES and not gave_up:
+                        gave_up = True
+                        print("何度開き直しても、届く音は全部ゼロのままです。"
+                              f"このあとは {DEAD_SLOW_SEC / 60:.0f} 分おきに試し続けます。"
+                              "マイクを選び直すか、挿し直すと早く戻ります",
+                              file=sys.stderr, flush=True)
+                        # 既定の入力が別の装置へ移っていることがある。いま何が
+                        # 見えているかを一度だけ出しておけば、選び直す手がかりになる。
+                        try:
+                            seen = "、".join(m["label"] for m in list_mics()
+                                            if m["id"] != SYSTEM_DEFAULT)
+                        except Exception:
+                            seen = ""
+                        if seen:
+                            print(f"いま見えているマイクは {seen} です",
+                                  file=sys.stderr, flush=True)
+                    reopen()
+                    continue
+            else:
+                # 音が入ってきた時点で全部やり直す。数え途中を持ち越すと、
+                # 前に切れたときの分だけ次の判定が早まってしまう。
+                dead_run, dead_tries, gave_up = 0.0, 0, False
+                if lost:
+                    lost = False
+                    print(f"マイクが戻りました: {current}", file=sys.stderr, flush=True)
+                retry_wait = RETRY_MIN
 
             block = to_16k(np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0)
             # block.dot(block) は二乗の一時配列を作らない
