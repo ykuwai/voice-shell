@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""音声プロンプト用の常駐デーモン。
+"""Background daemon for voice prompts.
 
-マイクを聞き続け、発話が確定するたびに1行 JSON をログに追記する。
-Claude Code 側は Monitor でこのログを tail し、行が来たらプロンプトとして扱う。
+It keeps listening to the mic and appends one JSON line to the log every time an
+utterance settles. On the Claude Code side, Monitor tails this log and treats
+each line that arrives as a prompt.
 
     python voice_daemon.py --language Japanese
 
-ログ形式（1行1発話、JSONL）。本文だけを載せる。
-    {"text": "テストを実行して"}
+Log format is one utterance per line, JSONL. Only the body goes in.
+    {"text": "run the tests"}
 
-制御コマンドは次のとおり。
-    python voice_daemon.py --status    # 動いているか確認
-    python voice_daemon.py --stop      # 停止する
+The control commands are as follows.
+    python voice_daemon.py --status    # check whether it is running
+    python voice_daemon.py --stop      # stop it
 """
 import argparse
 import json
@@ -24,8 +25,8 @@ import threading
 import time
 from pathlib import Path
 
-# fcntl は POSIX 専用（Windows に無い）。二重起動防止のロックだけの用途なので、
-# Windows では msvcrt.locking で代替する。
+# fcntl is POSIX only (Windows does not have it). The only use here is the lock
+# that stops a second instance, so on Windows msvcrt.locking stands in.
 if sys.platform.startswith("win"):
     import msvcrt
 
@@ -41,100 +42,107 @@ else:
 
 import asr_mic
 
-# voice-shell.sh(bash) 側の "/tmp" と、この Python プロセスが単独で解釈する
-# "/tmp" は実ディレクトリが食い違いうる（Windows では前者が MSYS のマウント先、
-# 後者はドライブ直下の C:\tmp になる）。voice-shell.sh は cygpath で解決した
-# 実パスを VOICE_SHELL_STATE_DIR で渡してくるので、あればそちらを使う。
+# The "/tmp" that voice-shell.sh (bash) sees and the "/tmp" this Python process
+# resolves on its own can be different real directories (on Windows the former is
+# the MSYS mount point, the latter is C:\tmp at the drive root). voice-shell.sh
+# passes the cygpath-resolved real path in VOICE_SHELL_STATE_DIR, so prefer that.
 if os.environ.get("VOICE_SHELL_STATE_DIR"):
     STATE_DIR = Path(os.environ["VOICE_SHELL_STATE_DIR"])
 else:
-    # 以前は認識モデルの名前を取って "qwen-voice" と呼んでいた。道具の名前へ
-    # 改めたが、動いているものを壊さないよう、古い方が残っていて新しい方が
-    # 無ければそちらを使い続ける（/tmp が空けば自然に新しい名前へ移る）。
+    # This used to be named "qwen-voice" after the recognition model. The name
+    # follows the tool now, but so nothing already running breaks, keep using the
+    # old one when it is there and the new one is not (once /tmp is cleared it
+    # moves to the new name on its own).
     _base = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp"))
     STATE_DIR = _base / "voice-shell"
     _legacy = _base / "qwen-voice"
     if not STATE_DIR.exists() and _legacy.exists():
         STATE_DIR = _legacy
 
-# ユーザー辞書。再起動をまたいで残したいので設定ディレクトリに置く。
-# Web UI から編集でき、変更は次の発話からすぐ効く（デーモン再起動は不要）。
+# User dictionary. It has to survive restarts, so it lives in the config dir.
+# The web UI can edit it and edits land from the next utterance (no daemon restart).
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME",
                                  Path.home() / ".config")) / "voice-shell"
 DICT_FILE = CONFIG_DIR / "dictionary.json"
-# マイクの感度と「何秒黙ったら確定するか」。辞書と同じく設定ディレクトリに
-# 置き、ビューアから変えられる。デーモンが 0.5 秒おきに読み直すので再起動は要らない。
+# Mic sensitivity and how many seconds of silence settles an utterance. Like the
+# dictionary it lives in the config dir and the viewer can change it. The daemon
+# re-reads it every 0.5 seconds, so no restart is needed.
 TUNING_FILE = CONFIG_DIR / "tuning.json"
-# 「次もこれで起動する」を覚えておく場所。辞書やしきい値と同じく
-# 設定ディレクトリに置く（/tmp だと再起動で消え、毎回選び直しになる）。
+# Where "start with this next time" is remembered. Like the dictionary and the
+# thresholds it goes in the config dir (in /tmp it would vanish on reboot and you
+# would have to pick again every time).
 CONFIG_FILE = CONFIG_DIR / "config.json"
 PID_FILE = STATE_DIR / "daemon.pid"
 LOG_FILE = STATE_DIR / "utterances.jsonl"
-# 認識途中のテキスト。上書きし続けるだけで履歴は残さない（ビューアの表示用）。
+# Text while recognition is still running. Overwritten, no history kept (for the
+# viewer).
 PARTIAL_FILE = STATE_DIR / "partial.txt"
-# いま拾えている音量。ビューアがバーとして出す。
-# 文字が出ないとき、マイクが死んでいるのか黙っているだけなのかを見分ける。
+# The volume being picked up right now. The viewer draws it as a bar.
+# When no text shows up, this tells a dead mic apart from a room that is just quiet.
 LEVEL_FILE = STATE_DIR / "level.txt"
-# このファイルがあると発話を保留する。認識は続くが Claude には送らず、
-# 保留トレイに溜めて手直ししてから送れる。
+# While this file exists, utterances are held. Recognition keeps going but nothing
+# goes to Claude. It piles up in the hold tray so you can fix it before sending.
 PAUSE_FILE = STATE_DIR / "paused"
-# 保留中に確定した発話の置き場。
+# Where utterances that settled while held are kept.
 HOLD_FILE = STATE_DIR / "held.jsonl"
-# このファイルがあるとマイクを切った扱い。認識結果をどこにも残さず捨てる。
-# デーモンを止めると再起動に1〜2分かかるので、こちらで無視するだけにする。
+# While this file exists the mic counts as off. Results are thrown away, kept nowhere.
+# Starting the daemon again takes 1 to 2 minutes, so this only ignores what comes in.
 MUTE_FILE = STATE_DIR / "muted"
-# 使いたいマイク。ビューアが書き、デーモンが読んで録音だけ差し替える
-# （モデルは載せたままなので待たされない）。
+# The mic to use. The viewer writes it, the daemon reads it and swaps out only the
+# recording (the model stays loaded, so there is no waiting).
 MIC_FILE = STATE_DIR / "mic"
 
-# 物音や息だけを拾ったときに出やすい定型句。これ単独の発話は指示ではないので捨てる。
-# （モデルが無音に近い入力へ相槌を当ててしまうため）
+# Stock phrases that tend to come out when only a noise or a breath got picked up.
+# An utterance that is nothing but one of these is not an instruction, so drop it.
+# (The model fits a backchannel onto input that is close to silence.)
 NOISE_ONLY = {
-    # 返事・相槌
+    # Replies and backchannels
     "はい", "はいはい", "はーい", "うん", "うんうん", "ううん", "ええ", "ええと",
     "そう", "そうそう", "そうか", "そうね", "そうですね", "なるほど", "たしかに",
     "オーケー", "オッケー", "よし", "よしよし", "わかった", "了解",
-    # 息・言い淀み
+    # Breaths and hesitations
     "あ", "あー", "ああ", "あっ", "い", "う", "うー", "うーん", "え", "えー",
     "えっ", "お", "おー", "おお", "おっ", "ん", "んー", "んん", "は", "はっ",
     "ふ", "ふう", "ふん", "ふーん", "ふむ", "へ", "へえ", "ほう", "ほー",
     "まあ", "ねえ", "あの", "あのー", "えっと", "えーと", "なんか",
-    # 動画の定型句（「ご視聴ありがとうございました」など）はここに入れない。
-    # どの国の人も使う道具に、日本語の動画で出る言い回しが最初から並んでいると、
-    # 初めて見た人には何のための一覧か分からなくなる。要る人は辞書側で足せる。
-    # 英語でも同種の相槌が出る
+    # Stock video phrases (the Japanese "thanks for watching" sign-off and such)
+    # do not go here. People in any country use this tool, and a list that opens
+    # with turns of phrase from Japanese videos leaves a first-time reader unable
+    # to tell what it is for. Whoever needs them can add them in the dictionary.
+    # The same kind of backchannel comes out in English
     "yeah", "yes", "yep", "ok", "okay", "uh", "uh-huh", "um", "umm",
     "hmm", "hm", "mm", "mhm", "oh", "ah", "ahh", "eh", "huh",
     "right", "so", "well", "sure", "wow", "hey",
 }
 
-# 句読点・記号・空白を落として比較するための文字
+# Characters stripped before comparing, punctuation and symbols and whitespace
 _TRIM = "。、．，！？!?.…・ 　\n"
 
-# 物音を拾ったとき、日本語以外に誤認識されることがある（実測で中国語が出た）。
-# 日本語で使わない文字が含まれていれば、その発話は誤認識と判断して捨てる。
+# When a noise gets picked up it is sometimes misrecognized as something other than
+# Japanese (measured, Chinese came out). If the text holds characters Japanese never
+# uses, treat that utterance as a misrecognition and drop it.
 _NON_JA = re.compile(
     "["
-    "ㄅ-ㄯ"      # 注音符号
-    "가-힯"      # ハングル
-    "Ѐ-ӿ"      # キリル
-    "฀-๿"      # タイ文字
-    "؀-ۿ"      # アラビア文字
-    "嗯呢吗吧咱您们这那哪儿铁东车马门问题时间说话谢没儿"  # 簡体字・中国語特有
+    "ㄅ-ㄯ"      # Bopomofo
+    "가-힯"      # Hangul
+    "Ѐ-ӿ"      # Cyrillic
+    "฀-๿"      # Thai
+    "؀-ۿ"      # Arabic
+    "嗯呢吗吧咱您们这那哪儿铁东车马门问题时间说话谢没儿"  # Simplified, specific to Chinese
     "]"
 )
 
 
 def looks_non_japanese(text: str) -> bool:
-    """日本語でも英語でもない文字が混ざっているか。"""
+    """Whether characters that are neither Japanese nor English are mixed in."""
     return bool(_NON_JA.search(text))
 
 
 DEFAULT_DICT = {
-    # これ単独の発話なら捨てる（NOISE_ONLY に上乗せする）
+    # Dropped when the whole utterance is just this (adds on top of NOISE_ONLY)
     "ignore": [],
-    # 認識結果を置き換える。技術用語はカタカナや略記で崩れやすい。
-    # 長い語から当てるので、部分が重なっていてもよい。
+    # Replaces what came out of recognition. Technical terms break down easily into
+    # katakana or shorthand. Longer entries are matched first, so overlaps are fine.
     "replace": {
         # Claude
         "クロードコード": "Claude Code",
@@ -147,7 +155,7 @@ DEFAULT_DICT = {
         "スキルドットエムディー": "SKILL.md",
         "スキルズドットエスエイチ": "skills.sh",
         "スキルズドットS.H.": "skills.sh",
-        # よく崩れる略語（ピリオドが入ってしまう）
+        # Abbreviations that often break down (periods get inserted)
         "A.I.": "AI",
         "エーアイ": "AI",
         "L.L.M.": "LLM",
@@ -163,14 +171,14 @@ DEFAULT_DICT = {
         "C.P.U.": "CPU",
         "M.C.P.": "MCP",
         "P.R.": "PR",
-        # 他社のモデル・サービス（カタカナで出やすいもの）
+        # Models and services from other companies (the ones that come out in katakana)
         "ジェミニ": "Gemini",
         "オープンエーアイ": "OpenAI",
         "チャットジーピーティー": "ChatGPT",
         "コーデックス": "Codex",
         "コパイロット": "Copilot",
-        # 「カーソル」は文字カーソルの意味でも使うので入れない
-        # ツール・サービス
+        # 「カーソル」 (Cursor) is left out, the same word also means the text cursor
+        # Tools and services
         "ギットハブ": "GitHub",
         "ギットいーぶ": "GitHub",
         "ヴイエスコード": "VS Code",
@@ -181,17 +189,17 @@ DEFAULT_DICT = {
         "ノードジェイエス": "Node.js",
         "タイプスクリプト": "TypeScript",
         "ジャバスクリプト": "JavaScript",
-        # このプロジェクト
+        # This project
         "ボイスシェル": "voice-shell",
     },
 }
 
 
-_dict_cache = (None, None)   # (更新時刻, 中身)
+_dict_cache = (None, None)   # (mtime, contents)
 
 
 def _read_one(path: Path) -> dict:
-    """辞書ファイル1つを読む。無い・壊れているときは空。"""
+    """Read one dictionary file. Empty when it is missing or broken."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -201,9 +209,10 @@ def _read_one(path: Path) -> dict:
         return {"ignore": [], "unignore": [], "replace": {}}
     return {
         "ignore": [s for s in data.get("ignore", []) if isinstance(s, str)],
-        # 組み込みで無視している語のうち、無視しないことにしたもの。
-        # 「わかった」「了解」のように、こちらへの返事として実際に言う語が
-        # 組み込みに入っている。誰にとって邪魔かは人によるので、外せるようにする。
+        # Of the words the built-in list ignores, the ones the user decided not to
+        # ignore. Words people really do say back to you, like 「わかった」 or
+        # 「了解」 (got it, roger), are in the built-in list. Which ones get in the
+        # way depends on the person, so they can be taken out.
         "unignore": [s for s in data.get("unignore", []) if isinstance(s, str)],
         "replace": {k: v for k, v in data.get("replace", {}).items()
                     if isinstance(k, str) and isinstance(v, str)},
@@ -218,15 +227,15 @@ def _mtime():
 
 
 def load_dictionary() -> dict:
-    """辞書を返す。
+    """Return the dictionary.
 
-    発話ごとに呼ばれるので、更新時刻が変わったときだけ読み直す。
-    これにより Web UI での編集がデーモン再起動なしで反映される。
+    This is called for every utterance, so it re-reads only when the mtime changed.
+    That is what makes web UI edits show up without restarting the daemon.
     """
     global _dict_cache
     mtime = _mtime()
-    # 先に無い場合を弾く。cache の初期値も None なので、順を逆にすると
-    # 「まだ何も読んでいない」と「ファイルが無い」が同じ顔になる。
+    # Rule out the missing case first. The cache also starts at None, so in the
+    # other order "nothing read yet" and "no file" would look the same.
     if mtime is None:
         return DEFAULT_DICT
     if _dict_cache[0] == mtime:
@@ -238,16 +247,18 @@ def load_dictionary() -> dict:
 
 
 def save_default_dictionary():
-    """辞書が無ければ既定値で作る（Web UI から編集する起点になる）。
+    """Create the dictionary from the defaults when there is none (the starting point
+    for editing from the web UI).
 
-    すでにある場合は、既定に増えた項目だけを足す。ユーザーが直した内容や
-    消した項目は尊重するため、上書きはしない。
+    When one already exists, add only the entries the defaults gained. What the user
+    edited or deleted is respected, so nothing gets overwritten.
     """
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
     if not DICT_FILE.exists():
-        # 作った時点で「配った語」を控えておく。ここを省くと、初回に配った語を
-        # 消した人のところへ、次の更新で同じ語がそのまま戻ってくる。
+        # Note down the shipped words at the moment of creation. Skip this and the
+        # words shipped on the first run come right back at the next update for
+        # anyone who deleted them.
         first = dict(DEFAULT_DICT)
         first["_seen"] = sorted(DEFAULT_DICT["replace"])
         first["_seen_ignore"] = sorted(DEFAULT_DICT["ignore"])
@@ -257,13 +268,13 @@ def save_default_dictionary():
     try:
         cur = json.loads(DICT_FILE.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
-        return                      # 壊れていれば触らない（ユーザーが直せる）
+        return                      # Broken, so leave it alone (the user can fix it)
 
-    # 既定に新しく増えた語だけを補う。ユーザーが値を変えたものは変えない。
-    # 「一度でも既定として配った語」は言い換えと無視で別に控える。ひとつの
-    # 入れ物にまとめると、同じ語が両方にあったときに片方を消しただけで
-    # もう片方も配られなくなる。控えを言い換えだけにすると、利用者が消した
-    # 既定の無視語が更新のたびに戻ってくる。
+    # Fill in only the words newly added to the defaults. Values the user changed
+    # stay put. Words ever shipped as a default are noted separately for replacements
+    # and for ignores. In one bucket, when the same word sits in both, deleting it
+    # from one side would stop the other from being shipped too. Noting only the
+    # replacements would bring back a deleted default ignore word at every update.
     known = set(cur.get("_seen", []))
     known_ignore = set(cur.get("_seen_ignore", []))
     replace = dict(cur.get("replace", {}))
@@ -289,17 +300,17 @@ def save_default_dictionary():
     print(f"辞書に既定の項目を {added} 件追加しました", file=sys.stderr)
 
 
-# 漢数字。位取りのある表記（三十二 → 32）を数字に直す。
+# Kanji numerals. Rewrites place-value forms (三十二 → 32) as digits.
 _KANJI_DIGIT = {"〇": 0, "零": 0, "一": 1, "二": 2, "三": 3, "四": 4,
                 "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
 _KANJI_SMALL = {"十": 10, "百": 100, "千": 1000}
 _KANJI_BIG = {"万": 10**4, "億": 10**8, "兆": 10**12}
 
-# 数として読める並びだけを拾う。「一部」「一気に」を壊さないよう、
-# 直後が助数詞・助詞になっているものは別途 _NOT_NUMBER で除く。
+# Pick up only runs that read as a number. To keep 「一部」 and 「一気に」 intact,
+# forms followed by a counter or a particle are excluded separately in _NOT_NUMBER.
 _KANJI_NUM_RE = re.compile(r"[〇零一二三四五六七八九十百千万億兆]+")
 
-# 数字にすると意味が変わる語（慣用句・熟語）。これらは変換しない。
+# Words whose meaning changes if turned into digits (idioms, compounds). Not converted.
 _NOT_NUMBER = {
     "一部", "一気", "一緒", "一応", "一旦", "一度", "一体", "一番", "一通り",
     "一方", "一見", "一切", "一人", "二人", "三人", "一日", "一言", "一杯",
@@ -309,10 +320,10 @@ _NOT_NUMBER = {
 
 
 def _kanji_to_int(s: str):
-    """漢数字を整数にする。読めなければ None。"""
-    total = 0        # 万・億をまたいだ合計
-    section = 0      # いまの区切り（万未満）の値
-    digit = None     # 直前の一桁
+    """Turn a kanji numeral into an int. None when it does not read as one."""
+    total = 0        # Sum across the 万 and 億 boundaries
+    section = 0      # Value of the current section (below 万)
+    digit = None     # The single digit just before
 
     for ch in s:
         if ch in _KANJI_DIGIT:
@@ -334,10 +345,10 @@ def _kanji_to_int(s: str):
 
 
 def kanji_numbers_to_arabic(text: str) -> str:
-    """漢数字をアラビア数字に直す（「三十秒」→「30秒」）。
+    """Rewrite kanji numerals as Arabic ones (「三十秒」 → 「30秒」).
 
-    熟語や慣用句（一部・十分など）は変えない。単独の「一」「二」も、
-    数として言ったのか判別できないので変えない。
+    Compounds and idioms (一部, 十分 and the like) are left alone. A bare 「一」 or
+    「二」 is left alone too, since there is no telling whether it was said as a number.
     """
     def sub(m):
         s = m.group(0)
@@ -349,39 +360,42 @@ def kanji_numbers_to_arabic(text: str) -> str:
     return _KANJI_NUM_RE.sub(sub, text)
 
 
-# 大文字で書かれても略語ではないもの。「A vs B」を「A VS B」にしない。
-# e.g. / i.e. / a.m. のような小文字の略記は大文字判定で弾かれるので入れない。
+# Written in caps and still not an acronym. Do not turn "A vs B" into "A VS B".
+# Lowercase shorthand like e.g. / i.e. / a.m. is already rejected by the uppercase
+# test, so it is not listed here.
 _NOT_ACRONYM = {"vs"}
 
-# 1文字ずつ区切られたアルファベットの並び。「G.U.I.」「G U I」「T.T.S」を捉える。
-# 各文字の直後の区切りはピリオドか空白。最後の1文字だけ区切りが無くてもよい。
-# 2文字以上を条件にして、単独の「I」や「a」を巻き込まないようにする。
+# A run of letters split one at a time. Catches "G.U.I.", "G U I" and "T.T.S".
+# The separator right after each letter is a period or a space. Only the last letter
+# may go without one. Requiring two or more letters keeps a lone "I" or "a" out.
 _SPELLED_RE = re.compile(
-    r"(?<![A-Za-z])"              # 直前が英字なら別の語の一部なので触らない
+    r"(?<![A-Za-z])"              # A letter just before means part of another word, leave it
     r"((?:[A-Za-z][.　 ]){1,}[A-Za-z]\.?)"
-    r"(?![A-Za-z])"               # 直後が英字でも同様
+    r"(?![A-Za-z])"               # Same when a letter comes just after
 )
 
 
 def collapse_letter_acronyms(text: str) -> str:
-    """1文字ずつ読み上げられた略語を詰める（「G.U.I.」「S S H」→「GUI」「SSH」）。
+    """Squeeze an acronym read out one letter at a time ("G.U.I.", "S S H" → "GUI", "SSH").
 
-    音声認識は略語を一文字ずつ区切って返すことがある。辞書でも直せるが、
-    未登録の語（AWS, JWT など）には効かないので、形で機械的に潰す。
+    Speech recognition sometimes returns an acronym split letter by letter. The
+    dictionary can fix that too, but it does nothing for unregistered words (AWS,
+    JWT and so on), so this collapses them mechanically by shape.
 
-    「Node.js」のような正当なドット付きの語や、文末のピリオドには触れない。
-    区切りが2つ以上連続する並びだけを対象にするため、「I.」単独や
-    「it. Some」のような普通の文は影響を受けない。
+    A legitimately dotted word like "Node.js" and a period ending a sentence are left
+    alone. Only runs with two or more separators in a row are targeted, so a lone
+    "I." or an ordinary sentence like "it. Some" is not affected.
     """
     def sub(m):
         s = m.group(1)
         letters = re.sub(r"[.　 ]", "", s)
-        # 音声認識が返す略語は大文字。小文字の並び（「a b c」「e.g.」）は
-        # 普通の文章か略記なので触らない。この判定だけで e.g. / i.e. /
-        # a.m. は守れる（大文字の「A M 三時」は AM に詰めてよい）。
+        # Acronyms returned by speech recognition are uppercase. A lowercase run
+        # ("a b c", "e.g.") is ordinary prose or shorthand, so leave it. This test
+        # alone protects e.g. / i.e. / a.m. (an uppercase 「A M 三時」 can safely
+        # squeeze down to AM).
         if not letters.isupper():
             return s
-        # 大文字でも略語でないもの（「A vs B」の V S など）は残す
+        # Uppercase but not an acronym (the V S in "A vs B") stays as it is
         if letters.lower() in _NOT_ACRONYM:
             return s
         return letters
@@ -390,24 +404,24 @@ def collapse_letter_acronyms(text: str) -> str:
 
 
 def apply_replacements(text: str, replace: dict) -> str:
-    """辞書の置換を適用する。長い語から当てて部分一致の取りこぼしを防ぐ。"""
+    """Apply the dictionary replacements. Longest first, to catch partial matches."""
     for src in sorted(replace, key=len, reverse=True):
         if src:
             text = text.replace(src, replace[src])
     return text
 
 
-# 意味を持たないつなぎ言葉。ビューアの設定で入切する。
-# ここで消すことで、画面の見た目だけでなく Claude に渡る本文からも消える。
+# Filler words that carry no meaning. Turned on and off in the viewer settings. Removing
+# them here takes them out of the body that reaches Claude, not just the screen.
 FILLERS = ["えーと", "えっと", "ええと", "あのー", "あの", "えー", "えっ",
            "まあ", "なんか", "そのー", "うーん", "んー"]
-# 長いものから当てる（「あのー」を「あの」で先に食われないように）
+# Longest first (so 「あのー」 is not eaten by 「あの」 beforehand)
 _FILLER_RE = re.compile("|".join(re.escape(w) for w in
                                  sorted(FILLERS, key=len, reverse=True)))
 
 
 def strip_fillers(text: str) -> str:
-    """つなぎ言葉を落として、句読点の乱れを整える。"""
+    """Drop the filler words and tidy up the punctuation they leave behind."""
     text = _FILLER_RE.sub("", text)
     text = re.sub("、{2,}", "、", text)
     text = re.sub(r"^[、。\s]+", "", text)
@@ -415,12 +429,12 @@ def strip_fillers(text: str) -> str:
 
 
 def fix_latin_commas(text: str) -> str:
-    """日本語モードで英語を話すと単語ごとに読点が入るのを戻す。"""
+    """Undo the Japanese comma inserted between English words in Japanese mode."""
     return re.sub(r"([A-Za-z])、(?=[A-Za-z])", r"\1 ", text)
 
 
 def read_config() -> dict:
-    """前回の選択。無ければ空。"""
+    """The previous choice. Empty when there is none."""
     try:
         d = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
         return d if isinstance(d, dict) else {}
@@ -429,9 +443,10 @@ def read_config() -> dict:
 
 
 def write_config(**kw) -> dict:
-    """選択を覚える。渡した項目だけ差し替える。
+    """Remember a choice. Only the keys passed in get replaced.
 
-    None は「触らない」の意味。空文字や False は消す／切るの意味なので通す。
+    None means leave it alone. An empty string or False means clear it or turn it
+    off, so those go through.
     """
     cur = read_config()
     cur.update({k: v for k, v in kw.items() if v is not None})
@@ -441,11 +456,12 @@ def write_config(**kw) -> dict:
 
 
 def resolve_engine(want: str = "") -> str:
-    """これから使うエンジンを決める。
+    """Decide which engine to use from here on.
 
-    指定 > 前回の選択 > 自動。自動は「何も入れずに動く」ブラウザを選ぶ。
-    ブラウザが使えない状況（画面を開けない）だけは呼び出し側が
-    --engine auto を渡してくるので、そのときは入っているモデルから選ぶ。
+    Explicit > previous choice > automatic. Automatic picks the browser, the one that
+    runs with nothing installed. Only when the browser cannot be used (no screen to
+    open) does the caller pass --engine auto, and then the pick comes from the models
+    that are installed.
     """
     known = {"browser"} | {e["id"] for e in asr_mic.available_engines()}
 
@@ -459,19 +475,19 @@ def resolve_engine(want: str = "") -> str:
         remembered = read_config().get("engine")
         if remembered in known:
             return remembered
-        # 覚えていたものが使えなくなっている（モデルを消した等）。
-        # 黙って失敗し続けるより、何もいらない方へ戻す。
+        # What was remembered is no longer usable (the model got deleted, say).
+        # Falling back to the one that needs nothing beats failing silently.
         if remembered:
             print(f"前回選んだ「{remembered}」は今使えないので、"
                   f"このブラウザで認識します。", file=sys.stderr)
         return "browser"
-    # want == "auto" のときは、入っているモデルの中から選ぶ
+    # For want == "auto", pick from among the models that are installed
     have = [e["id"] for e in asr_mic.available_engines()]
     for pick in ("apple", "whisper"):
         if pick in have:
             return pick
-    # auto は「画面を開けないので手元のモデルで」という意味。
-    # 1つも無いのに browser へ落とすと、その前提を裏切る。
+    # auto means "no screen to open, so use a local model". Falling back to browser
+    # when there is not a single one would betray that premise.
     sys.exit("手元で使える認識モデルがありません。\n"
              "  SETUP.md の手順で入れるか、画面を開けるなら\n"
              "  voice-shell.sh start --engine browser をお使いください。")
@@ -479,10 +495,10 @@ def resolve_engine(want: str = "") -> str:
 
 def polish(text: str, user_dict: dict, keep_kanji_numbers: bool = False,
            drop_fillers: bool = False) -> str:
-    """認識したテキストを読みやすく整える。
+    """Tidy the recognized text so it reads well.
 
-    略語を先に詰めるのは、辞書が完全一致で当たるため。「G P U」のまま
-    だと登録済みの「G.P.U.」に当たらない。
+    Acronyms get squeezed first because the dictionary matches exactly. Left as
+    「G P U」 it never hits the registered 「G.P.U.」.
     """
     text = collapse_letter_acronyms(text)
     text = apply_replacements(text, user_dict["replace"])
@@ -495,16 +511,16 @@ def polish(text: str, user_dict: dict, keep_kanji_numbers: bool = False,
 
 
 def is_noise(text: str, extra=(), allow=()) -> bool:
-    """相槌だけの発話かどうか。
+    """Whether the utterance is nothing but a backchannel.
 
-    「はい、はい」のように区切って繰り返しただけのものも相槌とみなす。
-    中身のある発話（「はい、それでは始めます」）は残す。
+    A word merely repeated with a break, like 「はい、はい」, counts as a backchannel
+    too. An utterance with substance (「はい、それでは始めます」) is kept.
 
-    extra には辞書の「無視する発話」を渡す。組み込みと同じ扱いにするので、
-    ユーザーが足した語も「〜、〜」の繰り返し判定に効く。
+    Pass the dictionary's ignore list as extra. It is treated the same as the built-in
+    list, so words the user added also work in the 「〜、〜」 repeat test.
 
-    allow には組み込みから外したい語を渡す。「わかった」「了解」のように、
-    こちらへの返事として実際に言う語が組み込みに入っているため。
+    Pass words to take out of the built-in list as allow. Words people really do say
+    back to you, like 「わかった」 or 「了解」, are in the built-in list.
     """
     off = {w.strip().lower() for w in allow}
     words = ({w for w in NOISE_ONLY if w.lower() not in off}
@@ -512,26 +528,28 @@ def is_noise(text: str, extra=(), allow=()) -> bool:
     core = text.strip().strip(_TRIM)
     if core.lower() in words:
         return True
-    # 句読点で分割して、全部が相槌なら捨てる（「はい、はい」「うん、うん。」）
+    # Split on punctuation, drop it when every part is a backchannel
+    # (「はい、はい」 「うん、うん。」)
     parts = [p.strip().strip(_TRIM) for p in re.split(r"[、。,.\s]+", core) if p.strip(_TRIM)]
     return bool(parts) and all(p.lower() in words for p in parts)
 
 
 def is_allowed_short(text: str, allow=()) -> bool:
-    """短くても最小文字数で落としてはいけない発話か。
+    """Whether a short utterance is one the minimum length must not drop.
 
-    最小文字数（既定15字）は物音の誤認識を捨てるためのもので、下げると
-    「はい」「うん」まで通り始める。下げずに、**この語だけは通したい**と
-    ユーザーが選んだものだけを通す。
+    The minimum length (15 characters by default) is there to throw away misrecognized
+    noise, and lowering it starts letting 「はい」 and 「うん」 through. Instead of
+    lowering it, let through only what the user picked as **this word specifically
+    should get through**.
 
-    allow に渡すのは辞書の unignore、つまり組み込みの無視語から本人が
-    外した語。「わかった」「了解」のような、こちらの問いかけへの返事と
-    して実際に言う語がそこに入る。外したのに長さで消えるなら、外せる
-    ようにした意味が無い。
+    What goes into allow is the dictionary's unignore, the built-in ignore words the
+    person took out themselves. Words people really do say in answer to a question,
+    like 「わかった」 or 「了解」, end up in there. If they get taken out and then
+    vanish on length, making them removable meant nothing.
 
-    物音の誤認識は一覧に載っていない語として出てくるので、この抜け道は
-    広がらない。判定は is_noise と同じ形に揃える（記号を落として比べ、
-    「了解、了解」のような繰り返しも同じ扱いにする）。
+    Misrecognized noise comes out as words that are not on the list, so this loophole
+    does not widen. The test matches the shape of is_noise (compare with symbols
+    stripped, and treat a repeat like 「了解、了解」 the same way).
     """
     off = {w.strip().strip(_TRIM).lower() for w in allow}
     off.discard("")
@@ -547,37 +565,41 @@ def is_allowed_short(text: str, allow=()) -> bool:
     return bool(parts) and all(p in off for p in parts)
 
 
-# ── 声で使えるコマンドの語 ──────────────────────
+# ── Words for the voice commands ─────────────────
 #
-# 合図の語はここ1か所に集める。散らばっていると、画面に一覧を出すのも、
-# 別の言語を足すのも、そのたびにファイルの中を探して回ることになる。
+# The command words are gathered here in one place. Scattered around, both putting
+# the list on screen and adding a language would mean hunting through the file.
 #
-# 言語で分けてあるのは、訳すだけでは済まないため。「ミュート」の英語は
-# mute でよいとして、その言語で実際に口から出る言い方は訳語を引いても
-# 出てこない。言語を足すときは欄を足すだけでよく、既にある欄は消さない
-# （英語で言う人も日本語で言う人も、同じ機械に向かって喋る）。
+# They are split by language because translating is not enough. English for 「ミュート」
+# may well be mute, but the phrasing that actually comes out of a mouth in that
+# language does not turn up in a dictionary. Adding a language just means adding a
+# column, and existing columns are never deleted (someone speaking English and
+# someone speaking Japanese talk to the same machine).
 #
-# 合図の語は短いので、最小文字数や相槌の判定より前に見る。誤爆すると
-# 話しかけているのに届かない状態になるので、その一言だけを喋ったときに
-# 限る（部分一致はしない）。
+# Command words are short, so they are checked before the minimum length and the
+# backchannel test. A false hit leaves you talking with nothing getting through, so
+# it only counts when that phrase alone was spoken (no partial matches).
 #
-# 合図はどの言語で言っても効く。**認識する言語にも画面の言語にも従わない。**
-# 画面をスペイン語にしたまま日本語で喋る人も、英語の画面で「ミュート」と
-# 言う人もいる。どちらかで絞ると、その人たちの合図が黙って効かなくなる。
-# 画面の言語で絞るのは「？」の一覧だけで、そこは「何と言えばよいか」に
-# ひとつ答える場所なので、読める言語のものを出す（command_catalog）。
+# Commands work in any language. **They follow neither the recognition language nor
+# the screen language.** Some people leave the screen in Spanish and speak Japanese,
+# some say 「ミュート」 to an English screen. Narrowing by either one would silently
+# kill those people's commands. The screen language narrows only the "?" list, which
+# is the one place that answers "what do I say" with a single answer, so it shows the
+# ones in a language the reader can read (command_catalog).
 #
-# **日本語と英語以外は下書き。**その言語を話す人がまだ目を通していない。
-# 画面の一覧にもその旨を出してある（viewer.html の cmdDraft）。
+# **Everything but Japanese and English is a draft.** No speaker of those languages
+# has looked it over yet. The list on screen says so too (cmdDraft in viewer.html).
 COMMAND_WORDS = {
-    # マイクを切る。
-    # 切っている間も認識は動いている（録ってはいるが送らない）ので解除の
-    # 合図は届く。ブラウザ認識は切ると音声を手放すので、声では戻せない。
+    # Turn the mic off.
+    # Recognition keeps running while it is off (it records but does not send), so
+    # the unmute command still gets through. Browser recognition lets go of the audio
+    # when it is turned off, so voice cannot bring it back.
     "mute": {
-        # 並び順は画面のため。判定は集合なので順に意味は無いが、一覧は頭から
-        # 数個しか出さないので、似た言い方を先に固めない（「ミュート」の変化形が
-        # 6つ並ぶと、マイクを切る言い方が他にもあることが伝わらない）。
-        # 認識が化けた形（みゅーと など）は、狙って言う語ではないので後ろへ。
+        # The order is for the screen. Matching uses a set so order means nothing
+        # there, but the list only shows the first few, so similar phrasings are not
+        # bunched at the front (six variants of 「ミュート」 in a row would not get
+        # across that there are other ways to turn the mic off). Forms that came out
+        # garbled (「みゅーと」 and such) go to the back, nobody says them on purpose.
         "ja": [
             "ミュート", "ミュートして", "ミュートオン",
             "マイクオフ", "マイクを切って", "マイクを切る",
@@ -589,8 +611,8 @@ COMMAND_WORDS = {
             "mute", "mute me", "mute the mic", "mic off",
             "turn off the mic", "turn the mic off",
         ],
-        # 「silencio」「silence」のような、部屋の人へ向けて言う語は入れない。
-        # 機械へ向けた言い方（不定詞や画面のボタンの文言）だけにする。
+        # Words aimed at people in the room, like "silencio" or "silence", are left
+        # out. Only phrasings aimed at a machine go in (infinitives, button wording).
         "es": [
             "silenciar", "silenciar el micro", "silenciar el micrófono",
             "apagar el micro", "apagar el micrófono",
@@ -599,8 +621,8 @@ COMMAND_WORDS = {
             "couper le micro", "couper le microphone", "coupe le micro",
             "micro off", "mode muet",
         ],
-        # ドイツ語は大文字で書いておく。判定は command_key が畳むので当たるし、
-        # 画面の一覧には書いた形がそのまま出る。
+        # German is written capitalized. Matching still hits because command_key
+        # folds the case, and the list on screen shows the form as written.
         "de": [
             "Mikro aus", "Mikrofon aus", "Stumm", "Stummschalten",
             "Mikrofon ausschalten",
@@ -608,16 +630,17 @@ COMMAND_WORDS = {
         "zh": [
             "静音", "开启静音", "关闭麦克风", "关掉麦克风", "麦克风静音",
         ],
-        # 「마이크 꺼」のような、相手へ言う形は入れない。名詞で止める形だけ。
+        # Forms said to a person, like 「마이크 꺼」, are left out. Noun forms only.
         "ko": [
             "음소거", "음소거 켜기", "마이크 끄기", "마이크 음소거",
         ],
     },
-    # マイクを入れる。
-    # 解除の語は、**この道具にしか言わない言葉**に限る。切っている理由はたいてい
-    # 通話や同席者との会話なので、「戻して」「再開」のような普通の言葉を入れると、
-    # 相手に言ったつもりの一言でマイクが開き、そのあとの会話が指示として流れ出す。
-    # 誤爆で失うのが「発話1つ」ではなく「切っていたつもりの時間ぜんぶ」になる。
+    # Turn the mic on.
+    # Unmute words are limited to **things you would only ever say to this tool**. The
+    # mic is usually off because of a call or someone sitting with you, so putting in
+    # ordinary words like 「戻して」 or 「再開」 means one sentence meant for a person
+    # opens the mic, and the conversation after that starts flowing out as instructions.
+    # A false hit costs not one utterance but the whole stretch you thought was muted.
     "unmute": {
         "ja": [
             "ミュート解除", "ミュート解除して", "アンミュート", "解除",
@@ -632,15 +655,16 @@ COMMAND_WORDS = {
             "unmute", "unmute me", "unmute the mic", "mic on",
             "turn on the mic", "turn the mic on",
         ],
-        # ここだけは言語ごとに足す基準を厳しくしてある。「マイクを入れて」に
-        # 当たる言い方は、通話中の相手へ言う一言でもあるからで、その語で開くと
-        # 失うのが発話1つではなく、切っていたつもりの時間ぜんぶになる。
+        # This is the one place where the bar for adding a language is set higher.
+        # Anything that means 「マイクを入れて」 is also a sentence you say to the
+        # person on a call, and opening on that word costs not one utterance but the
+        # whole stretch you thought was muted.
         #
-        # 入れてあるのは、二人称の命令形ではない形だけ。不定詞（activar /
-        # réactiver / einschalten）と、画面のボタンに書いてある名詞の形
-        # （解除静音 / 음소거 해제）は、人へ向けてそのまま言うことがまず無い。
-        # 「enciende el micro」「마이크 켜줘」「打开麦克风」のような、相手へ
-        # 頼む形は入れていない。
+        # What is in here is only forms that are not a second-person imperative.
+        # Infinitives (activar / réactiver / einschalten) and the noun forms written
+        # on a button (解除静音 / 음소거 해제) are things almost nobody says straight
+        # at a person. Forms that ask someone to do it, like 「enciende el micro」,
+        # 「마이크 켜줘」 or 「打开麦克风」, are not in here.
         "es": [
             "quitar silencio", "quitar el silencio", "dejar de silenciar",
             "activar el micro", "activar el micrófono", "reactivar el micro",
@@ -653,41 +677,41 @@ COMMAND_WORDS = {
             "Stummschaltung aufheben", "Stumm aus", "Mikrofon einschalten",
             "Mikro einschalten", "Mikrofon an",
         ],
-        # 中国語と韓国語は、画面のボタンの文言だけにしてある。日常の通話で
-        # 何と言うかまでは確かめられていないので、広げるのは実際に使う人が
-        # 出てからでよい。
+        # Chinese and Korean are held to the wording on a button, nothing more.
+        # What people actually say on an everyday call has not been checked, so
+        # widening can wait until someone really uses them.
         "zh": ["解除静音", "取消静音"],
         "ko": ["음소거 해제", "음소거 풀기"],
     },
-    # そのまま届く側へ戻す。
-    # 即時 / 手直しの切り替えも声でできるようにする。どちらもこの道具に対して
-    # しか言わない言葉なので、単独で言われたら合図として扱ってよい。
+    # Back to the side where speech goes straight through. Switching between live and
+    # hold can be done by voice too. Both are words you would only ever say to this
+    # tool, so a phrase said alone can be taken as a command.
     "live": {
         "ja": [
             "即時", "即時にして", "即時モード", "即時に戻して",
             "そのまま送る", "そのまま送って",
             "そくじ", "そくじもーど", "即時に",
-            # 「そくじ」は「食事」に化けやすい（実測）。単独で来たら同じ合図とみなす。
+            # 「そくじ」 easily becomes 「食事」 (measured). Alone, same command.
             "食事", "しょくじ", "食事モード", "速時", "則時",
         ],
         "en": ["live", "live mode", "instant", "instant mode", "send live"],
         "es": ["directo", "modo directo", "en directo", "enviar directo"],
         "fr": ["direct", "mode direct", "en direct", "envoi direct"],
-        # 「Sofort」「Direkt」を単体で入れていないのは、どちらも返事として
-        # そのまま口から出るため（「Sofort.」＝すぐやります）。
+        # 「Sofort」 and 「Direkt」 are not in on their own because both come straight
+        # out of a mouth as a reply (「Sofort.」 means "right away").
         "de": ["Sofortmodus", "Direktmodus", "Direkt senden", "Sofort senden"],
         "zh": ["即时模式", "直接发送", "实时发送", "立刻发送"],
         "ko": ["바로 전달", "바로 보내기", "즉시 모드", "바로 전달 모드"],
     },
-    # 溜めて手直しする側へ回す。
+    # Send it over to the side that piles up for editing.
     "hold": {
         "ja": [
             "手直し", "手直しにして", "手直しモード", "手直しに回して", "溜めて", "保留",
             "てなおし", "てなおしもーど", "手直しに", "ためて", "溜める", "ためる",
         ],
         "en": ["hold", "hold mode", "draft", "draft mode"],
-        # 「guardar」「Prüfen」「存下来」のような、Claude への指示として
-        # そのまま言いそうな動詞は外してある。
+        # Verbs you would plausibly say straight out as an instruction to Claude,
+        # like 「guardar」, 「Prüfen」 or 「存下来」, are left out.
         "es": ["revisar", "modo revisar", "modo revisión", "borrador",
                "modo borrador"],
         "fr": ["relecture", "mode relecture", "brouillon", "mode brouillon"],
@@ -695,15 +719,16 @@ COMMAND_WORDS = {
         "zh": ["草稿模式", "暂存模式", "先存着改", "改完再发"],
         "ko": ["모아 두기", "초안 모드", "모으기 모드", "고쳐서 보내기"],
     },
-    # 言い終わってから「やっぱりなし」「これは直してから送りたい」と思うことが
-    # ある。発話の**終わり**に合図が来たら、その一言をそのように扱う。途中に
-    # 出てきた分は普通の言葉のまま（合図の話をしているだけのことがある）。
+    # After finishing a sentence you sometimes think 「やっぱりなし」 or "I want to
+    # fix this before it goes". When the command lands at the **end** of an utterance,
+    # that sentence is treated that way. One that turns up mid-sentence stays an
+    # ordinary word (people do just talk about the commands).
     #
-    # 語は絞る。「やめて」「なし」のような、普通の文の終わりにも来る言い方を
-    # 入れると、そのつもりのない指示まで持っていかれる。
+    # The words are kept few. Put in phrasings that also end an ordinary sentence,
+    # like 「やめて」 or 「なし」, and instructions you meant to send get taken too.
     #
-    # 並び順に意味がある。末尾から当てて最初に当たったものを外すので、
-    # 書いた順のまま見る（長い言い方が短い言い方に食われないように）。
+    # The order matters. Matching runs from the tail and strips the first hit, so they
+    # are checked in written order (so a long phrasing is not eaten by a short one).
     "cancel_tail": {
         "ja": [
             "キャンセル", "きゃんせる", "キャンセルで", "キャンセルして",
@@ -711,27 +736,29 @@ COMMAND_WORDS = {
             "なかったことに", "なかったことにして", "やっぱなし", "やっぱりなし",
         ],
         "en": ["cancel", "cancel that", "scratch that", "never mind", "nevermind"],
-        # 足した言語では、動詞1語だけの形（cancelar / annuler / abbrechen /
-        # 取消 / 취소）を入れていない。文の終わりに当てる合図なので、その語で
-        # 終わる普通の指示（「これはキャンセルしたい」に当たる文）が丸ごと
-        # 消える。「これは要らない」と分かる形だけにする。
+        # In the added languages, single-verb forms (cancelar / annuler / abbrechen /
+        # 取消 / 취소) are not in. This command matches the end of a sentence, so an
+        # ordinary instruction ending in that word (a sentence along the lines of
+        # 「これはキャンセルしたい」) would vanish whole. Only forms that clearly read
+        # as "I do not want this" go in.
         "es": ["cancela eso", "cancelar eso", "olvida eso", "olvídalo"],
         "fr": ["annule ça", "annuler ça", "oublie ça"],
         "de": ["streich das", "vergiss das", "vergiss es"],
         "zh": ["刚才那句取消", "取消刚才那句", "取消这句", "这句不要了"],
         "ko": ["방금 말 취소", "방금 건 취소", "지금 말 취소", "이건 취소"],
     },
-    # こちらは捨てずに、画面の下書きへ回す（直してから送れる）
+    # This one is not thrown away, it goes to the draft on screen (fix it, then send)
     "hold_tail": {
         "ja": [
             "手直し", "てなおし", "手直しで", "手直しして", "手直ししたい",
-            # 「てなおし」は「出直し」に化けやすい（実測）
+            # 「てなおし」 easily comes out as 「出直し」 (measured)
             "出直し", "でなおし", "出直して",
             "直してから", "なおしてから", "あとで直す", "ちょっと直す",
         ],
         "en": ["edit", "edit this", "let me edit", "hold this"],
-        # 「à corriger」「para editar」のように、目的語の後ろに付く形は入れない。
-        # 「直すべき一覧」に当たる文がそのまま消える。自分が直すと言う形にする。
+        # Forms that trail an object, like 「à corriger」 or 「para editar」, are left
+        # out. A sentence meaning "the list to fix" would vanish as it stands. Use the
+        # forms that say the speaker will do the fixing.
         "es": ["déjame editarlo", "lo edito yo", "quiero editarlo"],
         "fr": ["je corrige", "je le corrige", "laisse-moi corriger"],
         "de": ["das ändere ich", "lass mich das ändern"],
@@ -740,16 +767,18 @@ COMMAND_WORDS = {
     },
 }
 
-# 画面の一覧に並べる順。送信先は語の表ではなく型なので、下の代表例で見せる。
+# The order they line up in on screen. Routing is a pattern rather than a word
+# table, so it is shown through the examples below.
 COMMAND_KINDS = ("mute", "unmute", "live", "hold", "route",
                  "cancel_tail", "hold_tail")
 
 
 def builtin_words(kind: str, lang: str = None) -> list:
-    """組み込みの言い方を返す。lang を渡すとその言語の分だけ。
+    """Return the built-in phrasings. Pass lang to get just that language.
 
-    言語を渡さなければ全部を書いた順に繋げる。どの言語で言われても効く
-    ので、判定に使うのはこちら。読む人の言語で絞るのは画面の一覧だけ。
+    With no language, everything is joined in written order. Commands work in
+    whatever language they are said, so this is the one matching uses. Narrowing by
+    the reader's language happens only for the list on screen.
     """
     langs = COMMAND_WORDS.get(kind) or {}
     if lang is not None:
@@ -760,31 +789,35 @@ def builtin_words(kind: str, lang: str = None) -> list:
     return out
 
 
-# 記号と間の空白を落としてから比べる。「ミュート。」「mute me」「マイク、オン」
-# のどれも同じ鍵になるようにする。全角数字はここで半角へ畳む。
-# ー（長音）は落とさない。落とすと「ミュート」が「ミュト」になって当たらない。
+# Compare after dropping symbols and the spaces in between. 「ミュート。」, 「mute me」
+# and 「マイク、オン」 should all land on the same key. Full-width digits fold to
+# half-width here. The long vowel mark ー is not dropped. Drop it and 「ミュート」
+# becomes 「ミュト」 and never matches.
 _CMD_DROP = str.maketrans("１２３４５６７８９０", "1234567890",
                           " \t\u3000。、．，・…！？!?.,-~〜\"'「」『』()（）")
 
 
 def command_key(text: str) -> str:
-    """合図を見比べるときの形。記号と間の空白を落として小文字にする。
+    """The shape used when comparing commands. Symbols and the spaces in between are
+    dropped and the text is lowercased.
 
-    利用者が足した言い方も同じ形にして覚える。ここを通さずに覚えると、
-    「ミュート、して」のように読点を打って登録した語が永久に当たらない。
+    Phrasings the user adds are remembered in this same shape. Remember them without
+    going through here and a word registered with a comma in it, like 「ミュート、して」,
+    will never match.
     """
     return text.strip().translate(_CMD_DROP).lower()
 
 
-# 判定に使う形へ畳んだもの。
+# Folded into the shape matching uses.
 #
-# 単体で言う合図は、空白と記号を落とした鍵の集合にする。上の表には
-# 「mute the mic」と読める形で書いておき、畳むのはここ。表の方を
-# 「mutethemic」と書いてしまうと、画面の一覧がそのまま出て英語が読めない。
+# Commands said on their own become a set of keys with spaces and symbols dropped.
+# The table above keeps them written readably as 「mute the mic」 and the folding
+# happens here. Write 「mutethemic」 in the table and the list on screen shows exactly
+# that, and the English becomes unreadable.
 #
-# 文の末尾に付く合図は畳まない。こちらは発話の末尾と生のまま比べるので
-# （空白の入った「cancel that」がそのまま要る）、書いた順のタプルにする。
-# 当てる順にも意味がある。
+# Commands that attach to the end of a sentence are not folded. Those are compared
+# raw against the tail of an utterance (「cancel that」 is needed with its space), so
+# they stay a tuple in written order. The order they are matched in matters too.
 MUTE_WORDS = {command_key(w) for w in builtin_words("mute")}
 UNMUTE_WORDS = {command_key(w) for w in builtin_words("unmute")}
 LIVE_WORDS = {command_key(w) for w in builtin_words("live")}
@@ -793,45 +826,48 @@ CANCEL_TAIL = tuple(builtin_words("cancel_tail"))
 HOLD_TAIL = tuple(builtin_words("hold_tail"))
 
 
-# ── 利用者が足す言い方 ──────────────────────
+# ── Phrasings the user adds ────────────────────
 #
-# 辞書と同じ流儀で設定ディレクトリに置き、デーモンが読み直すので再起動は
-# 要らない。辞書そのものへ混ぜないのは、誤認識の言い換えと機械への合図が
-# 別の話だから。同じ画面に並ぶと、「ミュート解除」と書いた行が言い換えたい
-# のか合図に足したいのか、書いた本人にも読めなくなる。
+# Same style as the dictionary, it lives in the config dir and the daemon re-reads
+# it, so no restart is needed. It stays out of the dictionary itself because
+# rewriting a misrecognition and adding a command for the machine are separate
+# matters. Lined up on one screen, even the person who wrote 「ミュート解除」 could no
+# longer tell whether that line was a rewrite or an added command.
 COMMANDS_FILE = CONFIG_DIR / "commands.json"
 
-# 足せるのは、その一言だけを喋ったときに効く合図に限る。
+# What can be added is limited to commands that work when that phrase alone is said.
 #
-# 解除（unmute）を外してあるのは、誤爆の代償が釣り合わないため。切って
-# いる理由はたいてい通話なので、相手に言ったつもりの一言でマイクが開くと、
-# そのあとの会話が丸ごと指示として流れる。失うのが「発話1つ」ではなく
-# 「切っていたつもりの時間ぜんぶ」になる。
+# unmute is left out because the cost of a false hit does not balance. The mic is
+# usually off because of a call, so if a sentence meant for the other person opens
+# the mic, the whole conversation after it flows out as instructions. What is lost is
+# not one utterance but the whole stretch you thought was muted.
 #
-# 文の末尾に付ける合図（cancel_tail / hold_tail）も外してある。こちらは
-# 普通の文の**終わり**に当たるので、よく使う言い方を足すと、そのつもりの
-# ない指示まで消える。組み込みの語を絞ってあるのと同じ理由。
+# Commands that attach to the end of a sentence (cancel_tail / hold_tail) are left
+# out too. Those match the **end** of an ordinary sentence, so adding a common
+# phrasing makes instructions you never meant to lose disappear. Same reason the
+# built-in words are kept few.
 USER_COMMAND_KINDS = ("mute", "live", "hold", "route")
-ROUTE_SLOT = "{n}"           # 送信先の言い方で、数の入る場所
-_USER_PHRASE_MAX = 24        # route_command が見る長さに合わせる
-_USER_PHRASE_MIN = 2         # 1文字は普通の発話と見分けが付かない
-_USER_PHRASE_LIMIT = 50      # 1種類あたり。際限なく増やすと誤爆だけが増える
+ROUTE_SLOT = "{n}"           # Where the number goes in a routing phrase
+_USER_PHRASE_MAX = 24        # Matches the length route_command looks at
+_USER_PHRASE_MIN = 2         # One character cannot be told apart from ordinary speech
+_USER_PHRASE_LIMIT = 50      # Per kind. Growing without limit only grows false hits
 
 
 def clean_user_phrase(kind: str, phrase) -> str:
-    """足された言い方を、使える形に直す。使えなければ空。
+    """Turn an added phrasing into a usable shape. Empty when it is not usable.
 
-    画面とデーモンの両方がここを通る。片方だけで弾くと、画面は受け取った
-    のに効かない語ができて、「登録したのに動かない」になる。
+    Both the screen and the daemon go through here. Reject in only one of them and
+    you get words the screen accepted that do nothing, which reads as "I registered
+    it and it does not work".
     """
     if kind not in USER_COMMAND_KINDS or not isinstance(phrase, str):
         return ""
     key = command_key(phrase)
     slots = key.count(ROUTE_SLOT)
     if kind == "route":
-        if slots != 1:       # 数の入る場所がちょうど1つ要る
+        if slots != 1:       # Exactly one slot for the number is required
             return ""
-    elif slots:              # 他の合図に数は入らない
+    elif slots:              # No number goes into the other commands
         return ""
     bare = key.replace(ROUTE_SLOT, "")
     if not _USER_PHRASE_MIN <= len(bare) <= _USER_PHRASE_MAX:
@@ -840,7 +876,7 @@ def clean_user_phrase(kind: str, phrase) -> str:
 
 
 def _clean_phrase_list(data: dict, kind: str) -> list:
-    """1種類ぶんの言い方を、覚える形にして並べ直す。"""
+    """Take one kind's phrasings and lay them out in the remembered shape."""
     raw = data.get(kind) or []
     out = []
     for p in raw if isinstance(raw, list) else []:
@@ -852,14 +888,15 @@ def _clean_phrase_list(data: dict, kind: str) -> list:
 
 _NO_COMMANDS = {"mute": frozenset(), "live": frozenset(), "hold": frozenset(),
                 "route": ()}
-_cmd_cache = (None, None)   # (更新時刻, 中身)
+_cmd_cache = (None, None)   # (mtime, contents)
 
 
 def load_commands() -> dict:
-    """利用者が足した言い方を返す。
+    """Return the phrasings the user added.
 
-    発話ごとに呼ばれるので、更新時刻が変わったときだけ読み直す。辞書と
-    同じ作りなので、画面で足した分がデーモンの再起動なしに効く。
+    This is called for every utterance, so it re-reads only when the mtime changed.
+    Same build as the dictionary, so what is added on screen works without a daemon
+    restart.
     """
     global _cmd_cache
     try:
@@ -889,10 +926,11 @@ def load_commands() -> dict:
 
 
 def clean_user_commands(data) -> dict:
-    """受け取った一式を、覚える形にして種類ごとに並べる。
+    """Take the whole set as received, put it in the remembered shape and sort it by kind.
 
-    画面からの保存もここを通す。片方だけで整えると、画面が持っている形と
-    デーモンが読む形がずれて、登録したのに効かない語ができる。
+    Saving from the screen goes through here too. Tidy in only one place and the shape
+    the screen holds drifts from the shape the daemon reads, which makes words that
+    were registered but do nothing.
     """
     if not isinstance(data, dict):
         data = {}
@@ -900,7 +938,7 @@ def clean_user_commands(data) -> dict:
 
 
 def user_command_phrases() -> dict:
-    """いま覚えている言い方を種類ごとに返す（画面へ渡す用）。"""
+    """Return the phrasings remembered right now, by kind (for handing to the screen)."""
     try:
         data = json.loads(COMMANDS_FILE.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError, ValueError):
@@ -909,30 +947,31 @@ def user_command_phrases() -> dict:
 
 
 def voice_command(text: str, muted: bool):
-    """発話そのものが入切の合図なら "mute" / "unmute" を返す。
+    """Return "mute" / "unmute" when the utterance itself is an on or off command.
 
-    いまの状態で意味のある方だけを見る。切っている最中の「ミュート」も、
-    入っている最中の「ミュート解除」も何も起こさない。見る語が半分になる分、
-    誤爆も半分になる。
+    Only the side that means something in the current state is checked. 「ミュート」
+    while already off and 「ミュート解除」 while already on both do nothing. Half as
+    many words to check means half as many false hits.
     """
     key = command_key(text)
     if not key:
         return None
     if muted:
-        # 解除に足した言い方は見ない（そもそも足せないようにしてある）
+        # Added unmute phrasings are not checked (they cannot be added anyway)
         return "unmute" if key in UNMUTE_WORDS else None
     return "mute" if key in MUTE_WORDS or key in load_commands()["mute"] else None
 
 
-# 数の言い方は認識のたびに揺れる。「2」と言っても「に」「ツー」「二」と出るし、
-# 「送信先に」は「送信先2」のことがある。読みを一通り並べて、どれで来ても拾う。
-# ひらがな1文字（に・し・ご・く）は助詞と見分けが付かないので、単独では効かない。
-# 下の型はどれも「番」「送信先」「〜に切り替え」の形を要求する。
+# How a number is said drifts with every recognition. Say 「2」 and out comes 「に」,
+# 「ツー」 or 「二」, and 「送信先に」 can mean 「送信先2」. All the readings are listed
+# so any of them gets picked up. A single hiragana (に, し, ご, く) cannot be told
+# apart from a particle, so it does nothing on its own. Every pattern below demands
+# the shape 「番」, 「送信先」 or 「〜に切り替え」.
 #
-# 11 以上は持たない。聞いているセッションが 11 個並ぶことはまず無いし、
-# 増やすほど普通の発話を食う危険だけが上がる。
+# Nothing from 11 up is held. Eleven sessions listening at once is not going to
+# happen, and every one added only raises the risk of eating ordinary speech.
 NUMBER_WORDS = {
-    # アラビア数字は、どの言語で喋っても同じ形で出てくる
+    # Arabic digits come out in the same shape whatever language is spoken
     "any": {"0": 0, "1": 1, "2": 2, "3": 3, "4": 4, "5": 5,
             "6": 6, "7": 7, "8": 8, "9": 9, "10": 10},
     "ja": {
@@ -953,7 +992,7 @@ NUMBER_WORDS = {
     "es": {"cero": 0, "uno": 1, "una": 1, "dos": 2, "tres": 3, "cuatro": 4,
            "cinco": 5, "seis": 6, "siete": 7, "ocho": 8, "nueve": 9,
            "diez": 10},
-    # 綴りの揺れ（zéro と zero）は両方持つ。認識がどちらで書くか決まらない。
+    # Spelling drift (zéro and zero) is held both ways. Recognition never settles.
     "fr": {"zéro": 0, "zero": 0, "un": 1, "une": 1, "deux": 2, "trois": 3,
            "quatre": 4, "cinq": 5, "six": 6, "sept": 7, "huit": 8, "neuf": 9,
            "dix": 10},
@@ -962,38 +1001,42 @@ NUMBER_WORDS = {
            "zehn": 10},
     "zh": {"零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
            "六": 6, "七": 7, "八": 8, "九": 9, "十": 10},
-    # 韓国語の読み（일 이 삼 …）は載せていない。「이번」が「今回」の意味で
-    # 日常語なので、これを2番と読むと普通の話が送信先の切り替えになる。
-    # 数字で言われたときだけ拾う（「2번」は下の ROUTE_PARTS で通る）。
+    # Korean readings (일 이 삼 and so on) are not listed. 「이번」 is an everyday
+    # word meaning "this time", so reading it as number 2 would turn ordinary talk
+    # into a routing switch. Only digits get picked up (「2번」 goes through
+    # ROUTE_PARTS below).
 }
-# 「ひとつ目」の形の前にだけ立つ和語の読み。ここに入れた語は「つ目」が
-# 続くときしか数として読まない。上の表へ混ぜると「いつに変更」が5番への
-# 切り替えになってしまう（「いつ」＝5）。数として読める場所を狭くして防ぐ。
+# Native Japanese readings that stand only in front of the 「ひとつ目」 shape. Words
+# put here read as a number only when 「つ目」 follows. Mixed into the table above,
+# 「いつに変更」 would become a switch to number 5 (「いつ」 is 5). Narrowing where
+# they can read as a number is what prevents it.
 NUMBER_WORDS_ORDINAL = {
     "ja": {"ひと": 1, "ふた": 2, "みっ": 3, "よっ": 4, "いつ": 5,
            "むっ": 6, "やっ": 8, "ここの": 9},
 }
 
-# 送信先の言い方を組み立てる部品。数そのものと違って、前後に付く語は
-# 言語で形が変わる（日本語は助数詞が後ろ、英語は前置きだけ）。
+# The parts a routing phrase is built from. Unlike the number itself, the words around
+# it change shape by language (Japanese puts a counter after, English a lead-in only).
 ROUTE_PARTS = {
     "ja": {
-        # 数の前に付く語。「送信先2」「セッション2」「ナンバー2」「番号2」
+        # In front of the number. 「送信先2」 「セッション2」 「ナンバー2」 「番号2」
         "prefix": ["送信先", "宛先", "あて先", "セッション", "せっしょん",
                    "ナンバー", "なんばー", "番号", "ばんごう"],
-        # 数のあとに付く語。「2番」「1番目」
+        # Words after the number. 「2番」 「1番目」
         "counter": ["番目", "ばんめ", "番", "ばん"],
-        # 「1つ目」の形。和語の読み（ひとつ目）が立てるのはここだけ
+        # The 「1つ目」 shape. The only place a native reading (ひとつ目) can stand
         "ordinal": ["つ目", "つめ"],
     },
     "en": {
-        # 「switch to 2」「number one」。英語は前に付く語だけで決まる。
-        # ここは畳んだ鍵（空白を落とした形）と比べるので、空白なしで書く。
+        # 「switch to 2」 「number one」. English is settled by the leading word alone.
+        # This compares against the folded key (spaces dropped), so it is written
+        # without spaces.
         "prefix": ["switchto", "sendto", "routeto", "goto", "target",
                    "session", "destination", "route", "number"],
     },
-    # 以下も畳んだ鍵と比べるので空白なしで書く。記号は落ちるが、アクセント
-    # （é à ü）は落ちないので、認識が付ける形と付けない形を両方持つ。
+    # The rest also compares against the folded key, so it is written without spaces.
+    # Symbols drop out but accents (é à ü) do not, so both the form recognition puts
+    # them on and the form without them are held.
     "es": {
         "prefix": ["sesión", "sesion", "destino", "número", "numero",
                    "objetivo", "cambiaa", "cambiara", "vea", "envíaa",
@@ -1009,15 +1052,16 @@ ROUTE_PARTS = {
                    "gehzu", "sendean", "sendezu", "schaltezu"],
     },
     "zh": {
-        # 「切换到2」「会话2」「第2个」。数のうしろに付く語だけの形
-        # （「一个」「十号」）は持たない。どちらも普通の言葉として出てくる。
+        # 「切换到2」 「会话2」 「第2个」. Shapes made only of a word after the number
+        # (「一个」 「十号」) are not held. Both come out as ordinary words.
         "prefix": ["切换到", "切换成", "切到", "换到", "发送到", "发到",
                    "发给", "会话", "目标", "第"],
         "tail": ["个", "号", "会话", "吧"],
     },
     "ko": {
-        # 「2번」「세션 2」「2번으로 보내」。数の読みを持たないので、番号は
-        # アラビア数字で来たときだけ通る（NUMBER_WORDS の韓国語の欄を見よ）。
+        # 「2번」 「세션 2」 「2번으로 보내」. There are no number readings, so a number
+        # goes through only when it arrives as Arabic digits (see the Korean column
+        # in NUMBER_WORDS).
         "prefix": ["세션", "대상", "목적지", "번호"],
         "counter": ["번", "번째"],
         "tail": ["으로", "로", "으로보내", "로보내", "으로보내줘", "로보내줘",
@@ -1025,9 +1069,10 @@ ROUTE_PARTS = {
     },
 }
 
-# 画面の一覧に出す代表例。送信先だけは語の表ではなく型なので、組み込みの
-# 語をそのまま並べても何と言えばよいのかが読めない。ここに書いたものが
-# 本当に効くことは、検証で1つずつ確かめている。
+# Representative examples for the list on screen. Routing alone is a pattern rather
+# than a word table, so lining up the built-in words as they are does not tell a
+# reader what to say. That the ones written here really work has been checked one by
+# one in testing.
 ROUTE_EXAMPLES = {
     "ja": ["2番", "2番目", "2つ目", "送信先を2", "セッション2", "ナンバー2",
            "2に切り替え"],
@@ -1040,14 +1085,14 @@ ROUTE_EXAMPLES = {
 }
 
 _NUM_WORDS = {w: n for tbl in NUMBER_WORDS.values() for w, n in tbl.items()}
-# 「つ目」の前でだけ数として読む分も足した引き当て表
+# Lookup table with the readings that count as a number only before 「つ目」 added in
 _NUM_LOOKUP = dict(_NUM_WORDS)
 for _tbl in NUMBER_WORDS_ORDINAL.values():
     _NUM_LOOKUP.update(_tbl)
 
 
 def _alt(words) -> str:
-    """長いものから当てる選択肢。「じゅう」を「じ」「ゅ」…と崩されないように。"""
+    """Longest first, so 「じゅう」 is not broken up into 「じ」 「ゅ」 and so on."""
     return "(?:" + "|".join(
         sorted((re.escape(w) for w in words), key=len, reverse=True)) + ")"
 
@@ -1056,8 +1101,9 @@ _NUM_ALT = _alt(_NUM_WORDS)
 _NUM_ORDINAL_ALT = _alt(_NUM_LOOKUP)
 _COUNTER = _alt(ROUTE_PARTS["ja"]["counter"])
 _ORDINAL = _alt(ROUTE_PARTS["ja"]["ordinal"])
-# 言い方が惜しく外れると、min_chars（既定15字）に届かず黙って消える。
-# 「合図でもプロンプトでもない」が一番たちが悪いので、語尾は広めに取る。
+# When a phrasing just barely misses, it falls short of min_chars (15 characters by
+# default) and vanishes without a word. "Neither a command nor a prompt" is the worst
+# outcome of all, so the sentence endings are taken generously.
 _VERB_CORE = (r"(?:切り替え|切替|きりかえ|変更|へんこう|送る|おくる|送って|おくって|"
               r"送信|そうしん|して|お願い|おねがい|頼む|たのむ|"
               r"switchto|sendto|goto)")
@@ -1069,14 +1115,14 @@ _PART = r"(?:に|へ|で)?"
 
 _ROUTE_RXS = [re.compile(rx) for rx in (
     # 送信先2 / 送信先を2に / セッション2に切り替えて / セッショントゥー
-    # 「送信先に」も入る（に＝2）。番号の無い「送信先に」は言葉として成り立たない。
+    # 「送信先に」 is in too (に is 2). A 「送信先に」 with no number is not language.
     rf"^{_PREFIX}を?({_NUM_ALT}){_COUNTER}?{_PART}{_VERB}?$",
-    # 2番 / 1番目 / 2番にして / 2番でお願い（頭に数が来る方が認識されやすい）
+    # 2番 / 1番目 / 2番にして / 2番でお願い (a number at the front is recognized more easily)
     rf"^({_NUM_ALT}){_COUNTER}{_PART}{_VERB}?$",
     # 1つ目 / 一つ目 / ひとつ目 / 3つ目に切り替え
-    # 和語の読み（ひと・ふた…）が数として通るのは、この型の中だけ。
+    # Native readings (ひと, ふた and so on) pass as a number only inside this pattern.
     rf"^({_NUM_ORDINAL_ALT}){_ORDINAL}{_PART}{_VERB}?$",
-    # 2に切り替え / 2へ送って（数のあとに必ず動詞が要る）
+    # 2に切り替え / 2へ送って (a verb is always required after the number)
     rf"^({_NUM_ALT})(?:に|へ){_VERB}$",
     # switch to 2 / session two / route 3 / number one
     rf"^{_PREFIX_EN}(?:session)?({_NUM_ALT})$",
@@ -1084,10 +1130,11 @@ _ROUTE_RXS = [re.compile(rx) for rx in (
 
 
 def _lang_num_alt(lang: str) -> str:
-    """その言語の数の読みと、アラビア数字だけを引く選択肢。
+    """An alternation drawing only that language's number readings and Arabic digits.
 
-    表を全部混ぜないのは、別の言語の読みが日常語と当たったときに、
-    当てにいく型が増えるだけ誤爆が広がるため。
+    The tables are not all mixed together because when another language's reading
+    collides with an everyday word, every extra pattern being matched just widens the
+    false hits.
     """
     words = dict(NUMBER_WORDS["any"])
     words.update(NUMBER_WORDS.get(lang) or {})
@@ -1095,12 +1142,12 @@ def _lang_num_alt(lang: str) -> str:
 
 
 def _route_patterns(lang: str, parts: dict) -> list:
-    """足した言語の型を、部品から組み立てる。
+    """Build the patterns for an added language out of the parts.
 
-    見るのは「前に付く語＋数」と「数＋後ろに付く語」の2つだけ。日本語の
-    ように助詞や語尾がいくつも付く形は言語ごとに違うので、ひとつの型へ
-    まとめると読めなくなる。広げるのは、その言語で実際に使う人が出てから
-    でよい。
+    Only two things are checked, a leading word plus a number, and a number plus a
+    trailing word. Shapes that pile on particles and endings the way Japanese does
+    differ from language to language, so folding them into one pattern makes it
+    unreadable. Widening can wait until someone actually uses that language.
     """
     num = _lang_num_alt(lang)
     tail = f"{_alt(parts['tail'])}?" if parts.get("tail") else ""
@@ -1114,21 +1161,22 @@ def _route_patterns(lang: str, parts: dict) -> list:
     return out
 
 
-# 日本語と英語の型は上にそのまま置いてある。触ると、いま効いている言い方が
-# 静かに効かなくなる。足した言語はここで後ろへ継ぎ足す。
+# The Japanese and English patterns are left as they are above. Touch them and
+# phrasings that work today quietly stop working. Added languages are appended here
+# at the back.
 _ROUTE_RXS += [re.compile(rx)
                for lang, parts in ROUTE_PARTS.items() if lang not in ("ja", "en")
                for rx in _route_patterns(lang, parts)]
 
 
 def _route_rx(key: str):
-    """足された言い方から、数を拾う型を作る。{n} の場所に数が入る。"""
+    """Build a pattern that pulls the number out of an added phrasing. {n} marks its spot."""
     head, _, tail = key.partition(ROUTE_SLOT)
     return re.compile(rf"^{re.escape(head)}({_NUM_ALT}){re.escape(tail)}$")
 
 
 def mode_command(text: str):
-    """送り方を切り替える合図なら "live" / "hold" を返す。"""
+    """Return "live" / "hold" when this is a command to switch how speech gets sent."""
     key = command_key(text)
     if not key:
         return None
@@ -1139,15 +1187,15 @@ def mode_command(text: str):
 
 
 def route_command(text: str):
-    """送信先を選ぶ合図なら番号を返す（画面に並ぶ順の1番目から）。"""
+    """Return the number when this command chooses a target (the first on screen is 1)."""
     key = command_key(text)
-    if not key or len(key) > 24:      # 合図はどれも短い。長い文は見るまでもない
+    if not key or len(key) > 24:      # Commands are all short. No need to read a long one
         return None
     for rx in _ROUTE_RXS:
         m = rx.match(key)
         if m:
             return _NUM_LOOKUP[m.group(1)]
-    # 足された言い方は組み込みの後ろで見る。組み込みの効き方を上書きさせない。
+    # Added phrasings come after the built-ins. They never override built-in behavior.
     for rx in load_commands()["route"]:
         m = rx.match(key)
         if m:
@@ -1156,16 +1204,17 @@ def route_command(text: str):
 
 
 def command_catalog(lang: str = "en") -> list:
-    """画面に出す一覧。読む人の言語の言い方だけを並べる。
+    """The list shown on screen. Only phrasings in the reader's language are laid out.
 
-    その言語の欄が無い合図は英語で出し、fallback を立てる。画面はそれを
-    見て「あなたの言語の言い方はまだ無い。この英語がそのまま効く」と添える。
-    黙って英語を出すと、その言語では別の言い方があるのに読めていないのか、
-    そもそも無いのかが読む人に分からない。
+    A command with no column for that language comes out in English with fallback
+    raised. The screen sees that and adds "there is no phrasing in your language yet,
+    this English works as it is". Show English silently and the reader cannot tell
+    whether a phrasing in their language exists and just was not read, or does not
+    exist at all.
 
-    判定はどの言語の語でも通るので、ここに出ていない言い方も効く。一覧は
-    「何と言えばよいか」に1つ答えるためのもので、全部を数え上げる場所
-    ではない。
+    Matching passes on words in any language, so phrasings not shown here work too.
+    The list is there to give one answer to "what do I say", not to be the place that
+    enumerates everything.
     """
     out = []
     for kind in COMMAND_KINDS:
@@ -1178,22 +1227,23 @@ def command_catalog(lang: str = "en") -> list:
         out.append({"id": kind, "phrases": list(words), "fallback": fallback,
                     "editable": kind in USER_COMMAND_KINDS})
     return out
-# 合図だと分かるように「コマンド◯◯」と言う人がいる。前置きは落とす。
+# Some people say 「コマンド◯◯」 so it reads as a command. The lead-in is dropped.
 _TAIL_PREFIX = ("コマンド", "こまんど", "command")
 _TAIL_TRIM = " \t\u3000。、．，・！？!?.,"
 
 
 def take_tail(text: str, tails):
-    """末尾が合図なら、それを取り除いた本文を返す。合図でなければ None。"""
+    """When the tail is a command, return the body with it removed. None when it is not."""
     body = text.strip().rstrip(_TAIL_TRIM)
     low = body.lower()
     for w in tails:
-        # 表の側も小文字にして比べる。ドイツ語のように名詞を大文字で書く
-        # 言語では、表に書いた形のまま比べると永久に当たらない。
+        # The table side is lowercased for the comparison too. In a language that
+        # capitalizes nouns, like German, comparing against the form as written in
+        # the table would never match.
         if not low.endswith(w.lower()):
             continue
         rest = body[: len(body) - len(w)].rstrip(_TAIL_TRIM)
-        for pre in _TAIL_PREFIX:          # 「〜。コマンド手直し」の前置き
+        for pre in _TAIL_PREFIX:          # The lead-in in 「〜。コマンド手直し」
             if rest.lower().endswith(pre):
                 rest = rest[: len(rest) - len(pre)].rstrip(_TAIL_TRIM)
                 break
@@ -1201,22 +1251,24 @@ def take_tail(text: str, tails):
     return None
 
 
-# ── 何台かで同時に使うとき ──────────────────────
+# ── Using several machines at once ───────────────
 #
-# 会社の Windows とこの Mac が両方聞いていると、「ミュート」と言えば両方が
-# 切れてしまう。機械に名前を付けて「開発用ミュート」のように頭に添えると、
-# その機械だけが反応する。
+# With the work Windows box and this Mac both listening, saying 「ミュート」 turns
+# both of them off. Give a machine a name and put it at the front, as in
+# 「開発用ミュート」, and only that machine responds.
 #
-# 名前が付いていない合図は、どの機械のものか決められないので**どれも動かない**。
-# ただし黙って捨てる（別の機械へ言ったものが、こちらの指示として届くと困る）。
+# A command with no name cannot be pinned to a machine, so **none of them act**. It
+# is dropped silently though (something said to another machine arriving here as an
+# instruction would be trouble).
 _NAME_SEP = " \t\u3000、,。．，:：・のはでをへに"
 
 
 def machine_config() -> tuple:
-    """(複数台モードか, この機械の呼び名) を返す。
+    """Return (whether multi-machine mode is on, what this machine is called).
 
-    呼び名は読点で区切って何通りでも書ける。「Mac, マック, まっく」のように、
-    認識のたびに綴りが揺れる名前を全部並べておける。
+    The name can be written any number of ways separated by commas. A name whose
+    spelling drifts with every recognition, like 「Mac, マック, まっく」, can be listed
+    out in full.
     """
     cfg = read_config()
     raw = cfg.get("machine_name") or ""
@@ -1225,7 +1277,7 @@ def machine_config() -> tuple:
 
 
 def _strip_name(text: str, names):
-    """頭がこの機械の呼び名なら、それを外した残りを返す。違えば None。"""
+    """When the head is this machine's name, return the rest. None otherwise."""
     body = text.strip()
     low = body.lower()
     for name in sorted(names or [], key=len, reverse=True):
@@ -1235,33 +1287,35 @@ def _strip_name(text: str, names):
 
 
 def looks_like_any_command(text: str) -> bool:
-    """その一言が、まるごと何かの合図に見えるか。"""
+    """Whether that phrase, taken whole, looks like some command."""
     t = text.strip()
     if not t:
         return False
     if (voice_command(t, False) or voice_command(t, True)
             or mode_command(t) or route_command(t)):
         return True
-    # 末尾の合図が単体で来た場合（本文が無い＝「キャンセル」だけ）
+    # A tail command that arrived on its own (no body, just 「キャンセル」)
     return any(take_tail(t, tails) == "" for tails in (CANCEL_TAIL, HOLD_TAIL))
 
 
-# 末尾の合図（「〜、手直し」「〜、キャンセル」）に、この長さ以上の本文が
-# 付いていれば、それは口述の締めくくりであって別の機械への合図ではない。
+# When a tail command (「〜、手直し」 「〜、キャンセル」) carries a body at least this
+# long, it is the close of a dictation, not a command aimed at another machine.
 _TAIL_BODY_MIN = 5
 
 
 def looks_like_other_command(text: str) -> bool:
-    """別の機械へ言った合図に見えるか。
+    """Whether this looks like a command said to another machine.
 
-    相手の呼び名は知りようがないので、頭を少しずつ削って合図の形が出てくるかで
-    見る。短い一言に限る（長い文の末尾がたまたま合図と同じ形でも拾わない）。
+    There is no way to know what the other one is called, so this shaves the head off
+    bit by bit and watches for a command shape to appear. Short phrases only (a long
+    sentence whose tail happens to match a command shape is not picked up).
     """
     t = text.strip()
     if not t or len(t) > 24:
         return False
-    # 「認証まわりを直して、手直し」のような口述の締めくくりは、合図では
-    # あってもこの機械宛て。呼び名が要らない方の合図なので、ここでは捨てない。
+    # The close of a dictation like 「認証まわりを直して、手直し」 is a command, but
+    # one aimed at this machine. It is the kind that needs no name, so it is not
+    # dropped here.
     for tails in (CANCEL_TAIL, HOLD_TAIL):
         body = take_tail(t, tails)
         if body and len(body) >= _TAIL_BODY_MIN:
@@ -1271,10 +1325,11 @@ def looks_like_other_command(text: str) -> bool:
 
 
 def apply_voice_command(text: str, log_path, muted: bool, user_dict=None):
-    """発話が合図なら実行して、その種類を返す。合図でなければ None。
+    """Run the command when the utterance is one and return its kind. None when it is not.
 
-    デーモン（手元のモデル）とビューア（ブラウザ認識）の両方がここを通る。
-    片方にしか無いと、認識のやり方によって効いたり効かなかったりする。
+    Both the daemon (a local model) and the viewer (browser recognition) go through
+    here. Present in only one of them, a command would work or not work depending on
+    how recognition is being done.
     """
     log_path = Path(log_path)
     d = log_path.parent
@@ -1283,7 +1338,7 @@ def apply_voice_command(text: str, log_path, muted: bool, user_dict=None):
     if user_dict is None:
         user_dict = load_dictionary()
 
-    # 何台かで同時に使っているときは、この機械の呼び名が頭に付いたものだけ。
+    # With several machines at once, only what carries this machine's name at the front.
     multi, names = machine_config()
     cmd_text = text
     if multi:
@@ -1291,14 +1346,14 @@ def apply_voice_command(text: str, log_path, muted: bool, user_dict=None):
         if named is not None:
             cmd_text = named
         elif looks_like_other_command(text):
-            return "other_machine"       # 別の機械へ言ったもの。黙って捨てる
+            return "other_machine"       # Said to another machine. Drop it silently
         else:
-            cmd_text = ""                # 呼び名が無い合図はどれも動かさない
+            cmd_text = ""                # A command with no name moves nothing
     if not cmd_text:
         return None
 
-    # 辞書を通した形でも見る。崩れて聞こえる語は
-    # 「ミュート回収 → ミュート解除」のように登録すれば拾える。
+    # The dictionary-applied form is checked too. A word that comes through garbled
+    # can be picked up by registering it, as in 「ミュート回収 → ミュート解除」.
     fixed = apply_replacements(cmd_text, user_dict["replace"])
 
     cmd = voice_command(cmd_text, muted) or voice_command(fixed, muted)
@@ -1319,8 +1374,8 @@ def apply_voice_command(text: str, log_path, muted: bool, user_dict=None):
         note_voice_cmd(log_path, "mode_" + mode, "", text)
         return "mode_" + mode
 
-    # 送信先。聞き手が1つなら選ぶ相手がいないので合図にしない
-    # （番号で答えただけの「2番」を食わないため）。
+    # Routing. With only one listener there is nobody to choose, so it is not taken
+    # as a command (so a plain numeric answer like 「2番」 does not get eaten).
     n = route_command(cmd_text) or route_command(fixed)
     if n:
         live = list_active_listeners(log_path)
@@ -1330,25 +1385,26 @@ def apply_voice_command(text: str, log_path, muted: bool, user_dict=None):
                 note_voice_cmd(log_path, "route",
                                f"{n}. {live[n - 1]['label']}", text)
                 return "route"
-            # 無い番号。黙って捨てると「言ったのに変わらない」になる。
+            # A number that is not there. Dropped silently it reads as "I said it and
+            # nothing changed".
             note_voice_cmd(log_path, "route_missing", str(n), text)
             return "route_missing"
     return None
 
 
 def note_voice_cmd(log_path, kind: str, label: str = "", said: str = "") -> None:
-    """声の合図に何が起きたかを画面へ渡す。
+    """Hand the screen what happened with a voice command.
 
-    合図は発話として送らないので、通ったかどうかがユーザーに見えない。
-    ビューアがこのファイルを見て、音を鳴らし、一言を出す。
+    A command is not sent as an utterance, so the user cannot see whether it went
+    through. The viewer watches this file, plays a sound and puts up a line.
 
-    said には合図と判定した発話そのものを入れる。指示のつもりで言ったものが
-    合図として消えることがあるので、何が消えたのかは見せておく。
+    Put the utterance that was judged a command into said. Something meant as an
+    instruction sometimes disappears as a command, so show what disappeared.
     """
     try:
-        # encoding を書かないと Windows はロケール（cp932）で開く。題名に
-        # cp932 に無い字が1つでもあると UnicodeEncodeError で落ちる。これは
-        # OSError ではないので、捕まえる側も広げておく。
+        # Without encoding, Windows opens with the locale (cp932). One character in
+        # the title that cp932 does not have and it dies with UnicodeEncodeError.
+        # That is not an OSError, so what catches it is widened as well.
         (Path(log_path).parent / "voice_cmd.json").write_text(
             json.dumps({"at": time.time(), "kind": kind,
                         "label": label, "said": said[:60]},
@@ -1386,8 +1442,9 @@ def parse_args():
                    help="次回もこのエンジンで起動するよう覚える")
     p.add_argument("--list-engines", action="store_true",
                    help="選べるエンジンを一覧して終了")
-    # Whisper のモデルもエンジンと同じく覚える。画面の「聞き取りを始める」は
-    # 元のコマンドを知らないので、覚えていないと立て直した時点で既定へ戻る。
+    # The Whisper model is remembered the same as the engine. The start button on
+    # screen does not know the original command, so without remembering it, things
+    # fall back to the default the moment it is brought back up.
     p.add_argument("--resolve-model", action="store_true",
                    help="覚えている Whisper のモデルを表示して終了する")
     p.add_argument("--remember-model", metavar="NAME", default=None,
@@ -1396,10 +1453,10 @@ def parse_args():
 
 
 def _pid_alive(pid):
-    """シグナルを送らずに生存確認する。"""
+    """Check whether a process is alive without sending it a signal."""
     if sys.platform.startswith("win"):
-        # os.kill(pid, 0) は Windows では未対応（SystemError になる）。
-        # ハンドルが取れるかどうかで代用する。
+        # os.kill(pid, 0) is unsupported on Windows (it raises SystemError).
+        # Whether a handle can be taken stands in for it.
         import ctypes
         PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
         handle = ctypes.windll.kernel32.OpenProcess(
@@ -1414,10 +1471,10 @@ def _pid_alive(pid):
     except ProcessLookupError:
         return False
     except PermissionError:
-        # 他人のプロセスに PID が再利用されている。ここで見る PID は
-        # すべて自分が書いたものなので、他人のもの＝目的のプロセスではない。
-        # True にすると status が永久に「稼働中」になり、start も
-        # 二度と通らなくなる（二重起動の本当の歯止めは flock 側にある）。
+        # The PID got reused by somebody else's process. Every PID looked at here
+        # was written by us, so somebody else's is not the process we are after.
+        # Return True and status stays "running" forever and start never goes
+        # through again (the real brake on a second instance is on the flock side).
         return False
 
 
@@ -1430,12 +1487,13 @@ def read_pid():
 
 
 def _proc_started_at(pid):
-    """そのプロセスが始まってから何秒経ったか。分からなければ None。
+    """How many seconds since that process started. None when it cannot be told.
 
-    PID は使い回されるので、登録ファイルより後に始まったプロセスは別人と
-    みなす。経過秒（ps の etime）で見るのは、書式が "分:秒" や
-    "日-時:分:秒" と揺れる開始時刻より、桁を跨いでも解釈が単純なため。
-    ps が無い環境では None を返し、判定を素通りさせる。
+    PIDs get reused, so a process that started after the registration file is taken
+    to be somebody else. Elapsed seconds (etime from ps) is what gets read because it
+    stays simple across digit counts, unlike a start time whose format drifts between
+    "MM:SS" and "DD-HH:MM:SS". Where ps is missing, None comes back and the test is
+    waved through.
     """
     if sys.platform.startswith("win"):
         return None
@@ -1448,27 +1506,29 @@ def _proc_started_at(pid):
         days, _, clock = text.rpartition("-")
         parts = [int(x) for x in clock.split(":")]
         while len(parts) < 3:
-            parts.insert(0, 0)            # "分:秒" を "0:分:秒" に揃える
+            parts.insert(0, 0)            # Line up "MM:SS" into "0:MM:SS" form
         secs = parts[0] * 3600 + parts[1] * 60 + parts[2]
         return secs + (int(days) * 86400 if days else 0)
     except Exception:
         return None
 
 
-# 送信先の指定。ビューアが書き、デーモンが毎回読む。
-#   ファイルが無い  … まだ選んでいない（あとで起動した方へ届ける）
-#   <PID>          … その相手へ
-# 「全員へ」は選べない。2つのセッションが同じ指示を受け取って別々に動き出す
-# 状況に使い道が無く、間違って選ぶと気づきにくいだけだった。
+# The routing target. The viewer writes it, the daemon reads it every time.
+#   no file        … nothing chosen yet (goes to whichever started later)
+#   <PID>          … to that one
+# "everyone" cannot be chosen. Two sessions taking the same instruction and setting
+# off in different directions had no use, and picking it by mistake was only hard to
+# notice.
 def route_file(log_path):
     return Path(log_path).parent / "route"
 
 
 def write_atomic(path, text: str) -> None:
-    """別名で書いてから置き換える。
+    """Write under another name, then replace.
 
-    truncate と write のあいだに読まれると、欠けた内容が渡る。送信先の
-    場合は「一致する PID が無い」と見なされて別の相手へ1発話行く。
+    Read in between the truncate and the write and what gets handed over is missing
+    pieces. For the routing target that reads as "no matching PID" and one utterance
+    goes to a different listener.
     """
     tmp = Path(path).with_suffix(".tmp")
     tmp.write_text(text, encoding="utf-8")
@@ -1476,44 +1536,46 @@ def write_atomic(path, text: str) -> None:
 
 
 def resolve_target(log_path):
-    """いまの届け先を決める。None なら全員へ。
+    """Decide where things go right now. None means everyone.
 
-    既定は「あとで起動した方」。並行して別の作業を始めたら、そちらへ
-    向くのが自然なため。ここで決めるので、**画面を開いていなくても効く**
-    （以前は画面側だけの処理で、開いていないと全員に二重に届いていた）。
+    The default is whichever started later, since starting another job alongside
+    naturally turns attention that way. Deciding it here is what makes it **work even
+    with no screen open** (this used to live only on the screen side, and with it
+    closed everything arrived twice, to everyone).
     """
     try:
         raw = route_file(log_path).read_text(encoding="utf-8").strip()
     except OSError:
         raw = ""
 
-    # 選んだ相手は、登録ファイルの有無だけで判断する。生存確認の走査は
-    # 一時的に数え損なうことがあり、そのたびに別の相手へ回すと、選んだ
-    # つもりのない相手へ発話が紛れ込む（届かない方がまだ安全）。
+    # The chosen listener is judged purely by whether its registration file exists.
+    # The liveness sweep sometimes miscounts for a moment, and rerouting on every one
+    # of those slips utterances to a listener nobody chose (not arriving is safer).
     if raw and (listeners_dir(log_path) / raw).exists():
         return raw
 
-    # まだ選んでいない、または選んだ相手が終了した。既定は「いま起動した方」
-    # なので、並び順（first_seen）ではなく登録し直した時刻で選ぶ。
-    # 聞き手が1つだけなら宛先を書く意味がない。
+    # Nothing chosen yet, or the chosen listener exited. The default is whichever
+    # just started, so the pick uses the re-registration time rather than the display
+    # order (first_seen). With only one listener there is no point writing a target.
     live = list_active_listeners(log_path)
     if len(live) <= 1:
         return None
     return str(max(live, key=lambda e: e.get("since", 0))["pid"])
 
 
-# ── 聞き手の名前 ──────────────────────────
+# ── Listener names ─────────────────────────
 #
-# 起動時点では作業の中身が決まっていないので、まずフォルダ名。エージェントが
-# 会話に題名を付けたらそちらへ切り替える。題名の在り処は道具ごとに違うため、
-# 探し方を並べて上から試す。どれにも当たらない道具のために、環境変数
-# （VOICE_SHELL_NAME）と `voice-shell.sh name` も残してある。
+# At startup the work has no shape yet, so the folder name comes first. Once the
+# agent gives the conversation a title, it switches to that. Where the title lives
+# differs from tool to tool, so the ways of finding it are lined up and tried from
+# the top. For a tool none of them hit, the environment variable (VOICE_SHELL_NAME)
+# and `voice-shell.sh name` are still there.
 
 _title_cache = {}      # path -> (mtime, title)
 
 
 def _claude_title(session_id):
-    """Claude Code が付けた題名。会話が進むと更新される。"""
+    """The title Claude Code gave it. Updated as the conversation goes on."""
     import glob
     hits = glob.glob(str(Path.home() / ".claude/projects/*" / f"{session_id}.jsonl"))
     if not hits:
@@ -1531,7 +1593,7 @@ def _claude_title(session_id):
     try:
         with open(path, errors="replace") as f:
             for line in f:
-                # 全行を JSON に起こすと重い。目印のある行だけ見る。
+                # Parsing every line as JSON is heavy. Only look at marked lines.
                 if '"ai-title"' not in line:
                     continue
                 try:
@@ -1547,7 +1609,7 @@ def _claude_title(session_id):
 
 
 def _codex_title(session_id):
-    """Codex が付けた題名（thread_name）。"""
+    """The title Codex gave it (thread_name)."""
     path = Path.home() / ".codex" / "session_index.jsonl"
     try:
         mtime = path.stat().st_mtime
@@ -1576,7 +1638,7 @@ def _codex_title(session_id):
 
 
 def saved_names() -> dict:
-    """`voice-shell.sh name` で付けた名前（会話の id → 表示名）。"""
+    """Names set with `voice-shell.sh name` (conversation id to display name)."""
     try:
         return json.loads((CONFIG_DIR / "names.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -1584,13 +1646,13 @@ def saved_names() -> dict:
 
 
 def listener_title(entry):
-    """その聞き手をいま何と呼ぶか。無ければ None（フォルダ名に落とす）。"""
+    """What to call that listener right now. None falls back to the folder name."""
     if entry.get("name"):
-        return entry["name"]              # 手で付けた名前が最優先
+        return entry["name"]              # A hand-set name wins over everything
     sid, agent = entry.get("session"), entry.get("agent")
     if not sid:
         return None
-    # 音声モードを入れ直すと登録ファイルは作り直されるので、設定側も見る
+    # Voice mode off and on rebuilds the registration file, so check the config too
     named = saved_names().get(sid)
     if named:
         return named
@@ -1602,13 +1664,15 @@ def listener_title(entry):
 
 
 def label_listeners(entries):
-    """表示名を決める。同じ名前が並んだら早い順に (2) (3) と付ける。
+    """Decide the display names. When the same name lines up more than once, the
+    duplicates get (2), (3) and so on, counted in order of earliness.
 
-    並びは「その会話が最初に聞き始めた時刻」。登録し直した時刻で並べると、
-    音声モードを入れ直すたびに番号が動いて、声で指す番号が当てにならない。
+    The order is when that conversation first started listening. Order by the
+    re-registration time and the numbers shift every time voice mode goes off and on,
+    which makes the number you say out loud unreliable.
     """
-    # 同じ時刻で並んだときは PID で決める。ここを決めておかないと、
-    # 登録ファイルを読む順（OS 任せ）で番号が入れ替わる。
+    # When the times tie, the PID decides. Leave this undecided and the numbers swap
+    # around with the order the registration files get read (left to the OS).
     entries = sorted(entries,
                      key=lambda e: (e.get("first_seen") or e.get("since", 0),
                                     e.get("pid", 0)))
@@ -1626,11 +1690,11 @@ def listeners_dir(log_path):
 
 
 def list_active_listeners(log_path):
-    """発話ログを聞いているセッションを一覧する。
+    """List the sessions listening to the utterance log.
 
-    `pgrep` に頼らない（Windows の Git Bash には無い）。代わりに
-    `voice-shell.sh listen` が起動時に自分で登録するファイルを見る。
-    生きていないものはついでに掃除する。
+    This does not lean on `pgrep` (Git Bash on Windows does not have it). Instead it
+    looks at the file `voice-shell.sh listen` registers for itself at startup. The
+    ones that are not alive get cleaned up along the way.
     """
     d = listeners_dir(log_path)
     if not d.is_dir():
@@ -1649,14 +1713,15 @@ def list_active_listeners(log_path):
             info = json.loads(raw)
         except ValueError:
             info = {}
-        # 登録ファイルより後に始まったプロセスなら、PID が使い回されただけの
-        # 別人。これを見ないと、居ないセッションについて警告を書き続ける。
+        # A process that started after the registration file is somebody else who
+        # merely got the recycled PID. Without this check, warnings keep getting
+        # written about a session that is not there.
         stale = False
         age = _proc_started_at(pid)
         if age is not None:
             try:
                 registered_ago = time.time() - f.stat().st_mtime
-                stale = age < registered_ago - 5      # 5秒は測り方のぶれ
+                stale = age < registered_ago - 5      # 5 seconds of measurement slack
             except OSError:
                 stale = False
         if _pid_alive(pid) and not stale:
@@ -1670,9 +1735,9 @@ def list_active_listeners(log_path):
             out.append(info)
         else:
             try:
-                f.unlink(missing_ok=True)   # 死んでいるものは片付ける
+                f.unlink(missing_ok=True)   # Clear away the dead ones
             except PermissionError:
-                pass                        # 他人のもの。触らない
+                pass                        # Somebody else's. Leave it
     return label_listeners(out)
 
 
@@ -1692,8 +1757,8 @@ def main():
         return
 
     if args.resolve_model:
-        # 覚えていなければ何も出さない。呼ぶ側は空かどうかで
-        # 「--model を足すか」を決められる。
+        # Print nothing when nothing is remembered. The caller can decide whether
+        # to add --model from whether this comes back empty.
         print(read_config().get("whisper_model") or "")
         return
 
@@ -1707,8 +1772,8 @@ def main():
         return
 
     if args.listeners:
-        # 何も出さない/出す は呼び出し側（voice-shell.sh）に判断させる。
-        # ここで固定文言を出すと「呼び出し側が空かどうかを見分けられない」ため。
+        # Whether anything is printed is left to the caller (voice-shell.sh). Print
+        # a fixed line here and the caller can no longer tell an empty result apart.
         for l in list_active_listeners(args.log_file):
             print(f"  {l['label']}  （PID {l['pid']}）")
             print(f"    起動した時刻  {l['started']}")
@@ -1731,13 +1796,13 @@ def main():
             print("動いていません。")
             return
         os.kill(pid, signal.SIGTERM)
-        # 本当に終わるまで少し待つ。ここで即座に返ると、呼び出し元
-        # （viewer.py の /api/engine）は「止めた」と判断してしまうが、
-        # 実際にはまだ数百ms〜数秒プロセスが生きていることがある。
-        # その隙にブラウザ認識（Web Speech API）が発話を送ると、
-        # /api/utterance の「デーモンが動いているなら受けない」判定に
-        # 引っかかり、最初の1件だけ発話が黙って捨てられる（実測）。
-        for _ in range(50):        # 最大5秒
+        # Wait a little for it to really end. Return right away here and the caller
+        # (/api/engine in viewer.py) decides it stopped, but the process can in fact
+        # still be alive for a few hundred ms up to a few seconds. If browser
+        # recognition (Web Speech API) sends an utterance in that gap, it trips the
+        # "do not accept while the daemon is running" test in /api/utterance, and the
+        # very first utterance alone gets thrown away silently (measured).
+        for _ in range(50):        # 5 seconds at most
             if not _pid_alive(pid):
                 break
             time.sleep(0.1)
@@ -1749,27 +1814,28 @@ def main():
 
     STATE_DIR.mkdir(parents=True, exist_ok=True)
 
-    # 二重起動を確実に防ぐ。PID ファイルは読み込みが終わってから書かれるので、
-    # 起動中（1分ほど）は上の確認をすり抜けてしまう。二つ動くとマイクを
-    # 奪い合って両方とも中途半端に壊れる。ロックは起動の瞬間から効き、
-    # 異常終了しても OS が解放するので取り残しの心配がない。
+    # Reliably stop a second instance. The PID file is written only after loading
+    # finishes, so during startup (about a minute) the check above slips through.
+    # With two running they fight over the mic and both end up half broken. The lock
+    # holds from the instant of startup, and the OS releases it even on a crash, so
+    # nothing gets left behind.
     _lock = open(STATE_DIR / "daemon.lock", "w")
     try:
         _lock_exclusive_nb(_lock)
     except OSError:
         sys.exit("すでに起動しています（読み込み中かもしれません）。")
-    globals()["_daemon_lock"] = _lock   # 閉じると解放されるので握り続ける
+    globals()["_daemon_lock"] = _lock   # Closing it releases the lock, so keep holding on
 
     log_path = Path(args.log_file)
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    # 起動のたびに空にする（前回の発話を拾わせない）
+    # Emptied on every startup (so last time's utterances are not picked up)
     log_path.write_text("", encoding="utf-8")
 
     save_default_dictionary()
 
-    # ビューアから指定されたマイクを毎回見る（切り替えは録音だけ入れ替える）
-    # 前回選んだマイクを覚えておく。/tmp のファイルは再起動で消えるので、
-    # そこだけだと毎回「システムの既定」に戻ってしまう。
+    # Check the mic the viewer specified every time (switching swaps only the recording)
+    # Remember the mic picked last time. Files in /tmp vanish on reboot, so with only
+    # those it would fall back to the system default every single time.
     saved_mic = read_config().get("mic")
     if saved_mic and args.device == asr_mic.DEFAULT_DEVICE:
         args.device = saved_mic
@@ -1784,30 +1850,32 @@ def main():
 
     args.want_device = want_device
 
-    # 実際に切り替えが完了したデバイス名。ビューアが「切り替えました」と
-    # 表示するのはボタンを押した瞬間の楽観的な表示で、裏で本当に切り替わった
-    # かは分からない。ここに確定情報を書き、ビューアはこのファイルの変化を
-    # 見て初めて確定の表示をする。
+    # The device name the switch actually completed on. When the viewer says it
+    # switched, that is an optimistic display at the instant the button was pressed
+    # and it has no idea whether the switch really happened underneath. The settled
+    # information is written here, and only on seeing this file change does the
+    # viewer show the settled state.
     mic_active_path = Path(args.log_file).parent / "mic_active"
     mic_active_path.write_text(args.device, encoding="utf-8")
 
     def on_switch(dev):
         mic_active_path.write_text(dev, encoding="utf-8")
-        write_config(mic=dev)      # 次の起動でも同じマイクを使う
+        write_config(mic=dev)      # Use the same mic on the next startup too
 
     args.on_switch = on_switch
 
-    # マイク感度と確定までの無音秒数もビューアから触れる。録音の入れ替えすら
-    # 要らず、次に読み直した時点から効く。ファイルが無ければ今の値で作る。
+    # Mic sensitivity and the seconds of silence before settling are reachable from
+    # the viewer too. Not even a recording swap is needed, they take effect from the
+    # next re-read. With no file, one is made from the current values.
     def want_tuning():
         try:
             return json.loads(TUNING_FILE.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            return None      # 書き換え途中で読んだだけ。次の周期で拾い直す
+            return None      # Just read mid-write. Picked up again on the next cycle
 
     args.want_tuning = want_tuning
 
-    # 保存済みの値があれば、起動時点から反映しておく
+    # When saved values exist, apply them from startup onward
     saved = want_tuning() or {}
     for key in ("silence_threshold", "silence_duration"):
         if isinstance(saved.get(key), (int, float)):
@@ -1816,28 +1884,28 @@ def main():
         args.min_chars = int(saved["min_chars"])
     if isinstance(saved.get("strip_fillers"), bool):
         args.strip_fillers = saved["strip_fillers"]
-    # 認識言語（Whisper 限定）。他のエンジンは "Japanese" のような綴りを
-    # 使うため、ここで上書きすると壊れる。空文字は自動判定を意味する。
+    # Recognition language (Whisper only). Other engines use spellings like
+    # "Japanese", so overwriting here breaks them. An empty string means auto-detect.
     if args.engine == "whisper" and isinstance(saved.get("language"), str):
         args.language = saved["language"] or None
 
-    # 足りない項目を今の値で埋める。ファイルが既にある人にも新しい項目が
-    # 行き渡るようにする（無いままだとビューアのつまみが効かない）。
+    # Fill missing keys with the current values, so new keys reach people who
+    # already have the file (left missing, the viewer's sliders do nothing).
     filled = dict(saved)
     for key in ("silence_threshold", "silence_duration", "min_chars",
                 "strip_fillers"):
         filled.setdefault(key, getattr(args, key))
     if args.engine == "whisper":
-        # CLI 既定の "Japanese" のような綴りのままだと、ビューアの
-        # プルダウン（2文字コードで持つ）と一致しないので正規化する。
+        # Left as a CLI-default spelling like "Japanese", it does not match the
+        # viewer's dropdown (which holds two-letter codes), so normalize it.
         import whisper_engine
         filled.setdefault("language", whisper_engine._lang_code(args.language) or "")
     if filled != saved:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         TUNING_FILE.write_text(json.dumps(filled, indent=2) + "\n", encoding="utf-8")
 
-    # ビューアが「今どのエンジンか」を知るための確定情報（認識言語の
-    # プルダウンは Whisper のときだけ出す）。
+    # The settled information the viewer uses to know which engine is running (the
+    # recognition language dropdown only shows for Whisper).
     (Path(args.log_file).parent / "engine_active").write_text(args.engine, encoding="utf-8")
 
     print("モデルを読み込み中… (初回は数分かかります)", file=sys.stderr)
@@ -1847,19 +1915,20 @@ def main():
     print(f"\n  聞いています。喋ると {log_path} に追記します"
           f"\n  Ctrl-C で終了\n", file=sys.stderr, flush=True)
 
-    # 聞いているセッションが2つ以上になったら、発話ログ自体に警告を書いて
-    # Claude Code（Monitor でこのログを見ている側）へ知らせる。8日前の
-    # セッションが聞いたままで、同じ発話が2つに配られていたことが実際に
-    # あった。`voice-shell.sh listen` が起動時に自分を登録するので、
-    # ここではその数を数えるだけでよい（pgrep 不要、Windows でも動く）。
+    # Once two or more sessions are listening, write a warning into the utterance
+    # log itself to tell Claude Code (the side watching this log with Monitor). A
+    # session from 8 days earlier really was still listening once, and the same
+    # utterance was going out to two of them. `voice-shell.sh listen` registers
+    # itself at startup, so counting them is all that is needed here (no pgrep
+    # required, works on Windows).
     def watch_listeners():
         last_count = None
         while True:
             time.sleep(5)
             count = len(list_active_listeners(log_path))
-            # 送信先を選んでいるなら、複数聞いていても二重には届かない。
-            # 意図した使い方なので黙っている。
-            # 宛先が決まっていれば二重には届かない（既定でも決まる）
+            # With a target chosen, nothing arrives twice even with several
+            # listening. That is the intended way to use it, so stay quiet.
+            # With a target settled nothing arrives twice (the default settles one too)
             routed = resolve_target(log_path) is not None
             if routed:
                 last_count = count
@@ -1889,33 +1958,36 @@ def main():
         mute_path = log_path.parent / MUTE_FILE.name
         partial_path.write_text("", encoding="utf-8")
         level_path.write_text("0 0", encoding="utf-8")
-        pause_path.unlink(missing_ok=True)   # 起動時は必ず送信状態から
+        pause_path.unlink(missing_ok=True)   # Always start from the sending state
         mute_path.unlink(missing_ok=True)
         hold_path.write_text("", encoding="utf-8")
 
-        # 確定時のミュート状態だけを見ると、切っている間に話した音声が解除後に
-        # 流れ込む。切られた回数を数え、発話が始まった時点の値と比べて、
-        # ミュートをまたいだ発話を捨てる（単純なフラグだと、ミュート中に拾った
-        # 物音がフラグを消費して直後の発話を巻き込む）。
+        # Looking only at the mute state at settle time lets audio spoken while
+        # muted flow in after unmuting. Count how many times it was turned off,
+        # compare against the value when the utterance began, and drop utterances
+        # that span a mute (with a plain flag, a noise picked up while muted consumes
+        # the flag and takes the utterance right after it down with it).
         mute_generation = 0
         was_muted = False
-        speaking_since = None   # いま進行中の発話が始まった時点の generation
-        # いま進行中の発話が始まった時刻。画面の「消す」は、押した時点で
-        # 喋っていた一言だけを落としたい。確定より後に押されたものが次の
-        # 発話を巻き込まないよう、始まりの時刻と押した時刻を比べる。
+        speaking_since = None   # The generation when the utterance in progress began
+        # When the utterance in progress began. The discard button on screen should
+        # drop only the one phrase being spoken at the moment it was pressed. So a
+        # press that lands after settling does not take the next utterance with it,
+        # the start time and the press time are compared.
         speaking_at = None
         drop_path = log_path.parent / "drop_at"
-        dropping = False        # 画面の「消す」を受けた。確定まで何も出さない
+        dropping = False        # Got a discard from the screen. Emit nothing until settling
 
-        # 読み手（ビューア・Monitor）と食い違わないよう明示する。
-        # Windows は指定しないとロケール（cp932）で開いてしまう。
+        # Stated outright so it does not disagree with the readers (the viewer and
+        # Monitor). Left unspecified, Windows opens with the locale (cp932).
         with open(log_path, "a", buffering=1, encoding="utf-8") as f:
             for ev in asr_mic.stream_utterances(model, args):
                 muted_now = mute_path.exists()
 
-                # 画面の「消す」。押した時点で進行中だった一言を、途中経過ごと
-                # 引っ込める。確定を待ってから消すと、そのあいだ画面に文字が
-                # 出続けて「消えていない」ように見える。
+                # Discard from the screen. Pull back the phrase in progress at the
+                # moment it was pressed, partial text and all. Wait for settling
+                # before erasing and text stays on screen the whole time, which
+                # looks like it did not get erased.
                 if drop_path.exists():
                     try:
                         asked = float(drop_path.read_text(encoding="utf-8") or 0)
@@ -1927,13 +1999,13 @@ def main():
                         partial_path.write_text("", encoding="utf-8")
 
                 if muted_now and not was_muted:
-                    mute_generation += 1      # 切られた
+                    mute_generation += 1      # Turned off
                 was_muted = muted_now
 
-                # 発話の始まりを捉える（無音から声に変わった瞬間）
+                # Catch the start of an utterance (the instant silence turns into voice)
                 if ev["type"] == "level":
-                    # 音量をビューアに渡す。文字が出ないとき、マイクが
-                    # 死んでいるのか黙っているだけなのかを見分けたい。
+                    # Hand the volume to the viewer. When no text shows up, we
+                    # want to tell a dead mic apart from a room that is just quiet.
                     level_path.write_text(
                         f"{ev.get('rms', 0):.4f} {int(bool(ev.get('speaking')))}",
                         encoding="utf-8")
@@ -1947,7 +2019,7 @@ def main():
                     continue
 
                 if muted_now:
-                    # ミュート中の途中経過は残さない。確定は下でまとめて判定する。
+                    # No partials are kept while muted. Settling is judged below.
                     if ev["type"] != "final":
                         if partial_path.read_text(encoding="utf-8"):
                             partial_path.write_text("", encoding="utf-8")
@@ -1955,8 +2027,8 @@ def main():
 
                 if ev["type"] == "partial":
                     if dropping:
-                        continue        # 消した一言の途中経過は出さない
-                    # 途中経過は別ファイルに上書き（プロンプトのログは汚さない）
+                        continue        # No partials for a phrase that was discarded
+                    # Partials overwrite a separate file (the prompt log stays clean)
                     partial_path.write_text(ev["text"], encoding="utf-8")
                     continue
                 if ev["type"] != "final":
@@ -1972,35 +2044,37 @@ def main():
                     speaking_since = None
                     continue
 
-                # 辞書は毎回読む。Web UI で直した内容が次の発話から効くようにする。
+                # The dictionary is read every time, so web UI edits land next utterance.
                 user_dict = load_dictionary()
 
-                # 声だけの合図（入切・送り方・送信先）。合図はどれも短いので、
-                # 最小文字数や相槌の判定より前に見る。
+                # Voice-only commands (on and off, how to send, where to send).
+                # Commands are all short, so they are checked before the minimum
+                # length and the backchannel test.
                 kind = apply_voice_command(text, log_path, muted_now, user_dict)
                 if kind:
                     print(f"(合図 {kind}) {text[:40]}", file=sys.stderr, flush=True)
-                    # 合図そのものは発話ではないので送らない。was_muted は
-                    # 触らないでおく。次の周回の頭で数え直させる（ここで先回りすると
-                    # 世代が上がらず、切る前に始まった発話を落とせなくなる）。
+                    # A command is not an utterance, so it is not sent. was_muted
+                    # is left alone, to be recounted at the top of the next loop
+                    # (get ahead of it here and the generation never rises, and
+                    # utterances that began before the mute can no longer be dropped).
                     speaking_since = None
                     continue
 
-                # 発話が始まった時点から今までにミュートを挟んだか、
-                # あるいは今なお切られているなら、その発話は送らない。
+                # If a mute fell between the start of the utterance and now, or the
+                # mic is still off, that utterance is not sent.
                 started_at, speaking_since = speaking_since, None
                 if muted_now or (started_at is not None and started_at != mute_generation):
                     print(f"(マイク切) {text[:40]}", file=sys.stderr, flush=True)
                     continue
 
-                # 終わりに「キャンセル」が来たら、その一言ごと捨てる。
+                # When 「キャンセル」 lands at the end, throw the whole phrase away.
                 if take_tail(text, CANCEL_TAIL) is not None:
                     note_voice_cmd(log_path, "cancelled", "", text)
                     print(f"(取り消し) {text[:40]}", file=sys.stderr, flush=True)
                     continue
 
-                # 終わりに「手直し」が来たら、送らずに下書きへ回す。
-                # 短くても落とさない（本人が意図して回しているため）。
+                # When 「手直し」 lands at the end, it goes to the draft instead of
+                # being sent. Short ones are not dropped (the person meant that).
                 body = take_tail(text, HOLD_TAIL)
                 force_hold = body is not None
                 if force_hold:
@@ -2010,18 +2084,19 @@ def main():
                         continue
                     text = body
 
-                # 短い発話は基本的に捨てるが、辞書で「無視しない」側へ回した
-                # 語だけは通す（「わかった」「了解」のような、意味のある返事）。
+                # Short utterances are thrown away as a rule, but words moved to the
+                # do-not-ignore side of the dictionary go through (meaningful replies
+                # like 「わかった」 or 「了解」).
                 if not force_hold and len(text) < args.min_chars \
                         and not is_allowed_short(text,
                                                  user_dict.get("unignore", ())):
                     continue
 
                 def drop(kind: str):
-                    """送らなかったことを端末に残す（Claude には渡さない）。"""
+                    """Note in the terminal that it was not sent (nothing goes to Claude)."""
                     print(f"({kind}) {text[:40]}", file=sys.stderr, flush=True)
 
-                # 組み込みと辞書をまとめて判定する（辞書は毎回読むので即反映）
+                # Built-ins and dictionary judged together (dictionary read every time)
                 if not force_hold and not args.keep_noise \
                         and is_noise(text, user_dict["ignore"],
                                      user_dict.get("unignore", ())):
@@ -2035,8 +2110,8 @@ def main():
                               args.strip_fillers)
                 stamp = time.strftime("%H:%M:%S")
 
-                # 一時停止中は保留ファイルへ。Claude には送られない。
-                # （ビューアが時刻を表示するので、こちらには残す）
+                # While paused it goes to the hold file. Nothing reaches Claude.
+                # (The viewer shows the time, so the timestamp is kept here.)
                 if force_hold or pause_path.exists():
                     with open(hold_path, "a") as h:
                         h.write(json.dumps({"time": stamp, "text": text},
@@ -2046,8 +2121,9 @@ def main():
                         note_voice_cmd(log_path, "held", "", text)
                     continue
 
-                # Claude に渡る行は本文だけにする。時刻や言語は使わないので載せない。
-                # 送信先が選ばれているときだけ宛先を添える（無い行は全員へ）。
+                # The line that reaches Claude carries the body alone. Time and
+                # language go unused, so they do not go in. The target is attached
+                # only when one is chosen (a line without it goes to everyone).
                 rec = {"text": text}
                 to = resolve_target(log_path)
                 if to:
