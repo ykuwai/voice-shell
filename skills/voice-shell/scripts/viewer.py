@@ -10,6 +10,7 @@ import argparse
 import asyncio
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -558,6 +559,38 @@ async def main_async(args):
             "target": vd.resolve_target(args.log_file) or "",
         })
 
+    async def handle_disconnect(req):
+        """そのセッションに聞くのをやめさせる。
+
+        止めるのは `voice-shell.sh listen` だけで、相手のセッション自体は
+        終わらない。登録されている聞き手以外は受け付けない。
+        """
+        import voice_daemon as vd
+        body = await req.json()
+        pid = str(body.get("pid") or "").strip()
+        live = {str(l["pid"]): l for l in vd.list_active_listeners(args.log_file)}
+        if pid not in live:
+            return web.json_response({"error": "unknown"}, status=404)
+        # 先に本人へ知らせる。黙って切ると、そのセッションは「話しかけても
+        # 反応しない」状態のまま気づけない。tail が読む間だけ待ってから止める。
+        try:
+            with open(args.log_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps({
+                    "system_warning":
+                        "画面の操作で、このセッションは音声を聞くのをやめました。"
+                        "もう一度使うには /voice-shell と入力してください。",
+                    "to": pid,
+                }, ensure_ascii=False) + "\n")
+            await asyncio.sleep(0.5)
+        except OSError:
+            pass
+
+        try:
+            os.kill(int(pid), signal.SIGTERM)
+        except (OSError, ValueError) as err:
+            return web.json_response({"error": str(err)}, status=500)
+        return web.json_response({"ok": True, "label": live[pid].get("label", pid)})
+
     async def handle_route(req):
         """送信先を選ぶ。空なら全員へ。"""
         body = await req.json()
@@ -783,6 +816,7 @@ async def main_async(args):
     app.router.add_get("/api/engines", handle_engines)
     app.router.add_get("/api/listeners", handle_listeners)
     app.router.add_put("/api/route", handle_route)
+    app.router.add_post("/api/listeners/disconnect", handle_disconnect)
     app.router.add_post("/api/discard", handle_discard)
     app.router.add_post("/api/drop-current", handle_drop_current)
 

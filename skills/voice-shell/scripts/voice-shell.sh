@@ -413,12 +413,32 @@ case "$cmd" in
     fi
     # どの道具でも名乗れる逃げ道。VOICE_SHELL_NAME があれば最優先。
     "$PY" - "$reg" "$agent" "$session" "${VOICE_SHELL_NAME:-}" <<'REG' || true
-import json, os, subprocess, sys, time
+import json, os, sys, time
+from pathlib import Path
 reg, agent, session, name = sys.argv[1:5]
-started = time.strftime("%Y-%m-%d %H:%M:%S")
-json.dump({"started": started, "since": time.time(), "cwd": os.getcwd(),
+now = time.time()
+
+# 画面に並ぶ順は「その会話が最初に聞き始めた時刻」で決める。登録し直した
+# 時刻で並べると、音声モードを入れ直すたびに番号が後ろへ動いてしまう。
+first_seen = now
+if session:
+    conf = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "voice-shell"
+    conf.mkdir(parents=True, exist_ok=True)
+    f = conf / "sessions.json"
+    try:
+        seen = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        seen = {}
+    first_seen = seen.get(session) or now
+    if seen.get(session) != first_seen:
+        seen[session] = first_seen
+        f.write_text(json.dumps(seen, ensure_ascii=False, indent=2) + "\n",
+                     encoding="utf-8")
+
+json.dump({"started": time.strftime("%Y-%m-%d %H:%M:%S"), "since": now,
+           "first_seen": first_seen, "cwd": os.getcwd(),
            "agent": agent, "session": session, "name": name},
-          open(reg, "w"), ensure_ascii=False)
+          open(reg, "w", encoding="utf-8"), ensure_ascii=False)
 REG
     # exec すると trap が引き継がれず（プロセス置き換えで bash 自体が
     # 消えるため）終了時の自動削除が効かなくなる。
