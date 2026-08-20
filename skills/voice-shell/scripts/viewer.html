@@ -686,6 +686,11 @@
   /* ほとんど余地が無い。状態の一行は残す — ここを消すと、
      届いていないことに気づく手がかりが画面から無くなる */
   @media (max-height: 429px) {
+    /* 未送信の札は、札と道具の行だけで 50px 近く使う。ボタンは小さくせず、
+       まわりの余白の方を削って、喋った中身が見える高さを空ける。 */
+    .draft-card { padding:.28rem .55rem .38rem; }
+    .draft-card .gutter { margin-bottom:.05rem; }
+    .tiny-row { padding:2px; }
     /* 手直しの欄を開いている間は、認識中の行は引っ込める。直している文と
        送るボタンが先に見えていてほしい。聞こえているかはマイクの絵で分かる。 */
     .draft-card:has(> textarea:not([hidden])) .stream { display:none; }
@@ -711,6 +716,14 @@
     /* 開いた一覧は地の色に戻す（塗りのままだと文字が読めない） */
     .route-pick option { background:var(--panel-2); color:var(--text); font-weight:400; }
     .draft-card { margin-bottom:.25rem; }
+  }
+
+  /* ここまで来たら、上の帯ごと畳む。名札も設定もタブに戻す道も、いまは
+     場所の方が要る。状態はウィンドウの題と、マイクが動くかどうかで分かる。
+     広げれば戻ってくる。 */
+  @media (max-height: 319px) {
+    header, .status { display:none; }
+    .control-row { padding-top:.25rem; }
   }
 
   /* 横に並べ替える。マイクを左に大きく置き、丸2つを右へ。
