@@ -502,17 +502,24 @@ async def main_async(args):
         if not text:
             return web.json_response({"error": "empty"}, status=400)
 
-        # Claude に渡る行は本文だけ。手直し済みの印だけ添える。
+        # Claude に渡る行は本文だけ。手を入れたときだけ印を添える。
+        # ここを決め打ちにすると、手直しの欄を通ったというだけで印が付く。
+        # 印の意味は「ユーザーが意図して整えた文」なので、認識のままの文に
+        # 付いていると、読み替えるべき文が読み替えられなくなる。
+        # 触ったかどうかは画面しか知らないので、画面から受け取る。
         # 宛先はデーモンと同じ決め方で付ける。付け忘れると、選んでいない
         # セッションにも届く（実際に別の作業へ紛れ込んだ）。
         import voice_daemon as vd
-        rec_out = {"text": text, "edited": True}
+        edited = bool(body.get("edited"))
+        rec_out = {"text": text}
+        if edited:
+            rec_out["edited"] = True
         to = vd.resolve_target(args.log_file)
         if to:
             rec_out["to"] = to
         with open(args.log_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec_out, ensure_ascii=False) + "\n")
-        rec = {"time": time.strftime("%H:%M:%S"), "text": text, "edited": True}
+        rec = {"time": time.strftime("%H:%M:%S"), "text": text, "edited": edited}
         hold_file.write_text("", encoding="utf-8")     # 送ったので保留は空にする
         return web.json_response(rec)
 
@@ -782,6 +789,34 @@ async def main_async(args):
         # そのまま送り返され、こちらが持っている控えを画面側が塗り替えられる。
         return web.json_response({k: v for k, v in data.items() if not k.startswith("_")})
 
+    async def handle_commands_get(req):
+        """声で使える合図の一覧と、利用者が足した言い方を返す。
+
+        言い方はデーモンが持っている表から取る。画面に別の控えを持つと、
+        書いてあるのに効かない語ができる。何が起きるかの説明の方は画面の
+        i18n にある — 言い方と説明は訳す先が違うので、置き場所も分ける。
+        """
+        import voice_daemon as vd
+        return web.json_response({
+            "groups": vd.command_catalog(req.query.get("lang") or "en"),
+            "user": vd.user_command_phrases(),
+            "slot": vd.ROUTE_SLOT,
+        })
+
+    async def handle_commands_put(req):
+        """足された言い方を保存する。デーモンは毎発話読み直すので即反映される。
+
+        受け取ったものはデーモンと同じ関数で整える。使えない書き方（短すぎる、
+        数の入る場所が無い、足せない種類）はここで落ちるので、返した中身が
+        そのまま「実際に効くもの」になる。
+        """
+        import voice_daemon as vd
+        data = vd.clean_user_commands(await req.json())
+        vd.COMMANDS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        vd.COMMANDS_FILE.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return web.json_response(data)
+
     mic_file = state / "mic"
     engine_active_file = state / "engine_active"
 
@@ -901,6 +936,8 @@ async def main_async(args):
     app.router.add_put("/api/mics", handle_mic_put)
     app.router.add_get("/api/dictionary", handle_dict_get)
     app.router.add_put("/api/dictionary", handle_dict_put)
+    app.router.add_get("/api/commands", handle_commands_get)
+    app.router.add_put("/api/commands", handle_commands_put)
     app.router.add_post("/api/mute", handle_mute)
     app.router.add_post("/api/pause", handle_pause)
     app.router.add_post("/api/send", handle_send)

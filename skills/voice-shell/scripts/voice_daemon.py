@@ -547,39 +547,276 @@ def is_allowed_short(text: str, allow=()) -> bool:
     return bool(parts) and all(p in off for p in parts)
 
 
-# ── 声だけでマイクを入切する ──────────────────────
+# ── 声で使えるコマンドの語 ──────────────────────
+#
+# 合図の語はここ1か所に集める。散らばっていると、画面に一覧を出すのも、
+# 別の言語を足すのも、そのたびにファイルの中を探して回ることになる。
+#
+# 言語で分けてあるのは、訳すだけでは済まないため。「ミュート」の英語は
+# mute でよいとして、その言語で実際に口から出る言い方は訳語を引いても
+# 出てこない。言語を足すときは欄を足すだけでよく、既にある欄は消さない
+# （英語で言う人も日本語で言う人も、同じ機械に向かって喋る）。
 #
 # 合図の語は短いので、最小文字数や相槌の判定より前に見る。誤爆すると
 # 話しかけているのに届かない状態になるので、その一言だけを喋ったときに
 # 限る（部分一致はしない）。
-#
-# 切っている間も認識は動いている（録ってはいるが送らない）ので解除の
-# 合図は届く。ブラウザ認識は切ると音声を手放すので、声では戻せない。
-MUTE_WORDS = {
-    "ミュート", "みゅーと", "ミュートして", "ミュートしてください", "ミュートお願い",
-    "ミュートオン", "ミュートオンにして", "ミュートします",
-    "マイクオフ", "マイクをオフ", "マイクをオフにして",
-    "マイクを切って", "マイク切って", "マイクを切る", "マイク切る",
-    "mute", "muteme", "mutethemic", "micoff", "turnoffthemic", "turnthemicoff",
+COMMAND_WORDS = {
+    # マイクを切る。
+    # 切っている間も認識は動いている（録ってはいるが送らない）ので解除の
+    # 合図は届く。ブラウザ認識は切ると音声を手放すので、声では戻せない。
+    "mute": {
+        # 並び順は画面のため。判定は集合なので順に意味は無いが、一覧は頭から
+        # 数個しか出さないので、似た言い方を先に固めない（「ミュート」の変化形が
+        # 6つ並ぶと、マイクを切る言い方が他にもあることが伝わらない）。
+        # 認識が化けた形（みゅーと など）は、狙って言う語ではないので後ろへ。
+        "ja": [
+            "ミュート", "ミュートして", "ミュートオン",
+            "マイクオフ", "マイクを切って", "マイクを切る",
+            "みゅーと", "ミュートしてください", "ミュートお願い",
+            "ミュートオンにして", "ミュートします",
+            "マイクをオフ", "マイクをオフにして", "マイク切って", "マイク切る",
+        ],
+        "en": [
+            "mute", "mute me", "mute the mic", "mic off",
+            "turn off the mic", "turn the mic off",
+        ],
+    },
+    # マイクを入れる。
+    # 解除の語は、**この道具にしか言わない言葉**に限る。切っている理由はたいてい
+    # 通話や同席者との会話なので、「戻して」「再開」のような普通の言葉を入れると、
+    # 相手に言ったつもりの一言でマイクが開き、そのあとの会話が指示として流れ出す。
+    # 誤爆で失うのが「発話1つ」ではなく「切っていたつもりの時間ぜんぶ」になる。
+    "unmute": {
+        "ja": [
+            "ミュート解除", "ミュート解除して", "アンミュート", "解除",
+            "マイクオン", "マイクを入れて",
+            "ミュートかいじょ", "ミュート解除してください",
+            "ミュートを解除", "ミュートを解除して", "ミュートオフ", "ミュートオフにして",
+            "あんみゅーと", "かいじょ", "解除して", "かいじょして",
+            "マイクをオン", "マイクをオンにして", "マイクをつけて", "マイク付けて",
+            "マイク入れて",
+        ],
+        "en": [
+            "unmute", "unmute me", "unmute the mic", "mic on",
+            "turn on the mic", "turn the mic on",
+        ],
+    },
+    # そのまま届く側へ戻す。
+    # 即時 / 手直しの切り替えも声でできるようにする。どちらもこの道具に対して
+    # しか言わない言葉なので、単独で言われたら合図として扱ってよい。
+    "live": {
+        "ja": [
+            "即時", "即時にして", "即時モード", "即時に戻して",
+            "そのまま送る", "そのまま送って",
+            "そくじ", "そくじもーど", "即時に",
+            # 「そくじ」は「食事」に化けやすい（実測）。単独で来たら同じ合図とみなす。
+            "食事", "しょくじ", "食事モード", "速時", "則時",
+        ],
+        "en": ["live", "live mode", "instant", "instant mode", "send live"],
+    },
+    # 溜めて手直しする側へ回す。
+    "hold": {
+        "ja": [
+            "手直し", "手直しにして", "手直しモード", "手直しに回して", "溜めて", "保留",
+            "てなおし", "てなおしもーど", "手直しに", "ためて", "溜める", "ためる",
+        ],
+        "en": ["hold", "hold mode", "draft", "draft mode"],
+    },
+    # 言い終わってから「やっぱりなし」「これは直してから送りたい」と思うことが
+    # ある。発話の**終わり**に合図が来たら、その一言をそのように扱う。途中に
+    # 出てきた分は普通の言葉のまま（合図の話をしているだけのことがある）。
+    #
+    # 語は絞る。「やめて」「なし」のような、普通の文の終わりにも来る言い方を
+    # 入れると、そのつもりのない指示まで持っていかれる。
+    #
+    # 並び順に意味がある。末尾から当てて最初に当たったものを外すので、
+    # 書いた順のまま見る（長い言い方が短い言い方に食われないように）。
+    "cancel_tail": {
+        "ja": [
+            "キャンセル", "きゃんせる", "キャンセルで", "キャンセルして",
+            "取り消し", "取消", "取り消して", "とりけし", "とりけして",
+            "なかったことに", "なかったことにして", "やっぱなし", "やっぱりなし",
+        ],
+        "en": ["cancel", "cancel that", "scratch that", "never mind", "nevermind"],
+    },
+    # こちらは捨てずに、画面の下書きへ回す（直してから送れる）
+    "hold_tail": {
+        "ja": [
+            "手直し", "てなおし", "手直しで", "手直しして", "手直ししたい",
+            # 「てなおし」は「出直し」に化けやすい（実測）
+            "出直し", "でなおし", "出直して",
+            "直してから", "なおしてから", "あとで直す", "ちょっと直す",
+        ],
+        "en": ["edit", "edit this", "let me edit", "hold this"],
+    },
 }
-# 解除の語は、**この道具にしか言わない言葉**に限る。切っている理由はたいてい
-# 通話や同席者との会話なので、「戻して」「再開」のような普通の言葉を入れると、
-# 相手に言ったつもりの一言でマイクが開き、そのあとの会話が指示として流れ出す。
-# 誤爆で失うのが「発話1つ」ではなく「切っていたつもりの時間ぜんぶ」になる。
-UNMUTE_WORDS = {
-    "ミュート解除", "ミュートかいじょ", "ミュート解除して", "ミュート解除してください",
-    "ミュートを解除", "ミュートを解除して", "ミュートオフ", "ミュートオフにして",
-    "アンミュート", "あんみゅーと", "解除", "かいじょ", "解除して", "かいじょして",
-    "マイクオン", "マイクをオン", "マイクをオンにして", "マイクをつけて", "マイク付けて",
-    "マイクを入れて", "マイク入れて",
-    "unmute", "unmuteme", "unmutethemic", "micon", "turnonthemic", "turnthemicon",
-}
+
+# 画面の一覧に並べる順。送信先は語の表ではなく型なので、下の代表例で見せる。
+COMMAND_KINDS = ("mute", "unmute", "live", "hold", "route",
+                 "cancel_tail", "hold_tail")
+
+
+def builtin_words(kind: str, lang: str = None) -> list:
+    """組み込みの言い方を返す。lang を渡すとその言語の分だけ。
+
+    言語を渡さなければ全部を書いた順に繋げる。どの言語で言われても効く
+    ので、判定に使うのはこちら。読む人の言語で絞るのは画面の一覧だけ。
+    """
+    langs = COMMAND_WORDS.get(kind) or {}
+    if lang is not None:
+        return list(langs.get(lang) or [])
+    out = []
+    for words in langs.values():
+        out.extend(words)
+    return out
+
 
 # 記号と間の空白を落としてから比べる。「ミュート。」「mute me」「マイク、オン」
 # のどれも同じ鍵になるようにする。全角数字はここで半角へ畳む。
 # ー（長音）は落とさない。落とすと「ミュート」が「ミュト」になって当たらない。
 _CMD_DROP = str.maketrans("１２３４５６７８９０", "1234567890",
                           " \t\u3000。、．，・…！？!?.,-~〜\"'「」『』()（）")
+
+
+def command_key(text: str) -> str:
+    """合図を見比べるときの形。記号と間の空白を落として小文字にする。
+
+    利用者が足した言い方も同じ形にして覚える。ここを通さずに覚えると、
+    「ミュート、して」のように読点を打って登録した語が永久に当たらない。
+    """
+    return text.strip().translate(_CMD_DROP).lower()
+
+
+# 判定に使う形へ畳んだもの。
+#
+# 単体で言う合図は、空白と記号を落とした鍵の集合にする。上の表には
+# 「mute the mic」と読める形で書いておき、畳むのはここ。表の方を
+# 「mutethemic」と書いてしまうと、画面の一覧がそのまま出て英語が読めない。
+#
+# 文の末尾に付く合図は畳まない。こちらは発話の末尾と生のまま比べるので
+# （空白の入った「cancel that」がそのまま要る）、書いた順のタプルにする。
+# 当てる順にも意味がある。
+MUTE_WORDS = {command_key(w) for w in builtin_words("mute")}
+UNMUTE_WORDS = {command_key(w) for w in builtin_words("unmute")}
+LIVE_WORDS = {command_key(w) for w in builtin_words("live")}
+HOLD_WORDS = {command_key(w) for w in builtin_words("hold")}
+CANCEL_TAIL = tuple(builtin_words("cancel_tail"))
+HOLD_TAIL = tuple(builtin_words("hold_tail"))
+
+
+# ── 利用者が足す言い方 ──────────────────────
+#
+# 辞書と同じ流儀で設定ディレクトリに置き、デーモンが読み直すので再起動は
+# 要らない。辞書そのものへ混ぜないのは、誤認識の言い換えと機械への合図が
+# 別の話だから。同じ画面に並ぶと、「ミュート解除」と書いた行が言い換えたい
+# のか合図に足したいのか、書いた本人にも読めなくなる。
+COMMANDS_FILE = CONFIG_DIR / "commands.json"
+
+# 足せるのは、その一言だけを喋ったときに効く合図に限る。
+#
+# 解除（unmute）を外してあるのは、誤爆の代償が釣り合わないため。切って
+# いる理由はたいてい通話なので、相手に言ったつもりの一言でマイクが開くと、
+# そのあとの会話が丸ごと指示として流れる。失うのが「発話1つ」ではなく
+# 「切っていたつもりの時間ぜんぶ」になる。
+#
+# 文の末尾に付ける合図（cancel_tail / hold_tail）も外してある。こちらは
+# 普通の文の**終わり**に当たるので、よく使う言い方を足すと、そのつもりの
+# ない指示まで消える。組み込みの語を絞ってあるのと同じ理由。
+USER_COMMAND_KINDS = ("mute", "live", "hold", "route")
+ROUTE_SLOT = "{n}"           # 送信先の言い方で、数の入る場所
+_USER_PHRASE_MAX = 24        # route_command が見る長さに合わせる
+_USER_PHRASE_MIN = 2         # 1文字は普通の発話と見分けが付かない
+_USER_PHRASE_LIMIT = 50      # 1種類あたり。際限なく増やすと誤爆だけが増える
+
+
+def clean_user_phrase(kind: str, phrase) -> str:
+    """足された言い方を、使える形に直す。使えなければ空。
+
+    画面とデーモンの両方がここを通る。片方だけで弾くと、画面は受け取った
+    のに効かない語ができて、「登録したのに動かない」になる。
+    """
+    if kind not in USER_COMMAND_KINDS or not isinstance(phrase, str):
+        return ""
+    key = command_key(phrase)
+    slots = key.count(ROUTE_SLOT)
+    if kind == "route":
+        if slots != 1:       # 数の入る場所がちょうど1つ要る
+            return ""
+    elif slots:              # 他の合図に数は入らない
+        return ""
+    bare = key.replace(ROUTE_SLOT, "")
+    if not _USER_PHRASE_MIN <= len(bare) <= _USER_PHRASE_MAX:
+        return ""
+    return key
+
+
+def _clean_phrase_list(data: dict, kind: str) -> list:
+    """1種類ぶんの言い方を、覚える形にして並べ直す。"""
+    raw = data.get(kind) or []
+    out = []
+    for p in raw if isinstance(raw, list) else []:
+        k = clean_user_phrase(kind, p)
+        if k and k not in out:
+            out.append(k)
+    return out[:_USER_PHRASE_LIMIT]
+
+
+_NO_COMMANDS = {"mute": frozenset(), "live": frozenset(), "hold": frozenset(),
+                "route": ()}
+_cmd_cache = (None, None)   # (更新時刻, 中身)
+
+
+def load_commands() -> dict:
+    """利用者が足した言い方を返す。
+
+    発話ごとに呼ばれるので、更新時刻が変わったときだけ読み直す。辞書と
+    同じ作りなので、画面で足した分がデーモンの再起動なしに効く。
+    """
+    global _cmd_cache
+    try:
+        mtime = COMMANDS_FILE.stat().st_mtime
+    except OSError:
+        return _NO_COMMANDS
+    if _cmd_cache[0] == mtime:
+        return _cmd_cache[1]
+    try:
+        data = json.loads(COMMANDS_FILE.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError, ValueError) as e:
+        print(f"{COMMANDS_FILE.name} を読めませんでした ({e})。無視します",
+              file=sys.stderr)
+        _cmd_cache = (mtime, _NO_COMMANDS)
+        return _NO_COMMANDS
+    if not isinstance(data, dict):
+        _cmd_cache = (mtime, _NO_COMMANDS)
+        return _NO_COMMANDS
+
+    out = {}
+    for kind in USER_COMMAND_KINDS:
+        keys = _clean_phrase_list(data, kind)
+        out[kind] = (tuple(_route_rx(k) for k in keys) if kind == "route"
+                     else frozenset(keys))
+    _cmd_cache = (mtime, out)
+    return out
+
+
+def clean_user_commands(data) -> dict:
+    """受け取った一式を、覚える形にして種類ごとに並べる。
+
+    画面からの保存もここを通す。片方だけで整えると、画面が持っている形と
+    デーモンが読む形がずれて、登録したのに効かない語ができる。
+    """
+    if not isinstance(data, dict):
+        data = {}
+    return {kind: _clean_phrase_list(data, kind) for kind in USER_COMMAND_KINDS}
+
+
+def user_command_phrases() -> dict:
+    """いま覚えている言い方を種類ごとに返す（画面へ渡す用）。"""
+    try:
+        data = json.loads(COMMANDS_FILE.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError, ValueError):
+        data = {}
+    return clean_user_commands(data)
 
 
 def voice_command(text: str, muted: bool):
@@ -589,35 +826,96 @@ def voice_command(text: str, muted: bool):
     入っている最中の「ミュート解除」も何も起こさない。見る語が半分になる分、
     誤爆も半分になる。
     """
-    key = text.strip().translate(_CMD_DROP).lower()
+    key = command_key(text)
     if not key:
         return None
     if muted:
+        # 解除に足した言い方は見ない（そもそも足せないようにしてある）
         return "unmute" if key in UNMUTE_WORDS else None
-    return "mute" if key in MUTE_WORDS else None
+    return "mute" if key in MUTE_WORDS or key in load_commands()["mute"] else None
 
 
 # 数の言い方は認識のたびに揺れる。「2」と言っても「に」「ツー」「二」と出るし、
 # 「送信先に」は「送信先2」のことがある。読みを一通り並べて、どれで来ても拾う。
 # ひらがな1文字（に・し・ご・く）は助詞と見分けが付かないので、単独では効かない
 # — 下の型はどれも「番」「送信先」「〜に切り替え」の形を要求する。
-_NUM_WORDS = {
-    "0": 0, "〇": 0, "ぜろ": 0, "れい": 0, "ゼロ": 0, "zero": 0,
-    "1": 1, "一": 1, "いち": 1, "ワン": 1, "わん": 1, "one": 1,
-    "2": 2, "二": 2, "に": 2, "ツー": 2, "つー": 2, "トゥー": 2, "とぅー": 2, "two": 2,
-    "3": 3, "三": 3, "さん": 3, "スリー": 3, "すりー": 3, "three": 3,
-    "4": 4, "四": 4, "よん": 4, "し": 4, "フォー": 4, "ふぉー": 4, "four": 4,
-    "5": 5, "五": 5, "ご": 5, "ファイブ": 5, "ふぁいぶ": 5, "five": 5,
-    "6": 6, "六": 6, "ろく": 6, "シックス": 6, "しっくす": 6, "six": 6,
-    "7": 7, "七": 7, "なな": 7, "しち": 7, "セブン": 7, "せぶん": 7, "seven": 7,
-    "8": 8, "八": 8, "はち": 8, "エイト": 8, "えいと": 8, "eight": 8,
-    "9": 9, "九": 9, "きゅう": 9, "く": 9, "ナイン": 9, "ないん": 9, "nine": 9,
-    "10": 10, "十": 10, "じゅう": 10, "テン": 10, "てん": 10, "ten": 10,
+#
+# 11 以上は持たない。聞いているセッションが 11 個並ぶことはまず無いし、
+# 増やすほど普通の発話を食う危険だけが上がる。
+NUMBER_WORDS = {
+    # アラビア数字は、どの言語で喋っても同じ形で出てくる
+    "any": {"0": 0, "1": 1, "2": 2, "3": 3, "4": 4, "5": 5,
+            "6": 6, "7": 7, "8": 8, "9": 9, "10": 10},
+    "ja": {
+        "〇": 0, "ぜろ": 0, "れい": 0, "ゼロ": 0,
+        "一": 1, "いち": 1, "ワン": 1, "わん": 1,
+        "二": 2, "に": 2, "ツー": 2, "つー": 2, "トゥー": 2, "とぅー": 2,
+        "三": 3, "さん": 3, "スリー": 3, "すりー": 3,
+        "四": 4, "よん": 4, "し": 4, "フォー": 4, "ふぉー": 4,
+        "五": 5, "ご": 5, "ファイブ": 5, "ふぁいぶ": 5,
+        "六": 6, "ろく": 6, "シックス": 6, "しっくす": 6,
+        "七": 7, "なな": 7, "しち": 7, "セブン": 7, "せぶん": 7,
+        "八": 8, "はち": 8, "エイト": 8, "えいと": 8,
+        "九": 9, "きゅう": 9, "く": 9, "ナイン": 9, "ないん": 9,
+        "十": 10, "じゅう": 10, "テン": 10, "てん": 10,
+    },
+    "en": {"zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+           "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10},
 }
-# 長いものから当てる。「じゅう」を「じ」「ゅ」…と崩されないように。
-_NUM_ALT = "(?:" + "|".join(
-    sorted((re.escape(k) for k in _NUM_WORDS), key=len, reverse=True)) + ")"
-_COUNTER = r"(?:番目|ばんめ|番|ばん)"
+# 「ひとつ目」の形の前にだけ立つ和語の読み。ここに入れた語は「つ目」が
+# 続くときしか数として読まない。上の表へ混ぜると「いつに変更」が5番への
+# 切り替えになってしまう（「いつ」＝5）。数として読める場所を狭くして防ぐ。
+NUMBER_WORDS_ORDINAL = {
+    "ja": {"ひと": 1, "ふた": 2, "みっ": 3, "よっ": 4, "いつ": 5,
+           "むっ": 6, "やっ": 8, "ここの": 9},
+}
+
+# 送信先の言い方を組み立てる部品。数そのものと違って、前後に付く語は
+# 言語で形が変わる（日本語は助数詞が後ろ、英語は前置きだけ）。
+ROUTE_PARTS = {
+    "ja": {
+        # 数の前に付く語。「送信先2」「セッション2」「ナンバー2」「番号2」
+        "prefix": ["送信先", "宛先", "あて先", "セッション", "せっしょん",
+                   "ナンバー", "なんばー", "番号", "ばんごう"],
+        # 数のあとに付く語。「2番」「1番目」
+        "counter": ["番目", "ばんめ", "番", "ばん"],
+        # 「1つ目」の形。和語の読み（ひとつ目）が立てるのはここだけ
+        "ordinal": ["つ目", "つめ"],
+    },
+    "en": {
+        # 「switch to 2」「number one」。英語は前に付く語だけで決まる。
+        # ここは畳んだ鍵（空白を落とした形）と比べるので、空白なしで書く。
+        "prefix": ["switchto", "sendto", "routeto", "goto", "target",
+                   "session", "destination", "route", "number"],
+    },
+}
+
+# 画面の一覧に出す代表例。送信先だけは語の表ではなく型なので、組み込みの
+# 語をそのまま並べても何と言えばよいのかが読めない。ここに書いたものが
+# 本当に効くことは、検証で1つずつ確かめている。
+ROUTE_EXAMPLES = {
+    "ja": ["2番", "2番目", "2つ目", "送信先を2", "セッション2", "ナンバー2",
+           "2に切り替え"],
+    "en": ["switch to 2", "session 2", "number two", "send to 2"],
+}
+
+_NUM_WORDS = {w: n for tbl in NUMBER_WORDS.values() for w, n in tbl.items()}
+# 「つ目」の前でだけ数として読む分も足した引き当て表
+_NUM_LOOKUP = dict(_NUM_WORDS)
+for _tbl in NUMBER_WORDS_ORDINAL.values():
+    _NUM_LOOKUP.update(_tbl)
+
+
+def _alt(words) -> str:
+    """長いものから当てる選択肢。「じゅう」を「じ」「ゅ」…と崩されないように。"""
+    return "(?:" + "|".join(
+        sorted((re.escape(w) for w in words), key=len, reverse=True)) + ")"
+
+
+_NUM_ALT = _alt(_NUM_WORDS)
+_NUM_ORDINAL_ALT = _alt(_NUM_LOOKUP)
+_COUNTER = _alt(ROUTE_PARTS["ja"]["counter"])
+_ORDINAL = _alt(ROUTE_PARTS["ja"]["ordinal"])
 # 言い方が惜しく外れると、min_chars（既定15字）に届かず黙って消える。
 # 「合図でもプロンプトでもない」が一番たちが悪いので、語尾は広めに取る。
 _VERB_CORE = (r"(?:切り替え|切替|きりかえ|変更|へんこう|送る|おくる|送って|おくって|"
@@ -625,7 +923,8 @@ _VERB_CORE = (r"(?:切り替え|切替|きりかえ|変更|へんこう|送る|�
               r"switchto|sendto|goto)")
 _TAIL = r"(?:て|る|して|ください|下さい|お願い|おねがい|します|ます|ましょう|な|ね)*"
 _VERB = rf"(?:{_VERB_CORE}{_TAIL})"
-_PREFIX = r"(?:送信先|宛先|あて先|セッション|せっしょん)"
+_PREFIX = _alt(ROUTE_PARTS["ja"]["prefix"])
+_PREFIX_EN = _alt(ROUTE_PARTS["en"]["prefix"])
 _PART = r"(?:に|へ|で)?"
 
 _ROUTE_RXS = [re.compile(rx) for rx in (
@@ -634,72 +933,67 @@ _ROUTE_RXS = [re.compile(rx) for rx in (
     rf"^{_PREFIX}を?({_NUM_ALT}){_COUNTER}?{_PART}{_VERB}?$",
     # 2番 / 1番目 / 2番にして / 2番でお願い（頭に数が来る方が認識されやすい）
     rf"^({_NUM_ALT}){_COUNTER}{_PART}{_VERB}?$",
+    # 1つ目 / 一つ目 / ひとつ目 / 3つ目に切り替え
+    # 和語の読み（ひと・ふた…）が数として通るのは、この型の中だけ。
+    rf"^({_NUM_ORDINAL_ALT}){_ORDINAL}{_PART}{_VERB}?$",
     # 2に切り替え / 2へ送って（数のあとに必ず動詞が要る）
     rf"^({_NUM_ALT})(?:に|へ){_VERB}$",
-    # switch to 2 / session two / route 3
-    rf"^(?:switchto|sendto|routeto|goto|target|session|destination|route)"
-    rf"(?:session)?({_NUM_ALT})$",
+    # switch to 2 / session two / route 3 / number one
+    rf"^{_PREFIX_EN}(?:session)?({_NUM_ALT})$",
 )]
 
 
-# 即時 / 手直しの切り替えも声でできるようにする。どちらもこの道具に対して
-# しか言わない言葉なので、単独で言われたら合図として扱ってよい。
-LIVE_WORDS = {
-    "即時", "そくじ", "即時モード", "そくじもーど", "即時に", "即時にして",
-    "即時に戻して", "そのまま送る", "そのまま送って",
-    # 「そくじ」は「食事」に化けやすい（実測）。単独で来たら同じ合図とみなす。
-    "食事", "しょくじ", "食事モード", "速時", "則時",
-    "live", "livemode", "instant", "instantmode", "sendlive",
-}
-HOLD_WORDS = {
-    "手直し", "てなおし", "手直しモード", "てなおしもーど", "手直しに", "手直しにして",
-    "手直しに回して", "溜めて", "ためて", "溜める", "ためる", "保留",
-    "hold", "holdmode", "draft", "draftmode",
-}
+def _route_rx(key: str):
+    """足された言い方から、数を拾う型を作る。{n} の場所に数が入る。"""
+    head, _, tail = key.partition(ROUTE_SLOT)
+    return re.compile(rf"^{re.escape(head)}({_NUM_ALT}){re.escape(tail)}$")
 
 
 def mode_command(text: str):
     """送り方を切り替える合図なら "live" / "hold" を返す。"""
-    key = text.strip().translate(_CMD_DROP).lower()
+    key = command_key(text)
     if not key:
         return None
-    if key in LIVE_WORDS:
+    user = load_commands()
+    if key in LIVE_WORDS or key in user["live"]:
         return "live"
-    return "hold" if key in HOLD_WORDS else None
+    return "hold" if key in HOLD_WORDS or key in user["hold"] else None
 
 
 def route_command(text: str):
     """送信先を選ぶ合図なら番号を返す（画面に並ぶ順の1番目から）。"""
-    key = text.strip().translate(_CMD_DROP).lower()
+    key = command_key(text)
     if not key or len(key) > 24:      # 合図はどれも短い。長い文は見るまでもない
         return None
     for rx in _ROUTE_RXS:
+        m = rx.match(key)
+        if m:
+            return _NUM_LOOKUP[m.group(1)]
+    # 足された言い方は組み込みの後ろで見る。組み込みの効き方を上書きさせない。
+    for rx in load_commands()["route"]:
         m = rx.match(key)
         if m:
             return _NUM_WORDS[m.group(1)]
     return None
 
 
-# 言い終わってから「やっぱりなし」「これは直してから送りたい」と思うことが
-# ある。発話の**終わり**に合図が来たら、その一言をそのように扱う。途中に
-# 出てきた分は普通の言葉のまま（合図の話をしているだけのことがある）。
-#
-# 語は絞る。「やめて」「なし」のような、普通の文の終わりにも来る言い方を
-# 入れると、そのつもりのない指示まで持っていかれる。
-CANCEL_TAIL = (
-    "キャンセル", "きゃんせる", "キャンセルで", "キャンセルして",
-    "取り消し", "取消", "取り消して", "とりけし", "とりけして",
-    "なかったことに", "なかったことにして", "やっぱなし", "やっぱりなし",
-    "cancel", "cancel that", "scratch that", "never mind", "nevermind",
-)
-# こちらは捨てずに、画面の下書きへ回す（直してから送れる）
-HOLD_TAIL = (
-    "手直し", "てなおし", "手直しで", "手直しして", "手直ししたい",
-    # 「てなおし」は「出直し」に化けやすい（実測）
-    "出直し", "でなおし", "出直して",
-    "直してから", "なおしてから", "あとで直す", "ちょっと直す",
-    "edit", "edit this", "let me edit", "hold this",
-)
+def command_catalog(lang: str = "en") -> list:
+    """画面に出す一覧。読む人の言語の言い方だけを並べる。
+
+    その言語の欄が無い合図は英語で出す（何も出ないより読める）。判定は
+    どの言語の語でも通るので、ここに出ていない言い方も効く。一覧は
+    「何と言えばよいか」に1つ答えるためのもので、全部を数え上げる場所
+    ではない。
+    """
+    out = []
+    for kind in COMMAND_KINDS:
+        if kind == "route":
+            words = ROUTE_EXAMPLES.get(lang) or ROUTE_EXAMPLES["en"]
+        else:
+            words = builtin_words(kind, lang) or builtin_words(kind, "en")
+        out.append({"id": kind, "phrases": list(words),
+                    "editable": kind in USER_COMMAND_KINDS})
+    return out
 # 合図だと分かるように「コマンド◯◯」と言う人がいる。前置きは落とす。
 _TAIL_PREFIX = ("コマンド", "こまんど", "command")
 _TAIL_TRIM = " \t\u3000。、．，・！？!?.,"
