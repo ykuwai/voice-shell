@@ -396,7 +396,11 @@ async def main_async(args):
             ui = int(page.stat().st_mtime)
         except OSError:
             ui = 0
+        import voice_daemon as vd
+        cfg = vd.read_config()
         return web.json_response({"muted": mute_file.exists(),
+                                  "multiMachine": bool(cfg.get("multi_machine")),
+                                  "machineName": cfg.get("machine_name") or "",
                                   "paused": pause_file.exists(),
                                   "engine": engine_running(),
                                   "loading": engine_loading(),
@@ -558,6 +562,19 @@ async def main_async(args):
             # 実際に届く先。未選択なら「あとで起動した方」に決まる。
             "target": vd.resolve_target(args.log_file) or "",
         })
+
+    async def handle_machine(req):
+        """この機械の名前と、複数台モードの入切。
+
+        何台かが同時に聞いていると「ミュート」で全部が切れてしまう。名前を
+        頭に添えた合図だけを受けるようにするための設定。
+        """
+        import voice_daemon as vd
+        body = await req.json()
+        name = str(body.get("name") or "").strip()[:24]
+        multi = bool(body.get("multi"))
+        vd.write_config(machine_name=name, multi_machine=multi)
+        return web.json_response({"machineName": name, "multiMachine": multi})
 
     async def handle_disconnect(req):
         """そのセッションに聞くのをやめさせる。
@@ -817,6 +834,7 @@ async def main_async(args):
     app.router.add_get("/api/listeners", handle_listeners)
     app.router.add_put("/api/route", handle_route)
     app.router.add_post("/api/listeners/disconnect", handle_disconnect)
+    app.router.add_put("/api/machine", handle_machine)
     app.router.add_post("/api/discard", handle_discard)
     app.router.add_post("/api/drop-current", handle_drop_current)
 

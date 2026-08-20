@@ -153,6 +153,13 @@
   .route-chip .nm {
     min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   }
+  /* 何台かで同時に使っているときに、いまどの機械を見ているかを本体に出す。
+     設定の中だけだと、間違った機械へ話しかけていても気づけない。 */
+  .machine {
+    font-size:.66rem; font-weight:600; padding:.1rem .5rem; border-radius:var(--pill);
+    color:var(--accent-2); background:color-mix(in srgb, var(--accent-2) 16%, transparent);
+    max-width:9rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
   .route-chip:hover { color:var(--text); }
   /* 聞くのをやめさせる×。1回目で確かめ、2回目で実行する（小窓では
      確認ダイアログが出せないのと、押し間違いで相手を切りたくないため）。 */
@@ -597,6 +604,7 @@
     <div class="brand">
       <div class="mark" id="logoMark" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
       <h1>VoiceShell</h1>
+      <span class="machine" id="machineTag" hidden></span>
     </div>
     <div class="icons">
       <button class="icon" id="floatBtn" data-icon="picture_in_picture" data-icon-size="20"
@@ -780,6 +788,19 @@
     </div>
   </div>
 
+  <!-- 複数台で使う -->
+  <div class="group">
+    <h3 data-icon="swap_horiz" data-icon-size="16" data-i18n="grpMulti">Several machines</h3>
+    <label class="toggle" style="margin-bottom:.5rem">
+      <input type="checkbox" id="multiOn"><span data-i18n="multiOn">Require this machine's name</span>
+    </label>
+    <div class="field">
+      <label for="machineName" data-icon="short_text" data-icon-size="17" data-i18n="machineName">This machine</label>
+      <input class="filter" id="machineName" data-i18n-ph="machineNamePh" style="margin:0">
+    </div>
+    <p class="range-note" data-i18n="multiNote"></p>
+  </div>
+
   <!-- 辞書 -->
   <div class="group">
     <h3 data-icon="menu_book" data-icon-size="16" data-i18n="grpDict">Dictionary</h3>
@@ -943,6 +964,10 @@ const I18N = {
     voiceRoute:'Now sending to {name}',
     voiceRouteMissing:'There is no session {n}',
     voiceCancelled:'Cancelled — nothing was sent',
+    grpMulti:'Several machines',
+    multiOn:'Require this machine\'s name',
+    machineName:'This machine', machineNamePh:'e.g. work laptop',
+    multiNote:'When two machines listen at once, “mute” stops both. Turn this on and say the name first — “work mute”, “work 2”. Signals meant for other machines are ignored here.',
     disconnectTitle:'Stop {name} from listening',
     disconnectAsk:'Stop listening?',
     disconnected:'{name} stopped listening',
@@ -1048,6 +1073,10 @@ const I18N = {
     voiceRoute:'送信先を {name} にしました',
     voiceRouteMissing:'{n} 番のセッションはありません',
     voiceCancelled:'取り消しました — 送っていません',
+    grpMulti:'複数台で使う',
+    multiOn:'この機械の名前を付けたときだけ合図を受ける',
+    machineName:'この機械の名前', machineNamePh:'例: 会社用',
+    multiNote:'2台が同時に聞いていると「ミュート」で両方が切れます。入れておくと、名前を頭に付けた合図（「会社用ミュート」「会社用2番」）だけを受けます。他の機械宛ての合図は、こちらでは指示にしません。',
     disconnectTitle:'{name} に聞くのをやめさせる',
     disconnectAsk:'解除しますか？',
     disconnected:'{name} が聞くのをやめました',
@@ -1118,7 +1147,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'silence','silenceVal','minChars','minCharsVal','clean',
                   'calibBtn','calibNote',
                   'engineGroup','enginePick','engineNote','browserAsrWarn','asrLang','asrLangField',
-                  'themeRow','langRow',
+                  'themeRow','langRow','multiOn','machineName','machineTag',
                   'scopePrivate','scopeNote','tabReplace','tabIgnore',
                   'paneReplace','paneIgnore','replaceRows','ignoreRows',
                   'addReplace','addIgnore','newFrom','newTo','newIgnore','filterReplace',
@@ -1708,6 +1737,25 @@ function paintTinyButtons() {
   el.editOnce.disabled = route !== 'live' || oneShot;
 }
 
+/* 複数台で使うときの設定。合図を受ける条件が変わるので、入れているときは
+   本体にも機械の名前を出す（設定の中だけだと、間違った機械へ話しかけて
+   いても気づけない）。 */
+function paintMachine() {
+  const on = el.multiOn.checked;
+  const nm = el.machineName.value.trim();
+  el.machineTag.hidden = !(on && nm);
+  el.machineTag.textContent = nm;
+  el.machineTag.title = t('multiOn');
+}
+function saveMachine() {
+  paintMachine();
+  putJSON('/api/machine', {multi: el.multiOn.checked, name: el.machineName.value.trim()})
+    .catch(() => {});
+}
+el.multiOn.onchange = saveMachine;
+el.machineName.onchange = saveMachine;
+el.machineName.oninput = paintMachine;
+
 // 手直し欄は、溜めるモードか書きかけがあるときだけ出す。
 // 即時モードでは認識中の文字だけが見えていればよい。
 function paintDraft() {
@@ -2060,6 +2108,13 @@ async function refreshState() {
         el.hint.textContent = t('hintStopped');
         return;
       }
+    }
+
+    // 何台かで使うときの設定（他の画面で変えられることもある）
+    if (document.activeElement !== el.machineName) {
+      el.multiOn.checked = !!s.multiMachine;
+      el.machineName.value = s.machineName || '';
+      paintMachine();
     }
 
     // Claude が切り替えたときの一言。自分で押したときは付かない。
