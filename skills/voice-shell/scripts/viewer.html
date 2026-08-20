@@ -776,6 +776,26 @@
   .chip.off .w { text-decoration:line-through; }
   .chip.off:hover .x { color:var(--ok); }
   .builtin-head { margin-top:.7rem; }
+
+  /* 声で言う言い方。読むためのものなので押せない。押せる札（.chip）と
+     取り違えられないよう、指の形にも下線にもしない。 */
+  .say {
+    display:inline-flex; align-items:center;
+    font-size:.78rem; padding:.2rem .6rem; border-radius:var(--pill);
+    background:var(--panel-2); color:var(--text);
+    border:1px solid var(--line-soft);
+  }
+  /* 言い方が多い区画で、5つより先を出し入れする。見出しの行に置くのは、
+     開いても閉じても的が同じ場所に居るようにするため。 */
+  .more {
+    margin-left:auto; flex:none; font-size:.75rem; font-weight:500;
+    color:var(--accent); padding:.15rem .4rem; border-radius:8px;
+  }
+  .more:hover { background:var(--raise); }
+  /* 書き方が合わない行。送っても落ちるだけなので、その場で分かるようにする */
+  .row.bad input { border-color:var(--warn); }
+  /* 一覧の下に出す一言。区画の外なので左右の余白は自分で持つ。 */
+  #cmdNote { padding:0 var(--pad); }
   /* chrome:// は web ページから開けない決まりなので、押したら写す。
      行き先が分かる形にしておかないと、どこを触ればよいのか伝わらない。 */
   .link {
@@ -908,6 +928,10 @@
     <div class="icons">
       <button class="icon" id="floatBtn" data-icon="picture_in_picture" data-icon-size="20"
               data-i18n-title="floatBtn" hidden></button>
+      <!-- 声で何と言えば効くのか。知っている人しか使えない状態にしない。
+           設定の隣に置く（同じ「開いて読んで戻る」形なので、探す場所が同じ）。 -->
+      <button class="icon" id="openHelp" data-icon="help" data-icon-size="20"
+              data-i18n-title="commandsTitle"></button>
       <button class="icon" id="openSettings" data-icon="settings" data-icon-size="20"
               data-i18n-title="settingsTitle"></button>
     </div>
@@ -1210,6 +1234,24 @@
   </div><!-- /paneDict -->
  </div>
 </section>
+
+<!-- ── 声で使えるコマンド ───────────────────────
+     設定と同じ作りにする。押すと画面が入れ替わり、左上の戻るで本体へ帰る。
+     中身は /api/commands が返す。言い方はデーモンが判定に使っている表その
+     ものなので、ここに出ているのに効かない、が起きない。 -->
+<section class="sheet" id="helpSheet" hidden>
+ <div class="sheet-inner">
+  <div class="sheet-head">
+    <button class="icon" id="closeHelp" data-icon="arrow_back_ios_new"
+            data-icon-size="18" data-i18n-title="back"></button>
+    <!-- 設定と同じく、開いている間も聞こえているかが見えるようにする -->
+    <span class="mini-mic" id="helpMini" role="img"><canvas id="helpMiniViz"></canvas></span>
+    <h2 data-i18n="commandsTitle">Voice commands</h2>
+  </div>
+  <div id="cmdGroups"></div>
+  <p class="dict-note" id="cmdNote"></p>
+ </div>
+</section>
 <script>
 // 画面に出ない不具合を見えるようにする（読み込み失敗はボタンが無反応になるだけなので）
 window.addEventListener('error', e => {
@@ -1315,6 +1357,31 @@ const I18N = {
     dictSaved:'Saved.',
     dictLoaded:'Imported and saved ({a} added, {u} changed{s}).',
     dictSkipped:' / {n} unreadable rows',
+    commandsTitle:'Voice commands',
+    cmdMute:'Turn the microphone off',
+    cmdMuteWhat:'Say one of these on its own and nothing more is recorded.',
+    cmdUnmute:'Turn the microphone on',
+    cmdUnmuteWhat:'Say one of these on its own and speech starts going through again.',
+    cmdUnmuteWhen:'Only while the microphone is off, and only when a model on this machine is listening. Browser recognition lets go of the microphone when you mute, so it never hears you come back.',
+    cmdLive:'Send straight through',
+    cmdLiveWhat:'Whatever you say goes out as soon as you stop talking.',
+    cmdHold:'Hold for editing',
+    cmdHoldWhat:'Speech collects in the box below instead of going out.',
+    cmdRoute:'Choose where speech goes',
+    cmdRouteWhat:'Picks one of the listening sessions, counted from the top of the list.',
+    cmdRouteWhen:'Only when two or more sessions are listening. With one there is nothing to choose, so the number stays ordinary speech.',
+    cmdCancelTail:'Drop what you just said',
+    cmdCancelTailWhat:'Say this at the end of a sentence and the whole sentence is thrown away.',
+    cmdHoldTail:'Edit what you just said',
+    cmdHoldTailWhat:'Say this at the end of a sentence and it lands in the box below instead of going out.',
+    cmdFixed:'Wording here is fixed. A phrase misheard in this spot costs too much.',
+    cmdYours:'Your own wording',
+    cmdAddPh:'say this too',
+    cmdAddRoutePh:'number {n}',
+    cmdSlotNote:'Write {n} where the number goes.',
+    cmdBadPhrase:'Could not use that. It needs two characters or more, and only the destination takes {n}, exactly once.',
+    cmdShowAll:'Show all',
+    cmdShowLess:'Show fewer',
     items:'items',
     micSwitched:'Switched microphone: {name}',
     voiceMuted:'Muted — say “unmute” to come back',
@@ -1432,6 +1499,31 @@ const I18N = {
     dictSaved:'保存しました。',
     dictLoaded:'読み込んで保存しました（追加 {a} 件、書き換え {u} 件{s}）。',
     dictSkipped:' / 読めない行 {n} 件',
+    commandsTitle:'声で使えるコマンド',
+    cmdMute:'マイクを切る',
+    cmdMuteWhat:'この一言だけを喋ると、そこから先は記録しません。',
+    cmdUnmute:'マイクを入れる',
+    cmdUnmuteWhat:'この一言だけを喋ると、また届くようになります。',
+    cmdUnmuteWhen:'切っている間だけ効きます。聞いているのがこの機械のモデルのときに限ります。ブラウザ認識は切るとマイクを手放すので、戻す合図を聞けません。',
+    cmdLive:'そのまま届ける',
+    cmdLiveWhat:'喋り終わった分から、そのまま Claude Code に届きます。',
+    cmdHold:'手直しに回す',
+    cmdHoldWhat:'喋った分は下の欄に溜まり、そのままでは出ていきません。',
+    cmdRoute:'送信先を選ぶ',
+    cmdRouteWhat:'聞いているセッションを、上から数えた番号で選びます。',
+    cmdRouteWhen:'聞き手が2つ以上のときだけ効きます。1つのときは選ぶ相手がいないので、番号は普通の発話のまま扱います。',
+    cmdCancelTail:'いま言った分を捨てる',
+    cmdCancelTailWhat:'文の終わりに付けると、その一文ごと捨てます。',
+    cmdHoldTail:'いま言った分を直す',
+    cmdHoldTailWhat:'文の終わりに付けると、出さずに下の欄へ回します。',
+    cmdFixed:'ここは言い方を足せません。聞き違えたときに失うものが大きすぎます。',
+    cmdYours:'自分の言い方',
+    cmdAddPh:'この言い方でも効かせる',
+    cmdAddRoutePh:'ナンバー{n}',
+    cmdSlotNote:'数の入るところに {n} と書きます。',
+    cmdBadPhrase:'その書き方は使えません。2文字以上にしてください。{n} を書けるのは送信先だけで、ちょうど1つです。',
+    cmdShowAll:'すべて見る',
+    cmdShowLess:'たたむ',
     items:'件',
     micSwitched:'マイクを切り替えました: {name}',
     voiceMuted:'ミュートにしました — 「ミュート解除」で戻ります',
@@ -1533,7 +1625,9 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'addReplace','addIgnore','newFrom','newTo','newIgnore','filterReplace',
                   'builtinChips','builtinCount',
                   'dictNote','dictExport','dictImport','dictFile',
-                  'paneBasic','paneDict','tabBasic','tabDict'])
+                  'paneBasic','paneDict','tabBasic','tabDict',
+                  'openHelp','helpSheet','closeHelp','helpMini','helpMiniViz',
+                  'cmdGroups','cmdNote'])
   el[id] = $(id);
 
 const post = (path, body) =>
@@ -1615,6 +1709,8 @@ const ICON = {
          'M480-424 284-228q-11 11-28 11t-28-11q-11-11-11-28t11-28l196-196-196-196q-11-11-11-28t11-28q11-11 28-11t28 11l196 196 196-196q11-11 28-11t28 11q11 11 11 28t-11 28L536-480l196 196q11 11 11 28t-11 28q-11 11-28 11t-28-11L480-424Z'],
   arrow_back_ios_new: ['m382-480 294 294q15 15 14.5 35T675-116q-15 15-35 15t-35-15L297-423q-12-12-18-27t-6-30q0-15 6-30t18-27l308-308q15-15 35.5-14.5T676-844q15 15 15 35t-15 35L382-480Z',
                       'm382-480 294 294q15 15 14.5 35T675-116q-15 15-35 15t-35-15L297-423q-12-12-18-27t-6-30q0-15 6-30t18-27l308-308q15-15 35.5-14.5T676-844q15 15 15 35t-15 35L382-480Z'],
+  help: ['M513.5-254.5Q528-269 528-290t-14.5-35.5Q499-340 478-340t-35.5 14.5Q428-311 428-290t14.5 35.5Q457-240 478-240t35.5-14.5ZM480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm0-80q134 0 227-93t93-227q0-134-93-227t-227-93q-134 0-227 93t-93 227q0 134 93 227t227 93Zm0-320Zm4-172q25 0 43.5 16t18.5 40q0 22-13.5 39T502-525q-23 20-40.5 44T444-427q0 14 10.5 23.5T479-394q15 0 25.5-10t13.5-25q4-21 18-37.5t30-31.5q23-22 39.5-48t16.5-58q0-51-41.5-83.5T484-720q-38 0-72.5 16T359-655q-7 12-4.5 25.5T368-609q14 8 29 5t25-17q11-15 27.5-23t34.5-8Z',
+         'M513.5-254.5Q528-269 528-290t-14.5-35.5Q499-340 478-340t-35.5 14.5Q428-311 428-290t14.5 35.5Q457-240 478-240t35.5-14.5ZM480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm4-572q25 0 43.5 16t18.5 40q0 22-13.5 39T502-525q-23 20-40.5 44T444-427q0 14 10.5 23.5T479-394q15 0 25.5-10t13.5-25q4-21 18-37.5t30-31.5q23-22 39.5-48t16.5-58q0-51-41.5-83.5T484-720q-38 0-72.5 16T359-655q-7 12-4.5 25.5T368-609q14 8 29 5t25-17q11-15 27.5-23t34.5-8Z'],
 };
 
 // 輪郭と塗りを両方入れた svg を作る。どちらを見せるかは CSS が決める。
@@ -1682,22 +1778,26 @@ function fitCanvas() {
 }
 new ResizeObserver(fitCanvas).observe(canvas);
 
-/* 設定と辞書の見出しに置く小さいマイク。本体と同じ絵を、同じ値で描く。
+/* シートの見出しに置く小さいマイク。本体と同じ絵を、同じ値で描く。
    隠れている間は寸法が取れない（display:none なので 0 になる）ので、
-   開いた時点で測り直す。 */
-const mini = el.miniViz, mcx = mini.getContext('2d');
-let mw = 0, mh = 0;
+   開いた時点で測り直す。シートを増やしたらここへ足す — 足さないと、
+   その画面を開いている間だけ聞こえているかどうかが見えなくなる。 */
+const minis = [[el.miniViz, el.sheet, el.miniMic],
+               [el.helpMiniViz, el.helpSheet, el.helpMini]]
+  .map(([canvas, sheet, box]) => ({canvas, sheet, box, cx: canvas.getContext('2d'), w: 0, h: 0}));
 function fitMini() {
-  const r = mini.getBoundingClientRect();
-  if (!r.width || !r.height) { mw = mh = 0; return; }
   const dpr = window.devicePixelRatio || 1;
-  mw = Math.round(r.width);
-  mh = Math.round(r.height);
-  mini.width = mw * dpr;
-  mini.height = mh * dpr;
-  mcx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  for (const m of minis) {
+    const r = m.canvas.getBoundingClientRect();
+    if (!r.width || !r.height) { m.w = m.h = 0; continue; }
+    m.w = Math.round(r.width);
+    m.h = Math.round(r.height);
+    m.canvas.width = m.w * dpr;
+    m.canvas.height = m.h * dpr;
+    m.cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
 }
-new ResizeObserver(fitMini).observe(mini);
+for (const m of minis) new ResizeObserver(fitMini).observe(m.canvas);
 
 // 色も「いま中身が居る document」から読む。元の document から読むと、浮かせて
 // いる間にテーマを変えたときに canvas のマイクだけ新しい色になり、周りの
@@ -1978,12 +2078,13 @@ function paintFrame(now) {
   stepMicLevel(now);
   drawMic(cx, cw, ch, cssVar('--accent'));
 
-  // 設定や辞書を開いている間は本体が丸ごと隠れる。同じ絵を見出しの隣にも
-  // 描いて、聞こえているかどうかだけは見えるようにする。閉じている間は
-  // 描かない（見えないものを毎コマ描くだけになる）。
-  if (!el.sheet.hidden && mw && mh) {
-    mcx.clearRect(0, 0, mw, mh);
-    drawMic(mcx, mw, mh, cssVar(shownMode === 'hold' ? '--accent-2' : '--accent'));
+  // シートを開いている間は本体が丸ごと隠れる。同じ絵を見出しの隣にも描いて、
+  // 聞こえているかどうかだけは見えるようにする。閉じている間は描かない
+  // （見えないものを毎コマ描くだけになる）。
+  for (const m of minis) {
+    if (m.sheet.hidden || !m.w || !m.h) continue;
+    m.cx.clearRect(0, 0, m.w, m.h);
+    drawMic(m.cx, m.w, m.h, cssVar(shownMode === 'hold' ? '--accent-2' : '--accent'));
   }
 
   // ロゴの波も同じ値で動かす（小さくしたときの手がかり）
@@ -2055,10 +2156,12 @@ addEventListener('keydown', armViz, {once:true});
 function setState(kind, text) {
   el.beacon.className = 'beacon ' + kind;
   el.stateText.textContent = text;
-  // 設定を開いている間、この一行は隠れる。小さなマイクだけが手がかりに
+  // シートを開いている間、この一行は隠れる。小さなマイクだけが手がかりに
   // なるので、同じ文をそちらの読み上げと吹き出しにも持たせる。
-  el.miniMic.title = text;
-  el.miniMic.setAttribute('aria-label', text);
+  for (const m of minis) {
+    m.box.title = text;
+    m.box.setAttribute('aria-label', text);
+  }
 }
 
 function retally() {
@@ -2141,6 +2244,14 @@ const ROUTE = {
 let route = 'live';
 let lastMode = 'live';   // 一時停止を解いたとき、直前のモードに戻す
 let oneShot = false;     // この一言だけ手直しに回している最中か
+/* いまの下書きに人が手を入れたか。送るときに一緒に渡し、サーバはこれを見て
+   "edited" の印を付ける。手直しの欄を通ったかどうかでは決めない — 認識が
+   うまくいってそのまま送った文にまで印が付き、Claude 側が「意図して整えた文」
+   として読み替えを控えてしまう。認識結果が入るのは value への代入なので
+   'input' は起きず、人が打ったとき・貼ったとき・切り取ったときだけ立つ。
+   直して元の文へ戻した場合も手直しとして数える（操作はあったので）。
+   下ろすのは、送ったときと捨てたときだけ。 */
+let draftTouched = false;
 let shownMode = 'live';  // 画面に見せている送り先。小さいマイクの色もこれに従う
 let asrPausedByRoute = false;   // 一時停止のためにブラウザ認識を止めたか
 let inFlight = false;    // 切替中はポーリングに巻き戻されないようにする
@@ -2705,8 +2816,9 @@ async function refreshState() {
 el.send.onclick = async () => {
   const text = el.draft.value.trim();
   if (!text) return;
-  await post('/api/send', {text});
+  await post('/api/send', {text, edited: draftTouched});
   el.draft.value = '';
+  draftTouched = false;
   grow();
   paintDraft();
   endOneShot();
@@ -2714,11 +2826,15 @@ el.send.onclick = async () => {
 
 // 消したものは一度だけ戻せるようにする（確認ダイアログは毎回だと煩わしい）
 let lastDiscarded = '';
+// 戻したときに手直しの印まで消えないよう、一緒に控えておく
+let lastDiscardedTouched = false;
 
 el.discard.onclick = async () => {
   lastDiscarded = el.draft.value;
+  lastDiscardedTouched = draftTouched;
   await post('/api/discard');
   el.draft.value = '';
+  draftTouched = false;
   grow();
   paintDraft();
   if (lastDiscarded.trim()) {
@@ -2727,6 +2843,7 @@ el.discard.onclick = async () => {
     undo.textContent = t('undo');
     undo.onclick = () => {
       el.draft.value = lastDiscarded;
+      draftTouched = lastDiscardedTouched;
       paintDraft();
       grow();
       el.hint.textContent = '';
@@ -2804,9 +2921,10 @@ function leaveOneShotIfEmpty(e) {
   endOneShot();
   say(t('oneShotOff'), 4);
 }
-for (const n of [el.page, el.sheet, document]) n.addEventListener('click', leaveOneShotIfEmpty);
+for (const n of [el.page, el.sheet, el.helpSheet, document])
+  n.addEventListener('click', leaveOneShotIfEmpty);
 
-el.draft.addEventListener('input', () => { grow(); });
+el.draft.addEventListener('input', () => { draftTouched = true; grow(); });
 // Ctrl+Enter で送信
 el.draft.addEventListener('keydown', e => {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); el.send.click(); }
@@ -2830,6 +2948,7 @@ el.tabBasic.onclick = () => showSheetTab('basic');
 el.tabDict.onclick = () => showSheetTab('dict');
 
 el.openSettings.onclick = async () => {
+  el.helpSheet.hidden = true;       // シートは重ねない。どちらか一方だけ出す
   el.sheet.hidden = false;
   fitMini();                        // 隠れている間は寸法が取れない
   showSheetTab(store.get('sheetTab', 'basic'));
@@ -2837,6 +2956,18 @@ el.openSettings.onclick = async () => {
   el.dictNote.textContent = '';
 };
 el.closeSettings.onclick = () => { saveDict(); el.sheet.hidden = true; };
+
+/* 声で使えるコマンドの一覧。設定と同じく、開くと本体と入れ替わる。 */
+el.openHelp.onclick = async () => {
+  saveDict();                       // 設定から直接来ることがある
+  el.sheet.hidden = true;
+  el.helpSheet.hidden = false;
+  el.helpSheet.scrollTop = 0;
+  fitMini();
+  el.cmdNote.textContent = '';
+  await loadCommands();
+};
+el.closeHelp.onclick = () => { saveCmds(); el.helpSheet.hidden = true; };
 
 // テーマ。自動のときは OS の設定に従う（data-theme を外しておく）
 // 浮かせている間は小窓と元の document の両方に書く。小窓だけだと戻した瞬間に
@@ -2863,6 +2994,9 @@ function applyLang(choice) {
     const m = row.querySelector('.mark');
     m.textContent = t(row.dataset.kind);
   }
+  // コマンドの一覧は文字も言い方も言語で変わる。開いたまま切り替えられる
+  // ので、取り直して組み立て直す（data-i18n では言い方の方が付いてこない）。
+  if (!el.helpSheet.hidden) loadCommands();
 }
 for (const b of el.langRow.children) b.onclick = () => applyLang(b.dataset.langChoice);
 
@@ -3596,7 +3730,7 @@ const canFloat = 'documentPictureInPicture' in window;
 el.floatBtn.hidden = !canFloat;
 // 小窓へ移す中身。増やすときはここだけ書き足す。開くときと戻すときで並びが
 // 食い違うと、戻したときに書き足したぶんだけ小窓と一緒に消える。
-const floatParts = [el.page, el.sheet];
+const floatParts = [el.page, el.sheet, el.helpSheet];
 paintFloatAsk();
 
 // 浮いているかどうかで、絵と説明を入れ替える。
@@ -3697,7 +3831,7 @@ el.floatBtn.onclick = async () => {
   applyTheme(store.get('theme', 'auto'));
   // 要素ごと移す。参照は生きたままなので JS は書き換えなくてよい。
   win.document.body.append(...floatParts);
-  el.sheet.hidden = true;
+  el.sheet.hidden = el.helpSheet.hidden = true;   // 小窓は本体から始める
   fitCanvas();
   paintFloat(true);
   store.set('floated', '1');
@@ -3987,6 +4121,234 @@ el.clean.onchange = () => {
   tuning.strip_fillers = el.clean.checked;
   putJSON('/api/tuning', tuning);
 };
+
+/* ── 声で使えるコマンドの一覧 ─────────────────
+   何が起きるかの説明はここ（i18n）、口に出す言い方はデーモンの表にある。
+   訳す先が違うので置き場所も分ける。言語を足すときは、画面の文字がこちら、
+   実際に喋る言葉が voice_daemon.py の COMMAND_WORDS。
+
+   言い方をこちらに写して持たない。写すと、画面に書いてあるのに効かない語や、
+   効くのに書いていない語ができる。 */
+const CMD_ICON = {mute:'mic_off', unmute:'mic', live:'bolt', hold:'edit',
+                  route:'swap_horiz', cancel_tail:'delete', hold_tail:'edit'};
+// 使える条件があるものだけ。無いものに「いつでも効きます」とは書かない。
+const CMD_WHEN = {unmute:'cmdUnmuteWhen', route:'cmdRouteWhen'};
+const SAY_MAX = 6;      // 一度に見せる言い方の数。全部並べても読み切れない
+// mute → cmdMute、cancel_tail → cmdCancelTail
+const cmdI18nBase = id =>
+  'cmd' + id.replace(/(^|_)([a-z])/g, (_m, _s, c) => c.toUpperCase());
+
+/* サーバと同じ決まりで整える。ここで弾くのは、打っている人へその場で
+   見せるため。決めるのはサーバ側で、保存のときにもう一度通る。
+
+   どの合図に足せるかは、画面に控えを持たずにサーバの答えから覚える。
+   控えを持つと、足せる種類を向こうで変えた日に片方だけ古いまま残る。 */
+let cmdEditable = new Set();
+const CMD_WIDE = '１２３４５６７８９０';
+const CMD_DROP = /[ \t　。、．，・…！？!?.,\-~〜"'「」『』()（）]/g;
+const cmdNormal = s => s.trim()
+  .replace(/[１２３４５６７８９０]/g, c => '1234567890'[CMD_WIDE.indexOf(c)])
+  .replace(CMD_DROP, '').toLowerCase();
+
+function cleanPhrase(kind, s) {
+  if (!cmdEditable.has(kind)) return '';
+  const key = cmdNormal(s);
+  const slots = (key.match(/\{n\}/g) || []).length;
+  if (kind === 'route' ? slots !== 1 : slots > 0) return '';
+  const bare = key.replaceAll('{n}', '');
+  return bare.length >= 2 && bare.length <= 24 ? key : '';
+}
+
+let cmdNoteTimer = null;
+function flashCmdNote(msg, ms) {
+  clearTimeout(cmdNoteTimer);
+  el.cmdNote.textContent = msg;
+  cmdNoteTimer = setTimeout(() => { el.cmdNote.textContent = ''; }, ms);
+}
+
+// 足した言い方の1行。辞書の行と同じ形にする（消し方まで同じ）。
+function cmdRow(kind, phrase = '') {
+  const row = document.createElement('div');
+  row.className = 'row';
+  const a = document.createElement('input');
+  a.className = 'phrase';
+  a.value = phrase;
+  a.placeholder = t(kind === 'route' ? 'cmdAddRoutePh' : 'cmdAddPh');
+  // 使えない書き方は、送って消えるより先にその場で分かるようにする
+  const mark = () => row.classList.toggle(
+    'bad', !!a.value.trim() && !cleanPhrase(kind, a.value));
+  a.addEventListener('input', mark);
+  mark();
+  const del = document.createElement('button');
+  del.className = 'del';
+  del.title = t('remove');
+  del.appendChild(iconSvg('close', 17));
+  // 消しても焦点は動かないので、ここから呼ばないと保存の機会が来ない
+  del.onclick = () => { row.remove(); saveCmds(); };
+  row.append(a, del);
+  return row;
+}
+
+function cmdGroupEl(g, mine) {
+  const base = cmdI18nBase(g.id);
+  const box = document.createElement('div');
+  box.className = 'group';
+  box.dataset.kind = g.id;
+
+  const head = document.createElement('h3');
+  head.dataset.icon = CMD_ICON[g.id] || 'auto_awesome';
+  head.dataset.iconSize = '16';
+  head.append(t(base));
+  box.append(head);
+
+  const what = document.createElement('p');
+  what.className = 'dict-label';
+  what.textContent = t(base + 'What');
+  box.append(what);
+
+  // 言い方そのもの。読むためのものなので、押せる形にはしない。
+  const says = document.createElement('div');
+  says.className = 'chips';
+  const paintSays = () => {
+    const all = box.classList.contains('open');
+    says.replaceChildren(...(all ? g.phrases : g.phrases.slice(0, SAY_MAX))
+      .map(p => {
+        const s = document.createElement('span');
+        s.className = 'say';
+        s.textContent = p;
+        return s;
+      }));
+  };
+  if (g.phrases.length > SAY_MAX) {
+    const more = document.createElement('button');
+    more.className = 'more';
+    const paintMore = () => {
+      more.textContent = t(box.classList.contains('open') ? 'cmdShowLess' : 'cmdShowAll');
+    };
+    more.onclick = () => { box.classList.toggle('open'); paintMore(); paintSays(); };
+    paintMore();
+    head.append(more);      // 見出しの行に置く。開いても的が動かない
+  }
+  paintSays();
+  box.append(says);
+
+  if (CMD_WHEN[g.id]) {
+    const when = document.createElement('p');
+    when.className = 'dict-note';
+    when.textContent = t(CMD_WHEN[g.id]);
+    box.append(when);
+  }
+
+  // 足せない合図は、足せない理由まで書く。欄が無い理由が読めないと、
+  // 見落としたのか決まりなのかが分からない。
+  if (!g.editable) {
+    const fixed = document.createElement('p');
+    fixed.className = 'dict-note';
+    fixed.textContent = t('cmdFixed');
+    box.append(fixed);
+    return box;
+  }
+
+  const label = document.createElement('p');
+  label.className = 'dict-label builtin-head';
+  label.textContent = t('cmdYours');
+  box.append(label);
+
+  if (g.id === 'route') {
+    const slot = document.createElement('p');
+    slot.className = 'dict-note';
+    slot.textContent = t('cmdSlotNote');
+    box.append(slot);
+  }
+
+  const rows = document.createElement('div');
+  rows.className = 'rows';
+  rows.append(...mine.map(p => cmdRow(g.id, p)));
+
+  const add = document.createElement('div');
+  add.className = 'new-row';
+  const input = document.createElement('input');
+  input.placeholder = t(g.id === 'route' ? 'cmdAddRoutePh' : 'cmdAddPh');
+  const btn = document.createElement('button');
+  btn.className = 'btn tonal';
+  btn.dataset.icon = 'add';
+  btn.dataset.iconSize = '17';
+  btn.append(t('add'));
+  const doAdd = () => {
+    const v = input.value.trim();
+    if (!v) { input.focus(); return; }
+    if (!cleanPhrase(g.id, v)) {
+      flashCmdNote(t('cmdBadPhrase'), 6000);
+      input.focus();
+      return;
+    }
+    rows.prepend(cmdRow(g.id, v));
+    input.value = '';
+    input.focus();
+    saveCmds();       // 足した行には焦点が乗らない。ここで書かないと消える
+  };
+  btn.onclick = doAdd;
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); doAdd(); }
+  });
+  add.append(input, btn);
+  box.append(add, rows);
+  return box;
+}
+
+function renderCommands(d) {
+  // 先に覚える。cleanPhrase がこれを見て、足せない種類を落とす。
+  cmdEditable = new Set((d.groups || []).filter(g => g.editable).map(g => g.id));
+  el.cmdGroups.replaceChildren(...(d.groups || []).map(
+    g => cmdGroupEl(g, (d.user || {})[g.id] || [])));
+  decorateIcons(el.cmdGroups);    // 浮かせている間もあるので、宛先を渡す
+}
+
+function collectCmds() {
+  const out = {};
+  for (const box of el.cmdGroups.children) {
+    const rows = box.querySelector('.rows');
+    if (!rows) continue;          // 足せない合図には欄が無い
+    out[box.dataset.kind] = [...rows.children]
+      .map(r => cleanPhrase(box.dataset.kind, r.querySelector('.phrase').value))
+      .filter(Boolean);
+  }
+  return out;
+}
+
+/* 辞書と同じで、焦点が外れた時点で書く。保存ボタンは置かない。 */
+let cmdsReady = false;                // 一度読むまでは書かない
+let cmdsLast = '';                    // 最後に書いた中身。同じなら投げない
+let cmdsSaving = Promise.resolve();   // 書き込みを一本の列にする
+
+async function saveCmds(quiet = false) {
+  if (!cmdsReady) return;
+  const d = collectCmds();
+  const body = JSON.stringify(d);
+  if (body === cmdsLast) return;
+  cmdsLast = body;
+  const mine = cmdsSaving = cmdsSaving.then(() => putJSON('/api/commands', d))
+                                      .then(r => r.ok, () => false);
+  if (!await mine) { cmdsLast = ''; return; }   // 次に触ったときに投げ直す
+  if (!quiet) flashCmdNote(t('dictSaved'), 1600);
+}
+
+async function loadCommands() {
+  cmdsReady = false;
+  let d;
+  try {
+    d = await (await fetch('/api/commands?lang=' + lang)).json();
+  } catch {
+    return;               // 古いサーバには無い口。開くだけにして黙る
+  }
+  renderCommands(d);
+  // 読んだ直後の姿を控える。ここを飛ばすと、開いただけで一度書きに行く。
+  cmdsLast = JSON.stringify(collectCmds());
+  cmdsReady = true;
+}
+
+// 打っている最中は書かない。焦点が外れた時点でだけ書く。
+el.helpSheet.addEventListener('focusout', () => saveCmds());
 
 /* ── 起動 ───────────────────────────────── */
 resolveLang();
