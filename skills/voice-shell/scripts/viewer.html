@@ -1717,7 +1717,7 @@ function paint() {
     el.hint.textContent = t(off ? 'hintOff' : shown === 'hold' ? 'hintHold' : 'hintLive');
   }
   // 手元で作業している間はタブのタイトルだけが手がかりになる
-  document.title = t(off ? 'titleOff' : shown === 'hold' ? 'titleHold' : 'titleLive') + ' — voice-shell';
+  setTitle(t(off ? 'titleOff' : shown === 'hold' ? 'titleHold' : 'titleLive') + ' — voice-shell');
 
   el.tray.classList.toggle('holding', route === 'hold');
   el.tray.classList.toggle('editing', oneShot);
@@ -1804,6 +1804,17 @@ function applyRouteSideEffects(next) {
     }
   }
   paintBrowserAsr();
+}
+
+/* 浮かせた小窓は別の document なので、こちらの title を書いても届かない。
+   小窓の題は Alt+Tab に出るだけでなく、窓の上端にも出る。合わせておかないと、
+   一時停止しているのに「送信中」と書かれたままになる。 */
+function setTitle(text) {
+  document.title = text;
+  const w = window.documentPictureInPicture?.window;
+  if (w) {
+    try { w.document.title = text; } catch { /* 閉じかけ */ }
+  }
 }
 
 /* 合図の一言。3秒おきの paint() に上書きされないよう、しばらく守る。
@@ -3002,6 +3013,7 @@ el.floatBtn.onclick = async () => {
   el.sheet.hidden = true;
   fitCanvas();
   paintFloat(true);
+  paint();                    // 小窓にも同じ題を付ける
   win.addEventListener('pagehide', () => {
     document.body.append(el.page, el.sheet);
     paintFloat(false);          // 閉じる最中は window がまだ残っている
