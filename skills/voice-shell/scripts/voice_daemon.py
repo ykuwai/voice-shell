@@ -952,10 +952,13 @@ def resolve_target(log_path):
     if raw and (listeners_dir(log_path) / raw).exists():
         return raw
 
-    # まだ選んでいない、または選んだ相手が終了した。
+    # まだ選んでいない、または選んだ相手が終了した。既定は「いま起動した方」
+    # なので、並び順（first_seen）ではなく登録し直した時刻で選ぶ。
     # 聞き手が1つだけなら宛先を書く意味がない。
     live = list_active_listeners(log_path)
-    return str(live[-1]["pid"]) if len(live) > 1 else None
+    if len(live) <= 1:
+        return None
+    return str(max(live, key=lambda e: e.get("since", 0))["pid"])
 
 
 # ── 聞き手の名前 ──────────────────────────
@@ -1058,8 +1061,12 @@ def listener_title(entry):
 
 
 def label_listeners(entries):
-    """表示名を決める。同じ名前が並んだら登録の早い順に (2) (3) と付ける。"""
-    entries = sorted(entries, key=lambda e: e.get("since", 0))
+    """表示名を決める。同じ名前が並んだら早い順に (2) (3) と付ける。
+
+    並びは「その会話が最初に聞き始めた時刻」。登録し直した時刻で並べると、
+    音声モードを入れ直すたびに番号が動いて、声で指す番号が当てにならない。
+    """
+    entries = sorted(entries, key=lambda e: e.get("first_seen") or e.get("since", 0))
     seen = {}
     for e in entries:
         base = listener_title(e) or os.path.basename(e.get("cwd", "")) or "?"
