@@ -406,6 +406,8 @@
     flex:1 1 auto; font-size:.88rem; line-height:1.65; color:var(--text);
     min-height:1.5em; max-height:var(--stream-max);
     overflow-y:auto; overscroll-behavior:contain;
+    /* 繰れることは伝えたいが、細い窓では棒が本文を押しのける */
+    scrollbar-width:thin; scrollbar-color:var(--line) transparent;
   }
   /* 合図として受け取った言葉。指示ではなく操作として扱ったことを、
      その言葉自体を光らせて示す。 */
@@ -724,6 +726,17 @@
   @media (max-height: 319px) {
     header, .status { display:none; }
     .control-row { padding-top:.25rem; }
+    /* 「未送信」の札と時刻は畳み、道具は本文の横へ回す。行をひとつ
+       まるごと空けられるので、余白を詰めるより効く。手直しの欄と
+       送るボタンは、開いたときだけ下の行へ折り返す。 */
+    .draft-card { flex-flow:row wrap; align-items:flex-start; gap:.4rem; }
+    .draft-card .mark, .draft-card .gutter .spacer, #draftTime { display:none; }
+    .draft-card .gutter { order:2; flex:none; margin:0; }
+    /* 手直し中は本文の行が消えるので、道具だけが左に取り残される */
+    .draft-card:has(> textarea:not([hidden])) .gutter { margin-left:auto; }
+    .draft-card .stream { order:1; flex:1 1 6em; min-width:0; }
+    .draft-card > textarea { order:3; flex:1 1 100%; margin-top:0; }
+    .draft-card .draft-actions { order:4; flex:1 1 100%; margin-top:0; }
   }
 
   /* 横に並べ替える。マイクを左に大きく置き、丸2つを右へ。
