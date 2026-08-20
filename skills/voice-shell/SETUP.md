@@ -1,113 +1,119 @@
-# セットアップ
+# Setup
 
-Claude Code が案内するための手順書。まず環境を調べ、**どれで進めるかユーザーに
-確認してから**実行する（勝手に全部入れない）。
+The procedure Claude Code follows when it walks someone through this. Look at the
+environment first and **ask the user which way to go before running anything**
+(do not install everything on your own).
 
-**多くの場合、何も入れなくてよい。** 既定は Chrome の Web Speech API で、
-`pip install numpy aiohttp` だけで動く。モデルの読み込みも待ち時間も無い。
-ただし**音声は認識のため Google のサーバへ送られる**。
+**Most of the time there is nothing to install.** The default is Chrome's Web Speech
+API, and `pip install numpy aiohttp` is enough to run it. No model to load, nothing
+to wait for. The catch is that **the audio is sent to Google's servers to be
+recognized**.
 
-以下は、手元だけで完結させたい場合や、画面を開かずに使いたい場合の手順。
+What follows is for when you want everything to stay on your machine, or when you
+want to use it without opening the window.
 
-## 1. 環境を調べる
+## 1. Look at the environment
 
 ```bash
 uname -s -m
-sw_vers -productVersion 2>/dev/null      # macOS のとき
+sw_vers -productVersion 2>/dev/null      # on macOS
 ```
 
-| 環境 | 進む節 |
+| Environment | Which section |
 |---|---|
-| まず試したいだけ、または非力な機械 | **入れるものは無い**（既定のブラウザ認識） |
-| macOS 26 以降 | **A**。OS 付属の認識で、モデルを落とさずに動く |
-| それ以外、または固有名詞に強くしたい | **B**。Whisper を手元で動かす |
+| Just trying it out, or a weak machine | **Nothing to install** (the default browser recognition) |
+| macOS 26 or later | **A**. The recognition that ships with the OS, no model to download |
+| Anything else, or you want it strong on proper nouns | **B**. Run Whisper on your own machine |
 
-A も B も音声はこの機械から出ない。**手元で動かせるのはこの 2 つだけ。**
+With A and B the audio never leaves the machine. **Those two are the only ways to
+run it locally.**
 
-## A. macOS 26 以降（OS 付属の認識）
+## A. macOS 26 or later (the recognition that ships with the OS)
 
-`SpeechAnalyzer` と `SpeechTranscriber` を使う（`engine_apple.py`）。
-`--engine apple` で動く。
+Uses `SpeechAnalyzer` and `SpeechTranscriber` (`engine_apple.py`).
+Runs with `--engine apple`.
 
 ```bash
-brew install ffmpeg                      # 録音用
-cd <このリポジトリ>
-python3 -m venv .venv                    # Python 3.10〜3.13
+brew install ffmpeg                      # for recording
+cd <this repository>
+python3 -m venv .venv                    # Python 3.10 to 3.13
 .venv/bin/pip install -U numpy aiohttp soxr
 ```
 
-Swift のヘルパ（`speech_helper.swift`）を初回起動時に自動でビルドするので、
-Xcode か Command Line Tools が要る。
+The Swift helper (`speech_helper.swift`) is built automatically on the first run,
+so Xcode or the Command Line Tools have to be there.
 
 ```bash
-xcode-select --install                   # 入っていなければ
-swiftc --version                         # macOS 26 SDK が見えるか確認
+xcode-select --install                   # if you do not have them
+swiftc --version                         # check that the macOS 26 SDK is visible
 ```
 
-日本語の音声認識モデルは OS が初回に自動で落としてくる（数十秒）。
-2 回目以降は端末に残るので待ち時間はない。
+The OS pulls down the speech model for the language by itself on the first run
+(tens of seconds). It stays on the machine after that, so there is no wait.
 
-メモリは OS 側が持つので、こちらでは抱えない。起動は 1 秒未満、
-3.5 秒の発話の認識に 0.1 秒ほど（Apple Silicon での実測）。
+The memory is held by the OS, not by us. Startup is under a second, and a 3.5 second
+utterance takes about 0.1 seconds to recognize (measured on Apple Silicon).
 
-**macOS 25 以前には `SpeechTranscriber` が無い。** その場合は B へ進む。
+**macOS 25 and earlier have no `SpeechTranscriber`.** Go to B in that case.
 
-## B. Whisper（faster-whisper）
+## B. Whisper (faster-whisper)
 
-`--engine whisper` で動く（`whisper_engine.py`）。中身は
-[faster-whisper](https://github.com/SYSTRAN/faster-whisper)（CTranslate2 版の
-Whisper）で、OS を選ばない。
+Runs with `--engine whisper` (`whisper_engine.py`). Inside it is
+[faster-whisper](https://github.com/SYSTRAN/faster-whisper), the CTranslate2 build
+of Whisper, which runs on any OS.
 
 ```bash
-cd <このリポジトリ>
-python3 -m venv .venv                    # Python 3.10〜3.13
+cd <this repository>
+python3 -m venv .venv                    # Python 3.10 to 3.13
 .venv/bin/pip install -U faster-whisper aiohttp soxr numpy
 ```
 
-`nvidia-smi` で NVIDIA の GPU が見える機械なら、そのまま既定で動く。
+If `nvidia-smi` shows an NVIDIA GPU on the machine, the defaults are fine as they are.
 
 ```bash
 voice-shell.sh whisper
 ```
 
-CPU しか無いなら、モデルを小さくして精度を落とす場所を指定する。
+With only a CPU, shrink the model and say where you want to give up accuracy.
 
 ```bash
 voice-shell.sh whisper --model base --whisper-device cpu --whisper-compute int8
 ```
 
-モデルは初回起動時に Hugging Face から自動で落ちてくる（`base` で数十 MB から
-100MB 程度）。`--whisper-compute` は精度と速度の兼ね合いで、CPU なら `int8`、
-GPU なら `float16` を使う。
+The model comes down from Hugging Face on the first run (tens of MB up to about
+100MB for `base`). `--whisper-compute` is the trade between accuracy and speed, so
+use `int8` on a CPU and `float16` on a GPU.
 
-### どのモデルを使うか
+### Which model to use
 
-既定は `large-v3-turbo`。**GPU の無い CPU では重すぎる**ので、4 コア CPU の
-実測では `base` が実用的（RTF 約0.15）。`small` は RTF 約0.76 で少し重め。
+The default is `large-v3-turbo`. It is **far too heavy on a CPU with no GPU**, and
+on a 4 core CPU the measured result was that `base` is the practical one (RTF about
+0.15). `small` is a bit heavy at RTF about 0.76.
 
-`--model` は Hugging Face の名前も、手元に置いたフォルダの場所も受ける。
-その言語に合わせて調整したモデルを持っているなら、そのまま渡せる。
+`--model` takes a Hugging Face name as well as the path of a folder on your machine.
+If you have a model tuned for your language, hand it over as it is.
 
 ```bash
 voice-shell.sh whisper --model kotoba-tech/kotoba-whisper-v2.0
 voice-shell.sh whisper --model /path/to/my-model
 ```
 
-一度渡したモデルは覚えるので、次からは `start` だけでよい
-（`~/.config/voice-shell/config.json`）。既定に戻すときは `--model ""` を渡す。
+A model you hand over once is remembered, so `start` is enough after that
+(`~/.config/voice-shell/config.json`). Pass `--model ""` to go back to the default.
 
-覚えるのはモデルだけ。`--whisper-device` と `--whisper-compute` は覚えないので、
-CPU で使うなら毎回渡す。
+Only the model is remembered. `--whisper-device` and `--whisper-compute` are not,
+so pass them every time if you are on a CPU.
 
-Apple のオンデバイス認識との違いは、固有名詞に強いこと、騒がしい場所や
-複数人の声でも崩れにくいこと。代わりに起動が遅く、モデルのぶんのメモリを使う。
+Compared with Apple's on-device recognition, Whisper is stronger on proper nouns
+and holds up better in a noisy room or with several voices. In exchange it starts
+slower and uses the memory the model needs.
 
-## 共通
+## Common to both
 
-`voice-shell.sh` はリポジトリ直下の `.venv` を自動で見つけるので、
-`VOICE_SHELL_PYTHON` の設定は不要。
+`voice-shell.sh` finds the `.venv` at the root of the repository by itself, so there
+is no need to set `VOICE_SHELL_PYTHON`.
 
-録音の道具が要る。macOS と Windows は `ffmpeg`、Linux は `arecord`。
+You need a tool to record with. `ffmpeg` on macOS and Windows, `arecord` on Linux.
 
 ```bash
 brew install ffmpeg              # macOS
@@ -115,35 +121,37 @@ sudo apt install alsa-utils      # Linux
 winget install ffmpeg            # Windows
 ```
 
-macOS では初回起動時に、ターミナルへマイクの許可を求めるダイアログが出るので
-許可してもらう（ffmpeg が avfoundation 経由で録音するため）。認識そのものは
-マイクを触らないので、追加の許可は要らない。
+On macOS a dialog asks the terminal for mic permission on the first run, so have
+the user allow it (ffmpeg records through avfoundation). The recognition itself
+never touches the mic, so nothing else has to be allowed.
 
-## 2. スキルを認識させる
+## 2. Make the skill visible
 
 ```bash
 ln -s "$(pwd)/skills/voice-shell" ~/.claude/skills/voice-shell
 ```
 
-`npx skills add ykuwai/voice-shell` で入れた場合は不要。
+Not needed if it went in with `npx skills add ykuwai/voice-shell`.
 
-## 3. 動かす
+## 3. Run it
 
 ```bash
 ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh start
 ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh wait-ready
 ```
 
-`READY` が出たら http://127.0.0.1:8090 を開いて話しかけてもらう。
+Once `READY` shows up, have the user open http://127.0.0.1:8090 and talk.
 
-## つまずいたら
+## When you get stuck
 
-| 症状 | 対処 |
+The first row is left in Japanese because that is exactly what gets printed.
+
+| Symptom | What to do |
 |---|---|
-| `Python が見つかりません` | `export VOICE_SHELL_PYTHON=/path/to/.venv/bin/python` |
-| `arecord`／`ffmpeg` が無い | 上の「共通」で入れる |
-| 起動が `FAILED` | `voice-shell.sh status` と `daemon.out` の末尾を見る |
-| Whisper が遅い | モデルを小さくする（`--model base`）。CPU なら `--whisper-compute int8` |
-| 喋っても届かない | 感度が低い。ビューアのマイクの下の印を、声のときだけバーが超える位置まで上げる |
-| 物音で勝手に届く | 感度が高い。同じ印を下げる |
-| マイクを変えたい | `arecord -L`（Linux）等で一覧を出し `--device` に渡す |
+| `Python が見つかりません` (no Python it can run) | `export VOICE_SHELL_PYTHON=/path/to/.venv/bin/python` |
+| No `arecord` or `ffmpeg` | Install it as shown under "Common to both" above |
+| Startup says `FAILED` | Look at `voice-shell.sh status` and the tail of `daemon.out` |
+| Whisper is slow | Shrink the model (`--model base`). On a CPU add `--whisper-compute int8` |
+| You talk and nothing arrives | The sensitivity is too low. Raise the mark under the mic in the viewer until the bar only crosses it when you speak |
+| Noises send things on their own | The sensitivity is too high. Lower that same mark |
+| You want a different mic | List them with `arecord -L` (Linux) or the like and pass one to `--device` |

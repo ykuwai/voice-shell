@@ -1,260 +1,306 @@
-# ビューアの設計メモ
+# Viewer design notes
 
-2026-08-18 の音声セッションで決めたこと。実装が誰の手に渡っても同じものが出来るように、
-判断とその理由を残す。見た目の好みではなく「そう決めた理由」を書く。
+What was decided in the voice session of 2026-08-18. Written down so that whoever
+picks the implementation up builds the same thing. It records the decisions and the
+reasons for them, not preferences about looks.
 
-## この画面は何か
+## What this screen is
 
-ターミナルの横に**浮かべっぱなしにする細長い板**。ブラウザのタブではなく、常に最前面。
-一日中視界の端にあるので、静かなときに騒がしくないことが要件になる。
+**A long thin panel you leave floating next to the terminal.** Not a browser tab,
+always on top. It sits at the edge of your vision all day, so being quiet when
+things are quiet is a requirement.
 
-## 決めたこと
+## What was decided
 
-### 一時停止はボタンではなく波形そのもの
+### Pause is the waveform itself, not a button
 
-真ん中に丸ボタンを置く案は却下。押す場所が決まらないうえ、「止まっている」ことを別の
-インジケータで示す必要が出る。
+Putting a round button in the middle was rejected. There is no obvious place to
+press, and on top of that you would need a separate indicator to show that it is
+stopped.
 
-**波形パネル全体をタップで切り替える。** 止まると波が沈んで色が引き、それが状態表示を
-兼ねる。聞いている様子を出している場所を押して聞くのをやめる、という対応なので迷わない。
-ヘッダにも一時停止ボタンを置き、両者は同じ状態を指す（発見しやすさと速さの両立）。
+**Tapping anywhere on the waveform panel toggles it.** When it stops, the wave sinks
+and the color drains, and that doubles as the state display. You press the place
+that shows it listening in order to stop it listening, which is a match nobody has
+to think about. There is a pause button in the header too, and the two point at the
+same state (discoverability and speed at once).
 
-### マイクのアイコンは使わない
+### No mic icon
 
-マイクの図は「いまミュート中」なのか「押すとミュートになる」のかを区別できない。
-一時停止のアイコンなら操作と状態が一致する。
+A picture of a mic cannot tell you whether it means "muted right now" or "press to
+mute". A pause icon makes the action and the state agree.
 
-**塗り = いまその状態にある。輪郭 = 選べるがいまは違う。** この規則を画面全体で守る。
-塗られているものを数えれば現在の状態が全部わかる、という状態にする。
+**Filled means you are in that state. Outline means you can pick it but you are not
+in it.** Hold to this rule across the whole screen. Count the filled things and you
+know the entire current state.
 
-- 即時／手直し … 選択中の側だけ塗り。さらにボタン自体を塗って文字とアイコンを抜き色にする
-- 電源 … 動作中は塗り
-- 設定 … 常に輪郭（状態ではなく入り口なので）
+- Live and hold ... only the selected side is filled. On top of that the button
+  itself is filled and the text and icon are knocked out
+- Power ... filled while running
+- Settings ... always outline (it is a doorway, not a state)
 
-### 波形は流さない
+### The wave does not flow
 
-横に流れる表示は「録音している」ように見え、いま喋っていることが伝わらない。
-**中央から左右に開く形**にして、その瞬間に反応させる。バーは中央が高くなるよう重みを
-付ける（均一な棒の列はノイズに見える）。
+A display that scrolls sideways looks like "we are recording" and does not convey
+what you are saying right now. **Make it open outward from the center** so it reacts
+in the moment. Weight the bars so the center is taller (an even row of bars looks
+like noise).
 
-リング表示は単一の円ではなく、**傾きの違う楕円を複数重ねて半透明で揺らす**。線の太さも
-揺らす。円がひとつ膨らむだけだと計器に見え、喋っている感じが出ない。
+The ring display is not a single circle. **Several ellipses at different tilts are
+stacked and wobbled semi-transparently.** The line width wobbles too. One circle
+swelling on its own looks like a gauge and gives no sense of speech.
 
-### しきい値を線として描く
+### Draw the threshold as a line
 
-喋っている最中に知りたいのは「いま届いているか」だけ。線を越えたバーだけ色を変える。
-感度の調整がこの画面だけで完結する。
+While you are talking, the only thing you want to know is whether it is getting
+through right now. Only the bars past the line change color. Adjusting sensitivity
+is then finished on this screen alone.
 
-### 音量は積分してから表示する（重要）
+### Integrate the volume before showing it (important)
 
-**生の rms をそのまま高さにしてはいけない。** 子音、特に S の音で振り切れる。
-250ms 程度で積分した値を表示する。
+**Never put raw rms straight into the height.** Consonants, /s/ above all, peg it.
+Show a value integrated over roughly 250ms.
 
-理由は後述の LiveKit 調査で裏が取れている。実測の裏付けとして、ユーザーからも
-「静かな部屋なのに S の音で画面いっぱいになる」という報告があった。
+The reason is backed up by the LiveKit investigation further down. As real
+confirmation, a user reported that the screen fills up on the sound of an S even in
+a quiet room.
 
-判定側（デーモンの発話区切り）も同じ rms を見ているので、同じ問題を持つ。
-まず表示だけ直し、判定側は様子を見てから触る。
+The judging side (the daemon's utterance splitting) looks at the same rms, so it has
+the same problem. Fix the display first, watch how it goes, then touch the judging
+side.
 
-### マイクの自動調整（作ったが、外した）
+### Automatic mic tuning (built, then taken out)
 
-> **2026-08-20 に削除。** 実際に使うと、調整のために喋った内容が
-> そのまま Claude へ送られてしまう（測るのにマイクを開ける必要があり、
-> 開いている以上その声は発話として確定する）。加えて、部屋が普通に
-> 静かでも「声が小さすぎます」で終わることがあり、そこから何をすれば
-> よいのかが分からない。
+> **Deleted on 2026-08-20.** Used for real, whatever you say in order to tune it
+> gets sent to Claude as it is (you have to open the mic to measure, and while it
+> is open that voice settles as an utterance). On top of that, even in a normally
+> quiet room it sometimes ends with 「声が小さすぎます」 ("your voice is too
+> quiet"), and there is no way to tell what to do from there.
 >
-> 代わりに**メーターの印をつまむ**方を正式な手段にした。すぐ上のバーが
-> 今の音量なので、喋りながら「声のときだけ超える位置」へ置けばよく、
-> 測って推定するより直接的で、外れようが無い。以下は当時の設計の記録。
+> **Dragging the mark on the meter** is the official way instead. The bar right
+> above it is the current volume, so while talking you put the mark where "only my
+> voice crosses it", which is more direct than measuring and estimating, and there
+> is nothing to get wrong. What follows is the record of the design as it was.
 
-静か 3 秒 → ふだんの声で 5 秒、を測って部屋の音と声の間にしきい値を置く。
-結果は 1 本の目盛りに「部屋・しきい値・声」を並べて出す。
+Three seconds of quiet, then five seconds in a normal voice, measured to put the
+threshold between the room and the voice. The result is shown as one scale with
+"room", "threshold" and "voice" laid out along it.
 
-**差が足りないときは値を決めない。** どんな数字を入れても直らない状態なので、
-「マイクを近づけてください」と言う。既存の `tuning.json` の安全範囲（0.003〜0.06）に
-収まらない値が出ること自体が、その合図として使える。
+**When the gap is not big enough, do not pick a value.** No number will fix that
+state, so it says 「マイクを近づけてください」 ("move closer to the mic") instead.
+The fact that the value comes out outside the safe range of the existing
+`tuning.json` (0.003 to 0.06) is itself usable as that signal.
 
-デーモンが流している `rms` をそのまま集める。**判定に使われている数字そのもの**で
-測るので「調整したのに効かない」が起きない。パネル側で別にマイクを開いて測ると、
-測った音と判定される音が別物になり、この機能は信用できないものになる。
+Collect the `rms` the daemon is already streaming. Measuring with **the very number
+the judging uses** means "I tuned it and nothing changed" cannot happen. If the
+panel opened its own mic to measure, the sound measured and the sound judged would
+be different things, and this feature would become something you cannot trust.
 
-### 手元だけの辞書（作ったが、外した）
+### A dictionary just for this machine (built, then taken out)
 
-> **2026-08-20 に削除。** 辞書を「共有」と「この機械にだけ持つ」に分けて
-> 持てるようにしていたが、実際には共有辞書というものが誰にとっても
-> 存在しなかった。どちらのファイルも `~/.config/voice-shell/` にあって
-> リポジトリには入らないので、「公開されない」という区別が最初から
-> 効いていない。分ける意味が無いまま、設定の先頭に切り替えだけが
-> 居座って、初めて開いた人に「どちらへ書けばいいのか」を考えさせていた。
+> **Deleted on 2026-08-20.** The dictionary could be split into "shared" and "only
+> on this machine", but in practice a shared dictionary did not exist for anybody.
+> Both files sit in `~/.config/voice-shell/` and never go into the repository, so
+> the "it will not be published" distinction was not doing anything to begin with.
+> With nothing to gain from the split, a toggle sat at the top of the settings and
+> made everyone opening it for the first time stop and wonder which one to write to.
 >
-> 辞書は `dictionary.json` ひとつになった。他の人に入れてほしい語も、
-> 自分だけの語も、同じところへ入れる。
+> The dictionary is now a single `dictionary.json`. Words you want other people to
+> have and words only you need go to the same place.
 
-### 設定に置くもの
+### What goes in the settings
 
-マイク接続先 / 感度 / 送信までの無音 / 最短文字数 / 辞書 / 言語 / テーマ / 波の見せ方。
-どれも頻繁に触るものではないので、本体には出さない。
+Mic to connect to, sensitivity, silence before sending, minimum characters,
+dictionary, language, theme, how the wave is shown. None of them get touched often,
+so they stay out of the main screen.
 
-`viewer.py` に API は揃っている（`/api/mics`, `/api/tuning`, `/api/dictionary`,
-`/api/mute`, `/api/pause`, `/api/send`, `/api/discard`）。デーモンは `tuning.json` を
-0.5 秒おきに読み直すので、書けば再起動なしで効く。
+`viewer.py` already has the APIs (`/api/mics`, `/api/tuning`, `/api/dictionary`,
+`/api/mute`, `/api/pause`, `/api/send`, `/api/discard`). The daemon re-reads
+`tuning.json` every 0.5 seconds, so writing it takes effect without a restart.
 
-### 多言語
+### Multiple languages
 
-**英語を原文にして日本語を訳として持つ。** 狭い縦長では英語の方が長くなる
-（"Silence before sending" 対「送信までの無音」）ので、設定行はラベルと説明を縦に積む。
-横並びにすると英語で崩れる。
+**English is the original and Japanese is carried as the translation.** In a narrow
+tall layout English runs longer ("Silence before sending" against 「送信までの無音」),
+so a settings row stacks the label and the description vertically. Side by side
+breaks in English.
 
-### ダーク既定
+### Dark by default
 
-暗い部屋で使う。白い画面はまぶしい。ライトも完全に用意するが、既定はダーク。
-切り替えは記憶する（再読み込みのたびに白く戻ると実害がある）。
+It gets used in a dark room. A white screen is glaring. Light is fully provided too,
+but the default is dark. The choice is remembered (going back to white on every
+reload does real damage).
 
-### アイコンと線
+### Icons and lines
 
-全体的に丸く、線は太めに。細いと手抜きに見える。フォントは読み込まず SVG を
-スプライトにして `<use>` で呼ぶ（ローカルの道具なので、取得を待つ間アイコンが
-出ない状態を作らない）。
+Round overall, lines on the thick side. Thin lines look lazy. No font is loaded.
+SVGs go into a sprite and are called with `<use>` (this is a local tool, so never
+create a moment where icons are missing while a fetch finishes).
 
-### 認識中の文字
+### The text being recognized
 
-未送信カードに流れ込む。ライブ表示と下書きを分けない（同じ文章が 2 回出るのは冗長）。
+It flows into the unsent card. The live display and the draft are not separated
+(the same sentence appearing twice is redundant).
 
-**認識中に人が触ったら、追記を止めて人の編集を優先する。** 喋りながら「そこ違う」と
-直せる方がこの道具に合う。確定を待たせる案は安全だが数秒もどかしい。
+**If a person touches it mid-recognition, stop appending and give the person's edit
+priority.** Being able to say "no, not that" and fix it while still talking suits
+this tool. Making them wait for the text to settle is the safe option but it is
+maddening for those few seconds.
 
-### フィラー除去
+### Filler removal
 
-オンのとき、**シェルに送信される本文からも除去する**。いまは表示から消えるだけで
-送信内容には効いていない。それでは意味がない。
+When it is on, **remove them from the body sent to the shell as well**. Right now
+they only vanish from the display and have no effect on what gets sent. That is
+pointless.
 
-## 最前面に浮かべる方法
+## How to float it on top
 
-**Chrome の Document Picture-in-Picture** を使う（実装済み）。ヘッダの
-picture_in_picture アイコンから、常に最前面の小窓へ画面ごと移す。
+**Chrome's Document Picture-in-Picture** (implemented). The picture_in_picture icon
+in the header moves the whole screen into an always-on-top window.
 
-- 常時最前面は API の既定の動き。追加の実行環境もビルド工程も要らない
-- `#page` と `#sheet` を移し、`<style>` を複製するだけ。JS は書き換えていない
-- 400×664 で開き、リサイズできる。閉じると元のタブへ戻る
+- Always on top is the API's own default behavior. No extra runtime, no build step
+- It just moves `#page` and `#sheet` and copies the `<style>`. The JS is untouched
+- Opens at 400x664 and is resizable. Closing it puts it back in the original tab
 
-検討した別案は2つある。
+Two alternatives were considered.
 
-- **Swift + WKWebView の薄い殻。** `NSWindow` の level を `.floating` にすれば
-  本物の最前面固定になり、Chrome を閉じていても使える。一度書いたが、PiP で
-  足りたので消した（`13e1bac` に残っている）
-- **Electron（100MB 超）/ Tauri（Rust が必要）。** どちらも持ち込む必要はない
+- **A thin Swift and WKWebView shell.** Setting the `NSWindow` level to `.floating`
+  gives you a real always-on-top window that works with Chrome closed. It was
+  written once, then deleted because PiP was enough (it survives in `13e1bac`)
+- **Electron (over 100MB) or Tauri (needs Rust).** Neither is worth bringing in
 
-## アイコン
+## Icons
 
-**Material Symbols Rounded（Apache-2.0）を viewer.html に直接埋め込む。**
-使う30字形の輪郭と塗りを対で持ち、状態で入れ替える。
+**Material Symbols Rounded (Apache-2.0) embedded directly in viewer.html.** The 30
+glyphs in use are kept as outline and filled pairs and swapped by state.
 
-スプライトを別ファイルにする案もあったが、PiP の小窓は別ドキュメントになるため、
-外部参照だと解決させるのに配信経路を足す必要がある。埋め込みならその心配が無く、
-取得を待つ間アイコンが出ない状態も作らない。
+Putting the sprite in a separate file was considered, but the PiP window is a
+separate document, so an external reference would need a delivery path added to
+resolve it. Embedding has none of that worry, and it never creates a moment where
+icons are missing while a fetch finishes.
 
-## LiveKit の音量表示を調べた結果
+## What came out of looking at LiveKit's volume display
 
-「LiveKit の Agent UI を使いたい」という要望があったので中身を読んだ。
-**結論として使わない。** 理由は 2 つある。
+Someone asked to use LiveKit's Agent UI, so the internals were read.
+**The conclusion is that we do not use it.** There are two reasons.
 
-### 1. 構成が合わない
+### 1. The shape does not fit
 
-`BarVisualizer` は audio Track を要求する。ローカルのビューアはマイクを持たず、
-デーモンが流す `rms` を見るだけ。パネルにマイクを開かせれば形式上は動くが、
-表示される音量が「判定に使われている音」と別物になり、しきい値の線が嘘になる。
+`BarVisualizer` demands an audio Track. The local viewer has no mic, it only watches
+the `rms` the daemon streams. Making the panel open a mic would technically work,
+but the volume shown would be a different thing from the sound the judging uses, and
+the threshold line would become a lie.
 
-（なお Room の接続自体は不要で、`LocalAudioTrack` を直接渡せる。サーバは要らない。
-使わない理由は構成であって、重さではない。）
+(For the record, connecting a Room is not required, you can hand it a
+`LocalAudioTrack` directly. No server needed. The reason we do not use it is the
+shape, not the weight.)
 
-### 2. S で振り切れる問題を、LiveKit も持っている
+### 2. LiveKit has the same S pegging problem
 
-実装を読んだ結果（`livekit/components-js`、`livekit/client-sdk-js`）は次のとおり。
+Reading the implementation (`livekit/components-js`, `livekit/client-sdk-js`) gives
+the following.
 
-- `BarVisualizer` が見ている帯域は **2.34〜4.69kHz のみ**。声の基本周波数
-  （85〜255Hz）も第1フォルマントも入っていない。**まさに /s/ /ʃ/ /t/ の帯域**
-- `loPass` / `hiPass` は Hz ではなく **FFT のビン番号**で、名前と役割が逆
-  （`loPass: 100` は「ビン 0〜99 を捨てる」＝ハイパス）。移植時の最大の罠
-- 正規化は -100〜-10dB にクランプして線形写像、さらに `sqrt`。**対数領域の値を
-  平均している**ので小さいビンが持ち上がる
-- **attack/release の包絡線は無い。** 時間方向の平滑化は AnalyserNode の
-  `smoothingTimeConstant`（multiband で 0.8）だけ
-- 知覚重み（A特性など）も、対数の帯域分割も無い
+- The band `BarVisualizer` watches is **2.34 to 4.69kHz only**. Neither the
+  fundamental of the voice (85 to 255Hz) nor the first formant is in there.
+  **That is exactly the band of /s/, /ʃ/ and /t/**
+- `loPass` and `hiPass` are **FFT bin numbers**, not Hz, and the names are the
+  reverse of what they do (`loPass: 100` means "throw away bins 0 to 99", so it is a
+  high pass). The biggest trap when porting
+- Normalization clamps to -100 to -10dB, maps linearly, then takes `sqrt`.
+  **It averages values in the log domain**, so small bins get lifted
+- **There is no attack and release envelope.** The only smoothing over time is the
+  AnalyserNode's `smoothingTimeConstant` (0.8 in multiband)
+- No perceptual weighting (A-weighting or similar) and no logarithmic band split
 
-つまり、母音は上の倍音でしかこの窓に入らないのに、/s/ は主エネルギーがそこに乗る。
-**LiveKit の見た目をそのまま真似ると、ユーザーが指摘したS問題を再現することになる。**
+So vowels only reach that window through their upper harmonics, while /s/ puts its
+main energy right in it. **Copying LiveKit's look as it is means reproducing the S
+problem the user pointed out.**
 
-副作用として、ノイズフロアが -85dB/bin なら正規化後 0.39 になり、`minHeight: 20` と
-相まって**静かな部屋でもバーが 4 割の高さで揺れる**。「静かなのによく動く」の説明にもなる。
+As a side effect, a noise floor of -85dB/bin normalizes to 0.39, and together with
+`minHeight: 20` that means **the bars wobble at 40 percent height even in a quiet
+room**. It also explains "it moves a lot even when it is quiet".
 
-### 参考にする点
+### What is worth taking
 
-- `state`（listening / thinking / speaking）でアニメーションを切り替える発想は良い。
-  ただし LiveKit の thinking は listening と同じ列を 150ms 間隔で光らせるだけ
-- Gen2 の radial は同じ multiband を円周に並べたもの
-- Gen2 の aura は WebGL のシェーダで、**音量は円の SDF 半径ひとつだけに効く**
-  （0.2 → 0.4）。他は全部 state 由来で音とは無関係
+- Switching the animation on `state` (listening, thinking, speaking) is a good idea.
+  LiveKit's thinking is only the same row as listening blinking at 150ms intervals
+  though
+- Gen2's radial is the same multiband laid around a circle
+- Gen2's aura is a WebGL shader, and **the volume feeds exactly one thing, the SDF
+  radius of the circle** (0.2 to 0.4). Everything else comes from state and has
+  nothing to do with the sound
 
-**採るべき設計は次のもの。** 帯域を絞らず全体の音量を使い、250ms で積分し、attack を速く
-release を遅くする。見た目の豊かさは重ねた楕円と揺らぎで作る。
+**The design to take is this one.** Do not narrow the band, use the overall volume,
+integrate over 250ms, attack fast and release slow. Make the richness of the look
+out of stacked ellipses and wobble.
 
-出典は次のファイル。
+The sources are the following files.
 
 `packages/react/src/hooks/useTrackVolume.ts`,
 `packages/react/src/components/participant/BarVisualizer.tsx`,
-`src/room/utils.ts` の `createAudioAnalyser`,
+`createAudioAnalyser` in `src/room/utils.ts`,
 `packages/shadcn/{hooks,components}/agents-ui/*`
 
-## モックアップ
+## Mockup
 
-作りはじめに、ライト／ダーク、英／日、バー／リングを切り替えられる版を1枚作って
-決めた（波の動きはダミーで、マイクは使っていない）。中身は `viewer.html` に
-入っているので、この覚え書きから参照するものは残していない。
+At the start, one page that could switch light and dark, English and Japanese, and
+bars and ring was built, and the decisions were made on it (the wave motion was a
+dummy and no mic was used). What it contains is in `viewer.html` now, so nothing
+this note refers to is kept around.
 
-## ボタンの扱い（マテリアルの原則に寄せる）
+## How buttons are handled (leaning on the Material principles)
 
-方針は「**重要なものは塗りつぶしで表す。ボタン同士のコントラストを必ず用意する**」。
+The policy is "**say what matters with a fill. Always give buttons contrast against
+each other**".
 
-- 保存・送信・作成のような**確定操作は塗り**。輪郭や文字だけのボタンにしない
-- 同じ画面に並ぶボタンは、主・副・打ち消しが**一目で区別できる濃さの差**を持つ。
-  全部が同じ見た目だと、どれを押せばいいか読む手間が発生する
-- 文字だけのボタン（「完了」など）は挙動が伝わりにくい。**アイコンで表せるものは
-  アイコンにする**
+- **Confirming actions are filled**, things like save, send and create. Not outline
+  and not text only
+- Buttons standing side by side on one screen have **a difference in weight you can
+  see at a glance** between primary, secondary and dismiss. When they all look the
+  same, you have to read them to work out which one to press
+- Text-only buttons (「完了」, "Done", and the like) do not convey what they do.
+  **If it can be an icon, make it an icon**
 
-### 設定画面の閉じ方
+### How the settings screen closes
 
-「完了」というラベルのボタンを右上に置くのは分かりにくい。押すと保存されるのか、
-捨てられるのか、単に閉じるだけなのかが読めない。
+A button labeled "Done" in the top right is hard to read. You cannot tell whether
+pressing it saves, discards, or just closes.
 
-案としては、
+The options are as follows.
 
-- 左上に**戻る矢印**を置いて本体へ帰る（設定は変更した時点で反映されるので、
-  そもそも確定操作が要らない）
-- 確定が要る項目だけ、その場に**塗りの「保存」ボタン**を出す
+- Put a **back arrow** at the top left that takes you home (settings apply the
+  moment they change, so no confirming action is needed in the first place)
+- For the few items that do need confirming, put a **filled "Save" button** right
+  there
 
-の組み合わせが素直。少なくとも、閉じるためだけの文字ボタンは置かない。
+That combination is the straightforward one. At the very least, do not put a text
+button there whose only job is to close.
 
-### 文字の大きさ
+### Text size
 
-設定の中身が小さい。狭い板とはいえ、設定は読む画面なので本体より詰めない。
+The contents of the settings are small. Narrow panel or not, settings are a screen
+you read, so do not pack them tighter than the main screen.
 
-## 浮かせ方
+## How it floats
 
-Chrome の Document Picture-in-Picture を使う（設定の「手前に浮かせる」ボタン。
-ビューア本体に実装済み）。追加の実行環境が要らず、要素ごと移すので JS の参照が
-生きたまま引っ越せる。Chrome か Edge が要る。
+Chrome's Document Picture-in-Picture (the "float in front" button in the settings,
+already implemented in the viewer itself). No extra runtime is needed, and because
+whole elements are moved, the JS references survive the move. Chrome or Edge
+required.
 
-OS 側の小窓（macOS なら `NSWindow.level = .floating`）を別に作る案もあったが、
-実装は残していない。ブラウザを開かずに使いたいという要望が出てから考える。
+A window from the OS side (`NSWindow.level = .floating` on macOS) was another
+option, but no implementation is kept. It can be thought about when someone asks to
+use this without opening a browser.
 
-## ページ側の音量取得について（訂正）
+## About getting the volume on the page side (correction)
 
-現行の `viewer.html` は `getUserMedia` でマイクを開き、自前の FFT で波形を描いている
-（`micStream` / `analyser`）。ユーザーが報告した「静かな部屋なのに S の音で画面いっぱいに
-なる」は、デーモンの rms ではなく**このページ自身の FFT** の挙動と考えられる。
-LiveKit の調査で分かった失敗の型と同じで、帯域の偏りと包絡線の不在が原因。
+The current `viewer.html` opens the mic with `getUserMedia` and draws the waveform
+with its own FFT (`micStream` and `analyser`). The user's report that the screen
+fills up on the sound of an S in a quiet room is most likely the behavior of
+**this page's own FFT**, not the daemon's rms. It is the same failure pattern the
+LiveKit investigation turned up, caused by the band being skewed and the envelope
+being absent.
 
-**デーモンの rms を主にして、マイクが無くても成立させる。** ページ側の FFT は
-ブラウザで動かしたときだけの付加機能として扱う。マイクを渡せない置き方では、
-この経路（`vizFailed → daemonLevel`）が常に使われる。
+**Make the daemon's rms the main path so it holds up with no mic.** Treat the FFT on
+the page side as an extra that only exists when it runs in a browser. In any setup
+where the mic cannot be handed over, this route (`vizFailed → daemonLevel`) is
+always the one used.
