@@ -833,23 +833,37 @@ def _strip_name(text: str, names):
 
 
 def looks_like_any_command(text: str) -> bool:
-    """その一言が、何かの合図に見えるか。"""
+    """その一言が、まるごと何かの合図に見えるか。"""
     t = text.strip()
     if not t:
         return False
-    return bool(voice_command(t, False) or voice_command(t, True)
-                or mode_command(t) or route_command(t))
+    if (voice_command(t, False) or voice_command(t, True)
+            or mode_command(t) or route_command(t)):
+        return True
+    # 末尾の合図が単体で来た場合（本文が無い＝「キャンセル」だけ）
+    return any(take_tail(t, tails) == "" for tails in (CANCEL_TAIL, HOLD_TAIL))
+
+
+# 末尾の合図（「〜、手直し」「〜、キャンセル」）に、この長さ以上の本文が
+# 付いていれば、それは口述の締めくくりであって別の機械への合図ではない。
+_TAIL_BODY_MIN = 5
 
 
 def looks_like_other_command(text: str) -> bool:
     """別の機械へ言った合図に見えるか。
 
-    相手の名前は知りようがないので、頭を少しずつ削って合図の形が出てくるかで
+    相手の呼び名は知りようがないので、頭を少しずつ削って合図の形が出てくるかで
     見る。短い一言に限る（長い文の末尾がたまたま合図と同じ形でも拾わない）。
     """
     t = text.strip()
     if not t or len(t) > 24:
         return False
+    # 「認証まわりを直して、手直し」のような口述の締めくくりは、合図では
+    # あってもこの機械宛て。呼び名が要らない方の合図なので、ここでは捨てない。
+    for tails in (CANCEL_TAIL, HOLD_TAIL):
+        body = take_tail(t, tails)
+        if body and len(body) >= _TAIL_BODY_MIN:
+            return False
     return any(looks_like_any_command(t[i:].lstrip(_NAME_SEP))
                for i in range(min(len(t), 11)))
 
