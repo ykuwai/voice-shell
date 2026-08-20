@@ -729,6 +729,11 @@ async def main_async(args):
 
         ?scope=private で手元だけの辞書を返す。
         """
+        # ?scope=effective は、共有と手元を合わせた「実際に効くもの」。
+        # 画面が認識途中の文字に置換を当てるために使う（編集用ではない）。
+        if req.query.get("scope") == "effective":
+            import voice_daemon as vd
+            return web.json_response(vd.load_dictionary())
         private = req.query.get("scope") == "private"
         d = _read_dict(path=PRIVATE_DICT_FILE if private else DICT_FILE)
         d["builtin"] = [] if private else _builtin_noise()

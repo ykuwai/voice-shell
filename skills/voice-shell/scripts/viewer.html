@@ -2068,6 +2068,28 @@ function say(text, sec = 6) {
    文章で「合図として扱いました」と説明するより、言った言葉そのものが
    色づいて見える方が、何が起きたのかが一目で分かる。 */
 let flashTimer = null;
+/* 認識の途中でも、辞書に載っている語はその場で置き換えて見せる。
+   「クロードコード」と出たまま溜まっていくと、送る前に読み返しても
+   何が届くのか分からない。
+
+   **置き換えるのは見た目だけ。** 送る本文はサーバがデーモンと同じ道で
+   作り直す。認識は言い終わるまで後ろを何度も直すので、こちらで手を
+   入れた文字を持ち回すと、直しが当たらなくなる。毎回、届いた生の文字
+   から作り直せば、言い直されてもそのまま追従する。 */
+let dictPairs = [];          // [長い語から, 置換後]
+async function loadDictPairs() {
+  try {
+    const d = await (await fetch('/api/dictionary?scope=effective')).json();
+    dictPairs = Object.entries(d.replace || {})
+      .filter(([k, v]) => k && v)
+      .sort((a, b) => b[0].length - a[0].length);   // 長い語から当てる
+  } catch { /* 取れなければ素のまま見せる */ }
+}
+function withDict(text) {
+  for (const [from, to] of dictPairs) text = text.split(from).join(to);
+  return text;
+}
+
 // 認識中のテキストには高さの上限がある。長く喋ると上へ流れていくので、
 // いま喋っている末尾が見えるところまで繰り下げる。
 function streamTail() {
@@ -2209,7 +2231,7 @@ function connect() {
       return;
     }
     if ('partial' in m) {
-      const s = m.partial.trim();
+      const s = withDict(m.partial.trim());
       el.stream.textContent = s;
       el.tray.classList.toggle('idle', !s);
       streamTail();
@@ -2893,7 +2915,7 @@ function newRecognition() {
       if (res.isFinal) sendUtterance(res[0].transcript);
       else interim += res[0].transcript;
     }
-    el.stream.textContent = interim;
+    el.stream.textContent = withDict(interim);
     el.tray.classList.toggle('idle', !interim);
     streamTail();
     paintTinyButtons();
@@ -3534,6 +3556,7 @@ el.dictSave.onclick = async () => {
     where: t(el.scopePrivate.checked ? 'dictSavedPrivate' : 'dictSavedShared'),
     r: Object.keys(d.replace).length, i: d.ignore.length,
   });
+  loadDictPairs();       // 認識途中の表示にも、次の一言から効かせる
 };
 
 /* ── CSV ─────────────────────────────────
@@ -3646,9 +3669,11 @@ retally();
 paintPower();
 paint();
 loadTuning();
+loadDictPairs();
 connect();
 loadListeners();
 setInterval(refreshState, 3000);
+setInterval(loadDictPairs, 30000);   // 別の画面や CSV 取り込みでの変更に追いつく
 // 題名は会話が進むと変わるので、定期的に引き直す
 setInterval(loadListeners, 5000);
 // 認識のやり方が外で変わることがある（別タブ、コマンド、別セッション）
