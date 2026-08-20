@@ -33,8 +33,7 @@ else:
 
 # ユーザー辞書。voice_daemon.py と同じ場所を読み書きする。
 _CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "voice-shell"
-DICT_FILE = _CONFIG / "dictionary.json"                  # 共有（リポジトリに反映できる）
-PRIVATE_DICT_FILE = _CONFIG / "dictionary.private.json"  # 手元だけ
+DICT_FILE = _CONFIG / "dictionary.json"
 # マイク感度と確定までの無音秒数。デーモンが 0.5 秒おきに読み直すので、
 # 書き換えるだけで再起動なしに効く。
 TUNING_FILE = _CONFIG / "tuning.json"
@@ -728,27 +727,19 @@ async def main_async(args):
     app.router.add_get("/ws", handle_ws)
     app.router.add_get("/api/state", handle_state)
     async def handle_dict_get(req):
-        """辞書と、組み込みで無視している語を返す。
-
-        ?scope=private で手元だけの辞書を返す。
-        """
-        # ?scope=effective は、共有と手元を合わせた「実際に効くもの」。
+        """辞書と、組み込みで無視している語を返す。"""
+        # ?scope=effective は組み込みの無視語まで畳んだ「実際に効くもの」。
         # 画面が認識途中の文字に置換を当てるために使う（編集用ではない）。
         if req.query.get("scope") == "effective":
             import voice_daemon as vd
             return web.json_response(vd.load_dictionary())
-        private = req.query.get("scope") == "private"
-        d = _read_dict(path=PRIVATE_DICT_FILE if private else DICT_FILE)
-        d["builtin"] = [] if private else _builtin_noise()
+        d = _read_dict(path=DICT_FILE)
+        d["builtin"] = _builtin_noise()
         return web.json_response(d)
 
     async def handle_dict_put(req):
-        """辞書を保存する。デーモンは毎発話読み直すので即反映される。
-
-        ?scope=private で手元だけの辞書に書く。
-        """
-        private = req.query.get("scope") == "private"
-        target = PRIVATE_DICT_FILE if private else DICT_FILE
+        """辞書を保存する。デーモンは毎発話読み直すので即反映される。"""
+        target = DICT_FILE
 
         body = await req.json()
         data = {
@@ -762,11 +753,10 @@ async def main_async(args):
             "replace": {k.strip(): v.strip() for k, v in body.get("replace", {}).items()
                         if isinstance(k, str) and isinstance(v, str) and k.strip()},
         }
-        if not private:
-            # 既定項目の追加履歴は内部用。消すと消した項目が復活してしまうので残す。
-            prev = _read_dict(raw=True, path=target)
-            seen = set(prev.get("_seen", [])) | set(prev.get("replace", {}))
-            data["_seen"] = sorted(seen | set(data["replace"]))
+        # 既定項目の追加履歴は内部用。消すと消した項目が復活してしまうので残す。
+        prev = _read_dict(raw=True, path=target)
+        seen = set(prev.get("_seen", [])) | set(prev.get("replace", {}))
+        data["_seen"] = sorted(seen | set(data["replace"]))
 
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

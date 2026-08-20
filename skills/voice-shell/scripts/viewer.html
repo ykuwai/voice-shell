@@ -685,7 +685,7 @@
     font-size:inherit; word-break:break-all; text-align:left;
   }
   .link:hover { color:var(--text); }
-  .dict-note, .scope-note { font-size:.75rem; line-height:1.5; color:var(--faint); margin:.5rem 0 0; }
+  .dict-note { font-size:.75rem; line-height:1.5; color:var(--faint); margin:.5rem 0 0; }
 
 
   /* ── 窓を小さくしたとき ─────────────────
@@ -1071,11 +1071,6 @@
   <!-- 辞書 -->
   <div class="group">
     <h3 data-icon="menu_book" data-icon-size="16" data-i18n="grpDict">Dictionary</h3>
-    <label class="toggle" style="margin-bottom:.5rem">
-      <input type="checkbox" id="scopePrivate"><span data-i18n="dictPrivate">Keep on this machine only</span>
-    </label>
-    <p class="scope-note" id="scopeNote"></p>
-
     <div class="dict-tabs" role="tablist">
       <button class="on" id="tabReplace" data-icon="swap_horiz" data-icon-size="17" data-i18n="dictReplace">Replace</button>
       <button id="tabIgnore" data-icon="voice_over_off" data-icon-size="17" data-i18n="dictIgnore">Ignore</button>
@@ -1205,9 +1200,6 @@ const I18N = {
     themeAuto:'Auto', themeDark:'Dark', themeLight:'Light',
     language:'Language',
     grpDict:'Dictionary',
-    dictPrivate:'Keep on this machine only',
-    dictShared:'~/.config/voice-shell/dictionary.json (can be shared as defaults)',
-    dictPrivateNote:'~/.config/voice-shell/dictionary.private.json (never committed)',
     dictReplace:'Replace', dictIgnore:'Ignore',
     dictReplaceHelp:'Swapped in before sending.',
     dictIgnoreHelp:'An utterance of only this word is not sent.',
@@ -1220,7 +1212,6 @@ const I18N = {
     add:'Add', save:'Save', exportCsv:'Export CSV', importCsv:'Import CSV',
     dictPending:'Press Save to apply.',
     dictSaved:'Saved ({r} replacements / {i} ignored). Effective from the next utterance.',
-    dictSavedShared:'shared', dictSavedPrivate:'this machine only',
     dictLoaded:'Loaded ({r} replacements / {i} ignored). Press Save to apply.',
     dictSkipped:' / {n} unreadable rows',
     grpLog:'Transcript', items:'items', copyAll:'Copy all', copied:'Copied',
@@ -1321,9 +1312,6 @@ const I18N = {
     themeAuto:'自動', themeDark:'ダーク', themeLight:'ライト',
     language:'言語',
     grpDict:'辞書',
-    dictPrivate:'ローカルにだけ保存する（公開しない）',
-    dictShared:'~/.config/voice-shell/dictionary.json（既定値として共有できます）',
-    dictPrivateNote:'~/.config/voice-shell/dictionary.private.json（リポジトリに入りません）',
     dictReplace:'言い換え', dictIgnore:'無視する発話',
     dictReplaceHelp:'送る前に置き換えます。',
     dictIgnoreHelp:'この語だけの発話は送りません。',
@@ -1335,8 +1323,7 @@ const I18N = {
     dictBuiltinBack:'「{w}」をまた無視する',
     add:'追加', save:'保存する', exportCsv:'CSV で保存', importCsv:'CSV を読み込む',
     dictPending:'「保存する」を押すと有効になります。',
-    dictSaved:'{where}保存しました（言い換え {r} 件 / 無視 {i} 件）。次の発話から効きます。',
-    dictSavedShared:'共有辞書に', dictSavedPrivate:'ローカルにだけ',
+    dictSaved:'保存しました（言い換え {r} 件 / 無視 {i} 件）。次の発話から効きます。',
     dictLoaded:'読み込みました（言い換え {r} 件 / 無視 {i} 件{s}）。「保存する」で確定します。',
     dictSkipped:' / 読めない行 {n} 件',
     grpLog:'ログ', items:'件', copyAll:'全部コピー', copied:'コピーしました',
@@ -1420,7 +1407,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'engineGroup','enginePick','engineNote','browserAsrWarn','browserMic','micSettingsLink','asrLang','asrLangField',
                   'idleMute','idleMuteVal','idleMuteField','idleMinsField','idleMuteOn','idleMuteNote',
                   'themeRow','langRow','multiOn','machineName','machineNameField','machineTag',
-                  'scopePrivate','scopeNote','tabReplace','tabIgnore',
+                  'tabReplace','tabIgnore',
                   'paneReplace','paneIgnore','replaceRows','ignoreRows',
                   'addReplace','addIgnore','newFrom','newTo','newIgnore','filterReplace',
                   'builtinChips','builtinCount',
@@ -2620,7 +2607,6 @@ function applyLang(choice) {
     const m = row.querySelector('.mark');
     m.textContent = t(row.dataset.kind);
   }
-  paintScopeNote();
 }
 for (const b of el.langRow.children) b.onclick = () => applyLang(b.dataset.langChoice);
 
@@ -3522,21 +3508,9 @@ function showDictTab(which) {
 el.tabReplace.onclick = () => showDictTab('replace');
 el.tabIgnore.onclick = () => showDictTab('ignore');
 
-// 共有辞書 / ローカルだけの辞書
-const scopeQuery = () => el.scopePrivate.checked ? '?scope=private' : '';
-const paintScopeNote = () => {
-  el.scopeNote.textContent = t(el.scopePrivate.checked ? 'dictPrivateNote' : 'dictShared');
-};
-
 async function loadDict() {
-  renderDict(await (await fetch('/api/dictionary' + scopeQuery())).json());
-  paintScopeNote();
+  renderDict(await (await fetch('/api/dictionary')).json());
 }
-
-el.scopePrivate.onchange = async () => {
-  await loadDict();
-  el.dictNote.textContent = '';
-};
 
 // 追加は一覧の先頭に入れる（下までスクロールしなくてよい）
 function addReplaceEntry() {
@@ -3581,9 +3555,8 @@ el.filterReplace.addEventListener('input', () => {
 
 el.dictSave.onclick = async () => {
   const d = collectDict();
-  await putJSON('/api/dictionary' + scopeQuery(), d);
+  await putJSON('/api/dictionary', d);
   el.dictNote.textContent = t('dictSaved', {
-    where: t(el.scopePrivate.checked ? 'dictSavedPrivate' : 'dictSavedShared'),
     r: Object.keys(d.replace).length, i: d.ignore.length,
   });
   loadDictPairs();       // 認識途中の表示にも、次の一言から効かせる
