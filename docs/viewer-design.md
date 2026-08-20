@@ -138,12 +138,12 @@ picture_in_picture アイコンから、常に最前面の小窓へ画面ごと�
 - `#page` と `#sheet` を移し、`<style>` を複製するだけ。JS は書き換えていない
 - 400×664 で開き、リサイズできる。閉じると元のタブへ戻る
 
-検討した別案:
+検討した別案は2つある。
 
-- **Swift + WKWebView の薄い殻** — `NSWindow` の level を `.floating` にすれば
+- **Swift + WKWebView の薄い殻。** `NSWindow` の level を `.floating` にすれば
   本物の最前面固定になり、Chrome を閉じていても使える。一度書いたが、PiP で
   足りたので消した（`13e1bac` に残っている）
-- **Electron（100MB 超）/ Tauri（Rust が必要）** — 持ち込む必要はない
+- **Electron（100MB 超）/ Tauri（Rust が必要）。** どちらも持ち込む必要はない
 
 ## アイコン
 
@@ -157,7 +157,7 @@ picture_in_picture アイコンから、常に最前面の小窓へ画面ごと�
 ## LiveKit の音量表示を調べた結果
 
 「LiveKit の Agent UI を使いたい」という要望があったので中身を読んだ。
-**結論: 使わない。** 理由は 2 つある。
+**結論として使わない。** 理由は 2 つある。
 
 ### 1. 構成が合わない
 
@@ -170,7 +170,7 @@ picture_in_picture アイコンから、常に最前面の小窓へ画面ごと�
 
 ### 2. S で振り切れる問題を、LiveKit も持っている
 
-実装を読んだ結果（`livekit/components-js`、`livekit/client-sdk-js`）:
+実装を読んだ結果（`livekit/components-js`、`livekit/client-sdk-js`）は次のとおり。
 
 - `BarVisualizer` が見ている帯域は **2.34〜4.69kHz のみ**。声の基本周波数
   （85〜255Hz）も第1フォルマントも入っていない。**まさに /s/ /ʃ/ /t/ の帯域**
@@ -196,10 +196,12 @@ picture_in_picture アイコンから、常に最前面の小窓へ画面ごと�
 - Gen2 の aura は WebGL のシェーダで、**音量は円の SDF 半径ひとつだけに効く**
   （0.2 → 0.4）。他は全部 state 由来で音とは無関係
 
-**採るべき設計**: 帯域を絞らず全体の音量を使い、250ms で積分し、attack を速く
+**採るべき設計は次のもの。** 帯域を絞らず全体の音量を使い、250ms で積分し、attack を速く
 release を遅くする。見た目の豊かさは重ねた楕円と揺らぎで作る。
 
-出典: `packages/react/src/hooks/useTrackVolume.ts`,
+出典は次のファイル。
+
+`packages/react/src/hooks/useTrackVolume.ts`,
 `packages/react/src/components/participant/BarVisualizer.tsx`,
 `src/room/utils.ts` の `createAudioAnalyser`,
 `packages/shadcn/{hooks,components}/agents-ui/*`

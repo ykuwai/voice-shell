@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>voice-shell — 音声プロンプト</title>
+<title>voice-shell・音声プロンプト</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%20%3Cdefs%3E%20%3ClinearGradient%20id%3D%22g%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%221%22%20y2%3D%221%22%3E%20%3Cstop%20offset%3D%220%22%20stop-color%3D%22%2322d3ee%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%23a855f7%22%2F%3E%20%3C%2FlinearGradient%3E%20%3C%2Fdefs%3E%20%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2216%22%20fill%3D%22%230b111c%22%2F%3E%20%3Cg%20fill%3D%22url%28%23g%29%22%3E%20%3Crect%20x%3D%2214%22%20y%3D%2226%22%20width%3D%226%22%20height%3D%2212%22%20rx%3D%223%22%2F%3E%20%3Crect%20x%3D%2224%22%20y%3D%2216%22%20width%3D%226%22%20height%3D%2232%22%20rx%3D%223%22%2F%3E%20%3Crect%20x%3D%2234%22%20y%3D%2221%22%20width%3D%226%22%20height%3D%2222%22%20rx%3D%223%22%2F%3E%20%3Crect%20x%3D%2244%22%20y%3D%2229%22%20width%3D%226%22%20height%3D%226%22%20rx%3D%223%22%2F%3E%20%3C%2Fg%3E%20%3C%2Fsvg%3E">
 <style>
-  /* 画面の前提: 横に並べず、手前に浮かせて使う細長い板。
+  /* この画面は、横に並べず手前に浮かせて使う細長い板を前提にしている。
      幅 340〜460px を基準に組み、広い画面でも中央で細いまま置く。 */
   :root {
     color-scheme: dark;
@@ -792,6 +792,24 @@
     color:var(--accent); padding:.15rem .4rem; border-radius:8px;
   }
   .more:hover { background:var(--raise); }
+  /* キーボードで使えるものの一覧。声の言い方（.say）と同じで、読むための
+     ものなので押せる形にはしない。キーの形に見せるのは、文中の英字と
+     取り違えないようにするため。 */
+  .keys { display:flex; flex-direction:column; gap:.45rem; }
+  .key-row { display:flex; align-items:center; gap:.3rem; }
+  .key-row .what {
+    margin-left:auto; padding-left:.7rem; font-size:.8rem;
+    color:var(--faint); text-align:right;
+  }
+  .cap {
+    display:inline-flex; align-items:center; justify-content:center;
+    min-width:1.7rem; padding:.15rem .42rem; border-radius:7px;
+    font-size:.72rem; font-weight:600; color:var(--text);
+    background:var(--panel-2); border:1px solid var(--line-soft);
+    border-bottom-width:2px;
+  }
+  .key-row .plus { font-size:.7rem; color:var(--faint); }
+
   /* 書き方が合わない行。送っても落ちるだけなので、その場で分かるようにする */
   .row.bad input { border-color:var(--warn); }
   /* 一覧の下に出す一言。区画の外なので左右の余白は自分で持つ。 */
@@ -850,7 +868,7 @@
     #draft { min-height:2.4em; }
   }
 
-  /* ほとんど余地が無い。状態の一行は残す — ここを消すと、
+  /* ほとんど余地が無い。それでも状態の一行は残す。ここを消すと、
      届いていないことに気づく手がかりが画面から無くなる */
   @media (max-height: 429px) {
     /* 未送信の札は、札と道具の行だけで 50px 近く使う。ボタンは小さくせず、
@@ -1030,7 +1048,7 @@
   </div>
 
   <button class="fresh" id="fresh" data-icon="auto_awesome" data-icon-size="15"
-          data-i18n="uiUpdated" hidden>Updated — tap to reload</button>
+          data-i18n="uiUpdated" hidden>Updated. Tap to reload</button>
 
   <!-- 同じ画面を2つ開いても見るものは同じで、マイクだけ二重に掴む。
        後から開いた方を本物にして、こちらは引き下がる。 -->
@@ -1252,13 +1270,45 @@
   </div>
   <div id="cmdGroups"></div>
   <p class="dict-note" id="cmdNote"></p>
+
+  <!-- キーボードで使えるもの。声で言えることと同じ場所に置く。探す場所が
+       2つに分かれると、どちらに載っているのかを覚えることになる。
+       覚えられないショートカットは無いのと同じなので、畳まず全部出す。 -->
+  <div class="group" id="keysGroup">
+    <h3 data-i18n="keysTitle">Keyboard shortcuts</h3>
+    <p class="dict-label" data-i18n="keysNote"></p>
+    <div class="keys">
+      <div class="key-row"><span class="cap">Shift</span><span class="plus">+</span
+        ><span class="cap">M</span><span class="what" data-i18n="keyMute"></span></div>
+      <div class="key-row"><span class="cap">Shift</span><span class="plus">+</span
+        ><span class="cap">L</span><span class="what" data-i18n="cmdLive"></span></div>
+      <div class="key-row"><span class="cap">Shift</span><span class="plus">+</span
+        ><span class="cap">H</span><span class="what" data-i18n="cmdHold"></span></div>
+      <div class="key-row"><span class="cap">Shift</span><span class="plus">+</span
+        ><span class="cap">E</span><span class="what" data-i18n="editOnce"></span></div>
+      <div class="key-row"><span class="cap">Shift</span><span class="plus">+</span
+        ><span class="cap">Backspace</span><span class="what" data-i18n="discardTitle"></span></div>
+      <div class="key-row"><span class="cap">Shift</span><span class="plus">+</span
+        ><span class="cap">1</span><span class="plus">…</span><span class="cap">9</span
+        ><span class="what" data-i18n="cmdRoute"></span></div>
+      <!-- 送るキーだけは前からあるもの。欄の中でも外でも同じように効く。 -->
+      <div class="key-row"><span class="cap mod">Ctrl</span><span class="plus">+</span
+        ><span class="cap">Enter</span><span class="what" data-i18n="sendTitle"></span></div>
+      <div class="key-row"><span class="cap">,</span
+        ><span class="what" data-i18n="settings"></span></div>
+      <div class="key-row"><span class="cap">?</span
+        ><span class="what" data-i18n="commandsTitle"></span></div>
+      <div class="key-row"><span class="cap">Esc</span
+        ><span class="what" data-i18n="keyClose"></span></div>
+    </div>
+  </div>
  </div>
 </section>
 <script>
 // 画面に出ない不具合を見えるようにする（読み込み失敗はボタンが無反応になるだけなので）
 window.addEventListener('error', e => {
   const box = document.getElementById('hint');
-  if (box) box.textContent = 'Script error: ' + e.message;
+  if (box) box.textContent = 'Script error. ' + e.message;
 });
 
 /* ── ことば ─────────────────────────────
@@ -1268,7 +1318,7 @@ const I18N = {
   en: {
     connecting:'Connecting…',
     statusLive:'Going to Claude', statusHold:'Holding', statusOff:'Paused',
-    statusDown:'Disconnected — reconnecting', statusBooting:'Starting up',
+    statusDown:'Disconnected. Reconnecting', statusBooting:'Starting up',
     statusEnded:'Voice mode ended',
     hintEnded:'Recognition stopped and the microphone was released.',
     statusStopped:'Stopped',
@@ -1279,14 +1329,14 @@ const I18N = {
     hintBooting:'Loading the model. The first time can take a while.',
     hintStopping:'Stopping recognition.',
     hintStopped:'Start listening again from Settings → Recognition.',
-    hintNoMic:'No microphone access — the meter still shows the daemon level.',
+    hintNoMic:'No microphone access. The meter still shows the level the daemon hears.',
     modeLive:'Instant', modeHold:'Review',
     unsent:'Unsent', history:'History', quiet:'(silence)',
     hintArm:'Press the microphone to start listening',
     routeGone:'“{gone}” ended. Sending to “{next}” now.',
     routeGoneAll:'“{gone}” ended. Sending to everyone now.',
-    uiUpdated:'Updated — tap to reload',
-    thresholdMark:'Drag to set sensitivity — speech past this mark is picked up',
+    uiUpdated:'Updated. Tap to reload',
+    thresholdMark:'Drag to set the sensitivity. Speech past this mark is picked up',
     sensitivitySet:'Sensitivity {n}',
     empty:'Nothing sent yet. Speak and it shows up here.',
     sent:'Sent', edited:'Edited',
@@ -1296,7 +1346,7 @@ const I18N = {
     dropOne:'Throw this one away',
     droppedOne:'Threw it away.',
     editingOne:'Editing',
-    hintOnce:'Holding this one. Fix it, then send — back to instant after.',
+    hintOnce:'Holding this one. Fix it, then send. It goes back to instant after that.',
     oneShotOff:'Stopped editing this one. Back to instant.',
     pauseTitle:'Turn the microphone off', resumeTitle:'Turn the microphone on',
     settingsTitle:'Settings',
@@ -1307,7 +1357,7 @@ const I18N = {
     settings:'Settings', back:'Back',
     floatBtn:'Float on top', unfloatBtn:'Back to the tab',
     floatAsk:'Keep this window on top',
-    takenOver:'Opened in another window. Only one viewer runs at a time — this one stepped aside.',
+    takenOver:'Opened in another window. Only one viewer runs at a time, so this one stepped aside.',
     takeBack:'Use this window',
     floatFailed:'Could not float the window. Click the button directly and try again.',
     grpInput:'Input', micDevice:'Microphone',
@@ -1327,9 +1377,9 @@ const I18N = {
     whisperModel:'Model',
     whisperModelNote:'A name from Hugging Face, or a folder on this machine. Leave it empty for the default shown faintly in the box. A new one loads when you stop and start listening below.',
     browserAsrNote:'Chrome’s own recognition. Nothing to install.',
-    browserMicNote:'The microphone above does not apply here — Chrome’s own default is used:',
+    browserMicNote:'The microphone above does not apply here. Chrome picks one of its own, and you change it in Chrome’s settings.',
     copied:'Copied',
-    browserAsrWarn:'Audio is sent to Google servers for recognition. Keep this off if everything must stay on this machine — use the daemon instead.',
+    browserAsrWarn:'Audio is sent to Google servers for recognition. Keep this off if everything must stay on this machine. Use one of the engines that runs here instead.',
     idleMute:'Turn off when idle',
     idleAfter:'Silence before it turns off',
     idleMuteNote:'Left alone, the browser keeps reconnecting to Google. Turn this on and the microphone switches itself off once nobody has spoken for a while. Press the mic to start again.',
@@ -1339,7 +1389,7 @@ const I18N = {
     asrDenied:'Microphone access was refused, so recognition could not start.',
     asrFailed:'Recognition kept failing, so it was turned off. Check your connection and the microphone.',
     asrSendFailed:'Could not deliver what was recognized ({n}). Say it again.',
-    asrDoubled:'Recognition was running twice, so this one was dropped. Switching to the current setting — say it again.',
+    asrDoubled:'Recognition was running twice, so this one was dropped. Switching to the current setting now. Say it again.',
     remove:'Remove',
     grpLook:'Appearance', theme:'Theme',
     themeAuto:'Auto', themeDark:'Dark', themeLight:'Light',
@@ -1387,32 +1437,36 @@ const I18N = {
     cmdFallback:'No wording in your language yet. The English one works as it is.',
     cmdDraft:'Wording outside Japanese and English is still a draft. Nobody who speaks the language has checked it yet.',
     items:'items',
-    micSwitched:'Switched microphone: {name}',
-    voiceMuted:'Muted — say “unmute” to come back',
+    micSwitched:'Switched the microphone to {name}',
+    voiceMuted:'Muted. Say “unmute” to come back',
     voiceRoute:'Now sending to {name}',
     voiceRouteMissing:'There is no session {n}',
-    voiceCancelled:'Cancelled — nothing was sent',
+    voiceCancelled:'Cancelled. Nothing was sent',
     grpMulti:'Several machines',
     multiOn:'Require this machine\'s name',
     machineName:'Names', machineNamePh:'mac, Mac, マック',
-    multiNote:'When two machines listen at once, “mute” stops both. Turn this on and say the name first — “work mute”, “work 2”. List several names separated by commas: recognition spells the same word differently each time. Signals meant for other machines are ignored here.',
+    multiNote:'When two machines listen at once, “mute” stops both. Turn this on and say the name first, as in “work mute” or “work 2”. You can list several names separated by commas, because recognition spells the same word differently each time. Signals meant for other machines are ignored here.',
     disconnectTitle:'Stop {name} from listening',
     routePick:'Where speech goes',
     disconnectAsk:'Stop listening?',
     disconnected:'{name} stopped listening',
-    voiceHeld:'Held for editing — fix it and send',
+    voiceHeld:'Held for editing. Fix it and send',
     voiceLive:'Sending straight through now',
     voiceHold:'Holding what you say now',
-    voiceUnmuted:'Unmuted — listening again',
+    voiceUnmuted:'Unmuted. Listening again',
     micSwitching:'Switching microphone to {name}…',
     discarded:'Discarded.', undo:'Undo',
-    switchFailed:'Could not switch: {err}',
+    switchFailed:'Could not switch. {err}',
     bootingLeft:'Starting… {n}s left', bootingSoon:'Starting… almost there',
+    keysTitle:'Keyboard shortcuts',
+    keysNote:'A key on its own only moves the screen. Hold Shift and it changes where your voice goes. None of them fire while you are typing in a box.',
+    keyMute:'Microphone on and off',
+    keyClose:'Close whatever is open',
   },
   ja: {
     connecting:'接続中',
     statusLive:'Claude に届いています', statusHold:'ためています', statusOff:'一時停止中',
-    statusDown:'切断 — 再接続中', statusBooting:'起動しています',
+    statusDown:'切断しました。つなぎ直しています', statusBooting:'起動しています',
     statusEnded:'音声モードは終了しました',
     hintEnded:'認識を止めて、マイクを手放しました。',
     statusStopped:'止まっています',
@@ -1429,7 +1483,7 @@ const I18N = {
     hintArm:'マイクを押すと聞き取りを始めます',
     routeGone:'「{gone}」が終了したので、「{next}」に切り替えました。',
     routeGoneAll:'「{gone}」が終了したので、全員に戻しました。',
-    uiUpdated:'画面が新しくなりました — 押すと反映',
+    uiUpdated:'画面が新しくなりました。押すと反映します',
     thresholdMark:'つまんで感度を変えられます（この印を超えた分が拾われます）',
     sensitivitySet:'感度 {n}',
     empty:'まだ何も送っていません。話すとここに出ます。',
@@ -1471,7 +1525,7 @@ const I18N = {
     whisperModel:'モデル',
     whisperModelNote:'Hugging Face の名前でも、この機械のフォルダの場所でも受けます。空にすると、欄に薄く出ている既定のモデルを使います。入れ替えたぶんは、下の「聞き取りを止める」と「始める」で積み直したときに効きます。',
     browserAsrNote:'Chrome の認識を使います。入れるものはありません。',
-    browserMicNote:'上のマイクはここには効きません。Chrome 自体の既定が使われます:',
+    browserMicNote:'上のマイクはここには効きません。Chrome が自分の既定を使います。変えるところは Chrome の設定です。',
     copied:'コピーしました',
     browserAsrWarn:'音声は認識のため Google のサーバへ送られます。ローカルだけで完結させたい場合は、ほかの認識に切り替えてください。',
     idleMute:'話さないと切る',
@@ -1531,27 +1585,31 @@ const I18N = {
     cmdFallback:'あなたの言語の言い方はまだありません。英語の言い方がそのまま効きます。',
     cmdDraft:'日本語と英語以外の言い方は下書きです。その言語を話す人がまだ目を通していません。',
     items:'件',
-    micSwitched:'マイクを切り替えました: {name}',
-    voiceMuted:'ミュートにしました — 「ミュート解除」で戻ります',
+    micSwitched:'マイクを {name} に切り替えました',
+    voiceMuted:'ミュートにしました。「ミュート解除」で戻ります',
     voiceRoute:'送信先を {name} にしました',
     voiceRouteMissing:'{n} 番のセッションはありません',
-    voiceCancelled:'取り消しました — 送っていません',
+    voiceCancelled:'取り消しました。送っていません',
     grpMulti:'複数台で使う',
     multiOn:'この機械の名前を付けたときだけ合図を受ける',
-    machineName:'呼び名', machineNamePh:'例: マック, Mac, まっく',
-    multiNote:'2台が同時に聞いていると「ミュート」で両方が切れます。入れておくと、呼び名を頭に付けた合図（「会社用ミュート」「会社用2番」）だけを受けます。**読点で区切って何通りでも書けます** — 同じ言葉でも認識のたびに綴りが揺れるためです。他の機械宛ての合図は、こちらでは指示にしません。',
+    machineName:'呼び名', machineNamePh:'マック, Mac, まっく',
+    multiNote:'2台が同時に聞いていると「ミュート」で両方が切れます。入れておくと、呼び名を頭に付けた合図（「会社用ミュート」「会社用2番」）だけを受けます。**読点で区切って何通りでも書けます。** 同じ言葉でも認識のたびに綴りが揺れるためです。他の機械宛ての合図は、こちらでは指示にしません。',
     disconnectTitle:'{name} に聞くのをやめさせる',
     routePick:'発話の届き先',
     disconnectAsk:'解除しますか？',
     disconnected:'{name} が聞くのをやめました',
-    voiceHeld:'下書きに回しました — 直して送れます',
+    voiceHeld:'下書きに回しました。直して送れます',
     voiceLive:'そのまま届く側にしました',
     voiceHold:'溜める側にしました',
-    voiceUnmuted:'ミュートを解除しました — また届きます',
+    voiceUnmuted:'ミュートを解除しました。また届きます',
     micSwitching:'{name} に切り替えています…',
     discarded:'消しました。', undo:'元に戻す',
-    switchFailed:'切替に失敗しました: {err}',
+    switchFailed:'切替に失敗しました。{err}',
     bootingLeft:'起動中… あと{n}秒', bootingSoon:'起動中… もうすぐ',
+    keysTitle:'キーボードで使えるもの',
+    keysNote:'素のキーは画面を動かすだけです。Shift を添えたキーが、声の行き先を変えます。文字を打っている最中は、どれも効きません。',
+    keyMute:'マイクの入切',
+    keyClose:'開いているものを閉じる',
   },
   es: {
     connecting:'Conectando…',
@@ -1696,6 +1754,10 @@ const I18N = {
     discarded:'Descartado.', undo:'Deshacer',
     switchFailed:'No se pudo cambiar: {err}',
     bootingLeft:'Arrancando… quedan {n} s', bootingSoon:'Arrancando… ya casi',
+    keysTitle:'Atajos de teclado',
+    keysNote:'Una tecla sola solo mueve la pantalla. Con Mayús cambia a dónde va tu voz. Ninguna funciona mientras escribes en un campo.',
+    keyMute:'Encender y apagar el micrófono',
+    keyClose:'Cerrar lo que esté abierto',
   },
   fr: {
     connecting:'Connexion…',
@@ -1840,6 +1902,10 @@ const I18N = {
     discarded:'Jeté.', undo:'Annuler',
     switchFailed:'Changement impossible : {err}',
     bootingLeft:'Démarrage… {n} s restantes', bootingSoon:'Démarrage… presque prêt',
+    keysTitle:'Raccourcis clavier',
+    keysNote:'Une touche seule ne fait que déplacer l’écran. Avec Maj, c’est la destination de votre voix qui change. Aucune ne fonctionne pendant que vous tapez dans un champ.',
+    keyMute:'Ouvrir et fermer le micro',
+    keyClose:'Fermer ce qui est ouvert',
   },
   de: {
     connecting:'Verbindung…',
@@ -1984,6 +2050,10 @@ const I18N = {
     discarded:'Verworfen.', undo:'Rückgängig',
     switchFailed:'Wechsel nicht möglich: {err}',
     bootingLeft:'Startet… noch {n} s', bootingSoon:'Startet… gleich fertig',
+    keysTitle:'Tastenkürzel',
+    keysNote:'Eine Taste allein bewegt nur die Ansicht. Mit Umschalt ändert sich, wohin die Stimme geht. Während du in ein Feld tippst, wirkt keine davon.',
+    keyMute:'Mikrofon ein und aus',
+    keyClose:'Schließen, was gerade offen ist',
   },
   zh: {
     connecting:'连接中…',
@@ -2128,6 +2198,10 @@ const I18N = {
     discarded:'已经丢掉。', undo:'撤销',
     switchFailed:'切换失败：{err}',
     bootingLeft:'启动中… 还有 {n} 秒', bootingSoon:'启动中… 快好了',
+    keysTitle:'键盘快捷键',
+    keysNote:'单独按一个键只会改变画面。按住 Shift 才会改变声音的去向。在输入框里打字时，它们都不生效。',
+    keyMute:'开关麦克风',
+    keyClose:'关掉正开着的面板',
   },
   ko: {
     connecting:'연결 중…',
@@ -2272,6 +2346,10 @@ const I18N = {
     discarded:'버렸습니다.', undo:'되돌리기',
     switchFailed:'바꾸지 못했습니다: {err}',
     bootingLeft:'시작하는 중… {n}초 남음', bootingSoon:'시작하는 중… 거의 다 됐습니다',
+    keysTitle:'키보드 단축키',
+    keysNote:'단독으로 누르는 키는 화면만 바꿉니다. Shift를 함께 누르면 말이 가는 곳이 바뀝니다. 입력란에 글을 쓰는 동안에는 어느 것도 작동하지 않습니다.',
+    keyMute:'마이크 켜고 끄기',
+    keyClose:'열려 있는 것 닫기',
   },
 };
 
@@ -2528,7 +2606,7 @@ new ResizeObserver(fitCanvas).observe(canvas);
 
 /* シートの見出しに置く小さいマイク。本体と同じ絵を、同じ値で描く。
    隠れている間は寸法が取れない（display:none なので 0 になる）ので、
-   開いた時点で測り直す。シートを増やしたらここへ足す — 足さないと、
+   開いた時点で測り直す。シートを増やしたらここへ足すこと。足さないと、
    その画面を開いている間だけ聞こえているかどうかが見えなくなる。 */
 const minis = [[el.miniViz, el.sheet, el.miniMic],
                [el.helpMiniViz, el.helpSheet, el.helpMini]]
@@ -2662,8 +2740,8 @@ function amplitudeFallback() {
 // （エキスパンダー）。ゼロにはしないので「もう録れていないのでは」とは
 // ならず、それでいて静かなときにうろうろ動かない。
 //
-//   しきい値より上 : そのまま
-//   しきい値より下 : 下がった分を EXPAND 倍にして落とす
+//   しきい値より上は、そのまま
+//   しきい値より下は、下がった分を EXPAND 倍にして落とす
 //
 // 折れ目をそのまま繋ぐと段差が見えるので、KNEE_DB の幅でなめらかにする。
 const EXPAND = 5;        // しきい値より下で何倍の速さで落とすか
@@ -2803,7 +2881,7 @@ function frame(now) {
   if (!cw || !ch) return;
   try { paintFrame(now); } catch (err) {
     // 一コマ失敗しても止めない。次のコマで描き直す。
-    // ただし黙るのは2回目から — 握りつぶすと、毎コマ落ちていても
+    // ただし黙るのは2回目から。握りつぶすと、毎コマ落ちていても
     // 「絵が出ない」としか分からない（実際にそれで気づけなかった）。
     if (!frameFailed) { frameFailed = true; console.error('paintFrame:', err); }
     cx.setTransform(window.devicePixelRatio || 1, 0, 0, window.devicePixelRatio || 1, 0, 0);
@@ -2957,7 +3035,7 @@ function addEntry(rec) {
   retally();
 }
 
-/* 宛先の PID から名前を引く。終わったセッションの名前も残す —
+/* 宛先の PID から名前を引く。終わったセッションの名前も残す。
    履歴は残るのに宛先だけ「#42101」になってしまうと、結局どちらか分からない。 */
 const routeNames = new Map();
 
@@ -2993,8 +3071,8 @@ let route = 'live';
 let lastMode = 'live';   // 一時停止を解いたとき、直前のモードに戻す
 let oneShot = false;     // この一言だけ手直しに回している最中か
 /* いまの下書きに人が手を入れたか。送るときに一緒に渡し、サーバはこれを見て
-   "edited" の印を付ける。手直しの欄を通ったかどうかでは決めない — 認識が
-   うまくいってそのまま送った文にまで印が付き、Claude 側が「意図して整えた文」
+   "edited" の印を付ける。手直しの欄を通ったかどうかでは決めない。それだと
+   認識がうまくいってそのまま送った文にまで印が付き、Claude 側が「意図して整えた文」
    として読み替えを控えてしまう。認識結果が入るのは value への代入なので
    'input' は起きず、人が打ったとき・貼ったとき・切り取ったときだけ立つ。
    直して元の文へ戻した場合も手直しとして数える（操作はあったので）。
@@ -3030,7 +3108,7 @@ function paint() {
       : t(off ? 'hintOff' : shown === 'hold' ? 'hintHold' : 'hintLive');
   }
   // 手元で作業している間はタブのタイトルだけが手がかりになる
-  setTitle(t(off ? 'titleOff' : shown === 'hold' ? 'titleHold' : 'titleLive') + ' — voice-shell');
+  setTitle(t(off ? 'titleOff' : shown === 'hold' ? 'titleHold' : 'titleLive') + ' · voice-shell');
 
   el.tray.classList.toggle('holding', route === 'hold');
   el.tray.classList.toggle('editing', oneShot);
@@ -3137,12 +3215,12 @@ async function setRoute(next) {
   refreshState();
 }
 
-/* 切ったあとの後始末。声で切り替わったときも同じ処理を通す —
+/* 切ったあとの後始末。声で切り替わったときも同じ処理を通す。
    ここを通さないと、画面は「切」なのにブラウザのマイクは開いたままで、
    タブの録音インジケータが点き続ける。 */
 function applyRouteSideEffects(next) {
   // 一時停止のあいだはブラウザ側のマイクも手放す（録音の気配を残さない）。
-  // 認識も一緒に止める — 止めないと、画面に「何も記録されません」と
+  // 認識も一緒に止める。止めないと、画面に「何も記録されません」と
   // 出しているのに、音声だけは外へ送られ続ける。
   if (next === 'off') {
     if (recWanted) { asrPausedByRoute = true; stopRecognition(); }
@@ -3717,6 +3795,148 @@ el.openHelp.onclick = async () => {
 };
 el.closeHelp.onclick = () => { saveCmds(); el.helpSheet.hidden = true; };
 
+/* ── キーボードで使えるもの ─────────────
+   声で言えることは、手が空いているときにキーでも済ませられるようにする。
+
+   割り当ての決まりは2つだけにした。**素のキーは画面を動かすだけ**（設定を
+   開く、一覧を開く、閉じる）。**Shift を添えたキーが、声の行き先を変える**
+   （マイクの入切、届け方、捨てる、送信先）。押し間違えたときに黙って届かなく
+   なるものを、素の1文字には置かない。取り違えても画面が変わるだけなら、
+   見れば分かって押し直せる。
+
+   Cmd+, は取らない。macOS では Chrome の設定に当たる割り当てで、ページ側で
+   止められない。仮に止められたとしても、この窓から Chrome の設定を開く道を
+   奪うことになる。見るのは Shift だけにして、Cmd と Ctrl と Alt が添えられて
+   いるときは何もしない（Cmd+Shift+M のようなブラウザの割り当てを、こちらが
+   横取りしないため）。
+
+   文字を打っている最中は素通しする。見るのは押した先（e.target）で、
+   uiDoc().activeElement ではない。焦点は押した瞬間にその要素にあるので、
+   どちらの document に居ても同じ答えが返る。
+
+   聞き手は document と、浮かせた小窓の document の両方に貼る。中身は
+   floatParts ごと小窓へ移るが、どこにも焦点が無いときのキーは小窓の body へ
+   届く。body は floatParts の外側なので、要素に貼っただけでは受け取れない。 */
+
+// 文字を打っている最中か。押した先で見る
+function typingIn(node) {
+  if (!node || !node.tagName) return false;
+  if (node.isContentEditable) return true;
+  return node.tagName === 'INPUT' || node.tagName === 'TEXTAREA' || node.tagName === 'SELECT';
+}
+
+/* 並びの違うキーボードでも押せるように、文字（key）と位置（code）の両方で
+   見る。かな入力に切り替えていると key の方が別の字になるため。 */
+const keyIs = (e, ch) => e.key.toUpperCase() === ch || e.code === 'Key' + ch;
+
+// 開いていれば閉じる、閉じていれば開く。押すたびに元の場所へ戻れる
+function toggleSheet(sheet, open, close) {
+  if (sheet.hidden) open.click(); else close.click();
+}
+
+function onKey(e) {
+  if (e.defaultPrevented || e.repeat || e.isComposing) return;
+
+  // 下書きを送る。手直し欄の中は欄自身が受け持っているので、外に居るときだけ。
+  if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key === 'Enter') {
+    if (typingIn(e.target)) return;
+    e.preventDefault();
+    el.send.click();
+    return;
+  }
+  // ここから先は Shift しか見ない。ブラウザが持っているキーは取らない。
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+  /* 開いているものを閉じる。打っている最中なら、まず欄から出るだけにする。
+     辞書も言い方も焦点が外れた時点で保存されるので、書き込みもここで起きる。
+     もう一度押せば閉じる。 */
+  if (e.key === 'Escape') {
+    if (typingIn(e.target)) { e.target.blur(); return; }
+    if (!el.helpSheet.hidden) { el.closeHelp.click(); return; }
+    if (!el.sheet.hidden) { el.closeSettings.click(); return; }
+    if (oneShot) { endOneShot(); say(t('oneShotOff'), 4); }
+    return;
+  }
+  if (typingIn(e.target)) return;
+
+  // 「？」は並びによって Shift が要ったり要らなかったりするので、先に見る
+  if (e.key === '?') {
+    e.preventDefault();
+    toggleSheet(el.helpSheet, el.openHelp, el.closeHelp);
+    return;
+  }
+
+  if (!e.shiftKey) {
+    // Cmd+, の代わり。設定を開く覚え方はそのままに、ブラウザとは喧嘩しない。
+    if (e.key === ',') {
+      e.preventDefault();
+      toggleSheet(el.sheet, el.openSettings, el.closeSettings);
+    }
+    return;
+  }
+
+  /* ここから先は声の行き先が変わる。画面を見ていないから声で操作している
+     ので、押したことが音と一言で分かるようにする（声で言ったときと同じもの
+     を回す。同じことをしたのに違う知らせが出ると、別のことが起きたように
+     読めてしまう）。 */
+  if (keyIs(e, 'M')) {                    // マイクの入切
+    const back = route === 'off';
+    e.preventDefault();
+    el.segOff.click();
+    chime(back ? 'up' : 'down');
+    say(t(back ? 'voiceUnmuted' : 'voiceMuted'));
+    return;
+  }
+  if (keyIs(e, 'L')) {                    // そのまま届ける
+    e.preventDefault();
+    el.segLive.click();
+    chime('ok');
+    say(t('voiceLive'));
+    return;
+  }
+  if (keyIs(e, 'H')) {                    // 手直しに回す
+    e.preventDefault();
+    el.segHold.click();
+    chime('ok');
+    say(t('voiceHold'));
+    return;
+  }
+  if (keyIs(e, 'E')) {                    // この一言だけ手直しに回す
+    e.preventDefault();
+    if (el.editOnce.disabled) { chime('err'); return; }
+    el.editOnce.click();                  // 一言は editThisOne が出す
+    chime('ok');
+    return;
+  }
+  if (e.key === 'Backspace') {            // 未送信を捨てる
+    e.preventDefault();
+    const had = el.draft.value.trim();
+    el.discard.click();                   // 一言と「元に戻す」は discard が出す
+    chime(had ? 'down' : 'err');
+    return;
+  }
+  /* 送信先を番号で選ぶ。Shift を添えると数字の字そのものが変わる並びが
+     あるので、ここは位置（code）で見る。番号は札に出ているものと同じ。 */
+  const digit = /^Digit([1-9])$/.exec(e.code || '');
+  if (digit) {
+    e.preventDefault();
+    const no = Number(digit[1]);
+    const pickTo = knownListeners[no - 1];
+    if (!pickTo) { chime('err'); say(t('voiceRouteMissing', {n: no})); return; }
+    setRoute2(String(pickTo.pid));
+    chime('ok');
+    say(t('voiceRoute', {name: pickTo.label}));
+  }
+}
+
+document.addEventListener('keydown', onKey);
+
+/* 送る組み合わせだけは機械によって呼び名が違う。一覧に嘘を書かないよう、
+   Cmd を持つ機械ではそちらに書き換える。 */
+if (/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)) {
+  for (const n of document.querySelectorAll('.cap.mod')) n.textContent = 'Cmd';
+}
+
 // テーマ。自動のときは OS の設定に従う（data-theme を外しておく）
 // 浮かせている間は小窓と元の document の両方に書く。小窓だけだと戻した瞬間に
 // 前の色へ跳ね返り、元だけだと浮かせている間ずっと変わらない。
@@ -4214,7 +4434,7 @@ function sendUtterance(text) {
         el.hint.textContent = t('asrSendFailed', {n: res.status});
       }
     } catch {
-      el.hint.textContent = t('asrSendFailed', {n: '—'});
+      el.hint.textContent = t('asrSendFailed', {n: '?'});
     }
   });
 }
@@ -4579,6 +4799,9 @@ el.floatBtn.onclick = async () => {
   applyTheme(store.get('theme', 'auto'));
   // 要素ごと移す。参照は生きたままなので JS は書き換えなくてよい。
   win.document.body.append(...floatParts);
+  // 小窓は毎回新しい document になる。キーの待ち受けはここで貼り直す
+  // （閉じれば document ごと消えるので、外す手当ては要らない）。
+  win.document.addEventListener('keydown', onKey);
   el.sheet.hidden = el.helpSheet.hidden = true;   // 小窓は本体から始める
   fitCanvas();
   paintFloat(true);
@@ -5143,7 +5366,7 @@ loadEngines().then(() => {
   if (!recWanted) return;
   if (vizArmed) { startRecognition(); return; }
   // ブラウザの決まりで、一度画面に触るまでマイクを開けない。「クリックして
-  // ください」と頼む代わりに、切った状態で始める。マイクを押して入れる —
+  // ください」と頼む代わりに、切った状態で始める。マイクを押して入れる、
   // という当たり前の動作が、そのまま「触った」ことになる。
   armPending = true;
   route = 'off';

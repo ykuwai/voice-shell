@@ -137,10 +137,10 @@ detach() {
 
 if [[ -z "$PY" ]]; then
   echo "動かせる Python が見つかりません。" >&2
-  echo "  ブラウザで認識するだけなら、これだけで足ります:" >&2
+  echo "  ブラウザで認識するだけなら、これだけで足ります。" >&2
   echo "    pip install numpy aiohttp" >&2
   echo "  手元のモデルで認識する場合は SETUP.md を参照してください。" >&2
-  echo "  場所を直接指定する場合: export VOICE_SHELL_PYTHON=/path/to/python" >&2
+  echo "  場所を直接指定するなら export VOICE_SHELL_PYTHON=/path/to/python と書きます" >&2
   exit 1
 fi
 # 以前は認識モデルの名前を取って "qwen-voice" と呼んでいた。道具の名前へ改めたが、
@@ -171,7 +171,7 @@ cmd="${1:-status}"; shift || true
 # Chrome の --app はタブもURL欄も無い窓になり、コマンドから開ける。
 # 「常に最前面」にしたい場合は、開いた窓のヘッダから手で浮かせる
 # （Document Picture-in-Picture は人が触らないと開けない決まりのため）。
-# 独立した窓で開く。一度開いたら覚えておく — start や viewer を打ち直す
+# 独立した窓で開く。一度開いたら覚えておく。start や viewer を打ち直す
 # たびに新しい窓が出て、実際に10個並んだ。窓はビューア1つにつき1つでよい。
 open_gui() {
   local url="http://127.0.0.1:8090"
@@ -366,18 +366,18 @@ case "$cmd" in
       if ! port_open; then
         echo "  ビューアが動いていません → voice-shell.sh viewer" >&2
       else
-        echo "  ビューア: http://127.0.0.1:8090"
+        echo "  ビューアは http://127.0.0.1:8090"
         # 画面が実際に聞いているかまで見る。ここを見ないと、開いていない・
         # マイクを拒否された状態と、ちゃんと聞いている状態を区別できない。
         http_get /api/asr-status \
           | "$PY" "$HERE/asr_status.py" || echo "  画面の状態を確認できませんでした"
       fi
     else
-      echo "認識のやり方: $engine"
+      echo "認識のやり方は $engine"
       "$PY" "$APP" --status
     fi
     echo
-    echo "この音声を聞いているセッション:"
+    echo "この音声を聞いているセッション"
     listeners_now="$(list_listeners)"
     if [ -n "$listeners_now" ]; then echo "$listeners_now"
     else echo "  なし（音声はどこにも届いていません）"; fi
@@ -564,7 +564,7 @@ NAMEIT
       # 独立したウィンドウで開く（--no-gui なら開かない）
       [[ "${VOICE_SHELL_NO_GUI:-0}" == "1" ]] || open_gui || true
     else
-      echo "起動に失敗しました:" >&2; tail -5 "$STATE_DIR/viewer.out" >&2; exit 1
+      echo "起動に失敗しました。" >&2; tail -5 "$STATE_DIR/viewer.out" >&2; exit 1
     fi
     ;;
   viewer-stop)
@@ -593,7 +593,7 @@ NAMEIT
     echo TIMEOUT; exit 1
     ;;
   *)
-    echo "使い方: voice-shell.sh {start [--engine X] [--no-gui]|stop|status|engines}" >&2
+    echo "使い方は voice-shell.sh {start [--engine X] [--no-gui]|stop|status|engines}" >&2
     echo "        voice-shell.sh {listen|listeners|name|hold|live|log-path|wait-ready|viewer}" >&2
     echo "        voice-shell.sh {apple|whisper}" >&2
     exit 1

@@ -6,10 +6,10 @@ Claude Code 側は Monitor でこのログを tail し、行が来たらプロ�
 
     python voice_daemon.py --language Japanese
 
-ログ形式（1行1発話、JSONL）。本文だけを載せる:
+ログ形式（1行1発話、JSONL）。本文だけを載せる。
     {"text": "テストを実行して"}
 
-制御コマンド:
+制御コマンドは次のとおり。
     python voice_daemon.py --status    # 動いているか確認
     python voice_daemon.py --stop      # 停止する
 """
@@ -197,7 +197,7 @@ def _read_one(path: Path) -> dict:
     except FileNotFoundError:
         return {"ignore": [], "unignore": [], "replace": {}}
     except (json.JSONDecodeError, OSError) as e:
-        print(f"{path.name} を読めませんでした ({e}) — 無視します", file=sys.stderr)
+        print(f"{path.name} を読めませんでした ({e})。無視します", file=sys.stderr)
         return {"ignore": [], "unignore": [], "replace": {}}
     return {
         "ignore": [s for s in data.get("ignore", []) if isinstance(s, str)],
@@ -452,7 +452,7 @@ def resolve_engine(want: str = "") -> str:
     if want and want != "auto":
         if want not in known:
             sys.exit(f"「{want}」は使えません。"
-                     f"選べるのは: {', '.join(sorted(known))}\n"
+                     f"選べるのは {', '.join(sorted(known))} です。\n"
                      f"  一覧は voice-shell.sh engines")
         return want
     if not want:
@@ -465,7 +465,7 @@ def resolve_engine(want: str = "") -> str:
             print(f"前回選んだ「{remembered}」は今使えないので、"
                   f"このブラウザで認識します。", file=sys.stderr)
         return "browser"
-    # want == "auto": 入っているモデルの中から選ぶ
+    # want == "auto" のときは、入っているモデルの中から選ぶ
     have = [e["id"] for e in asr_mic.available_engines()]
     for pick in ("apple", "whisper"):
         if pick in have:
@@ -926,8 +926,8 @@ def voice_command(text: str, muted: bool):
 
 # 数の言い方は認識のたびに揺れる。「2」と言っても「に」「ツー」「二」と出るし、
 # 「送信先に」は「送信先2」のことがある。読みを一通り並べて、どれで来ても拾う。
-# ひらがな1文字（に・し・ご・く）は助詞と見分けが付かないので、単独では効かない
-# — 下の型はどれも「番」「送信先」「〜に切り替え」の形を要求する。
+# ひらがな1文字（に・し・ご・く）は助詞と見分けが付かないので、単独では効かない。
+# 下の型はどれも「番」「送信先」「〜に切り替え」の形を要求する。
 #
 # 11 以上は持たない。聞いているセッションが 11 個並ぶことはまず無いし、
 # 増やすほど普通の発話を食う危険だけが上がる。
@@ -1703,7 +1703,7 @@ def main():
         print("  browser   このブラウザ（何も入れずに動く）")
         for e in have:
             print(f"  {e['id']:<9} {e['label']}")
-        print(f"\n  前回の選択: {remembered or '(まだ無い)'}")
+        print(f"\n  前回の選択は {remembered or '(まだ無い)'}")
         return
 
     if args.listeners:
@@ -1711,8 +1711,8 @@ def main():
         # ここで固定文言を出すと「呼び出し側が空かどうかを見分けられない」ため。
         for l in list_active_listeners(args.log_file):
             print(f"  {l['label']}  （PID {l['pid']}）")
-            print(f"    起動 : {l['started']}")
-            print(f"    場所 : {l['cwd']}")
+            print(f"    起動した時刻  {l['started']}")
+            print(f"    場所          {l['cwd']}")
         return
 
     if args.status:
@@ -1720,7 +1720,7 @@ def main():
         if pid:
             n = sum(1 for _ in open(args.log_file)) if Path(args.log_file).exists() else 0
             print(f"稼働中 (PID {pid}) / これまでの発話 {n} 件")
-            print(f"ログ: {args.log_file}")
+            print(f"ログは {args.log_file}")
         else:
             print("停止しています。")
         return
@@ -1844,7 +1844,7 @@ def main():
     model = asr_mic.load_model(args)
 
     PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
-    print(f"\n  聞いています — 喋ると {log_path} に追記します"
+    print(f"\n  聞いています。喋ると {log_path} に追記します"
           f"\n  Ctrl-C で終了\n", file=sys.stderr, flush=True)
 
     # 聞いているセッションが2つ以上になったら、発話ログ自体に警告を書いて
@@ -1981,7 +1981,7 @@ def main():
                 if kind:
                     print(f"(合図 {kind}) {text[:40]}", file=sys.stderr, flush=True)
                     # 合図そのものは発話ではないので送らない。was_muted は
-                    # 触らない — 次の周回の頭で数え直させる（ここで先回りすると
+                    # 触らないでおく。次の周回の頭で数え直させる（ここで先回りすると
                     # 世代が上がらず、切る前に始まった発話を落とせなくなる）。
                     speaking_since = None
                     continue

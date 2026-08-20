@@ -5,13 +5,15 @@ import Speech
 // macOS 26 の SpeechAnalyzer / SpeechTranscriber を voice-shell から使うための常駐ヘルパ。
 //
 // stdin から 1 行 1 リクエスト（WAV のパス）を受け取り、認識結果を JSON 1 行で返す。
-//   入力: /path/to/utterance.wav\n     … その音声を認識する
-//         QUIT\n                        … 終了
-//   出力: {"text":"...","language":"ja-JP"}\n
-//         {"error":"..."}\n
+//   受け取るもの
+//     /path/to/utterance.wav\n     … その音声を認識する
+//     QUIT\n                       … 終了
+//   返すもの
+//     {"text":"...","language":"ja-JP"}\n
+//     {"error":"..."}\n
 // 起動が済むと {"ready":true,"locale":"ja-JP"} を 1 行出す。
 //
-// 使い方:
+// 使い方は次のとおり。
 //   ./speech_helper [--locale ja-JP]
 //
 // ## マイクは触らない
@@ -53,7 +55,7 @@ struct SpeechHelper {
                 try await request.downloadAndInstall()
             }
         } catch {
-            emit(["error": "モデル資産の用意に失敗しました: \(error)"])
+            emit(["error": "モデル資産の用意に失敗しました。\(error)"])
             exit(1)
         }
 
