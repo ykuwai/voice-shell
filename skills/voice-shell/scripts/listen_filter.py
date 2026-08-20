@@ -1,48 +1,53 @@
 #!/usr/bin/env python3
-"""発話ログの行を、自分宛てのものだけに絞って流す。
+"""Pass through only the utterance log lines addressed to me.
 
-voice-shell.sh listen が tail の後ろに挟む。ビューアで送信先を選ぶと、
-デーモンが各行に "to"（宛先の PID）を付ける。指定の無い行は全員宛て。
+voice-shell.sh listen slots this in behind tail. When a destination is picked
+in the viewer, the daemon tags every line with "to" (the PID it is for).
+A line with no tag is for everyone.
 
-    tail -F utterances.jsonl | listen_filter.py <自分のPID>
+    tail -F utterances.jsonl | listen_filter.py <my PID>
 
-行ごとに送り出す（-u と flush）。溜めると、話してから届くまでが延びる。
+Write line by line (-u and flush). Buffering stretches the gap between
+speaking and arriving.
 
-長い発話はここで複数行に割る。Monitor は1行が長すぎると末尾を落とすので、
-そのまま流すと話の結びが AI に届かない。日本語は「〜してほしい」が最後に
-来るため、依頼そのものが消える。割るのはこの経路だけで、utterances.jsonl
-とビューアの履歴は1行1発話のまま残る。
+Long utterances get split here. Monitor drops the end of a line that is too
+long, so passing one through whole means the close of what was said never
+reaches the AI. Japanese puts 「〜してほしい」 last, so the request itself is
+what vanishes. Only this path splits. utterances.jsonl and the viewer history
+keep one line per utterance.
 """
 import json
 import sys
 
-# Monitor が1行で運べる長さ。実測すると、JSON にした行が 500 文字を超えた
-# ところから先が落ちた。バイト数ではない（日本語もアスキーも同じ 490 文字目で
-# 切れた）。上限そのものはどこにも書かれていないので、余裕を引いて割る。
+# How much Monitor carries on one line. Measured, a JSON line was cut off past
+# 500 characters. Not bytes (Japanese and ASCII both cut at the same 490th
+# character). The limit itself is documented nowhere, so split with room left.
 SAFE_LINE = 450
 
-# 割る位置を探す順。句点で切れれば読みやすく、無ければ読点、それも無ければ空白。
+# Order to look for a split point. A full stop reads best, then a comma, then a space.
 STRONG_BREAKS = "。！？"
 WEAK_BREAKS = "、，,；;"
 ASCII_STOPS = ".!?"
 
 
 def _dump(rec, text):
-    """text だけ差し替えて1行の JSON に戻す。
+    """Swap in a different text and rebuild the one-line JSON.
 
-    "to" や "edited" を落とすと宛先の絞り込みや扱いが壊れるので、
-    元の行のキーはそのまま持ち越す。ensure_ascii=False なのは、
-    日本語を \\uXXXX に開くと1文字が6文字に膨らんで割った意味が消えるため。
+    Dropping "to" or "edited" would break the destination filter and how the
+    line is treated, so every key of the original line is carried over.
+    ensure_ascii=False because opening Japanese out into \\uXXXX blows one
+    character up to six and defeats the point of splitting.
     """
     return json.dumps(dict(rec, text=text), ensure_ascii=False)
 
 
 def _fit(rec, text, budget):
-    """JSON にしたときに収まるところまで budget を詰める。
+    """Squeeze budget down until the JSON form fits.
 
-    引用符や改行はエスケープで伸びるので、文字数の引き算だけでは足りない。
-    はみ出した分をそのまま引くと、伸び方が大きいときに 1 文字まで削れて
-    細切れの山になる。伸びた比で詰めて、必要な分だけ縮める。
+    Quotes and newlines grow when escaped, so subtracting character counts is
+    not enough. Subtracting the overflow as it is cuts down to a single
+    character when the growth is large, leaving a pile of scraps. Squeeze by
+    the ratio it grew, only as far as needed.
     """
     room = SAFE_LINE - len(_dump(rec, ""))
     while budget > 1:
@@ -54,16 +59,17 @@ def _fit(rec, text, budget):
 
 
 def _last_break(text, limit, kind, floor):
-    """limit より手前で、区切りに使える位置を後ろから探す。
+    """Search backward from limit for a spot usable as a break.
 
-    floor より手前は選ばない。前半が短すぎると残りが伸びて割る回数が増える。
+    Nothing before floor is picked. Too short a first half leaves more behind
+    and adds splits.
     """
     for i in range(limit - 1, floor - 1, -1):
         ch = text[i]
         if kind == "strong":
             if ch in STRONG_BREAKS:
                 return i + 1
-            # 英語の句点。3.14 のような小数で切らないよう、直後が空白のときだけ
+            # English full stop. Only when a space follows, so 3.14 stays whole.
             if ch in ASCII_STOPS and (text[i + 1:i + 2] or " ") == " ":
                 return i + 1
         elif kind == "weak":
@@ -75,10 +81,11 @@ def _last_break(text, limit, kind, floor):
 
 
 def _cut_at(text, budget):
-    """budget 文字以内で、どこで切るかを決める。
+    """Decide where to cut, inside budget characters.
 
-    句点、読点、空白の順に探す。どれも見つからなければ budget でそのまま切る。
-    一息で続く発話には句点が1つも無いことがあるので、必ず切れる道を残す。
+    Look for a full stop, then a comma, then a space. If none turn up, cut at
+    budget as it is. An utterance carried on one breath can hold no full stop
+    at all, so always leave a way to cut.
     """
     limit = min(budget, len(text))
     floor = max(1, limit // 2)
@@ -90,14 +97,14 @@ def _cut_at(text, budget):
 
 
 def split_line(rec, line):
-    """1行を、Monitor が落とさない長さの複数行に割る。
+    """Split one line into lines short enough that Monitor keeps them.
 
-    割る必要が無ければ元の行をそのまま返す。普段の短い発話は素通しで、
-    余計な作り直しも待ち時間も挟まない。
+    If no split is needed, the original line comes back as it is. Everyday
+    short utterances pass straight through, with no rebuilding and no wait.
     """
     text = rec.get("text")
     if not isinstance(text, str):
-        return [line]           # 発話ではない行（system_warning など）は触らない
+        return [line]           # leave non-utterance lines (system_warning etc.) alone
     base = SAFE_LINE - len(_dump(rec, ""))
     if base < 1 or len(_dump(rec, text)) <= SAFE_LINE:
         return [line]
@@ -127,14 +134,15 @@ def main():
         except ValueError:
             rec = None
         if not isinstance(rec, dict):
-            print(line, flush=True)   # 読めない行は落とさない（取りこぼしを作らない）
+            print(line, flush=True)   # keep unreadable lines, never drop one silently
             continue
         to = rec.get("to")
         if to is not None and str(to) != me:
             continue
-        # 割れた分は続けて書く。Monitor は近い時刻に出た行を1つの通知にまとめ、
-        # まとめても行ごとに上限が掛かるだけなので、間を空ける必要は無い。
-        # むしろ同じ通知に並ぶほうが、受け手が全部を見てから動ける。
+        # Write the split pieces back to back. Monitor bundles lines emitted
+        # close in time into one notification, and bundling only caps each
+        # line, so no gap is needed. Landing in the same notification is
+        # better anyway, the reader sees all of it before acting.
         for out in split_line(rec, line):
             print(out, flush=True)
 

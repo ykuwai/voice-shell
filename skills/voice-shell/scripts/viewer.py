@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""音声プロンプトのライブビューア。
+"""Live viewer for voice prompts.
 
-voice_daemon.py が書き出す JSONL を追尾してブラウザに流すだけ。
-GPU も マイクも使わないので、音声モードと同時に動かせる。
+It only tails the JSONL voice_daemon.py writes out and pushes it to the browser.
+It uses neither GPU nor mic, so it can run alongside voice mode.
 
     python viewer.py            # → http://127.0.0.1:8090
 """
@@ -18,44 +18,46 @@ from pathlib import Path
 
 from aiohttp import web, WSCloseCode
 
-# voice_daemon.py と同じ理由（Windows での "/tmp" の食い違い）で、
-# voice-shell.sh から渡された実パスがあればそちらを優先する。
+# For the same reason as voice_daemon.py (the "/tmp" mismatch on Windows),
+# a real path handed over by voice-shell.sh wins if there is one.
 if os.environ.get("VOICE_SHELL_STATE_DIR"):
     DEFAULT_LOG = Path(os.environ["VOICE_SHELL_STATE_DIR"]) / "utterances.jsonl"
 else:
-    # 名前を "qwen-voice" から改めた。voice_daemon.py と同じ理由で、古い方が
-    # 残っていて新しい方が無ければそちらを使い続ける。
+    # The name changed from "qwen-voice". Same reason as voice_daemon.py, if the
+    # old one is still around and the new one is not, keep using the old one.
     _base = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp"))
     _state = _base / "voice-shell"
     if not _state.exists() and (_base / "qwen-voice").exists():
         _state = _base / "qwen-voice"
     DEFAULT_LOG = _state / "utterances.jsonl"
 
-# ユーザー辞書。voice_daemon.py と同じ場所を読み書きする。
+# The user dictionary. Read and written in the same place as voice_daemon.py.
 _CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "voice-shell"
 DICT_FILE = _CONFIG / "dictionary.json"
-# マイク感度と確定までの無音秒数。デーモンが 0.5 秒おきに読み直すので、
-# 書き換えるだけで再起動なしに効く。
+# Mic sensitivity and the seconds of silence before settling. The daemon rereads
+# them every 0.5 seconds, so writing them is enough, with no restart.
 TUNING_FILE = _CONFIG / "tuning.json"
-# 触っていい範囲。外れた値を書くと認識が完全に止まったように見えるので、
-# サーバ側でも必ず挟む（環境ノイズは 0.003 前後、macOS の既定は 0.015）。
+# The range it is safe to touch. A value outside it makes recognition look like
+# it stopped dead, so the server always clamps it too (room noise sits around
+# 0.003, the macOS default is 0.015).
 TUNING_RANGE = {"silence_threshold": (0.003, 0.15),
-                # つまみは 10 秒までだが、じっくり喋る人のために上は広く取る
+                # the knob stops at 10 seconds, but leave room above for slow talkers
                 "silence_duration": (0.3, 30.0),
                 "min_chars": (1, 40),
-                # ブラウザ認識で、これだけ声が無ければ自分でマイクを切る。
-                # 0 は切らない。使わない時間まで Google へ繋ぎ直し続けない。
+                # in browser recognition, cut the mic once no voice for this long.
+                # 0 never cuts. No reconnecting to Google through unused time.
                 "idle_mute_min": (0, 30)}
-# 数ではなく入切で持つもの
+# the ones held as on and off rather than a number
 TUNING_FLAGS = {"strip_fillers"}
-# 整数で持つもの。小数のまま渡すと文字数の比較が分かりにくくなる。
+# the ones held as integers. Left as floats, comparing character counts reads badly.
 TUNING_INT = {"min_chars", "idle_mute_min"}
 
 
 def _builtin_noise() -> list:
-    """voice_daemon.py が最初から無視している語を読む（表示用）。
+    """Read the words voice_daemon.py ignores from the start (for display).
 
-    デーモンを起動していなくても見せたいので、import せずソースから拾う。
+    They should show even with the daemon not running, so they are picked out
+    of the source rather than imported.
     """
     try:
         import ast
@@ -71,9 +73,9 @@ def _builtin_noise() -> list:
 
 
 def _read_dict(raw: bool = False, path: Path = None) -> dict:
-    """辞書を読む。無い・壊れている場合は空で返す。
+    """Read the dictionary. Missing or broken, it comes back empty.
 
-    raw=True なら内部用のキー（_seen）も含めてそのまま返す。
+    raw=True gives it back as it is, internal keys (_seen) included.
     """
     try:
         data = json.loads((path or DICT_FILE).read_text(encoding="utf-8"))
@@ -87,17 +89,18 @@ def _read_dict(raw: bool = False, path: Path = None) -> dict:
 
 
 def _keep_unignore(sent, prev: dict) -> list:
-    """組み込みから外した語をまとめる。
+    """Gather the words taken out of the built-in list.
 
-    画面は「いま組み込みにある語」の札しか出せないので、送られてくるのは
-    その範囲だけになる。届いた分で丸ごと置き換えると、組み込みから語が
-    消えた日や、一覧をうまく読めなかったときに、利用者が外したはずの語が
-    黙って無視へ戻る。札にできなかったぶんは前のまま残して足し合わせる。
+    The page can only put up chips for the words currently in the built-in
+    list, so only that much ever comes back. Replacing everything with what
+    arrives means that on a day a word leaves the built-in list, or when the
+    list could not be read, a word the user took out quietly goes back to being
+    ignored. Whatever could not become a chip stays as it was and is added on.
     """
     builtin = set(_builtin_noise())
     now = {s.strip() for s in sent if isinstance(s, str) and s.strip()}
-    # 札が出ていた語は、押し直して戻したぶんが届かないので、届いた分で決める。
-    # 札に出せなかった語（組み込みから消えた、一覧が読めなかった）は前のを残す。
+    # Words that had a chip go by what arrives, since one pressed back in never
+    # arrives. Words with no chip (gone from built-ins, list unreadable) stay.
     kept = {s.strip() for s in prev.get("unignore", []) or []
             if isinstance(s, str) and s.strip() and s.strip() not in builtin}
     return sorted(now | kept)
@@ -112,7 +115,7 @@ def parse_args():
 
 
 class Tail:
-    """JSONL を追尾し、新しい行を購読者に配る。"""
+    """Tail the JSONL and hand new lines out to the subscribers."""
 
     def __init__(self, path: Path):
         self.path = path
@@ -120,7 +123,7 @@ class Tail:
         self.history: list[dict] = []
 
     def read_existing(self):
-        """起動時点までの内容を読む（後から開いても経緯が見える）。"""
+        """Read everything up to startup (open it later, the history is there)."""
         if not self.path.exists():
             return
         with open(self.path) as f:
@@ -140,7 +143,7 @@ class Tail:
             return None
 
     async def watch(self):
-        """ファイル末尾を追い続ける。まだ無ければ現れるまで待つ。"""
+        """Keep following the end of the file. Not there yet, wait for it."""
         while not self.path.exists():
             await asyncio.sleep(1)
 
@@ -149,7 +152,7 @@ class Tail:
             while True:
                 line = f.readline()
                 if not line:
-                    # デーモン再起動でファイルが作り直された場合に追従する
+                    # follow along when a daemon restart rebuilt the file
                     try:
                         if self.path.stat().st_size < f.tell():
                             f.seek(0)
@@ -159,8 +162,9 @@ class Tail:
                     continue
 
                 rec = self._parse(line)
-                # system_warning は Claude Code（Monitor でこのログを直接見ている側）
-                # 宛てで、ブラウザの発話一覧に混ぜると壊れて見えるので流さない。
+                # system_warning is addressed to Claude Code (the side watching
+                # this log directly through Monitor). Mixed into the browser's
+                # utterance list it looks broken, so it is not pushed.
                 if rec and "system_warning" not in rec:
                     self.history.append(rec)
                     await self.broadcast(rec)
@@ -174,7 +178,7 @@ class Tail:
                 self.clients.discard(ws)
 
     async def watch_partial(self):
-        """認識途中のテキストを流す（デーモンが上書きし続けるファイルを読む）。"""
+        """Push the mid-recognition text (reading the file the daemon overwrites)."""
         path = self.path.parent / "partial.txt"
         last = None
         while True:
@@ -188,11 +192,11 @@ class Tail:
             await asyncio.sleep(0.2)
 
     async def watch_level(self):
-        """いま拾えている音量を流す。
+        """Push the volume being picked up right now.
 
-        文字が出ないとき、マイクが死んでいるのか黙っているだけなのかを
-        見分けたい。デーモンが書く level.txt は「音量 喋っているか」の
-        2 つの数値だけで、音声そのものは残らない。
+        When no text shows, you want to tell a dead mic from plain silence.
+        The level.txt the daemon writes holds 2 numbers only, the volume and
+        whether someone is speaking. The audio itself is never kept.
         """
         path = self.path.parent / "level.txt"
         last = None
@@ -205,14 +209,15 @@ class Tail:
             if cur != last:
                 last = cur
                 await self.broadcast({"level": cur[0], "speaking": cur[1]})
-            await asyncio.sleep(0.1)      # バーが滑らかに見える程度
+            await asyncio.sleep(0.1)      # about enough for the bar to look smooth
 
     async def watch_mic_active(self):
-        """デーモン側で実際に切り替えが完了したマイクを流す。
+        """Push the mic the daemon side really finished switching to.
 
-        ブラウザの「切り替えました」表示は押した瞬間の楽観的なものなので、
-        本当に切り替わったかはこれで確定させる。起動直後の1回目も送るが、
-        ブラウザ側は「切り替え要求後に来た1回」だけをトースト表示に使う。
+        The browser's "switched" message is optimistic, put up the moment the
+        button is pressed, so this settles whether it really switched. The first
+        one right after startup is sent too, but the browser toasts only the one
+        that arrives after a switch was asked for.
         """
         path = self.path.parent / "mic_active"
         last = None
@@ -227,11 +232,12 @@ class Tail:
             await asyncio.sleep(0.3)
 
     async def watch_muted(self):
-        """マイクの入切を流す。
+        """Push the mic going on and off.
 
-        声で切り替えられる（デーモンが「ミュート」を聞いてファイルを作る）ので、
-        画面が押していない変化が起きる。3秒おきの /api/state を待たせると、
-        切れたのかどうか分からないまま喋り続けることになる。
+        It can be switched by voice (the daemon hears 「ミュート」 and makes the
+        file), so changes happen that the page never pressed. Waiting on the
+        /api/state that comes every 3 seconds means talking on without knowing
+        whether it went off.
         """
         path = self.path.parent / "muted"
         last = None
@@ -243,10 +249,10 @@ class Tail:
             await asyncio.sleep(0.2)
 
     async def watch_paused(self):
-        """溜める側かどうかを流す。
+        """Push whether it is holding things back.
 
-        ミュートと同じく、声でも切り替わるようになったので、
-        3秒おきの /api/state を待たせると画面が置いていかれる。
+        Like mute, this switches by voice too now, so waiting on the
+        /api/state that comes every 3 seconds leaves the page behind.
         """
         path = self.path.parent / "paused"
         last = None
@@ -258,15 +264,16 @@ class Tail:
             await asyncio.sleep(0.2)
 
     async def watch_voice_cmd(self):
-        """声の合図に何が起きたかを流す。
+        """Push what happened to a voice signal.
 
-        合図は発話として送らないので、通ったかどうかが画面に出ない。
-        デーモンが書く voice_cmd.json をそのまま渡し、音と一言はブラウザに任せる。
+        A signal is not sent as an utterance, so nothing on the page shows
+        whether it went through. The voice_cmd.json the daemon writes goes
+        along as it is, and the sound and the word are left to the browser.
         """
         path = self.path.parent / "voice_cmd.json"
-        # 先に一度読んで「開いた時点で残っていたもの」を確定させる。
-        # これをしないと、最初に届いた本物の合図が first 扱いになり、
-        # 音も一言も出ないまま飛ばされる。
+        # Read once first to settle what was left over at the moment of opening.
+        # Without this the first real signal to arrive counts as the first one
+        # and gets skipped with no sound and no word.
         try:
             last = json.loads(path.read_text(encoding="utf-8")).get("at")
         except (OSError, ValueError, AttributeError):
@@ -283,10 +290,11 @@ class Tail:
             await asyncio.sleep(0.2)
 
     async def watch_held(self):
-        """一時停止中に確定した発話を、増えた分だけ流す。
+        """Push utterances settled while paused, only the ones newly added.
 
-        ブラウザ側はこれを受けてテキストエリアの末尾に足す。全文を送ると
-        編集中の内容を壊してしまうため、差分だけを送る。
+        The browser takes these and adds them to the end of the textarea. Send
+        the whole text and it wrecks what is being edited, so only the
+        difference goes.
         """
         path = self.path.parent / "held.jsonl"
         seen = 0
@@ -296,7 +304,7 @@ class Tail:
             except (FileNotFoundError, OSError):
                 lines = []
 
-            if len(lines) < seen:        # 送信・破棄でリセットされた
+            if len(lines) < seen:        # reset by a send or a discard
                 seen = 0
             for line in lines[seen:]:
                 rec = self._parse(line)
@@ -315,8 +323,8 @@ async def main_async(args):
     tail.read_existing()
 
     async def handle_index(_req):
-        # 開発中に手を入れるので、ブラウザにキャッシュさせない
-        # （古い画面のままボタンが効かない事故を防ぐ）
+        # It gets edited during development, so let the browser cache nothing
+        # (which heads off the accident where an old page's buttons do nothing)
         return web.FileResponse(page, headers={
             "Cache-Control": "no-store, must-revalidate",
         })
@@ -324,8 +332,9 @@ async def main_async(args):
     async def handle_ws(request):
         ws = web.WebSocketResponse(heartbeat=30)
         await ws.prepare(request)
-        # 先に購読者へ登録してから履歴を送る。逆順だと、await している隙に
-        # 届いた行が history にもブロードキャストにも乗らず、そこだけ落ちる。
+        # Register as a subscriber first, then send the history. The other way
+        # around, a line arriving while an await is open rides neither history
+        # nor broadcast, and just that one goes missing.
         tail.clients.add(ws)
         for rec in list(tail.history):
             await ws.send_str(json.dumps(rec, ensure_ascii=False))
@@ -344,8 +353,8 @@ async def main_async(args):
     pid_file = state / "daemon.pid"
 
     def _pid_alive(pid) -> bool:
-        """シグナルを送らずに生存確認する（voice_daemon.py と同じ理由）。
-        os.kill(pid, 0) は Windows では未対応で SystemError になる。"""
+        """Check it is alive without a signal (same reason as voice_daemon.py).
+        os.kill(pid, 0) is unsupported on Windows and gives SystemError."""
         if sys.platform.startswith("win"):
             import ctypes
             handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
@@ -360,36 +369,37 @@ async def main_async(args):
             return False
 
     def engine_running() -> bool:
-        """認識の準備ができているか（PID は読み込み完了後に書かれる）。"""
+        """Whether recognition is ready (the PID is written after loading)."""
         try:
             return _pid_alive(int(pid_file.read_text(encoding="utf-8")))
         except (OSError, ValueError):
             return False
 
-    stopping = {"until": 0.0}   # 停止を指示した直後は「起動中」と誤判定しない
-    starting = {"until": 0.0}   # 開始を指示した直後はプロセスがまだ見えない
+    stopping = {"until": 0.0}   # right after a stop, do not misread it as loading
+    starting = {"until": 0.0}   # right after a start, the process is not visible yet
 
     def engine_loading() -> bool:
-        """起動したがまだ準備中か。
+        """Started but still getting ready.
 
-        PID が出る前でも、デーモンのプロセス自体は動いている。
-        これを見ないと、押した直後に「止まっている」と表示されてしまう。
+        Even before a PID shows up, the daemon process itself is running.
+        Without checking this, the page says stopped right after the press.
 
-        ただし起動は切り離して行うので、指示してから pgrep に映るまで
-        0.1〜0.3秒ある。ブラウザはその窓で状態を訊きにくるため、
-        プロセスの有無だけを見ていると一度「止まっている」に戻ってしまう。
-        指示した事実を数秒だけ覚えておいて、この窓を埋める。
+        Startup is detached though, so 0.1 to 0.3 seconds pass between the order
+        and the process appearing in pgrep. The browser asks for state inside
+        that window, so watching only for the process flips it back to stopped
+        once. Remembering the order for a few seconds fills that window.
 
-        逆に停止直後はプロセスが消えきる前に拾えてしまうので、
-        止めた直後の数秒は起動中とみなさない。
+        The other way round, right after a stop the process can still be caught
+        before it is fully gone, so the seconds after a stop never count as
+        loading.
         """
         if engine_running() or time.monotonic() < stopping["until"]:
             return False
         if time.monotonic() < starting["until"]:
             return True
-        # pgrep が無い環境（Windows）では、この一瞬の窓を埋める術が無い。
-        # starting["until"] の間だけ拾えれば実害は小さいので諦めて False にする
-        # （クラッシュして /api/state 自体が壊れるよりずっとまし）。
+        # Where there is no pgrep (Windows) nothing can fill this momentary
+        # window. Catching it during starting["until"] alone does little harm,
+        # so give up and return False (far better than crashing /api/state).
         try:
             r = subprocess.run(["pgrep", "-f", "voice_daemon.py --language"],
                                capture_output=True)
@@ -397,22 +407,23 @@ async def main_async(args):
             return False
         return bool(r.stdout.strip())
 
-    # 送信先。空なら全員へ。
+    # Where it goes. Empty means everyone.
     route_path = state / "route"
 
-    # Claude が切り替えたときの理由。画面に出すだけで、発話には混ぜない。
+    # Why Claude switched it. Shown on the page only, never mixed into speech.
     note_file = Path(args.log_file).parent / "pause-note.txt"
 
     async def handle_state(_req):
-        """マイクの入切、保留の有無、保留中の発話を返す。"""
+        """Give back the mic on/off, whether anything is held, and the held ones."""
         held = []
         if hold_file.exists():
             for line in hold_file.read_text(encoding="utf-8").splitlines():
                 rec = Tail._parse(line)
                 if rec:
                     held.append(rec)
-        # 画面ファイルの更新時刻も返す。手を入れたときに、開いている
-        # 画面が古いままだと気づけない（特に浮かせた小窓は再読み込みしにくい）。
+        # Give back the page file's mtime too. After an edit there is no way to
+        # notice an open page is still the old one (a floating small window
+        # especially is awkward to reload).
         try:
             ui = int(page.stat().st_mtime)
         except OSError:
@@ -430,37 +441,37 @@ async def main_async(args):
                                           if note_file.exists() else ""})
 
     async def handle_engine(req):
-        """認識を止める / 動かす。
+        """Stop recognition, or run it.
 
-        止めるとマイクが解放され、Whisper のときはモデルのぶんのメモリも
-        戻る。ビューアは動いたままなので、ここから動かし直せる
-        （Whisper はモデル読み込みに1〜2分）。
+        Stopping frees the mic, and with Whisper the memory the model held
+        comes back too. The viewer stays running, so it can be started again
+        from here (Whisper takes 1 to 2 minutes to load its model).
         """
         body = await req.json()
         want = bool(body.get("running"))
         sh = str(Path(__file__).with_name("voice-shell.sh"))
 
-        # 使うエンジンの指定。voice-shell.sh は起動時にこのファイルを見る。
+        # Which engine to use. voice-shell.sh reads this file at startup.
         kind = (body.get("engine") or "").strip()
         if kind:
             import voice_daemon as vd
-            vd.write_config(engine=kind)        # 次回の起動もこれになる
+            vd.write_config(engine=kind)        # the next startup uses this too
             if kind != "browser":
                 (state / "engine").write_text(kind, encoding="utf-8")
 
-        # start_new_session でビューアから切り離す。
-        # デーモンは終了時に自分の子を全部 kill するので、ビューアの系統に
-        # ぶら下げると停止のときビューアまで巻き込まれる。
+        # start_new_session cuts it loose from the viewer.
+        # The daemon kills every one of its children when it exits, so hanging
+        # it off the viewer's line drags the viewer down on a stop.
         if want and not engine_running():
-            # 起動を指示した事実を覚えておく。切り離して起動するので
-            # pgrep に映るまでの一瞬、プロセスが見えない時間がある。
+            # Remember that a start was ordered. Startup is detached, so for a
+            # moment before pgrep shows it, the process cannot be seen.
             stopping["until"] = 0.0
             starting["until"] = time.monotonic() + 10
             subprocess.Popen(["bash", sh, "engine-start"],
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                              start_new_session=True)
         elif not want and engine_running():
-            # プロセスが消えきるまで数秒あるので、その間は起動中と見なさない
+            # the process takes seconds to vanish, so do not call it loading then
             starting["until"] = 0.0
             stopping["until"] = time.monotonic() + 8
             subprocess.run(["bash", sh, "engine-stop"],
@@ -470,7 +481,7 @@ async def main_async(args):
         return web.json_response({"engine": engine_running()})
 
     async def handle_mute(req):
-        """マイクを切る / 入れる。切っている間の発話はどこにも残らない。"""
+        """Cut the mic, or turn it on. Nothing said while cut is kept anywhere."""
         body = await req.json()
         if body.get("muted"):
             mute_file.touch()
@@ -479,11 +490,11 @@ async def main_async(args):
         return web.json_response({"muted": mute_file.exists()})
 
     async def handle_pause(req):
-        """発話を保留する / 直接送るのに戻す。
+        """Hold utterances back, or go back to sending them straight.
 
-        Claude 自身が切り替えることもある（雑談や通話が続いているとき）。
-        自分で押していないモード変更は理由が無いと戸惑うだけなので、
-        note を添えられるようにして画面に出す。
+        Claude itself sometimes switches this (when small talk or a phone call
+        is going on). A mode change nobody pressed is only confusing without a
+        reason, so a note can be attached and shown on the page.
         """
         body = await req.json()
         note = (body.get("note") or "").strip()[:200]
@@ -496,19 +507,21 @@ async def main_async(args):
         return web.json_response({"paused": pause_file.exists(), "note": note})
 
     async def handle_send(req):
-        """手直ししたテキストをログに書いて Claude に送る。"""
+        """Write the touched-up text to the log and send it to Claude."""
         body = await req.json()
         text = (body.get("text") or "").strip()
         if not text:
             return web.json_response({"error": "empty"}, status=400)
 
-        # Claude に渡る行は本文だけ。手を入れたときだけ印を添える。
-        # ここを決め打ちにすると、手直しの欄を通ったというだけで印が付く。
-        # 印の意味は「ユーザーが意図して整えた文」なので、認識のままの文に
-        # 付いていると、読み替えるべき文が読み替えられなくなる。
-        # 触ったかどうかは画面しか知らないので、画面から受け取る。
-        # 宛先はデーモンと同じ決め方で付ける。付け忘れると、選んでいない
-        # セッションにも届く（実際に別の作業へ紛れ込んだ）。
+        # The line reaching Claude is the body alone. A mark goes on only when
+        # it was edited. Hardcode it here and the mark lands on anything that
+        # merely passed through the touch-up field. The mark means a sentence
+        # the user deliberately shaped, so on a raw recognized sentence it stops
+        # what needs rereading from being reread.
+        # Only the page knows whether it was touched, so take it from the page.
+        # The destination is set the way the daemon sets it. Forget it and the
+        # line reaches sessions nobody picked (it really did wander into
+        # other work).
         import voice_daemon as vd
         edited = bool(body.get("edited"))
         rec_out = {"text": text}
@@ -520,15 +533,16 @@ async def main_async(args):
         with open(args.log_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec_out, ensure_ascii=False) + "\n")
         rec = {"time": time.strftime("%H:%M:%S"), "text": text, "edited": edited}
-        hold_file.write_text("", encoding="utf-8")     # 送ったので保留は空にする
+        hold_file.write_text("", encoding="utf-8")     # sent, so empty the held list
         return web.json_response(rec)
 
-    # ブラウザ認識の生存確認。開いている画面が「いま聞いている」ことを
-    # 定期的に知らせてくる。これが無いと、wait-ready が READY を返しても
-    # 実際には誰も聞いていない（画面が開かれていない・マイクを拒否された）
-    # 状態と区別が付かず、「どうぞ話してください」と言った先で虚空に話させる。
+    # Liveness check for browser recognition. An open page reports regularly
+    # that it is listening right now. Without it, wait-ready answering READY
+    # cannot be told apart from nobody actually listening (the page never
+    # opened, the mic was denied), and someone told to go ahead and speak ends
+    # up talking into a void.
     beat_file = state / "asr-heartbeat.json"
-    BEAT_STALE = 15        # これだけ音沙汰が無ければ、その画面は居ないとみなす
+    BEAT_STALE = 15        # nothing heard for this long means that page is gone
 
     def read_beats() -> dict:
         try:
@@ -554,7 +568,7 @@ async def main_async(args):
         return web.json_response({"tabs": len(beats)})
 
     async def handle_asr_status(_req):
-        """ブラウザ認識がいま実際に聞いているか。voice-shell.sh status が読む。"""
+        """Whether browser recognition is really listening. voice-shell.sh status reads it."""
         beats = read_beats()
         states = [v.get("state") for v in beats.values()]
         return web.json_response({
@@ -564,22 +578,22 @@ async def main_async(args):
         })
 
     async def handle_engines(_req):
-        """選べる認識エンジンの一覧。
+        """The list of recognition engines to pick from.
 
-        ブラウザの認識は何も入れずに動くので、これが既定。手元で完結させたい
-        人のために、実際に入っているものだけを並べる。
+        Browser recognition runs with nothing installed, so it is the default.
+        For people who want it all local, only what is really installed is listed.
         """
         import asr_mic, voice_daemon as vd
         return web.json_response({
             "engines": asr_mic.available_engines(),
-            # 覚えている選択。ブラウザの localStorage ではなくこちらを正とする
-            # （ブラウザごとに食い違うと、起動時の分岐が当てにならなくなる）。
+            # The remembered choice. This, not the browser's localStorage, is
+            # the truth (differing per browser makes the startup branch useless).
             "chosen": vd.resolve_engine(""),
             "running": engine_running(),
         })
 
     async def handle_listeners(_req):
-        """いま聞いているセッションの一覧と、選ばれている送信先。"""
+        """The sessions listening right now, and the destination that is picked."""
         import voice_daemon as vd
         try:
             chosen = route_path.read_text(encoding="utf-8").strip()
@@ -587,16 +601,17 @@ async def main_async(args):
             chosen = ""
         return web.json_response({
             "listeners": vd.list_active_listeners(args.log_file),
-            "route": chosen,                                  # 選ばれているもの
-            # 実際に届く先。未選択なら「あとで起動した方」に決まる。
+            "route": chosen,                                  # the one that is picked
+            # Where it actually lands. With nothing picked, the later start wins.
             "target": vd.resolve_target(args.log_file) or "",
         })
 
     async def handle_machine(req):
-        """この機械の名前と、複数台モードの入切。
+        """This machine's name, and multi-machine mode on and off.
 
-        何台かが同時に聞いていると「ミュート」で全部が切れてしまう。名前を
-        頭に添えた合図だけを受けるようにするための設定。
+        With several machines listening at once, 「ミュート」 cuts them all.
+        This is the setting that makes it take only signals with the name in
+        front.
         """
         import voice_daemon as vd
         body = await req.json()
@@ -606,10 +621,10 @@ async def main_async(args):
         return web.json_response({"machineName": name, "multiMachine": multi})
 
     async def handle_disconnect(req):
-        """そのセッションに聞くのをやめさせる。
+        """Make that session stop listening.
 
-        止めるのは `voice-shell.sh listen` だけで、相手のセッション自体は
-        終わらない。登録されている聞き手以外は受け付けない。
+        Only `voice-shell.sh listen` is stopped, the session itself does not
+        end. Anything but a registered listener is refused.
         """
         import voice_daemon as vd
         body = await req.json()
@@ -617,8 +632,9 @@ async def main_async(args):
         live = {str(l["pid"]): l for l in vd.list_active_listeners(args.log_file)}
         if pid not in live:
             return web.json_response({"error": "unknown"}, status=404)
-        # 先に本人へ知らせる。黙って切ると、そのセッションは「話しかけても
-        # 反応しない」状態のまま気づけない。tail が読む間だけ待ってから止める。
+        # Tell them first. Cut it quietly and that session sits there never
+        # noticing that talking to it gets no response. Wait just long enough
+        # for tail to read, then stop it.
         try:
             with open(args.log_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps({
@@ -638,22 +654,24 @@ async def main_async(args):
         return web.json_response({"ok": True, "label": live[pid].get("label", pid)})
 
     async def handle_route(req):
-        """送信先を選ぶ。空なら全員へ。"""
+        """Pick the destination. Empty means everyone."""
         body = await req.json()
         to = str(body.get("to") or "").strip()
-        # 一度別名で書いてから置き換える。truncate と write のあいだに
-        # デーモンが読むと、欠けた PID になって別の相手へ1発話行く。
+        # Write under another name first, then replace. If the daemon reads
+        # between the truncate and the write it gets a chopped PID, and one
+        # utterance goes to somebody else.
         tmp = route_path.with_suffix(".tmp")
         tmp.write_text(to, encoding="utf-8")
         os.replace(tmp, route_path)
         return web.json_response({"route": to})
 
     async def handle_utterance(req):
-        """ブラウザ側（Web Speech API）で認識した発話を受け取る。
+        """Take in an utterance recognized on the browser side (Web Speech API).
 
-        デーモンが認識したときと同じ道を通す。辞書の言い換え、無視する発話、
-        最小文字数、つなぎ言葉の除去、一時停止中の保留。ここを通さないと、
-        認識のやり方によって届く文が変わってしまう。
+        It goes down the same road as one the daemon recognized. Dictionary
+        rewrites, utterances to ignore, minimum length, filler removal, holding
+        while paused. Skip this road and the sentence that arrives changes with
+        the way it was recognized.
         """
         body = await req.json()
         text = (body.get("text") or "").strip()
@@ -662,28 +680,29 @@ async def main_async(args):
 
         import voice_daemon as vd
 
-        # デーモンも認識しているなら受け取らない。同じ発話ログに両方が
-        # 書くので、受けてしまうと同じ指示が2回 Claude に届く。
-        # 画面側でも排他しているが、タブを複数開かれる場合もあるので
-        # ここでも止める。
+        # If the daemon is recognizing too, take nothing. Both write to the same
+        # utterance log, so taking it sends one instruction to Claude twice.
+        # The page side excludes it as well, but tabs can be opened more than
+        # once, so it is stopped here too.
         if engine_running():
             return web.json_response({"dropped": "daemon_running"}, status=409)
 
         user_dict = vd.load_dictionary()
 
-        # 声だけの合図。デーモンと同じ関数を通すので、認識のやり方が変わっても
-        # 効き方は同じ（ただしブラウザ認識は切ると音声そのものを手放すので、
-        # 切ったあとの「ミュート解除」だけは聞けない）。
+        # Voice-only signals. They go through the same function as the daemon,
+        # so they bite the same however recognition is done (browser recognition
+        # lets go of the audio itself when cut, though, so 「ミュート解除」 after
+        # a cut is the one thing it cannot hear).
         kind = vd.apply_voice_command(text, args.log_file,
                                       mute_file.exists(), user_dict)
         if kind:
             return web.json_response({"command": kind})
 
-        # マイクを切っているあいだは、どこにも残さない（デーモンと同じ扱い）
+        # while the mic is cut, keep it nowhere (the daemon does the same)
         if mute_file.exists():
             return web.json_response({"dropped": "muted"})
 
-        # 終わりの「キャンセル」「手直し」も同じ扱いにする
+        # a trailing 「キャンセル」 or 「手直し」 gets the same treatment
         if vd.take_tail(text, vd.CANCEL_TAIL) is not None:
             vd.note_voice_cmd(args.log_file, "cancelled", "", text)
             return web.json_response({"dropped": "cancelled"})
@@ -700,9 +719,10 @@ async def main_async(args):
         except (OSError, ValueError):
             tuning = {}
 
-        # 順序はデーモンに合わせる（最小文字数 → 無視語 → 整形）。
-        # polish は辞書の言い換えで文字数が変わるので、順序が違うと
-        # 同じ発話でも認識のやり方によって届く／届かないが変わる。
+        # The order matches the daemon (minimum length → ignore words → polish).
+        # polish changes the character count through dictionary rewrites, so a
+        # different order makes the same utterance arrive or not depending on
+        # how it was recognized.
         min_chars = tuning.get("min_chars", 15)
         if not force_hold and isinstance(min_chars, (int, float)) \
                 and len(text) < int(min_chars) \
@@ -725,7 +745,7 @@ async def main_async(args):
                 vd.note_voice_cmd(args.log_file, "held", "", text)
             return web.json_response({"held": text})
 
-        # 宛先はデーモンと同じ決め方で付ける（ブラウザ認識も同じ扱い）
+        # the destination is set the way the daemon sets it (browser too)
         rec_out = {"text": text}
         to = vd.resolve_target(args.log_file)
         if to:
@@ -735,16 +755,17 @@ async def main_async(args):
         return web.json_response({"time": stamp, "text": text})
 
     async def handle_drop_current(_req):
-        """いま認識している一言を捨てる。
+        """Throw away the line being recognized right now.
 
-        押した時刻だけ置いておき、判定はデーモンに任せる。確定より後に
-        押されたものが次の発話を巻き込まないようにするため。
+        Only the time of the press is left behind, and the daemon does the
+        judging. That keeps a press landing after the settle from dragging in
+        the next utterance.
         """
         (state / "drop_at").write_text(str(time.time()), encoding="utf-8")
         return web.json_response({"ok": True})
 
     async def handle_discard(_req):
-        """保留中の発話を捨てる。"""
+        """Throw away the held utterances."""
         hold_file.write_text("", encoding="utf-8")
         return web.json_response({"ok": True})
 
@@ -753,9 +774,10 @@ async def main_async(args):
     app.router.add_get("/ws", handle_ws)
     app.router.add_get("/api/state", handle_state)
     async def handle_dict_get(req):
-        """辞書と、組み込みで無視している語を返す。"""
-        # ?scope=effective は組み込みの無視語まで畳んだ「実際に効くもの」。
-        # 画面が認識途中の文字に置換を当てるために使う（編集用ではない）。
+        """Give back the dictionary and the words the built-in rules ignore."""
+        # ?scope=effective folds in the built-in ignore words too, so it is what
+        # actually bites. The page uses it to apply replacements to
+        # mid-recognition text (not for editing).
         if req.query.get("scope") == "effective":
             import voice_daemon as vd
             return web.json_response(vd.load_dictionary())
@@ -764,7 +786,7 @@ async def main_async(args):
         return web.json_response(d)
 
     async def handle_dict_put(req):
-        """辞書を保存する。デーモンは毎発話読み直すので即反映される。"""
+        """Save the dictionary. The daemon rereads it per utterance, so it lands at once."""
         target = DICT_FILE
 
         body = await req.json()
@@ -776,8 +798,9 @@ async def main_async(args):
             "replace": {k.strip(): v.strip() for k, v in body.get("replace", {}).items()
                         if isinstance(k, str) and isinstance(v, str) and k.strip()},
         }
-        # 既定項目の追加履歴は内部用。消すと消した項目が復活してしまうので残す。
-        # 言い換えと無視で別に持つ。voice_daemon.py が種類ごとに見ている。
+        # The record of added default entries is internal. Delete it and deleted
+        # entries come back, so it stays. Rewrites and ignores are held apart,
+        # since voice_daemon.py looks at them by kind.
         seen = set(prev.get("_seen", [])) | set(prev.get("replace", {}))
         data["_seen"] = sorted(seen | set(data["replace"]))
         seen_ignore = set(prev.get("_seen_ignore", [])) | set(prev.get("ignore", []) or [])
@@ -785,16 +808,18 @@ async def main_async(args):
 
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        # 内部用のキー（_ で始まるもの）は返さない。画面へ渡すと、次の保存で
-        # そのまま送り返され、こちらが持っている控えを画面側が塗り替えられる。
+        # Internal keys (the ones starting with _) are not given back. Hand them
+        # to the page and they come straight back on the next save, letting the
+        # page paint over the copy held here.
         return web.json_response({k: v for k, v in data.items() if not k.startswith("_")})
 
     async def handle_commands_get(req):
-        """声で使える合図の一覧と、利用者が足した言い方を返す。
+        """Give back the signals usable by voice and the phrasings a user added.
 
-        言い方はデーモンが持っている表から取る。画面に別の控えを持つと、
-        書いてあるのに効かない語ができる。何が起きるかの説明の方は画面の
-        i18n にある。言い方と説明は訳す先が違うので、置き場所も分ける。
+        The phrasings come from the table the daemon holds. A separate copy on
+        the page would create words that are written down but do nothing. The
+        explanation of what each does lives in the page's i18n. Phrasings and
+        explanations translate into different things, so they are kept apart.
         """
         import voice_daemon as vd
         return web.json_response({
@@ -804,11 +829,11 @@ async def main_async(args):
         })
 
     async def handle_commands_put(req):
-        """足された言い方を保存する。デーモンは毎発話読み直すので即反映される。
+        """Save added phrasings. The daemon rereads per utterance, so it lands at once.
 
-        受け取ったものはデーモンと同じ関数で整える。使えない書き方（短すぎる、
-        数の入る場所が無い、足せない種類）はここで落ちるので、返した中身が
-        そのまま「実際に効くもの」になる。
+        What comes in is cleaned by the same function the daemon uses. Unusable
+        forms (too short, no slot for the number, a kind that cannot be added)
+        drop out here, so what goes back is exactly what actually bites.
         """
         import voice_daemon as vd
         data = vd.clean_user_commands(await req.json())
@@ -821,8 +846,9 @@ async def main_async(args):
     engine_active_file = state / "engine_active"
 
     async def handle_tuning_get(_req):
-        """いまの感度と確定までの無音秒数を返す。範囲も一緒に返して
-        スライダの端をサーバ側の制限と揃える。"""
+        """Give back the current sensitivity and seconds of silence before
+        settling. The range comes with it, so the slider ends line up with the
+        server's own limits."""
         try:
             cur = json.loads(TUNING_FILE.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -835,7 +861,7 @@ async def main_async(args):
         })
 
     async def handle_tuning_put(req):
-        """感度と無音秒数を書き換える。デーモンが次の周期で拾う。"""
+        """Rewrite the sensitivity and silence seconds. The daemon picks it up next cycle."""
         body = await req.json()
         try:
             cur = json.loads(TUNING_FILE.read_text(encoding="utf-8"))
@@ -855,7 +881,7 @@ async def main_async(args):
         if isinstance(body.get("language"), str):
             import whisper_engine
             code = body["language"]
-            # 空文字（自動判定）か、対応済みコードのときだけ受け付ける
+            # take it only when empty (auto-detect) or a code already supported
             if code == "" or code in whisper_engine.LANGUAGE_NAMES:
                 cur["language"] = code
 
@@ -864,8 +890,8 @@ async def main_async(args):
         return web.json_response({"tuning": cur})
 
     async def handle_languages(_req):
-        """認識言語の一覧（Whisper 使用時のみ）。他のエンジンでは
-        空リストを返し、ビューア側はプルダウンごと隠す。"""
+        """The list of recognition languages (only while Whisper is in use). Other
+        engines get an empty list back, and the viewer hides the whole dropdown."""
         try:
             engine = engine_active_file.read_text(encoding="utf-8").strip()
         except OSError:
@@ -884,11 +910,11 @@ async def main_async(args):
         })
 
     async def handle_whisper_model_get(_req):
-        """Whisper のモデル。覚えているものと、既定の名前を返す。
+        """The Whisper model. Gives back the remembered one and the default name.
 
-        入れ替えには積み直しが要るので、置き場は tuning.json ではなく
-        config.json（起動時に一度だけ読む方）。0.5 秒おきに読み直す
-        tuning.json に混ぜると、書いた側は効いたつもりになってしまう。
+        Swapping it needs a reload, so it lives in config.json (the one read
+        once at startup), not tuning.json. Mixed into the tuning.json that is
+        reread every 0.5 seconds, whoever wrote it would think it had taken.
         """
         import voice_daemon as vd
         return web.json_response({
@@ -897,10 +923,11 @@ async def main_async(args):
         })
 
     async def handle_whisper_model_put(req):
-        """Whisper のモデルを覚える。空で送ると既定へ戻す。
+        """Remember the Whisper model. Send it empty to go back to the default.
 
-        名前が正しいかはここでは見ない。Hugging Face の名前も手元の
-        フォルダの場所も受けるので、読み込んでみるまで分からない。
+        Whether the name is right is not checked here. It takes both a Hugging
+        Face name and the path of a folder kept locally, so there is no telling
+        until it is loaded.
         """
         import voice_daemon as vd
         body = await req.json()
@@ -909,7 +936,7 @@ async def main_async(args):
         return web.json_response({"model": name})
 
     async def handle_mics(_req):
-        """使えるマイクの一覧と、いま選ばれているものを返す。"""
+        """Give back the usable mics and the one picked right now."""
         import asr_mic
         try:
             current = mic_file.read_text(encoding="utf-8").strip()
@@ -918,7 +945,7 @@ async def main_async(args):
         return web.json_response({"current": current, "mics": asr_mic.list_mics()})
 
     async def handle_mic_put(req):
-        """使うマイクを変える。デーモンが録音プロセスだけ入れ替える。"""
+        """Change the mic in use. The daemon swaps only the recording process."""
         body = await req.json()
         dev = (body.get("device") or "").strip()
         if not dev:

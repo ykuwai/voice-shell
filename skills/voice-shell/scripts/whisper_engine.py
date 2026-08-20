@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Whisper をストリーミングとして使えるようにする。
+"""Make Whisper usable as a streaming recognizer.
 
-Whisper は 30 秒の音声をまとめて処理する作りで、本来ストリーミング向き
-ではない。そこで、溜まった音声を短い間隔で繰り返し認識し直す形にする。
-asr_mic.py が呼ぶ 3 つのメソッド（init_streaming_state /
-streaming_transcribe / finish_streaming_transcribe）を備えているので、
-どのエンジンを選んでも asr_mic.py 側は同じコードで扱える。
+Whisper is built to handle 30 seconds of audio in one shot and is not really
+meant for streaming. So instead the collected audio is recognized over and
+over at short intervals. It carries the 3 methods asr_mic.py calls
+(init_streaming_state / streaming_transcribe / finish_streaming_transcribe),
+so asr_mic.py works the same whichever engine is picked.
 
-Apple のオンデバイス認識との違いは、実測では次のとおり。
-  - 固有名詞に強い。人名や製品名の取りこぼしが少ない
-  - 騒がしい場所や複数人の声でも崩れにくい
-  - モデルを落として積むので、起動が遅くメモリを使う
+Measured, it differs from Apple's on-device recognition as follows.
+  - Strong on proper nouns. It rarely drops names of people or products
+  - Holds together in noisy places and with several people talking
+  - Downloads and loads a model, so it starts slowly and uses memory
 """
 import sys
 
@@ -18,9 +18,9 @@ import numpy as np
 
 SAMPLE_RATE = 16000
 
-# Whisper は "ja" のような 2 文字コードしか受け付けない。
-# voice-shell はどのエンジンにも "Japanese" と綴りで渡すので、ここで直す
-# （そのまま渡すと ValueError で落ちる）。
+# Whisper only takes a 2 letter code like "ja".
+# voice-shell hands every engine the spelled-out "Japanese", so fix it here
+# (passing that straight through dies with ValueError).
 _LANG = {
     "japanese": "ja", "english": "en", "chinese": "zh", "korean": "ko",
     "french": "fr", "german": "de", "spanish": "es", "italian": "it",
@@ -29,16 +29,16 @@ _LANG = {
 
 
 def _lang_code(name):
-    """「Japanese」「ja」「ja-JP」のどれで来ても "ja" にする。"""
+    """Turn "Japanese", "ja" or "ja-JP" into "ja", whichever one arrives."""
     if not name:
         return None
     s = str(name).strip().lower()
     return _LANG.get(s, s.split("-")[0][:2])
 
 
-# Whisper が対応する全言語（コード → 表示名）。ビューアの認識言語プルダウンを
-# ここから作る（一覧を二重管理しない）。コードの一覧は faster-whisper の
-# トークナイザに合わせる。
+# Every language Whisper handles (code → display name). The viewer builds its
+# language dropdown from this (no keeping two lists in step). The set of codes
+# follows the faster-whisper tokenizer.
 LANGUAGE_NAMES = {
     "af": "Afrikaans", "am": "Amharic", "ar": "Arabic", "as": "Assamese",
     "az": "Azerbaijani", "ba": "Bashkir", "be": "Belarusian",
@@ -70,45 +70,46 @@ LANGUAGE_NAMES = {
 
 
 def available_languages():
-    """認識言語プルダウン用の一覧。「自動」はコード "" で表す。"""
+    """The list for the language dropdown. Automatic is the code ""."""
     langs = [{"code": c, "name": n} for c, n in LANGUAGE_NAMES.items()]
     langs.sort(key=lambda x: x["name"])
     return langs
 
-# 日本語と英語が混ざった発話を、混ざったまま書き起こさせるための例文。
-# Whisper は言語トークンを 1 つしか持てないため、放っておくと発話ごとに
-# どちらか一方へ寄る（実測でも、英語で話したぶんが日本語になって届いた）。
-# こういう文が普通に出てくる、と先に見せておくと寄りが弱まる。
+# Sample sentences for getting speech that mixes Japanese and English written
+# down as the mix it is. Whisper can hold only one language token, so left alone
+# each utterance leans one way or the other (measured, what was said in English
+# arrived as Japanese). Showing up front that such sentences turn up normally
+# weakens the lean.
 MIXED_PROMPT = (
     "これは日本語と English が混ざった会話です。"
     "Claude Code で GitHub の pull request を確認しました。"
     "That's fine. じゃあ deploy しておきます。"
 )
 
-# 認識をやり直す間隔。短いほど早く文字が出るが、そのぶん推論が増える。
-# 溜まった音声を毎回まるごと読み直すので、長い発話ほど 1 回が重くなる。
+# Interval for redoing recognition. Shorter puts text up sooner but runs more
+# inference. Every run rereads all the audio, so longer utterances cost more.
 REFRESH_SEC = 0.7
 
-# ここを超えたら、それより前は確定したものとして切り離す。
-# 際限なく伸ばすと 1 回の認識が遅くなっていく。
+# Past this, everything before it is cut loose as settled.
+# Letting it grow without limit makes each recognition slower.
 MAX_WINDOW_SEC = 28.0
 
 
 class WhisperState:
-    """発話 1 つ分の途中経過。"""
+    """The work in progress for one utterance."""
 
     def __init__(self, language=None):
-        # 名前は他のエンジンの state と揃えてある。asr_mic は発話の長さを
-        # 測るのにこれを読む（属性が無いとそこで落ちる）。
+        # The names line up with the state of the other engines. asr_mic reads
+        # this to measure utterance length (a missing attribute dies there).
         self.audio_accum = np.zeros(0, dtype=np.float32)
         self.text = ""
         self.language = language
-        self.settled = ""      # 窓から押し出して確定させたぶん
-        self._since_run = 0.0  # 前回の認識からの秒数
+        self.settled = ""      # the part pushed out of the window and settled
+        self._since_run = 0.0  # seconds since the last recognition
 
 
 class WhisperModel:
-    """faster-whisper を、他のエンジンと同じ呼び出し方で使えるようにする。"""
+    """Make faster-whisper callable the same way as the other engines."""
 
     def __init__(self, name="large-v3-turbo", device="cuda",
                  compute_type="float16", language=None):
@@ -117,19 +118,19 @@ class WhisperModel:
         print(f"Whisper ({name} / {compute_type}) を読み込んでいます…",
               file=sys.stderr, flush=True)
         self._m = FW(name, device=device, compute_type=compute_type)
-        # None のままにして自動判定させる。voice-shell は --language Japanese を
-        # 常に渡してくるが、それをそのまま効かせると英語が日本語に訳されて
-        # 届く。言語を固定したいときは --whisper-language で明示する。
+        # Leave it None so it auto-detects. voice-shell always passes
+        # --language Japanese, but letting that bite makes English arrive
+        # translated into Japanese. Pin the language with --whisper-language.
         self._lang = _lang_code(language)
 
-    # ── asr_mic が呼ぶ 3 つ ──────────────────────
+    # ── The 3 asr_mic calls ──────────────────────
 
     def init_streaming_state(self, language=None, **_ignored):
-        """発話の始まり。使わない引数は他のエンジンに合わせて受け流す。"""
+        """Start of an utterance. Unused arguments pass through, to match the rest."""
         return WhisperState(_lang_code(language) or self._lang)
 
     def streaming_transcribe(self, pcm16k, state):
-        """音を受けて、頃合いを見て認識し直す。"""
+        """Take the sound in and, when the time is right, recognize again."""
         state.audio_accum = np.concatenate([state.audio_accum, pcm16k])
         state._since_run += len(pcm16k) / SAMPLE_RATE
 
@@ -137,7 +138,7 @@ class WhisperModel:
             return state
         state._since_run = 0.0
 
-        # 窓が長くなりすぎたら、前半を確定させて切り離す
+        # If the window has grown too long, settle the first half and cut it loose
         if len(state.audio_accum) / SAMPLE_RATE > MAX_WINDOW_SEC:
             keep = int(MAX_WINDOW_SEC * SAMPLE_RATE * 0.5)
             head, state.audio_accum = state.audio_accum[:-keep], state.audio_accum[-keep:]
@@ -147,38 +148,38 @@ class WhisperModel:
         return state
 
     def finish_streaming_transcribe(self, state):
-        """発話の終わり。最後にもう一度だけ通す。"""
+        """End of an utterance. Put it through once more, one last time."""
         if state.audio_accum.size:
             state.text = state.settled + self._run(state.audio_accum, state)
         return state
 
-    # ── 中身 ──────────────────────────────────
+    # ── Innards ───────────────────────────────
 
     def _run(self, audio, state) -> str:
-        """溜まった音声を認識する。
+        """Recognize the collected audio.
 
-        beam_size=1 と condition_on_previous_text=False は、途中経過が
-        コロコロ変わるのを抑えるため。前の推測を引きずらせると、認識を
-        やり直すたびに文が書き換わって読みにくい。
+        beam_size=1 and condition_on_previous_text=False hold down how much
+        the partial text flips about. Dragging the previous guess along
+        rewrites the sentence on every rerun and it gets hard to read.
 
-        language は既定で渡さない。Whisper は指定した言語で書き出そうと
-        するので、"ja" に固定すると英語で話したぶんまで日本語に訳されて
-        しまう（実測でも "I found that..." が日本語になって届いた）。
-        自動判定なら話した言語のまま出る。
+        language is not passed by default. Whisper tries to write in the
+        language it is given, so pinning "ja" translates even the parts
+        spoken in English into Japanese (measured, "I found that..." arrived
+        as Japanese). Auto-detect leaves speech in the language it was said in.
         """
-        if audio.size < SAMPLE_RATE * 0.3:      # 短すぎると誤認識しやすい
+        if audio.size < SAMPLE_RATE * 0.3:      # too short and it misreads easily
             return ""
         segments, info = self._m.transcribe(
             audio,
-            language=self._lang,                # None なら自動判定
-            task="transcribe",                  # translate にはしない
-            # 言語トークンは 1 つしか持てず、発話ごとに 1 言語へ寄る。
-            # 日本語に混ざった英語まで日本語で書こうとするので、
-            # 混在があると分かる例文を先に読ませて引っぱる。
+            language=self._lang,                # None means auto-detect
+            task="transcribe",                  # never translate
+            # Only one language token is possible, so each utterance leans to
+            # one language. It tries to write even the English mixed into the
+            # Japanese as Japanese, so feed it a sample that shows the mix.
             initial_prompt=MIXED_PROMPT,
             beam_size=1,
             condition_on_previous_text=False,
-            vad_filter=True,                    # 無音を捨てて幻聴を減らす
+            vad_filter=True,                    # drop silence, hallucinate less
             vad_parameters={"min_silence_duration_ms": 300},
         )
         state.language = info.language or state.language
@@ -186,11 +187,11 @@ class WhisperModel:
 
 
 def load(args):
-    """asr_mic.load_model から呼ばれる。
+    """Called from asr_mic.load_model.
 
-    --language は見ない。voice-shell は常に Japanese を渡してくるが、
-    Whisper でそれを効かせると英語で話したぶんまで日本語に訳される。
-    固定したいときは --whisper-language。
+    --language is ignored. voice-shell always passes Japanese, but letting
+    that bite in Whisper translates even the parts spoken in English into
+    Japanese. To pin it, use --whisper-language.
     """
     return WhisperModel(
         name=getattr(args, "model", None) or "large-v3-turbo",
