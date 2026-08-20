@@ -158,7 +158,23 @@
      全部見せる。長い名前は詰めるが、頭の番号だけは必ず残す。 */
   .routes { padding:.1rem var(--pad) .5rem; }
   .route-chips { display:flex; flex-wrap:wrap; gap:.25rem; }
-  .route-pick { display:none; }
+  /* まとめて選ぶ形。札と並んで見えることは無いが、切り替わったときに
+     背丈と印の位置が変わると別物に見えるので、札の寸法に揃える。 */
+  .route-pick-wrap { display:none; position:relative; max-width:100%; }
+  .route-pick {
+    -webkit-appearance:none; appearance:none;
+    font-size:.75rem; line-height:1.6; border:1.5px solid var(--line);
+    border-radius:var(--pill); padding:.3rem 1.5rem .3rem .7rem;
+    width:auto; max-width:100%;
+  }
+  /* 三角は Chrome が描くと大きさも位置も動かせない。札の × と同じ右余白で
+     自分で描く。色は文字と同じものを使うので、テーマにも塗りにも付いてくる。 */
+  .route-pick-wrap::after {
+    content:""; position:absolute; right:.79rem; top:50%;
+    width:6px; height:6px; margin-top:-4.5px;
+    border-right:1.6px solid currentColor; border-bottom:1.6px solid currentColor;
+    transform:rotate(45deg); pointer-events:none; opacity:.45;
+  }
   .route-chip {
     flex:0 1 auto; min-width:0; max-width:100%;
     display:inline-flex; align-items:center; gap:.3rem;
@@ -170,7 +186,7 @@
   .route-chip .nm {
     min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   }
-  .route-chip .no { font-weight:700; font-variant-numeric:tabular-nums; flex:none; }
+  .route-chip .no { font-weight:inherit; font-variant-numeric:tabular-nums; flex:none; }
   /* 何台かで同時に使っているときに、いまどの機械を見ているかを本体に出す。
      設定の中だけだと、間違った機械へ話しかけていても気づけない。 */
   .machine {
@@ -519,6 +535,19 @@
     margin-left:auto; font-size:.8rem; color:var(--text); text-align:right;
     font-variant-numeric:tabular-nums; flex:none; min-width:3.2rem;
   }
+  /* つまみの端より先の値も入れられるようにする。見た目は値の表示のまま、
+     触ったときだけ枠が出る。 */
+  .val-num {
+    -webkit-appearance:none; appearance:none; -moz-appearance:textfield;
+    background:none; border:1px solid transparent; border-radius:8px;
+    padding:.15rem .3rem; width:3.4rem; min-width:3.4rem; text-align:right;
+  }
+  .val-num::-webkit-inner-spin-button, .val-num::-webkit-outer-spin-button {
+    -webkit-appearance:none; margin:0;
+  }
+  .field .unit { font-size:.78rem; color:var(--faint); flex:none; margin-left:-.15rem; }
+  .val-num:hover { border-color:var(--line); }
+  .val-num:focus { outline:none; border-color:var(--accent); background:var(--panel-2); }
   select, input[type=text], input[type=file] {
     flex:1; min-width:0; padding:.45rem .85rem;
     background:var(--panel-2); border:1px solid var(--line); border-radius:var(--pill);
@@ -628,8 +657,21 @@
     color:var(--faint); border-radius:50%; flex:none; }
   .row .del:hover { color:var(--danger); background:var(--raise); }
   .chips { display:flex; flex-wrap:wrap; gap:.25rem; }
-  .chip { font-size:.75rem; padding:.15rem .6rem; border-radius:var(--pill);
-    background:var(--panel-2); color:var(--faint); border:1px solid var(--line-soft); }
+  /* 組み込みで無視している語。押すと無視をやめる（もう一度押すと戻る）。
+     「わかった」「了解」のように、こちらへの返事として実際に言う語が
+     入っているので、要らない人が外せないと困る。 */
+  .chip {
+    display:inline-flex; align-items:center; gap:.3rem; cursor:pointer;
+    font-size:.75rem; padding:.15rem .5rem .15rem .6rem; border-radius:var(--pill);
+    background:var(--panel-2); color:var(--faint); border:1px solid var(--line-soft);
+    transition:color .14s, border-color .14s, opacity .14s;
+  }
+  .chip .x { font-size:.72rem; line-height:1; opacity:.4; }
+  .chip:hover { color:var(--text); border-color:var(--line); }
+  .chip:hover .x { opacity:1; color:var(--danger); }
+  .chip.off { border-style:dashed; opacity:.55; }
+  .chip.off .w { text-decoration:line-through; }
+  .chip.off:hover .x { color:var(--ok); }
   .builtin-head { margin-top:.7rem; }
   /* chrome:// は web ページから開けない決まりなので、押したら写す。
      行き先が分かる形にしておかないと、どこを触ればよいのか伝わらない。 */
@@ -710,9 +752,9 @@
     .route-chips { display:none; }
     /* 選ばれている札と同じ見た目にする。ここだけ地の色に戻ると、
        いまどこへ届くのかが札のときより弱く見えてしまう。 */
+    .route-pick-wrap { display:inline-block; color:var(--panel); }
     .route-pick {
-      display:block; width:auto; max-width:100%; padding:.32rem .7rem; font-size:.8rem;
-      font-weight:600; border-color:transparent; color:var(--panel);
+      display:block; font-weight:600; border-color:transparent; color:inherit;
       background:linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, var(--accent-2)));
     }
     /* 開いた一覧は地の色に戻す（塗りのままだと文字が読めない） */
@@ -829,7 +871,8 @@
     <div class="route-chips" id="routeChips"></div>
     <!-- 高さが尽きたら、札を並べる代わりにこちらを出す（CSS が切り替える）。
          札は1つずつ行を使うので、相手が増えると縦を食い切ってしまう。 -->
-    <select class="route-pick" id="routePick" data-i18n-title="routePick"></select>
+    <span class="route-pick-wrap"><select class="route-pick" id="routePick"
+            data-i18n-title="routePick"></select></span>
   </div>
 
   <!-- 未送信カード。認識中のテキストと手直し欄をここにまとめる。 -->
@@ -924,10 +967,11 @@
     <p class="range-note" data-i18n="sensitivityNote"></p>
     <div class="field">
       <label for="silence" data-icon="timer" data-icon-size="17" data-i18n="silence">Pause to send</label>
-      <input type="range" id="silence" min="0.5" max="3" step="0.1">
-      <span class="val" id="silenceVal"></span>
+      <input type="range" id="silence" min="0.5" max="10" step="0.1">
+      <input class="val val-num" id="silenceVal" type="number" step="0.1"
+             inputmode="decimal" aria-describedby="silenceNote"><span class="unit">s</span>
     </div>
-    <p class="range-note" data-i18n="silenceNote"></p>
+    <p class="range-note" id="silenceNote" data-i18n="silenceNote"></p>
     <div class="field">
       <label for="minChars" data-icon="short_text" data-icon-size="17" data-i18n="minChars">Min length</label>
       <input type="range" id="minChars" min="1" max="40" step="1">
@@ -1165,7 +1209,9 @@ const I18N = {
     dictHeard:'heard as', dictSendAs:'send as',
     dictFilter:'Filter saved entries',
     dictIgnorePh:'skip when said alone',
-    dictBuiltin:'Ignored out of the box — no need to add these',
+    dictBuiltin:'Ignored out of the box — tap one to stop ignoring it',
+    dictBuiltinDrop:'Stop ignoring “{w}”',
+    dictBuiltinBack:'Ignore “{w}” again',
     add:'Add', save:'Save', exportCsv:'Export CSV', importCsv:'Import CSV',
     dictPending:'Press Save to apply.',
     dictSaved:'Saved ({r} replacements / {i} ignored). Effective from the next utterance.',
@@ -1279,7 +1325,9 @@ const I18N = {
     dictHeard:'聞こえた語', dictSendAs:'送る語',
     dictFilter:'絞り込み（登録済みを探す）',
     dictIgnorePh:'この語だけなら送らない',
-    dictBuiltin:'最初から無視している語 — 登録は不要です',
+    dictBuiltin:'最初から無視している語 — 押すと無視しなくなります',
+    dictBuiltinDrop:'「{w}」を無視しない',
+    dictBuiltinBack:'「{w}」をまた無視する',
     add:'追加', save:'保存する', exportCsv:'CSV で保存', importCsv:'CSV を読み込む',
     dictPending:'「保存する」を押すと有効になります。',
     dictSaved:'{where}保存しました（言い換え {r} 件 / 無視 {i} 件）。次の発話から効きます。',
@@ -2642,6 +2690,7 @@ el.recogLang.onchange = () => putJSON('/api/tuning', {language: el.recogLang.val
 
 /* ── 感度と区切り ───────────────────────
    3つとも保存すると即座にデーモンへ効く（0.5秒おきに読み直している）。 */
+let silenceMin = 0.3, silenceMax = 30;      // サーバが許す幅（読み込み時に上書き）
 let tuning = {idle_mute_min: 5, silence_threshold: 0.015, silence_duration: 1.5,
               min_chars: 15, strip_fillers: false};
 
@@ -2660,7 +2709,9 @@ function paintTuning() {
   el.silence.value = tuning.silence_duration;
   el.minChars.value = tuning.min_chars;
   el.threshVal.textContent = Math.round(threshToPos(tuning.silence_threshold) / 10);
-  el.silenceVal.textContent = Number(tuning.silence_duration).toFixed(1) + 's';
+  if (document.activeElement !== el.silenceVal) {          // 打っている最中は触らない
+    el.silenceVal.value = Number(tuning.silence_duration).toFixed(1);
+  }
   el.minCharsVal.textContent = tuning.min_chars;
   el.clean.checked = !!tuning.strip_fillers;
   paintIdleMute();
@@ -2689,7 +2740,12 @@ async function loadTuning() {
     for (const [k, v] of Object.entries(d.tuning || {})) if (v != null) tuning[k] = v;
     for (const [k, r] of Object.entries(d.range || {})) {
       if (k === 'silence_threshold') { threshLo = r.min; threshHi = r.max; continue; }
-      const node = {silence_duration: el.silence, min_chars: el.minChars}[k];
+      if (k === 'silence_duration') {
+        silenceMin = r.min; silenceMax = r.max;
+        el.silenceVal.min = r.min; el.silenceVal.max = r.max;
+        continue;
+      }
+      const node = {min_chars: el.minChars}[k];
       if (node) { node.min = r.min; node.max = r.max; }
     }
     paintTuning();
@@ -2711,6 +2767,19 @@ el.thresh.oninput = () => {
   queueTuning();
 };
 el.silence.oninput = () => { tuning.silence_duration = Number(el.silence.value); paintTuning(); queueTuning(); };
+/* つまみは 10 秒までだが、もっと長く待ちたい人もいる。数字で直接入れられる
+   ようにして、つまみはその手前までを担当する。 */
+function commitSilence() {
+  const v = Number(el.silenceVal.value);
+  if (!Number.isFinite(v)) { paintTuning(); return; }
+  tuning.silence_duration =
+    Math.min(silenceMax, Math.max(silenceMin, Math.round(v * 10) / 10));
+  paintTuning(); queueTuning();
+}
+el.silenceVal.onchange = commitSilence;
+el.silenceVal.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); el.silenceVal.blur(); }
+});
 el.minChars.oninput = () => { tuning.min_chars = Number(el.minChars.value); paintTuning(); queueTuning(); };
 /* 入切と長さを分ける。0 に「切らない」の意味を持たせると、つまみを
    端まで動かした人が何を選んだのか分からない。 */
@@ -3395,10 +3464,25 @@ function renderDict(d) {
 
   // 組み込みで無視している語は編集できないので、見るだけの並びにする
   if (d.builtin) {
+    const off = new Set(d.unignore || []);
     el.builtinChips.replaceChildren(...d.builtin.map(w => {
-      const s = document.createElement('span');
-      s.className = 'chip'; s.textContent = w;
-      return s;
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chip' + (off.has(w) ? ' off' : '');
+      b.dataset.word = w;
+      const label = document.createElement('span');
+      label.className = 'w'; label.textContent = w;
+      const x = document.createElement('span');
+      x.className = 'x'; x.textContent = off.has(w) ? '＋' : '×';
+      b.append(label, x);
+      const paint = () => {
+        const gone = b.classList.contains('off');
+        x.textContent = gone ? '＋' : '×';
+        b.title = t(gone ? 'dictBuiltinBack' : 'dictBuiltinDrop', {w});
+      };
+      paint();
+      b.onclick = () => { b.classList.toggle('off'); paint(); };
+      return b;
     }));
     el.builtinCount.textContent = d.builtin.length;
   }
@@ -3417,7 +3501,10 @@ function collectDict() {
   }
   const ignore = [...el.ignoreRows.children]
     .map(r => r.querySelector('.word').value.trim()).filter(Boolean);
-  return {ignore, replace};
+  // 押して消した組み込みの語。無視しない側へ回す
+  const unignore = [...el.builtinChips.children]
+    .filter(c => c.classList.contains('off')).map(c => c.dataset.word);
+  return {ignore, unignore, replace};
 }
 
 function showDictTab(which) {

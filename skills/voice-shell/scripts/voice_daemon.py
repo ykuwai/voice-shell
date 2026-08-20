@@ -203,12 +203,16 @@ def _read_one(path: Path) -> dict:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return {"ignore": [], "replace": {}}
+        return {"ignore": [], "unignore": [], "replace": {}}
     except (json.JSONDecodeError, OSError) as e:
         print(f"{path.name} を読めませんでした ({e}) — 無視します", file=sys.stderr)
-        return {"ignore": [], "replace": {}}
+        return {"ignore": [], "unignore": [], "replace": {}}
     return {
         "ignore": [s for s in data.get("ignore", []) if isinstance(s, str)],
+        # 組み込みで無視している語のうち、無視しないことにしたもの。
+        # 「わかった」「了解」のように、こちらへの返事として実際に言う語が
+        # 組み込みに入っている。誰にとって邪魔かは人によるので、外せるようにする。
+        "unignore": [s for s in data.get("unignore", []) if isinstance(s, str)],
         "replace": {k: v for k, v in data.get("replace", {}).items()
                     if isinstance(k, str) and isinstance(v, str)},
     }
@@ -244,6 +248,7 @@ def load_dictionary() -> dict:
 
     d = {
         "ignore": shared["ignore"] + private["ignore"],
+        "unignore": shared["unignore"] + private["unignore"],
         "replace": {**shared["replace"], **private["replace"]},
     }
     _dict_cache = (mtimes, d)
@@ -607,7 +612,7 @@ def start_remote_server(model, args) -> None:
     ready.wait(timeout=10)
 
 
-def is_noise(text: str, extra=()) -> bool:
+def is_noise(text: str, extra=(), allow=()) -> bool:
     """相槌だけの発話かどうか。
 
     「はい、はい」のように区切って繰り返しただけのものも相槌とみなす。
@@ -615,8 +620,13 @@ def is_noise(text: str, extra=()) -> bool:
 
     extra には辞書の「無視する発話」を渡す。組み込みと同じ扱いにするので、
     ユーザーが足した語も「〜、〜」の繰り返し判定に効く。
+
+    allow には組み込みから外したい語を渡す。「わかった」「了解」のように、
+    こちらへの返事として実際に言う語が組み込みに入っているため。
     """
-    words = NOISE_ONLY | {w.lower() for w in extra}
+    off = {w.strip().lower() for w in allow}
+    words = ({w for w in NOISE_ONLY if w.lower() not in off}
+             | {w.lower() for w in extra})
     core = text.strip().strip(_TRIM)
     if core.lower() in words:
         return True
@@ -1614,7 +1624,8 @@ def main():
 
                 # 組み込みと辞書をまとめて判定する（辞書は毎回読むので即反映）
                 if not force_hold and not args.keep_noise \
-                        and is_noise(text, user_dict["ignore"]):
+                        and is_noise(text, user_dict["ignore"],
+                                     user_dict.get("unignore", ())):
                     drop("無視")
                     continue
                 if args.drop_non_japanese and looks_non_japanese(text):

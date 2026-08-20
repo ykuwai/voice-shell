@@ -41,7 +41,8 @@ TUNING_FILE = _CONFIG / "tuning.json"
 # 触っていい範囲。外れた値を書くと認識が完全に止まったように見えるので、
 # サーバ側でも必ず挟む（環境ノイズは 0.003 前後、macOS の既定は 0.015）。
 TUNING_RANGE = {"silence_threshold": (0.003, 0.15),
-                "silence_duration": (0.5, 3.0),
+                # つまみは 10 秒までだが、じっくり喋る人のために上は広く取る
+                "silence_duration": (0.3, 30.0),
                 "min_chars": (1, 40),
                 # ブラウザ認識で、これだけ声が無ければ自分でマイクを切る。
                 # 0 は切らない。使わない時間まで Google へ繋ぎ直し続けない。
@@ -78,10 +79,11 @@ def _read_dict(raw: bool = False, path: Path = None) -> dict:
     try:
         data = json.loads((path or DICT_FILE).read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return {"ignore": [], "replace": {}}
+        return {"ignore": [], "unignore": [], "replace": {}}
     if raw:
         return data
     return {"ignore": data.get("ignore", []) or [],
+            "unignore": data.get("unignore", []) or [],
             "replace": data.get("replace", {}) or {}}
 
 
@@ -682,7 +684,8 @@ async def main_async(args):
                 and len(text) < int(min_chars):
             return web.json_response({"dropped": "too_short"})
 
-        if not force_hold and vd.is_noise(text, user_dict["ignore"]):
+        if not force_hold and vd.is_noise(text, user_dict["ignore"],
+                                          user_dict.get("unignore", ())):
             return web.json_response({"dropped": "noise"})
 
         text = vd.polish(text, user_dict, False,
@@ -751,6 +754,11 @@ async def main_async(args):
         data = {
             "ignore": sorted({s.strip() for s in body.get("ignore", [])
                               if isinstance(s, str) and s.strip()}),
+            # 組み込みから外した語。組み込みの一覧に無いものは持たない
+            # （語が入れ替わったときに、古い名残が残り続けないように）。
+            "unignore": sorted({s.strip() for s in body.get("unignore", [])
+                                if isinstance(s, str) and s.strip()}
+                               & set(_builtin_noise())),
             "replace": {k.strip(): v.strip() for k, v in body.get("replace", {}).items()
                         if isinstance(k, str) and isinstance(v, str) and k.strip()},
         }
