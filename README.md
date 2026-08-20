@@ -1,92 +1,99 @@
 # voice-shell
 
-声で Claude Code に指示を出す Agent Skill。キーボードを使わずに、話しかけて指示を送る。
+Read this in [日本語](README.ja.md).
+
+An Agent Skill for giving Claude Code instructions with your voice. No keyboard.
+You talk and the instruction goes through.
 
 ```
-マイク → 音声認識 → JSONL に1行 → Monitor → Claude Code
+mic → speech recognition → one line of JSONL → Monitor → Claude Code
 ```
 
-作業中に思いついたことをそのまま口に出せば、Enter を押さなくても届く。
-Claude Code のほか、Codex など他のエージェントからも使える。
+Say whatever comes to mind while you work and it arrives without you pressing Enter.
+It works with Claude Code and with other agents such as Codex.
 
-## 入れる
+## Install
 
 ```bash
 npx skills add ykuwai/voice-shell
 pip install numpy aiohttp
 ```
 
-Chrome があれば、これだけで動く。**モデルのダウンロードも待ち時間もない。**
+If you have Chrome, that is all it takes. **No model to download, nothing to wait for.**
 
-## 使う
+## Use
 
-Claude Code で `/voice-shell` と打つか、「音声モードにして」と言う。以降は話すだけ。
-止めるときは「音声モード終了」。
+Type `/voice-shell` in Claude Code, or say "voice mode". After that you just talk.
+Say "stop voice mode" to stop.
 
-画面が独立した小窓（http://127.0.0.1:8090）で開き、認識している文字がその場で伸びる。
-手前に浮かせておけば、他の作業をしながら様子を見ていられる。
+A window of its own opens at http://127.0.0.1:8090 and the words it hears grow
+there as you speak. Float it in front and you can watch it while you work on
+something else.
 
-| 送り方 | 何が起きるか |
+| How it sends | What happens |
 |---|---|
-| 即時 | 話すとそのまま届く |
-| 手直し | 溜めておいて、直してから送る |
-| 一時停止 | 止めている間の発話はどこにも残らない |
+| Live | What you say goes straight through |
+| Hold | It piles up, so you can fix it before sending |
+| Paused | Nothing you say while paused is kept anywhere |
 
-手が塞がっていても、**声だけで切り替えられる。** 「ミュート」「ミュート解除」で
-マイクの入切、「手直し」「即時」で送り方。文の最後に「キャンセル」と言えば、
-その一言ごと送らずに捨てる（ブラウザの認識で切ったときだけは、音声そのものを
-手放すので画面から戻す）。
+Even with your hands full, **you can switch by voice alone.** "Mute" and "unmute"
+turn the mic off and on, "hold" and "live" change how it sends. End a sentence with
+"cancel" and that one utterance is dropped instead of sent. (Only with browser
+recognition, muting lets go of the audio itself, so turn the mic back on from the
+window.)
 
-別々の作業でそれぞれ音声モードを立ち上げておき、**どれへ届けるかを画面から選ぶ**
-こともできる。声でも選べる（「2番目」）。
+You can leave a voice mode running for each piece of work and **pick which one
+gets your words from the window.** Your voice picks too ("session 2").
 
-誤認識しやすい固有名詞は辞書に登録できる（`クロードコード → Claude Code`）。
-登録した言い換えは、認識している最中の文字にも当たる。
+Proper nouns that get misheard can go in a dictionary (`cloud code → Claude Code`).
+Replacements you register also hit the words while they are still being recognized.
 
-## 音声がどこへ行くか
+## Where your voice goes
 
-**既定はブラウザの認識なので、音声は Google のサーバへ送られる。**
-手元から出したくないときは、画面の設定から選び直す。画面のその場にも同じ注意が出る。
+**The default is browser recognition, so the audio is sent to Google's servers.**
+When you want it to stay on your machine, pick another way from the settings in
+the window. The same warning is written there on the spot.
 
-| やり方 | 何が要るか | 音声の行き先 |
+| Way | What it needs | Where the audio goes |
 |---|---|---|
-| **このブラウザ**（既定） | Chrome。画面を開いている間だけ動く | **Google のサーバ** |
-| Apple のオンデバイス | macOS 26 以降。追加で入れるものは無い | その機械の中だけ |
-| Whisper | `faster-whisper`。固有名詞に強い | その機械の中だけ |
+| **This browser** (default) | Chrome. Works only while the window is open | **Google's servers** |
+| Apple on-device | macOS 26 or later. Nothing extra to install | Stays on the machine |
+| Whisper | `faster-whisper`. Strong on proper nouns | Stays on the machine |
 
-選んだやり方は覚えているので、次からはそのまま起動する。手元で完結させる2つの
-入れ方は [SETUP.md](skills/voice-shell/SETUP.md) にある。
+It remembers the way you picked, so next time it starts the same way. The two ways
+that keep everything local are in [SETUP.md](skills/voice-shell/SETUP.md).
 
-録音には `ffmpeg`（macOS と Windows）または `arecord`（Linux）が要る。
+Recording needs `ffmpeg` (macOS and Windows) or `arecord` (Linux).
 
-認識できる言語は、選んだやり方が決める。ブラウザは Chrome が持つ一覧、Apple は OS に
-入っているロケール、Whisper はモデルの対応言語。画面の表示は英語と日本語を持つ。
+Which languages it can recognize is decided by the way you picked. The browser
+offers what Chrome carries, Apple offers the locales installed in the OS, Whisper
+offers what the model covers. The window itself comes in seven languages.
 
-## コマンド
+## Commands
 
 ```bash
-voice-shell.sh start [--engine X] [--no-gui]   # 起動（前回の選択を覚えている）
-voice-shell.sh stop                            # 停止
-voice-shell.sh status                          # 稼働状況と、聞いているセッション
-voice-shell.sh engines                         # 選べる認識のやり方
+voice-shell.sh start [--engine X] [--no-gui]   # start (it remembers your last choice)
+voice-shell.sh stop                            # stop
+voice-shell.sh status                          # what is running, and which session is listening
+voice-shell.sh engines                         # the ways it can recognize speech
 ```
 
-設定はすべて `~/.config/voice-shell/` に残り、再起動をまたいで消えない。
+Everything you set stays in `~/.config/voice-shell/` and survives a restart.
 
-## もう少し詳しく
+## A little more
 
-| 読むもの | 中身 |
+| What to read | What is in it |
 |---|---|
-| [SETUP.md](skills/voice-shell/SETUP.md) | 環境ごとの入れ方と、つまずいたときの対処 |
-| [SKILL.md](skills/voice-shell/SKILL.md) | エージェントが読む手順。細かい振る舞いはここ |
-| [docs/notes.md](docs/notes.md) | 作る過程で分かったこと。使うだけなら読まなくてよい |
-| [docs/viewer-design.md](docs/viewer-design.md) | 画面をそう決めた理由 |
+| [SETUP.md](skills/voice-shell/SETUP.md) | How to install it per environment, and what to do when you get stuck |
+| [SKILL.md](skills/voice-shell/SKILL.md) | The steps the agent reads. The fine behavior is here |
+| [docs/notes.md](docs/notes.md) | What we found out while building it. Skip it if you only want to use the tool |
+| [docs/viewer-design.md](docs/viewer-design.md) | Why the window turned out the way it did |
 
-## 参考
+## References
 
 - [Web Speech API (MDN)](https://developer.mozilla.org/docs/Web/API/SpeechRecognition)
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
 
-## ライセンス
+## License
 
 MIT

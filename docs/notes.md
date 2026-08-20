@@ -1,187 +1,219 @@
-# 実装メモ
+# Implementation notes
 
-作る過程で分かったこと。使うだけなら読まなくてよい。同じ落とし穴を
-踏み直さないための記録として残してある。
+What we found out while building this. No need to read it if you only use the tool.
+It is kept so nobody falls into the same holes twice.
 
-実測を書くときは、機種名ではなく**条件**で書く。「M◯ Pro で 0.1 秒」は
-その機械を持っている人にしか意味が無いが、「Apple Silicon で RTF 0.03」なら
-自分の環境と比べられる。数字は残す価値があるので落とさない。書き方だけ変える。
+When you write down a measurement, write the **condition**, not the model name.
+"0.1 seconds on an M-something Pro" only means something to people who own that
+machine, but "RTF 0.03 on Apple Silicon" is something you can compare your own
+environment against. The numbers are worth keeping, so do not drop them. Only the
+way they are written changes.
 
-## Windows（Git Bash）で動かすには何点か直しが要った
+## Getting it to run on Windows (Git Bash) took several fixes
 
-`voice_daemon.py` / `voice-shell.sh` は元々 Linux/macOS しか想定しておらず、
-Windows（Git Bash 上の bash）で動かすと以下がすべて刺さった。いずれも修正済み。
+`voice_daemon.py` and `voice-shell.sh` originally assumed Linux and macOS only, and
+running them on Windows (bash under Git Bash) hit every one of the following. All
+of them are fixed now.
 
-- **`import fcntl`** は POSIX 専用のモジュール。Windows には無いので、起動直後に
-  `ModuleNotFoundError` で落ちる。Windows では `msvcrt.locking` で
-  二重起動防止ロックを代替した
-- **`os.kill(pid, 0)`**（生存確認）は Windows では未対応で、`SystemError` になる。
-  `OpenProcess` が取れるかで代替した
-- **`pgrep` / `pkill` / `setsid`** は Git Bash に無い。`voice-shell.sh` は
-  リスナー一覧・二重起動チェック・停止処理でこれらに依存していたため、
-  無ければその機能だけ諦めて素通しするようガードを入れた
-  （ビューアの起動確認は pgrep が無ければポートへの応答で代用する）
-- **`/tmp` の解釈が bash と Python でずれる。** Git Bash（MSYS）の `/tmp` は
-  実際の Windows パス（`...\AppData\Local\Temp` のような場所）へマウント変換されるが、
-  素の Windows Python が同じ文字列 `"/tmp"` を受け取ると `C:\tmp` と解釈する。
-  両者が同じ意味のつもりで別ディレクトリを見てしまい、デーモンの書き込み先と
-  Monitor の `tail -F` 先がずれて**発話がどこにも届かない**という壊れ方をする。
-  `voice-shell.sh` が `cygpath -w` で実パスに変換し、`VOICE_SHELL_STATE_DIR`
-  環境変数で子プロセスへ明示的に渡すことで解決した
-- **文字コードも食い違う。** Windows の Python はファイル I/O に既定でシステムの
-  ロケール（日本語版なら cp932）を使う。UTF-8 で書いた JSON やログを
-  読もうとして `UnicodeDecodeError` になり、状態確認の文字列比較
-  （`grep -q 稼働中` 等）も一致しなくなる。`voice-shell.sh` で
-  `PYTHONUTF8=1` を強制して回避した（macOS/Linux では無害）
-- **ffmpeg の dshow マイク名も違う。** 当初の既定値だった `audio=default` は
-  実際には認識されない。`ffmpeg -list_devices true -f dshow -i dummy` で
-  出てくる実際のデバイス名をそのまま `--device audio=<名前>` に渡す必要がある
+- **`import fcntl`** is a POSIX-only module. Windows does not have it, so the thing
+  dies with `ModuleNotFoundError` right after startup. On Windows the lock that
+  prevents a second instance is done with `msvcrt.locking` instead
+- **`os.kill(pid, 0)`** (the liveness check) is unsupported on Windows and raises
+  `SystemError`. Replaced by checking whether `OpenProcess` succeeds
+- **`pgrep`, `pkill`, `setsid`** are not in Git Bash. `voice-shell.sh` relied on them
+  for listing listeners, for the double-start check, and for stopping, so a guard
+  was added that gives up on just that feature and passes through when they are
+  missing (if pgrep is gone, the viewer's startup check falls back to whether the
+  port answers)
+- **bash and Python read `/tmp` differently.** In Git Bash (MSYS) `/tmp` is mount
+  translated to a real Windows path (somewhere like `...\AppData\Local\Temp`), but
+  plain Windows Python that receives the same string `"/tmp"` reads it as `C:\tmp`.
+  The two of them think they mean the same thing while looking at different
+  directories, and where the daemon writes drifts away from where Monitor is
+  running `tail -F`, so **nothing you say arrives anywhere**. Solved by having
+  `voice-shell.sh` convert to the real path with `cygpath -w` and hand it to child
+  processes explicitly through the `VOICE_SHELL_STATE_DIR` environment variable
+- **The character encoding disagrees too.** Python on Windows uses the system locale
+  for file I/O by default (cp932 on a Japanese install). It hits
+  `UnicodeDecodeError` trying to read JSON and logs written as UTF-8, and the string
+  comparisons that check state (`grep -q 稼働中` and friends) stop matching too.
+  Worked around by forcing `PYTHONUTF8=1` in `voice-shell.sh` (harmless on
+  macOS and Linux)
+- **ffmpeg's dshow mic names are different as well.** The original default
+  `audio=default` is not actually recognized. You have to run
+  `ffmpeg -list_devices true -f dshow -i dummy` and pass the real device name it
+  prints, as `--device audio=<name>`
 
-## macOS は OS 付属の認識を既定にした
+## On macOS the recognition that ships with the OS is the default
 
-Mac では `--engine apple`（`engine_apple.py`）を既定にしている。macOS 26 の
-`SpeechAnalyzer` / `SpeechTranscriber` を使うので、モデルの追加ダウンロードも
-メモリの確保も要らない。実測（Apple Silicon / macOS 26）で 3.1 秒の日本語音声が
-0.10 秒、句読点まで含めて正しく出た（RTF 0.03）。起動も 0.83 秒で、モデルを
-落として積むやり方の 1〜2 分と比べ物にならない。
-音声はその機械の中だけで処理される。
+On a Mac the default is `--engine apple` (`engine_apple.py`). It uses macOS 26's
+`SpeechAnalyzer` and `SpeechTranscriber`, so there is no extra model to download and
+no memory to reserve. Measured (Apple Silicon, macOS 26), 3.1 seconds of Japanese
+speech took 0.10 seconds and came out correct down to the punctuation (RTF 0.03).
+Startup is 0.83 seconds too, which is nothing like the 1 to 2 minutes of downloading
+a model and loading it in. The audio is processed on that machine only.
 
-Swift の API しか無いので、`speech_helper.swift` を常駐させて WAV のパスを
-渡し、結果を JSON で受け取る形にした。ヘルパは初回起動時に `swiftc` で
-自動ビルドする（`scripts/build/` に置く。git には入れない）。
+Only a Swift API exists, so `speech_helper.swift` stays resident, we hand it the
+path of a WAV, and we get the result back as JSON. The helper is built automatically
+with `swiftc` on the first run (it goes in `scripts/build/` and is kept out of git).
 
-### ストリーム給餌ではなくファイル渡しにした
+### Handing over a file instead of feeding a stream
 
-`SpeechAnalyzer` には `start(inputSequence:)` で `AsyncStream` に音声を流す
-API もあるが、署名なしの CLI から呼ぶと `nilError` で落ちた（`.app` 化して
-いる `LiveDictation` では動く）。`analyzeSequence(from: AVAudioFile)` は
-同じ条件で問題なく動くので、発話 1 つ分を WAV に書いて渡している。
-RTF 0.03 なので、途中経過のために全体を何度も認識し直しても間に合う。
+`SpeechAnalyzer` also has an API where you push audio into an `AsyncStream` with
+`start(inputSequence:)`, but called from an unsigned CLI it died with `nilError`
+(it works in `LiveDictation`, which is packaged as an `.app`).
+`analyzeSequence(from: AVAudioFile)` works fine under the same conditions, so we
+write one utterance's worth to a WAV and hand it over. At RTF 0.03 there is time to
+re-recognize the whole thing again and again just to show progress.
 
-### マイクは Python 側が持つ
+### The mic belongs to the Python side
 
-ヘルパは音声を受け取って文字にするだけで、マイクには触らない。そのため
-TCC の許可も `.app` 化も要らず、`swiftc` で作った素の実行ファイルのまま動く。
-録音と発話の区切り（VAD）は従来どおり `asr_mic.py` の担当。
+The helper only takes audio and turns it into text, it never touches the mic. That
+is why it needs no TCC permission and no `.app` packaging, and runs as the plain
+executable `swiftc` produced. Recording and cutting utterances apart (VAD) stay the
+job of `asr_mic.py`.
 
-（この構成は、先に同じ API を試した
-[live-dictation](https://github.com/ykuwai/live-dictation) の知見を使っている。）
+(This shape comes out of what we learned in
+[live-dictation](https://github.com/ykuwai/live-dictation), which tried the same API
+first.)
 
-## 認識はワーカースレッドに逃がす
+## Push recognition out to a worker thread
 
-途中経過をメインループで認識すると、その間マイクを読めず ffmpeg のパイプ
-（約0.7秒分）が溢れて録音を取りこぼす。スレッド化で feed は 15ms 以下に
-なった（メインループで回していたときは毎チャンク約500ms 止まっていた）。
+If you recognize the in-progress text on the main loop, you cannot read the mic
+while it runs, ffmpeg's pipe (about 0.7 seconds' worth) overflows and recording gets
+dropped. Threading brought feed down to 15ms or less (it was stalling about 500ms
+per chunk when it ran on the main loop).
 
-## 録音プロセスの後始末は、エンジンによらず要る
+## Cleaning up the recording process is needed no matter which engine
 
-Ctrl-C や kill で親が死ぬと、録音の ffmpeg / arecord がマイクを掴んだまま
-残る。`asr_mic.py` の `_kill_engine_on_exit()` が atexit で自分の子を始末
-する（SIGTERM は既定で atexit を通らないので、sys.exit へ変換している）。
+When the parent dies on Ctrl-C or a kill, the recording ffmpeg or arecord is left
+holding the mic. `_kill_engine_on_exit()` in `asr_mic.py` cleans up its own children
+via atexit (SIGTERM does not go through atexit by default, so it is converted into
+a sys.exit).
 
-**この登録はエンジンの分岐に入る前に置く。** 以前はモデルを積む側の分岐の
-中にあり、モデルを積まない apple では登録を通らず、stop のたびに録音
-プロセスだけが孤児として残り続けていた。
+**Register it before the branch on the engine.** It used to sit inside the branch
+that loads a model, so on apple, which loads no model, the registration was never
+reached and every stop left the recording process behind as an orphan.
 
-## Linux ではマイクを arecord 経由で取得している
+## On Linux the mic is taken through arecord
 
-PipeWire がマイクを握っている環境で、PortAudio が PulseAudio バックエンド無しで
-ビルドされていると、`sounddevice` からは入力装置が一つも見えない（配布によっては
-既定でこの組み合わせになる）。`arecord -D pipewire` で録音し、soxr で 16kHz に
-変換すれば、どちらの事情も避けられる。
+In an environment where PipeWire holds the mic, if PortAudio was built without the
+PulseAudio backend, `sounddevice` sees no input devices at all (some distributions
+default to exactly that combination). Recording with `arecord -D pipewire` and
+converting to 16kHz with soxr avoids both problems.
 
-リサンプルは `soxr.ResampleStream` を使い回す。ブロックごとに `soxr.resample()` を
-呼ぶとフィルタの生成・破棄が毎回走り、実測で約5倍遅い。
+Reuse `soxr.ResampleStream` for the resampling. Calling `soxr.resample()` per block
+builds and tears down the filter every time, which measured about 5 times slower.
 
-## ミュート判定は「世代番号」で行う（フラグでは破綻する）
+## Decide mute by a generation number (a flag breaks)
 
-認識は発話が終わってから確定するため、確定時点だけを見てミュート判定すると、
-**切っている間に話した内容が解除後にまとめて流れ込む**（ところてん現象）。
+Recognition only settles after the utterance ends, so if you check for mute only at
+the moment it settles, **everything said while the mic was off comes flooding out
+together once it is back on.**
 
-単純な「一度でも切られたらフラグを立てる」方式も破綻する。破れ方は2通りある。
+The simple "raise a flag the moment it is ever muted" approach breaks too, in two
+different ways.
 
-- 無音のままミュートしただけでフラグが立ち、**解除後の最初の発話が消える**
-- ミュート中に物音が発話として確定すると、そこでフラグが消費され、
-  直後の本当の発話が取りこぼされる
+- Muting during silence raises the flag on its own, and **the first utterance after
+  unmuting disappears**
+- If a noise settles as an utterance while muted, the flag is consumed there, and
+  the real utterance right after it gets dropped
 
-`voice_daemon.py` では「マイクを切られた回数」(`mute_generation`) を数え、
-発話が始まった時点の値を覚えて、確定時に変化していたらその発話を捨てている。
-確かめたのは、無音ミュート→解除→発話 / ミュート中の物音→解除→発話 /
-発話中にミュート / ミュートをまたぐ発話 / 通常、の5通り。
+`voice_daemon.py` counts how many times the mic has been turned off
+(`mute_generation`), remembers the value from when the utterance started, and throws
+the utterance away if it changed by the time it settles. What we checked was five
+cases. Mute in silence then unmute then speak, a noise while muted then unmute then
+speak, mute while speaking, an utterance that straddles a mute, and the normal case.
 
-## 無音でも相槌が出力される
+## Even silence produces backchannels
 
-物音や息だけを拾うと、モデルが「はい」「うん」「ご視聴ありがとうございました」等を
-出力する。`voice_daemon.py` の `NOISE_ONLY` で、これら単独の発話を捨てている
-（`--keep-noise` で無効化）。中身のある発話（「はい、それでは始めます」）は残る。
+Given only noise or breath, the model outputs things like 「はい」, 「うん」, and
+「ご視聴ありがとうございました」 ("yes", "uh-huh", "thanks for watching").
+`NOISE_ONLY` in `voice_daemon.py` throws away utterances that are nothing but these
+(turn it off with `--keep-noise`). An utterance with content in it
+(「はい、それでは始めます」) is kept.
 
-「ありがとうございました」「お疲れ様でした」は実際に言う言葉なので除外していない。
+「ありがとうございました」 and 「お疲れ様でした」 are things people actually say, so
+they are not excluded.
 
-## 日本語以外への誤認識（既定では何もしない）
+## Misrecognition into languages other than Japanese (nothing is done by default)
 
-物音を拾うと中国語などに誤認識されることがある（実測で `嗯，那嗯嗯。` が出た）。
-ただし意図して他言語を話すこともあるため、**既定では素通し**にしている。
-`--drop-non-japanese` を付けると簡体字・ハングル・キリル等を含む発話を捨てる
-（「時間」「問題」「東京」など日本語と共通の漢字は通すので誤検出しない）。
+Picking up a noise sometimes gets misrecognized as Chinese or another language (we
+measured `嗯，那嗯嗯。` coming out). But people do speak other languages on purpose,
+so **by default it passes straight through**. Adding `--drop-non-japanese` throws
+away utterances that contain simplified Chinese, Hangul, Cyrillic and so on (kanji
+Japanese shares, like 「時間」, 「問題」 and 「東京」, pass, so it does not fire on
+those).
 
-この判定は発話全体を見るため、日本語の末尾に中国語が混じった場合は通過する。
-文の一部だけを落とす実装にはしていない（誤検出で指示本体を失う方が困るため）。
+This check looks at the whole utterance, so Japanese with Chinese mixed in at the
+end gets through. It is deliberately not implemented as dropping part of a sentence
+(losing the body of an instruction to a false positive is the worse outcome).
 
-## ストリーミングは音声全体を毎回再投入する
+## Streaming re-feeds the whole audio every time
 
-`streaming_transcribe()` はチャンクごとに「それまでの全音声」をモデルに再投入する。
-1発話でエンコードされる音声量は `発話長² / (2 × チャンク長)` に比例する。下の表がその増え方。
+`streaming_transcribe()` re-feeds "all the audio so far" to the model on every chunk.
+The amount of audio encoded for one utterance is proportional to
+`utterance length² / (2 × chunk length)`. The table below is how that grows.
 
-| 発話長 | チャンク | エンコード量 | 増幅率 |
+| Utterance | Chunk | Audio encoded | Amplification |
 |---|---|---|---|
 | 30s | 1.0s | 465s | 15.5x |
 | 30s | 2.0s | 240s | 8.0x |
 | 15s | 1.0s | 120s | 8.0x |
 
-長く喋り続けるほど1チャンクの処理が重くなる。かつては上限秒数で区切っていたが、
-**一息で伝えたいのに途中で送られる方が困る**ため、喋っている間は区切らないことに
-した。歯止めは `HARD_UTTERANCE_CAP`（300秒）だけで、そこまで無音を挟まずに
-喋り続けることは実際には起きない。遅延が気になる場合はチャンク長を伸ばす。
+The longer you keep talking, the heavier one chunk gets. It used to be cut at a
+maximum number of seconds, but **being cut off mid-way when you meant to say it all
+in one breath is the worse problem**, so now nothing is cut while you are still
+talking. The only brake left is `HARD_UTTERANCE_CAP` (300 seconds), and talking that
+long without a pause does not actually happen. Stretch the chunk length if the
+latency bothers you.
 
-## Monitor は `tail -F` にする
+## Monitor has to be `tail -F`
 
-デーモンを再起動するとログファイルが作り直されるため、`-f`（小文字）だと古い inode を
-見続けて音声が届かなくなる。モニターを2つ生かすと同じ発話が二重に届く点にも注意。
+The log file is recreated when the daemon restarts, so with `-f` (lowercase) it
+keeps watching the old inode and the voice stops arriving. Watch out for keeping two
+monitors alive as well, since the same utterance then arrives twice.
 
-## 小さい窓は「縮める」より「並べ替える」
+## For a small window, rearrange rather than shrink
 
-ビューアは手前に浮かせた小窓で使うので、幅も高さも大きく変わる。最初は
-文字とボタンを段階的に小さくしたが、読めない・狙えないでは意味が無い。
-実際に効いたのは次の3つで、寸法そのものは触っていない。
+The viewer is used as a small window floating in front, so both width and height
+change a lot. The first attempt shrank the text and the buttons in stages, but
+unreadable and unhittable is no use. The three things that actually worked are
+below, and none of them touch the sizes themselves.
 
-- **マイクと送り方を横に並べる**（`max-height: 559px`）。縦に積むと、この
-  2つだけで 200px 以上使う。左にマイク、右に丸2つで 95〜120px に収まる
-- **上の帯を名札だけにする**。題も音量の波も、小さいときは見なくてよい
-- **余りも不足も履歴が引き受ける**。`.page` を画面の高さに固定し、履歴だけ
-  `flex:1 1 0; min-height:0` にすると、狭くなったときに先に消えるのが履歴になる
+- **Put the mic and the send mode side by side** (`max-height: 559px`). Stacked
+  vertically, those two alone eat more than 200px. Mic on the left and the two
+  circles on the right fits in 95 to 120px
+- **Cut the top strip down to just the name tag**. Neither the title nor the volume
+  wave has to be seen when it is small
+- **Let the history absorb both the slack and the shortfall**. Fix `.page` to the
+  height of the screen and give only the history `flex:1 1 0; min-height:0`, and the
+  history is what goes first as things get tight
 
-`.page > *` に `flex:none` を付けるのが要る。flex の既定は `0 1 auto` なので、
-放っておくと状態表示のような小さい行まで潰れ、`overflow:hidden` の中で文字が
-切れる（高さ 32px の行が 8px になった）。最後の逃げ道として `.page` 自体は
-`overflow-y:auto` にしてある。どうしても入らないときに切り落とさないため。
+You need `flex:none` on `.page > *`. The flex default is `0 1 auto`, so left alone
+even a small row like the status line gets squashed and its text is cut off inside
+`overflow:hidden` (a 32px row became 8px). As a last way out, `.page` itself is
+`overflow-y:auto`, so nothing gets chopped when it truly will not fit.
 
-認識中のテキストは `max-height` で頭を止め、伸びたら末尾へ繰る（`streamTail`）。
-一息で長く喋る使い方なので、上限が無いと未送信の札だけで画面が埋まる。
+The text being recognized is capped at the top with `max-height` and scrolls to the
+tail as it grows (`streamTail`). People use this by talking at length in one breath,
+so without a cap the unsent card alone fills the screen.
 
-## 言語を足すとき、どこを触るか
+## Where to touch when you add a language
 
-**7か所ある。1つ漏らすと、そこだけ英語のまま残るか、キーがそのまま画面に出る。**
+**There are 7 places. Miss one and either that spot stays English or a key shows up
+on screen as it is.**
 
-画面の文字は `viewer.html` の3つ。
+Three of them are the on-screen text, in `viewer.html`.
 
-- `I18N` に言語のまとまりを足す。**キーは全言語で同じ数だけ要る**。1つ欠けるとキーの名前が画面にそのまま出る
-- `UI_LANGS` に足す。プルダウンに出る名前は**その言語自身の表記**にする。読めない言語で書かれても選べない
-- `TIME_LOCALE` に足す。時刻の書き方が言語ごとに違う
+- Add the language's block to `I18N`. **Every language needs the same number of keys.** Miss one and the name of the key goes on screen as it is
+- Add it to `UI_LANGS`. The name in the dropdown goes **in that language's own script**. Nobody can pick a language written in letters they cannot read
+- Add it to `TIME_LOCALE`. Every language writes the time differently
 
-声の合図は `voice_daemon.py` の4つ。
+Four of them are the spoken triggers, in `voice_daemon.py`.
 
-- `COMMAND_WORDS`、`NUMBER_WORDS`、`ROUTE_PARTS`、`ROUTE_EXAMPLES`
+- `COMMAND_WORDS`, `NUMBER_WORDS`, `ROUTE_PARTS`, `ROUTE_EXAMPLES`
 
-**`UI_LANGS` に足すときは、`ASR_LANGS` にも在ることを確かめる。** 画面だけ訳しても、その言語で声が通らなければ嘘になる。
+**When you add to `UI_LANGS`, check that it is in `ASR_LANGS` too.** Translating the screen but not being able to speak that language makes the screen a lie.
 
-**解除の合図を足すときだけ、別の慎重さが要る。** 切っている理由はたいてい通話なので、その言語で通話中によく言う言い回しを入れると、相手へ言った一言でマイクが開く。失うのは発話1つではなく、切っていたつもりの時間ぜんぶ。**その言語の会話が分からないなら、解除は足さずに出す。** 英語の言い方がそのまま効く。
+**Adding the unmute trigger is the one that needs a different kind of care.** The reason the mic is off is usually a call, so a phrase people commonly say during a call in that language will open the mic on a word meant for the other person. What you lose is not one utterance, it is the whole stretch of time you thought was off. **If you do not know how that language is spoken, ship it without the unmute.** The English wording works as it is.
