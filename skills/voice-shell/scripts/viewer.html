@@ -451,7 +451,7 @@
   /* Stacked vertically, when seats run short only the live transcript has to
      give. The rest does not move, so the buttons never shift on their own. */
   .draft-card {
-    position:relative;                /* so the bar along the bottom sits inside the card */
+    position:relative;                /* so the drawing in the corner is placed against this card */
     display:flex; flex-direction:column;
     margin:0 calc(var(--pad) - .25rem) .4rem;
     background:var(--panel-2);
@@ -503,24 +503,64 @@
      since you stopped talking, but nothing used to show on screen for that, so
      there was no telling whether it had gone yet or not. A number (1.5 → 1.0 →
      0.5) is exact, but it makes you read. This screen gets watched out of the
-     corner of your eye while you talk, so show only the amount, with a ground
-     and a fill (same build as the level meter). Speak again and the fill clears
-     and starts over. It lives along the bottom edge of the card. Painting a
-     whole surface would flash the bottom half of the screen with every breath.
+     corner of your eye while you talk, so show only the amount, on the one
+     drawing that already means sent. The paper plane fills from the bottom up,
+     the same way the mic lights up from below.
+     A line across the whole bottom edge came first. It moved too far for
+     something caught out of the corner of the eye, so the amount lives in one
+     corner now.
+     It is not a button. There is nothing here to press, and pressing would not
+     help anyway (speaking again is what clears it).
      While reviewing and while paused nothing is sent on silence, so it is not
      placed then. */
-  /* Do not let it bite into the rounded corners. Put it where it fits inside
-     the 20px radius (.8rem on each side and 3px up from the bottom puts the
-     bottom of the line just inside the curve). */
-  .send-rail {
-    position:absolute; left:.8rem; right:.8rem; bottom:3px;
-    height:2px; border-radius:var(--pill); background:var(--track);
-    pointer-events:none;
+  /* Do not let it bite into the rounded corners. The card is 20px round over a
+     1.5px border, so a child placed against the padding box has to clear a
+     curve of 18.5px. Set 12px in from the right and 5.6px up from the bottom,
+     the near corner of the drawing sits sqrt(6.5² + 12.9²) = 14.4px from the
+     center of that curve, which leaves 4px of daylight. */
+  /* Floated over the card, never in the flow. The card must not gain a single
+     pixel of height for this, or every screen grows a strip of empty room under
+     the text just to hold a drawing that is usually idle. The line it replaced
+     was placed the same way, so the trick is already proven here. */
+  .send-cue {
+    position:absolute; right:.75rem; bottom:.35rem;
+    width:18px; height:18px; pointer-events:none;
   }
-  .send-rail i {
-    display:block; height:100%; width:0; border-radius:var(--pill);
-    background:var(--accent);
+  /* Since it takes no height, what it can run into is the text beside it. Hold
+     the room open in the transcript at all times, showing or not. Opening it
+     only while the drawing is up would shove the words sideways in the middle
+     of a sentence, and words moving while you talk is the same flicker this
+     whole change is meant to end. 24px clears the 18px drawing with a gap left
+     over, and across 460px of card the line hardly notices. */
+  .draft-card .stream { padding-right:24px; }
+  .send-cue > span { position:absolute; left:0; bottom:0; width:18px; height:18px; display:block; }
+  /* Laid out as a block so the drawing fills its box exactly. Left inline it
+     would ride the text baseline and sit a few pixels high, and the fill would
+     stop short of the tip. */
+  .send-cue svg { display:block; }
+  /* The ground is the outline and the fill is the solid one, both already in
+     ICON. Filling up is then the drawing turning from a sketch into a thing,
+     which needs no second color to read.
+     Neon was the complaint about the version before this. Both tones are pulled
+     back toward what is behind them, far enough to stop glaring and not so far
+     that the drawing goes missing (the fill measures 5.36:1 in dark and 3.40:1
+     in light against the card, the ground 2.60:1 and 2.02:1). Nothing glows,
+     since a shadow at this size only smears the outline. */
+  .send-cue .ground { color:color-mix(in srgb, var(--accent) 35%, var(--track)); }
+  /* It grows upward because it hangs from the bottom and only its height moves.
+     JS writes that height every frame, and there is deliberately no transition.
+     A tab in the background gets no frames, so on the way back a transition
+     would slide through values that were never true.
+     Nothing here pulses or travels on its own either, so prefers-reduced-motion
+     has nothing to switch off. Stepping the fill would turn an amount into a
+     count, which is the reading we are trying to avoid. */
+  .send-cue .fill {
+    overflow:hidden; height:0;
+    color:color-mix(in srgb, var(--accent) 70%, var(--panel-2));
   }
+  .send-cue .fill > span { position:absolute; left:0; bottom:0; width:18px; height:18px; display:block; }
+  .send-cue .fill svg .solid { display:inline; }
+  .send-cue .fill svg .line { display:none; }
 
   /* The raw live transcript. It sits apart from the edit box, and only the
      settled part drops down into it. Pouring this straight into the edit box
@@ -961,6 +1001,14 @@
     .draft-card .stream { order:1; flex:1 1 6em; min-width:0; }
     .draft-card > textarea { order:3; flex:1 1 100%; margin-top:0; }
     .draft-card .draft-actions { order:4; flex:1 1 100%; margin-top:0; }
+    /* The tools have come down beside the text here, and they end up holding
+       the bottom right corner themselves. A drawing tucked under them would
+       read as one more button in that row, and the card is only about 40px tall
+       so there is nowhere else for it to go. Drop it at this height and give the
+       room back to the words. Whether you are being heard still reads off the
+       mic drawing. */
+    .send-cue { display:none; }
+    .draft-card .stream { padding-right:0; }
   }
 
   /* When it is short, cut the top bar down to the name tag. Neither the title
@@ -1080,8 +1128,14 @@
     </div>
     <!-- The wait before it goes out. It is sent the moment the fill finishes.
          It is kept off the screen reader (hearing it leaves you no time to act
-         on it, and it only cuts in while you are talking). -->
-    <div class="send-rail" id="sendRail" aria-hidden="true" hidden><i id="sendRailFill"></i></div>
+         on it, and it only cuts in while you are talking).
+         Two copies of the same paper plane, the outline underneath and the
+         solid one clipped over it. Both come out of ICON, so no path is written
+         by hand here and the drawing stays the one the send button uses. -->
+    <span class="send-cue" id="sendCue" aria-hidden="true" hidden>
+      <span class="ground" data-icon="send" data-icon-size="18"></span>
+      <span class="fill" id="sendCueFill"><span data-icon="send" data-icon-size="18"></span></span>
+    </span>
   </section>
 
   <div class="log-head">
@@ -2503,7 +2557,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'miniMic','miniViz',
                   'routes','routeChips','routePick','viz','meter','meterHit','meterFill','meterMark','logoMark',
                   'tray','stream','draft','draftTime','draftActions','send','discard',
-                  'editOnce','dropOne','draftMark','sendRail','sendRailFill',
+                  'editOnce','dropOne','draftMark','sendCue','sendCueFill',
                   'hint','note','log','none','count','fresh','floatAsk','taken','takeBack',
                   'mic','recogLang','recogLangField','thresh','threshVal','gaugeFill','gaugeMark',
                   'silence','silenceVal','minChars','minCharsVal','clean',
@@ -2960,7 +3014,7 @@ let frameFailed = false;
 function frame(now) {
   requestAnimationFrame(frame);
   // Even when the drawing cannot happen (no measurable box size and so on), still show it building toward being sent
-  paintSendRail(now);
+  paintSendCue(now);
   if (!cw || !ch) return;
   try { paintFrame(now); } catch (err) {
     // One failed frame does not stop it. The next frame redraws.
@@ -3264,10 +3318,19 @@ function paintDraft() {
 /* ── The wait before it goes out ─────────
    The daemon breaks an utterance where the time spent under the reference level
    reaches the pause to send (asr_mic.stream_utterances). We run the same count
-   here and show what is left of it on the line along the bottom of the card.
-   The rms and speaking fields from level.txt are all it takes. */
+   here and fill the paper plane in the corner of the card with how far along it
+   is. The rms and speaking fields from level.txt are all it takes. */
 let voiceSeen = false;   // whether this utterance has picked up voice past the reference
 let silentAt = 0;        // when the voice broke off. 0 means nothing is being counted
+let livePartial = '';    // what is being recognized, raw, before the dictionary touches it
+
+/* Nothing shows for the first stretch of the silence. A breath, or the gap
+   between two words, drops under the reference level constantly, and starting
+   to fill on every one of them puts movement in the corner of your eye while
+   you are still in the middle of a sentence. The shortest pause to send anyone
+   can choose is 0.5s, so holding back 0.4s means those gaps show nothing at all
+   and only a real stop is ever drawn. */
+const SEND_CUE_DEAD = 400;
 
 /* Counting is allowed only on the side that goes straight through, and only
    while the daemon is listening. In review and under Edit this one, going quiet
@@ -3277,18 +3340,70 @@ let silentAt = 0;        // when the voice broke off. 0 means nothing is being c
 const sendCountdownOn = () =>
   route === 'live' && !oneShot && engineOnish() && !asrActive();
 
-function clearSendCountdown() { voiceSeen = false; silentAt = 0; }
+function clearSendCountdown() { voiceSeen = false; silentAt = 0; livePartial = ''; }
 
-function paintSendRail(now) {
+/* The same test voice_daemon.py runs (is_noise and is_allowed_short). Compare
+   with the punctuation taken off, and count a word merely said twice
+   (「了解、了解」) as that word on its own. Reading it differently from the
+   daemon is what would make the drawing promise a send that never comes. */
+const CUE_TRIM = /^[。、．，！？!?.…・\s　]+|[。、．，！？!?.…・\s　]+$/g;
+const cueCore = s => s.replace(CUE_TRIM, '').toLowerCase();
+function isBackchannel(text, words) {
+  if (!words.size) return false;
+  const core = cueCore(text);
+  if (!core) return false;
+  if (words.has(core)) return true;
+  const parts = core.split(/[、。,.\s]+/).map(cueCore).filter(Boolean);
+  return parts.length > 0 && parts.every(p => words.has(p));
+}
+
+/* Whether what has been heard so far is something the daemon would actually
+   send. Filling up for an utterance that gets thrown away is a promise that
+   never lands, and 「こんにちは」 under a 15 character floor is exactly that.
+   The order matches the daemon and viewer.py (minimum length, then ignored
+   words, and the dictionary rewrites only after both), so the count here is of
+   the raw characters, the same ones the floor is measured against. */
+function worthSending() {
+  const text = livePartial;
+  if (!text) return false;                    // nothing heard yet, so nothing to promise
+  const min = Number(tuning.min_chars) || 0;
+  // Words taken off the built in ignore list get through however short they
+  // are, which is the whole point of being able to take them off. Staying dark
+  // for 「わかった」 would be the same lie the other way round.
+  if (text.length < min && !isBackchannel(text, dictUnignore)) return false;
+  // Words the person put on the ignore list themselves are dropped whatever
+  // their length. The built in list is not checked here. Every word on it is
+  // far under any usable minimum length, so the line above has already caught
+  // them, and carrying a copy of that list into the page would leave two
+  // versions of the same rule to keep in step.
+  return !isBackchannel(text, dictIgnore);
+}
+
+function paintSendCue(now) {
   const on = sendCountdownOn();
   if (!on) clearSendCountdown();          // once the conditions drop, it resets itself every frame
-  el.sendRail.hidden = !on;
+  // The real send button takes this same corner whenever something is part way
+  // written (text carried over from review, for one), and that one can be
+  // pressed. Two paper planes in one corner leave you working out which is
+  // which, so the drawing gives way to the button.
+  el.sendCue.hidden = !on || !el.draftActions.hidden;
   const wait = (Number(tuning.silence_duration) || 0) * 1000;
-  const r = (silentAt && wait > 0) ? Math.min(1, (now - silentAt) / wait) : 0;
-  el.sendRailFill.style.width = (r * 100).toFixed(1) + '%';
+  /* The pause to send goes as low as 0.3s, under the held back stretch, and
+     subtracting it there leaves nothing to divide by. At those settings the
+     holding back has nothing left to protect either, because every dip that
+     short really is where the utterance gets cut, so filling across the whole
+     wait is the honest reading. */
+  const dead = wait > SEND_CUE_DEAD ? SEND_CUE_DEAD : 0;
+  // Clamped at the bottom as well. All through the held back stretch the top of
+  // this comes out negative, and a negative height is thrown out by the style,
+  // which would leave whatever the drawing was showing before stuck there.
+  const r = (silentAt && wait > 0 && worthSending())
+    ? Math.max(0, Math.min(1, (now - silentAt - dead) / (wait - dead)))
+    : 0;
+  el.sendCueFill.style.height = (r * 100).toFixed(1) + '%';
   // Stop counting once the fill completes. An utterance thrown out by the min
   // length or by an ignored word never comes back settled, so waiting for it
-  // leaves a full line sitting there.
+  // leaves a full drawing sitting there.
   if (r >= 1) clearSendCountdown();
 }
 
@@ -3369,13 +3484,25 @@ let flashTimer = null;
    tail until you finish speaking, so carrying around characters we touched here
    would stop those corrections from landing. Rebuild from the raw text every
    time and it follows along even when you say it over. */
-let dictPairs = [];          // [what was heard, what it becomes], longest first
+let dictPairs = [];             // [what was heard, what it becomes], longest first
+let dictIgnore = new Set();     // said on its own, this one is not sent
+let dictUnignore = new Set();   // taken off the built in ignore list, so short but still sent
 async function loadDictPairs() {
   try {
     const d = await (await fetch('/api/dictionary?scope=effective')).json();
     dictPairs = Object.entries(d.replace || {})
       .filter(([k, v]) => k && v)
       .sort((a, b) => b[0].length - a[0].length);   // match the longer words first
+    // The same read already carries both lists the drawing in the corner needs,
+    // so it costs no second request and there is no second thing to keep fresh.
+    // The two are tidied differently on purpose, because the daemon tidies them
+    // differently. is_noise takes the ignore list as it stands and only lowers
+    // the case, so an entry saved as 「はい。」 never matches anything there and
+    // the utterance really is sent. Trimming it here would go dark on a word
+    // that goes out. is_allowed_short does strip the punctuation off its list,
+    // so that one gets the same treatment here.
+    dictIgnore = new Set((d.ignore || []).map(w => w.trim().toLowerCase()).filter(Boolean));
+    dictUnignore = new Set((d.unignore || []).map(cueCore).filter(Boolean));
   } catch { /* if it cannot be fetched, show the text plain */ }
 }
 function withDict(text) {
@@ -3534,7 +3661,11 @@ function connect() {
       return;
     }
     if ('partial' in m) {
-      const s = withDict(m.partial.trim());
+      // Keep the text as it came as well. The minimum length is measured before
+      // the dictionary rewrites anything, so counting the rewritten characters
+      // here would let the drawing and the daemon disagree over the same words.
+      livePartial = m.partial.trim();
+      const s = withDict(livePartial);
       el.stream.textContent = s;
       el.tray.classList.toggle('idle', !s);
       streamTail();
@@ -3822,6 +3953,9 @@ el.editOnce.onclick = editThisOne;
 let dropNextLocal = false;
 el.dropOne.onclick = async () => {
   el.stream.textContent = '';
+  // Throwing it away and leaving the drawing to fill would say it is on its way
+  // out at the moment you just stopped it.
+  clearSendCountdown();
   el.tray.classList.add('idle');
   if (asrActive()) {
     // Clearing the screen alone brings it right back. Recognition keeps
