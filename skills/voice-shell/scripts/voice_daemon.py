@@ -205,7 +205,7 @@ def _read_one(path: Path) -> dict:
     except FileNotFoundError:
         return {"ignore": [], "unignore": [], "replace": {}}
     except (json.JSONDecodeError, OSError) as e:
-        print(f"{path.name} を読めませんでした ({e})。無視します", file=sys.stderr)
+        print(f"Could not read {path.name} ({e}). Ignoring it", file=sys.stderr)
         return {"ignore": [], "unignore": [], "replace": {}}
     return {
         "ignore": [s for s in data.get("ignore", []) if isinstance(s, str)],
@@ -297,7 +297,7 @@ def save_default_dictionary():
     cur["_seen"] = sorted(known | set(DEFAULT_DICT["replace"]))
     cur["_seen_ignore"] = sorted(known_ignore | set(DEFAULT_DICT["ignore"]))
     DICT_FILE.write_text(json.dumps(cur, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(f"辞書に既定の項目を {added} 件追加しました", file=sys.stderr)
+    print(f"Added {added} built-in entries to the dictionary", file=sys.stderr)
 
 
 # Kanji numerals. Rewrites place-value forms (三十二 → 32) as digits.
@@ -467,9 +467,9 @@ def resolve_engine(want: str = "") -> str:
 
     if want and want != "auto":
         if want not in known:
-            sys.exit(f"「{want}」は使えません。"
-                     f"選べるのは {', '.join(sorted(known))} です。\n"
-                     f"  一覧は voice-shell.sh engines")
+            sys.exit(f'"{want}" cannot be used.\n'
+                     f"  The choices are {', '.join(sorted(known))}.\n"
+                     f"  See them all with voice-shell.sh engines")
         return want
     if not want:
         remembered = read_config().get("engine")
@@ -478,8 +478,8 @@ def resolve_engine(want: str = "") -> str:
         # What was remembered is no longer usable (the model got deleted, say).
         # Falling back to the one that needs nothing beats failing silently.
         if remembered:
-            print(f"前回選んだ「{remembered}」は今使えないので、"
-                  f"このブラウザで認識します。", file=sys.stderr)
+            print(f'The choice from last time, "{remembered}", cannot be used now, '
+                  f'so this browser does the recognizing.', file=sys.stderr)
         return "browser"
     # For want == "auto", pick from among the models that are installed
     have = [e["id"] for e in asr_mic.available_engines()]
@@ -488,9 +488,9 @@ def resolve_engine(want: str = "") -> str:
             return pick
     # auto means "no screen to open, so use a local model". Falling back to browser
     # when there is not a single one would betray that premise.
-    sys.exit("手元で使える認識モデルがありません。\n"
-             "  SETUP.md の手順で入れるか、画面を開けるなら\n"
-             "  voice-shell.sh start --engine browser をお使いください。")
+    sys.exit("There is no recognition model on this machine.\n"
+             "  Install one by following SETUP.md, or if a screen can be opened,\n"
+             "  use voice-shell.sh start --engine browser.")
 
 
 def polish(text: str, user_dict: dict, keep_kanji_numbers: bool = False,
@@ -1052,7 +1052,7 @@ def load_commands() -> dict:
     try:
         data = json.loads(COMMANDS_FILE.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError, ValueError) as e:
-        print(f"{COMMANDS_FILE.name} を読めませんでした ({e})。無視します",
+        print(f"Could not read {COMMANDS_FILE.name} ({e}). Ignoring it",
               file=sys.stderr)
         _cmd_cache = (mtime, _NO_COMMANDS)
         return _NO_COMMANDS
@@ -1677,41 +1677,49 @@ def note_voice_cmd(log_path, kind: str, label: str = "", said: str = "") -> None
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="音声プロンプト常駐デーモン")
+    p = argparse.ArgumentParser(description="The resident daemon for voice prompts")
     asr_mic.add_common_args(p)
     p.add_argument("--log-file", default=str(LOG_FILE),
-                   help="発話を書き出す JSONL のパス")
+                   help="Path of the JSONL the utterances are written to")
     p.add_argument("--strip-fillers", action="store_true",
-                   help="「えーと」などのつなぎ言葉を送る前に落とす")
+                   help="Drop the connecting words before sending")
     p.add_argument("--min-chars", type=int, default=15,
-                   help="この文字数未満の発話は無視する（相槌や雑音よけ）。"
-                        "短い発話はほとんどが物音の誤認識なので厚めに切る。"
-                        "ただし辞書で「無視しない」側へ回した語は、短くても通る。"
-                        "本当に短く指示したいときはビューアから送る")
+                   help="Ignore an utterance shorter than this many characters. "
+                        "It keeps backchannels and noise out. Short utterances are "
+                        "mostly a sound misheard as speech, so the cut is generous. "
+                        "A word moved to the do-not-ignore side of the dictionary "
+                        "still gets through however short it is. To give a really "
+                        "short instruction, send it from the viewer")
     p.add_argument("--keep-noise", action="store_true",
-                   help="「はい」「うん」等の相槌も送る（既定では捨てる）")
+                   help="Send backchannels too. They are thrown away by default")
     p.add_argument("--keep-kanji-numbers", action="store_true",
-                   help="漢数字をそのまま送る（既定は「三十秒」→「30秒」に直す）")
+                   help="Send kanji numerals as they are. By default a kanji "
+                        "numeral is rewritten as digits")
     p.add_argument("--drop-non-japanese", action="store_true",
-                   help="中国語・韓国語等を含む発話を捨てる（既定では送る。"
-                        "意図して他言語を話すことがあるため既定は無効）")
-    p.add_argument("--status", action="store_true", help="稼働状況を表示して終了")
-    p.add_argument("--stop", action="store_true", help="常駐プロセスを停止して終了")
+                   help="Throw away an utterance that holds Chinese, Korean and "
+                        "the like. They are sent by default, because people do "
+                        "speak another language on purpose")
+    p.add_argument("--status", action="store_true",
+                   help="Print whether it is running and exit")
+    p.add_argument("--stop", action="store_true",
+                   help="Stop the resident process and exit")
     p.add_argument("--listeners", action="store_true",
-                   help="発話ログを聞いているセッションを一覧して終了")
+                   help="List the sessions listening to the utterance log and exit")
     p.add_argument("--resolve-engine", metavar="WANT", default=None,
-                   help="使うエンジンを決めて表示する（指定 > 前回 > 自動）")
+                   help="Settle which engine to use and print it. What is given "
+                        "beats last time's choice, which beats automatic")
     p.add_argument("--remember-engine", metavar="ENGINE", default=None,
-                   help="次回もこのエンジンで起動するよう覚える")
+                   help="Remember this engine so the next start uses it too")
     p.add_argument("--list-engines", action="store_true",
-                   help="選べるエンジンを一覧して終了")
+                   help="List the engines that can be picked and exit")
     # The Whisper model is remembered the same as the engine. The start button on
     # screen does not know the original command, so without remembering it, things
     # fall back to the default the moment it is brought back up.
     p.add_argument("--resolve-model", action="store_true",
-                   help="覚えている Whisper のモデルを表示して終了する")
+                   help="Print the remembered Whisper model and exit")
     p.add_argument("--remember-model", metavar="NAME", default=None,
-                   help="次回もこのモデルで起動するよう覚える（空文字で既定に戻す）")
+                   help="Remember this model so the next start uses it too. An "
+                        "empty string goes back to the default")
     return p.parse_args()
 
 
@@ -1989,8 +1997,8 @@ def list_active_listeners(log_path):
                 stale = False
         if _pid_alive(pid) and not stale:
             info["pid"] = pid
-            info.setdefault("cwd", "不明")
-            info.setdefault("started", "不明")
+            info.setdefault("cwd", "unknown")
+            info.setdefault("started", "unknown")
             try:
                 info.setdefault("since", f.stat().st_mtime)
             except OSError:
@@ -2028,35 +2036,35 @@ def main():
     if args.list_engines:
         remembered = read_config().get("engine", "")
         have = asr_mic.available_engines()
-        print("  browser   このブラウザ（何も入れずに動く）")
+        print("  browser   This browser. Runs with nothing installed")
         for e in have:
             print(f"  {e['id']:<9} {e['label']}")
-        print(f"\n  前回の選択は {remembered or '(まだ無い)'}")
+        print(f"\n  Last time's choice was {remembered or '(none yet)'}")
         return
 
     if args.listeners:
         # Whether anything is printed is left to the caller (voice-shell.sh). Print
         # a fixed line here and the caller can no longer tell an empty result apart.
         for l in list_active_listeners(args.log_file):
-            print(f"  {l['label']}  （PID {l['pid']}）")
-            print(f"    起動した時刻  {l['started']}")
-            print(f"    場所          {l['cwd']}")
+            print(f"  {l['label']}  (PID {l['pid']})")
+            print(f"    started at  {l['started']}")
+            print(f"    folder      {l['cwd']}")
         return
 
     if args.status:
         pid = read_pid()
         if pid:
             n = sum(1 for _ in open(args.log_file)) if Path(args.log_file).exists() else 0
-            print(f"稼働中 (PID {pid}) / これまでの発話 {n} 件")
-            print(f"ログは {args.log_file}")
+            print(f"Running (PID {pid}) / {n} utterances so far")
+            print(f"Log is {args.log_file}")
         else:
-            print("停止しています。")
+            print("Stopped.")
         return
 
     if args.stop:
         pid = read_pid()
         if not pid:
-            print("動いていません。")
+            print("Not running.")
             return
         os.kill(pid, signal.SIGTERM)
         # Wait a little for it to really end. Return right away here and the caller
@@ -2069,11 +2077,11 @@ def main():
             if not _pid_alive(pid):
                 break
             time.sleep(0.1)
-        print(f"停止しました (PID {pid})")
+        print(f"Stopped (PID {pid})")
         return
 
     if read_pid():
-        sys.exit("すでに動いています。停止するには --stop を使ってください。")
+        sys.exit("Already running. Use --stop to stop it.")
 
     STATE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -2086,7 +2094,7 @@ def main():
     try:
         _lock_exclusive_nb(_lock)
     except OSError:
-        sys.exit("すでに起動しています（読み込み中かもしれません）。")
+        sys.exit("Already starting up. It may still be loading.")
     globals()["_daemon_lock"] = _lock   # Closing it releases the lock, so keep holding on
 
     log_path = Path(args.log_file)
@@ -2209,12 +2217,12 @@ def main():
     # recognition language dropdown only shows for Whisper).
     (Path(args.log_file).parent / "engine_active").write_text(args.engine, encoding="utf-8")
 
-    print("モデルを読み込み中… (初回は数分かかります)", file=sys.stderr)
+    print("Loading the model. The first time takes a few minutes", file=sys.stderr)
     model = asr_mic.load_model(args)
 
     PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
-    print(f"\n  聞いています。喋ると {log_path} に追記します"
-          f"\n  Ctrl-C で終了\n", file=sys.stderr, flush=True)
+    print(f"\n  Listening. Speak and it gets appended to {log_path}"
+          f"\n  Ctrl-C to quit\n", file=sys.stderr, flush=True)
 
     # Once two or more sessions are listening, write a warning into the utterance
     # log itself to tell Claude Code (the side watching this log with Monitor). A
@@ -2239,11 +2247,12 @@ def main():
                     with open(log_path, "a", buffering=1, encoding="utf-8") as wf:
                         wf.write(json.dumps({
                             "system_warning":
-                                f"モニターが{count}個同時に発話ログを聞いています。"
-                                "送信先を選んでいないため、同じ発話が全部のセッションへ"
-                                "二重に届きます。ビューアの送信先で1つ選ぶか、"
-                                "`voice-shell.sh listeners` で確認して"
-                                "使っていないものを停止してください。"
+                                f"{count} monitors are listening to the utterance "
+                                "log at once. No destination is picked, so the same "
+                                "utterance reaches every session twice. Pick one "
+                                "destination in the viewer, or check with "
+                                "`voice-shell.sh listeners` and stop the ones that "
+                                "are not in use."
                         }, ensure_ascii=False) + "\n")
                 except OSError:
                     pass
@@ -2313,7 +2322,7 @@ def main():
                 # as one that spanned a mute and thrown away as 「マイク切」.
                 if ev["type"] == "dropped":
                     partial_path.write_text("", encoding="utf-8")
-                    print(f"(消した) {ev.get('text', '')[:40]}",
+                    print(f"(discarded) {ev.get('text', '')[:40]}",
                           file=sys.stderr, flush=True)
                     speaking_since = None
                     continue
@@ -2355,7 +2364,7 @@ def main():
                 # length and the backchannel test.
                 kind = apply_voice_command(text, log_path, muted_now, user_dict)
                 if kind:
-                    print(f"(合図 {kind}) {text[:40]}", file=sys.stderr, flush=True)
+                    print(f"(signal {kind}) {text[:40]}", file=sys.stderr, flush=True)
                     # A command is not an utterance, so it is not sent. was_muted
                     # is left alone, to be recounted at the top of the next loop
                     # (get ahead of it here and the generation never rises, and
@@ -2367,7 +2376,7 @@ def main():
                 # mic is still off, that utterance is not sent.
                 started_at, speaking_since = speaking_since, None
                 if muted_now or (started_at is not None and started_at != mute_generation):
-                    print(f"(マイク切) {text[:40]}", file=sys.stderr, flush=True)
+                    print(f"(mic off) {text[:40]}", file=sys.stderr, flush=True)
                     continue
 
                 # When 「キャンセル」 lands at the end, throw the whole phrase away.
@@ -2380,7 +2389,7 @@ def main():
                 # signal was always for.
                 if not forced and take_tail(text, active_tail("cancel_tail")) is not None:
                     note_voice_cmd(log_path, "cancelled", "", text)
-                    print(f"(取り消し) {text[:40]}", file=sys.stderr, flush=True)
+                    print(f"(cancelled) {text[:40]}", file=sys.stderr, flush=True)
                     continue
 
                 # When 「手直し」 lands at the end, it goes to the draft instead of
@@ -2394,7 +2403,7 @@ def main():
                 if force_hold:
                     if not body:
                         note_voice_cmd(log_path, "cancelled", "", text)
-                        print(f"(手直し・空) {text[:40]}", file=sys.stderr, flush=True)
+                        print(f"(review, nothing left) {text[:40]}", file=sys.stderr, flush=True)
                         continue
                     text = body
 
@@ -2415,10 +2424,10 @@ def main():
                 if not force_hold and not forced and not args.keep_noise \
                         and is_noise(text, user_dict["ignore"],
                                      user_dict.get("unignore", ())):
-                    drop("無視")
+                    drop("ignored")
                     continue
                 if not forced and args.drop_non_japanese and looks_non_japanese(text):
-                    drop("日本語以外")
+                    drop("not Japanese")
                     continue
 
                 polished = polish(text, user_dict, args.keep_kanji_numbers,
@@ -2432,7 +2441,7 @@ def main():
                 # The words as heard are what gets noted, since the emptied
                 # version says nothing about what happened.
                 if not polished.strip():
-                    print(f"(空) {text[:40]}", file=sys.stderr, flush=True)
+                    print(f"(empty) {text[:40]}", file=sys.stderr, flush=True)
                     continue
                 text = polished
                 stamp = time.strftime("%H:%M:%S")
@@ -2443,7 +2452,7 @@ def main():
                     with open(hold_path, "a") as h:
                         h.write(json.dumps({"time": stamp, "text": text},
                                            ensure_ascii=False) + "\n")
-                    print(f"[{stamp}] (保留) {text}", file=sys.stderr, flush=True)
+                    print(f"[{stamp}] (held) {text}", file=sys.stderr, flush=True)
                     if force_hold:
                         note_voice_cmd(log_path, "held", "", text)
                     continue
@@ -2459,7 +2468,7 @@ def main():
                 print(f"[{stamp}] {text}", file=sys.stderr, flush=True)
 
     except KeyboardInterrupt:
-        print("\n終了します。", file=sys.stderr)
+        print("\nQuitting.", file=sys.stderr)
     finally:
         PID_FILE.unlink(missing_ok=True)
 

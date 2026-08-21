@@ -15,18 +15,18 @@ def main():
     try:
         d = json.load(sys.stdin)
     except (ValueError, OSError):
-        print("  画面の状態を確認できませんでした")
+        print("  Could not check the state of the screen")
         return
 
     if d.get("listening"):
-        print(f"  聞いています（画面 {d['listening']} つ）")
+        print(f"  Listening ({d['listening']} screens)")
     elif d.get("denied"):
-        print("  マイクを拒否されています。Chrome の許可を出し直してください。")
+        print("  The microphone was refused. Allow it again in Chrome.")
     elif d.get("tabs"):
-        print("  画面は開いていますが、まだ聞いていません。")
+        print("  The screen is open but it is not listening yet.")
     else:
-        print("  画面が開かれていません。Chrome で上の URL を開いてください。")
-        print("  開くまでは、話しても何も届きません。")
+        print("  The screen is not open. Open the URL above in Chrome.")
+        print("  Until it is open, nothing arrives however much you speak.")
 
 
 if __name__ == "__main__":

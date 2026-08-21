@@ -115,7 +115,7 @@ class WhisperModel:
                  compute_type="float16", language=None):
         from faster_whisper import WhisperModel as FW
 
-        print(f"Whisper ({name} / {compute_type}) を読み込んでいます…",
+        print(f"Loading Whisper ({name} / {compute_type})",
               file=sys.stderr, flush=True)
         self._m = FW(name, device=device, compute_type=compute_type)
         # Leave it None so it auto-detects. voice-shell always passes

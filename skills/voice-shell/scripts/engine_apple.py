@@ -68,26 +68,28 @@ def _ensure_binary():
         return BINARY
 
     os.makedirs(os.path.dirname(BINARY), exist_ok=True)
-    print("音声認識ヘルパをビルドしています(初回のみ)…", file=sys.stderr, flush=True)
+    print("Building the speech helper (first run only)", file=sys.stderr, flush=True)
     r = subprocess.run(["swiftc", "-O", "-parse-as-library", SOURCE, "-o", BINARY],
                        capture_output=True, text=True)
     if r.returncode != 0:
-        sys.exit("speech_helper のビルドに失敗しました。\n"
-                 "  Xcode か Command Line Tools(xcode-select --install)と\n"
-                 "  macOS 26 以降が必要です。\n" + r.stderr.strip())
+        sys.exit("speech_helper failed to build.\n"
+                 "  It needs Xcode or the Command Line Tools "
+                 "(xcode-select --install)\n"
+                 "  and macOS 26 or newer.\n" + r.stderr.strip())
     return BINARY
 
 
 def load(args):
     """Wake the helper and hand back an adapter in the shape asr_mic wants."""
     if sys.platform != "darwin":
-        sys.exit("--engine apple は macOS 専用です")
+        sys.exit("--engine apple is for macOS only")
 
     binary = _ensure_binary()
     locale = _locale_id(getattr(args, "language", None))
-    print(f"認識エンジンは apple({locale} / OS 付属のオンデバイスモデル)",
-          file=sys.stderr)
-    print("  音声はこの Mac の中だけで処理されます。", file=sys.stderr, flush=True)
+    print(f"The recognition engine is apple ({locale}, the on-device model that "
+          f"ships with the OS)", file=sys.stderr)
+    print("  The audio is handled inside this Mac and nowhere else.",
+          file=sys.stderr, flush=True)
     return _AppleModel(binary, locale)
 
 
@@ -118,9 +120,9 @@ class _AppleModel:
         try:
             ready = json.loads(first)
         except ValueError:
-            sys.exit(f"speech_helper の応答が読めません。{first!r}")
+            sys.exit(f"The reply from speech_helper cannot be read. {first!r}")
         if "error" in ready:
-            sys.exit(f"speech_helper でエラーが起きました。{ready['error']}")
+            sys.exit(f"speech_helper hit a problem. {ready['error']}")
 
         self._io_lock = threading.Lock()   # one round trip on the pipe at a time
         self._lock = threading.Lock()      # guards swapping state and appending
@@ -172,7 +174,7 @@ class _AppleModel:
                 self._proc.stdin.flush()
                 line = self._proc.stdout.readline()
             except (BrokenPipeError, ValueError):
-                print("speech_helper が落ちました。", file=sys.stderr, flush=True)
+                print("speech_helper died.", file=sys.stderr, flush=True)
                 return ""
         if not line:
             return ""
@@ -181,7 +183,8 @@ class _AppleModel:
         except ValueError:
             return ""
         if "error" in r:
-            print(f"speech_helper でエラーが起きました。{r['error']}", file=sys.stderr, flush=True)
+            print(f"speech_helper hit a problem. {r['error']}",
+                  file=sys.stderr, flush=True)
             return ""
         return (r.get("text") or "").strip()
 

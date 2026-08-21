@@ -100,34 +100,40 @@ _DEFAULT_ENGINE = "apple" if sys.platform == "darwin" else "whisper"
 def add_common_args(p):
     """Register the arguments every script shares."""
     p.add_argument("--engine", default=os.environ.get("VOICE_SHELL_ENGINE", _DEFAULT_ENGINE),
-                   help="認識エンジン。apple（macOS 26 付属のオンデバイス認識。軽い）、"
-                        "whisper（faster-whisper。固有名詞に強い）。"
-                        "どちらも音声はこの機械から出ない。"
-                        "ブラウザ認識（browser）は画面の中で動くので、ここでは選べない。"
-                        "VOICE_SHELL_ENGINE でも指定できる")
+                   help="The recognition engine. apple is the on-device "
+                        "recognition that ships with macOS 26, and it is light. "
+                        "whisper is faster-whisper, strong on proper nouns. With "
+                        "either one the audio never leaves this machine. Browser "
+                        "recognition runs inside the screen, so it cannot be "
+                        "picked here. VOICE_SHELL_ENGINE names one too")
     p.add_argument("--whisper-compute", default=None,
-                   help="Whisper の精度と VRAM の兼ね合い（float16 / int8）")
+                   help="The trade between Whisper accuracy and VRAM "
+                        "(float16 / int8)")
     p.add_argument("--whisper-device", default=None,
-                   help="Whisper を動かす場所（cuda / cpu）")
+                   help="Where to run Whisper (cuda / cpu)")
     p.add_argument("--whisper-language", default=None,
-                   help="Whisper の言語を固定する（ja / en）。既定は自動判定。"
-                        "固定すると、その言語に訳されて出るので普段は指定しない")
+                   help="Pin the Whisper language (ja / en). It works it out on "
+                        "its own by default. Pinning it makes everything come out "
+                        "translated into that language, so usually leave it alone")
     p.add_argument("--model", default=None,
-                   help="Whisper のモデル。Hugging Face の名前でも、"
-                        "手元に置いたフォルダの場所でも受ける。"
-                        "省略すると large-v3-turbo を使う")
+                   help="The Whisper model. A Hugging Face name works, and so "
+                        "does the path of a folder on this machine. Left out, "
+                        "large-v3-turbo is used")
     p.add_argument("--language", default=None,
-                   help="言語を固定する。Japanese のように書く。省略すると自動判定")
+                   help="Pin the language. Write it like Japanese. Left out, it "
+                        "is worked out on its own")
     p.add_argument("--device", default=DEFAULT_DEVICE,
-                   help="録音デバイス。Linux は arecord の -D（pipewire, plughw:2,0）、"
-                        "macOS は avfoundation の番号（:0）、Windows は dshow の名前"
-                        "（audio=マイク名）")
+                   help="The recording device. On Linux it is the -D of arecord "
+                        "(pipewire, plughw:2,0), on macOS the avfoundation number "
+                        "(:0), on Windows the dshow name (audio=<mic name>)")
     p.add_argument("--input-samplerate", type=int, default=44100,
-                   help="マイクの録音レート。16kHz に変換して推論する")
+                   help="The rate the mic records at. It is converted to 16kHz "
+                        "before recognizing")
     p.add_argument("--silence-threshold", type=float, default=DEFAULT_SILENCE_THRESHOLD,
-                   help="この RMS 未満を無音とみなす（マイクのノイズフロアに合わせる）")
+                   help="Below this RMS counts as silence. Match it to the noise "
+                        "floor of the mic")
     p.add_argument("--silence-duration", type=float, default=1.5,
-                   help="この秒数だけ無音が続いたら発話を確定する")
+                   help="Silence this many seconds long settles the utterance")
     return p
 
 
@@ -155,9 +161,9 @@ def load_model(args):
     # An unknown name stops here instead of quietly returning None. Return it
     # and it turns into an unrelated exception later in init_streaming_state,
     # about NoneType having no attribute, and the reason never gets through.
-    sys.exit(f"「{args.engine}」はこの機械で動かせるエンジンではありません。\n"
-             "  選べるのは apple と whisper です。\n"
-             "  ブラウザ認識は voice-shell.sh start --engine browser から使えます。")
+    sys.exit(f'"{args.engine}" is not an engine this machine can run.\n'
+             "  The choices are apple and whisper.\n"
+             "  Browser recognition comes from voice-shell.sh start --engine browser.")
 
 
 def _kill_engine_on_exit():
@@ -202,8 +208,8 @@ def _kill_engine_on_exit():
 # left out, since listing it would only offer something unpickable.
 
 ENGINE_LABELS = {
-    "apple":    "Apple のオンデバイス認識（軽い・ローカル）",
-    "whisper":  "Whisper（固有名詞に強い・ローカル）",
+    "apple":    "Apple on-device recognition (light, local)",
+    "whisper":  "Whisper (strong on proper nouns, local)",
 }
 
 
@@ -244,7 +250,7 @@ def list_mics() -> list:
     """
     # The head of the list is always the system default. Without it, the dropdown
     # for anyone still on the default matches nothing and looks blank.
-    out = [{"id": SYSTEM_DEFAULT, "label": "システムの既定"}]
+    out = [{"id": SYSTEM_DEFAULT, "label": "System default"}]
     try:
         if sys.platform == "darwin":
             # ffmpeg puts the device list on stderr, and exits with 1 as well
@@ -304,7 +310,7 @@ def mic_command(device: str, in_sr: int) -> list:
     """
     if sys.platform == "darwin":
         if shutil.which("ffmpeg") is None:
-            sys.exit("ffmpeg が見つかりません (brew install ffmpeg)")
+            sys.exit("ffmpeg was not found (brew install ffmpeg)")
         # avfoundation takes the ":<audio device number>" form. ":default" works
         # too (measured, it does record from the system default input).
         if device == SYSTEM_DEFAULT:
@@ -317,7 +323,7 @@ def mic_command(device: str, in_sr: int) -> list:
 
     if sys.platform.startswith("win"):
         if shutil.which("ffmpeg") is None:
-            sys.exit("ffmpeg が見つかりません (winget install ffmpeg)")
+            sys.exit("ffmpeg was not found (winget install ffmpeg)")
         # dshow names the device. The list comes out of the following command.
         #   ffmpeg -list_devices true -f dshow -i dummy
         # Unlike avfoundation there is no spelling that stands for the default,
@@ -328,8 +334,8 @@ def mic_command(device: str, in_sr: int) -> list:
             # such thing exists, and anyone still on the default never records.
             found = [m["id"] for m in list_mics() if m["id"] != SYSTEM_DEFAULT]
             if not found:
-                sys.exit("マイクが見つかりません "
-                         "(ffmpeg -list_devices true -f dshow -i dummy で確認してください)")
+                sys.exit("No microphone was found. Check with "
+                         "ffmpeg -list_devices true -f dshow -i dummy")
             src = found[0]
         else:
             src = device if device.startswith("audio=") else "audio=default"
@@ -338,7 +344,7 @@ def mic_command(device: str, in_sr: int) -> list:
                 "-ac", "1", "-ar", str(in_sr), "-f", "s16le", "-"]
 
     if shutil.which("arecord") is None:
-        sys.exit("arecord が見つかりません (alsa-utils をインストールしてください)")
+        sys.exit("arecord was not found. Install alsa-utils")
     # PipeWire and PulseAudio both resolve the default on the sound server side
     if device == SYSTEM_DEFAULT:
         device = "pipewire"
@@ -422,7 +428,8 @@ def read_blocks(device: str, in_sr: int,
     proc, blocks = start(current)
     to_16k = make_resampler()
     if in_sr != SAMPLE_RATE:
-        print(f"マイクを {in_sr}Hz で録音し {SAMPLE_RATE}Hz に変換します", file=sys.stderr)
+        print(f"Recording the mic at {in_sr}Hz and converting to {SAMPLE_RATE}Hz",
+              file=sys.stderr)
 
     # Recording stops. Sometimes ffmpeg dies for no reason (measured on Windows,
     # rarely, a write to the pipe failing with "Invalid argument"), and sometimes
@@ -470,7 +477,7 @@ def read_blocks(device: str, in_sr: int,
                     # count. Carry it over and a device picked after giving up
                     # that is silent too waits long with no fast attempt.
                     dead_run, dead_tries, gave_up = 0.0, 0, False
-                    print(f"マイクを {current} に切り替えました", file=sys.stderr, flush=True)
+                    print(f"Switched the mic to {current}", file=sys.stderr, flush=True)
                     if on_switch is not None:
                         on_switch(current)
 
@@ -488,18 +495,18 @@ def read_blocks(device: str, in_sr: int,
                 nonlocal lost
                 if not lost:
                     lost = True
-                    print(f"{why}（{current}）。開き直して待ちます"
-                          "（挿し直せばそのまま戻ります）",
+                    print(f"{why} ({current}). Opening it again and waiting. "
+                          "Plugging it back in brings it straight back",
                           file=sys.stderr, flush=True)
                 reopen()
 
             try:
                 raw = blocks.get(timeout=STALL_SEC)
             except queue.Empty:
-                relight(f"マイクから {STALL_SEC:.0f} 秒ぶん音が来ません")
+                relight(f"No sound has come from the mic for {STALL_SEC:.0f} seconds")
                 continue
             if not raw:
-                relight("録音が終了しました")
+                relight("The recording ended")
                 continue
 
             # All zeros means not connected even though it arrives. Look at the
@@ -512,25 +519,26 @@ def read_blocks(device: str, in_sr: int,
                     dead_tries += 1
                     lost = True
                     if dead_tries == 1:
-                        print("マイクから届く音が全部ゼロです。"
-                              f"{current} を開き直します",
+                        print("Everything arriving from the mic is zero. "
+                              f"Opening {current} again",
                               file=sys.stderr, flush=True)
                     if dead_tries > DEAD_TRIES and not gave_up:
                         gave_up = True
-                        print("何度開き直しても、届く音は全部ゼロのままです。"
-                              f"このあとは {DEAD_SLOW_SEC / 60:.0f} 分おきに試し続けます。"
-                              "マイクを選び直すか、挿し直すと早く戻ります",
+                        print("However many times it is opened again, everything "
+                              "arriving stays zero. From here it keeps trying every "
+                              f"{DEAD_SLOW_SEC / 60:.0f} minutes. Picking the mic "
+                              "again, or plugging it back in, brings it back sooner",
                               file=sys.stderr, flush=True)
                         # The default input may have moved to another device.
                         # Printing what is visible now, once, gives a handle for
                         # picking again.
                         try:
-                            seen = "、".join(m["label"] for m in list_mics()
+                            seen = ", ".join(m["label"] for m in list_mics()
                                             if m["id"] != SYSTEM_DEFAULT)
                         except Exception:
                             seen = ""
                         if seen:
-                            print(f"いま見えているマイクは {seen} です",
+                            print(f"The mics visible right now are {seen}",
                                   file=sys.stderr, flush=True)
                     reopen()
                     continue
@@ -540,7 +548,7 @@ def read_blocks(device: str, in_sr: int,
                 dead_run, dead_tries, gave_up = 0.0, 0, False
                 if lost:
                     lost = False
-                    print(f"マイクが戻りました（{current}）", file=sys.stderr, flush=True)
+                    print(f"The mic came back ({current})", file=sys.stderr, flush=True)
                 retry_wait = RETRY_MIN
 
             block = to_16k(np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0)
