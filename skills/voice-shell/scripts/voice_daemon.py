@@ -2278,8 +2278,13 @@ def main():
             for ev in asr_mic.stream_utterances(model, args):
                 muted_now = mute_path.exists()
 
-                if muted_now and not was_muted:
-                    mute_generation += 1      # Turned off
+                # Step on both edges, not just the one that turns the mic off.
+                # Counting only the off edge lets an utterance that began while
+                # muted survive the check once the mic comes back, and it is
+                # delivered whole, muted part and all. That happened with a
+                # diary read out loud while muted and unmuted mid sentence.
+                if muted_now != was_muted:
+                    mute_generation += 1
                 was_muted = muted_now
 
                 # Catch the start of an utterance (the instant silence turns into voice)
