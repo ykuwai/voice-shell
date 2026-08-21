@@ -3012,7 +3012,7 @@ function cmdRow(kind, phrase = '') {
   return row;
 }
 
-function cmdGroupEl(g, mine) {
+function cmdGroupEl(g, mine, off) {
   const base = cmdI18nBase(g.id);
   const box = document.createElement('div');
   box.className = 'group';
@@ -3024,10 +3024,51 @@ function cmdGroupEl(g, mine) {
   head.append(t(base));
   box.append(head);
 
+  /* Whether this signal is listened for at all. All seven get one, including the
+     three that take no added wording, so it goes on above the early return below.
+
+     The seven stand alone and none of them pulls another along. Switching off
+     「マイクを入れる」 while 「マイクを切る」 stays on does leave the mic cuttable
+     by voice and openable only from here, and that is allowed. Someone reaching
+     for it is choosing to stay shut over opening by accident, and this tool holds
+     that the accidental opening costs more. Turning both off is a use of its own
+     as well (some people simply do not want the mic moving by voice), so the
+     one-sided case is not worth a rule against.
+
+     What is remembered is this kind's name, never a wording. See OFF_KEY in
+     voice_daemon.py for what the other way costs. */
+  const use = document.createElement('label');
+  use.className = 'switch';
+  use.title = t('cmdUse');
+  const useBox = document.createElement('input');
+  useBox.type = 'checkbox';
+  useBox.className = 'use';
+  useBox.checked = !off;
+  useBox.setAttribute('aria-label', t('cmdUse'));
+  const track = document.createElement('span');
+  track.className = 'track';
+  const knob = document.createElement('span');
+  knob.className = 'knob';
+  track.append(knob);
+  use.append(useBox, track);
+  head.append(use);
+
   const what = document.createElement('p');
   what.className = 'dict-label';
-  what.textContent = t(base + 'What');
   box.append(what);
+  /* Switched off, this line says what happens instead of what the signal does.
+     The wordings below stay on screen so they can be read before switching it back
+     on, and left with the old sentence above them they would read as still working.
+     One line carries it. Nothing new is put up for it. */
+  const paintUse = () => {
+    what.textContent = useBox.checked ? t(base + 'What') : t('cmdOff');
+    box.classList.toggle('off', !useBox.checked);
+  };
+  paintUse();
+  useBox.onchange = () => {
+    paintUse();
+    saveCmds();     // no field loses focus here, so nothing else would write it
+  };
 
   // The wordings themselves. They are there to be read, so they never take a pressable shape.
   const says = document.createElement('div');
@@ -3042,6 +3083,19 @@ function cmdGroupEl(g, mine) {
         return s;
       }));
   };
+  paintSays();
+  box.append(says);
+
+  /* It used to sit on the heading row, where opening the list left the target
+     where it was. The switch that decides whether this signal is heard at all
+     lives up there now, and those two must not be neighbours. A finger aiming at
+     「すべて見る」 that lands one target over would switch a signal off, and
+     nothing on screen moves far enough to notice it happened.
+
+     So it comes down here under the wordings, and opening the list does push it
+     down by the rows that appear. That is the price, and it is the cheaper one.
+     Reaching for it a second time costs a moment. Cutting a signal without
+     noticing costs every utterance that signal was carrying. */
   if (g.phrases.length > SAY_MAX) {
     const more = document.createElement('button');
     more.className = 'more';
@@ -3050,10 +3104,8 @@ function cmdGroupEl(g, mine) {
     };
     more.onclick = () => { box.classList.toggle('open'); paintMore(); paintSays(); };
     paintMore();
-    head.append(more);      // it sits on the heading row. Opening it does not move the target
+    box.append(more);
   }
-  paintSays();
-  box.append(says);
 
   // Where a language has no wording yet, the English one is showing as it is.
   // Put up silently, there is no telling whether you simply cannot read it or
@@ -3134,8 +3186,11 @@ function cmdGroupEl(g, mine) {
 function renderCommands(d) {
   // Remember it first. cleanPhrase reads this to drop the kinds that take no additions.
   cmdEditable = new Set((d.groups || []).filter(g => g.editable).map(g => g.id));
+  // Which ones are switched off. An older server sends no off list, and then
+  // nothing is off, which is what a machine that never knew about it was doing.
+  const off = new Set(d.off || []);
   el.cmdGroups.replaceChildren(...(d.groups || []).map(
-    g => cmdGroupEl(g, (d.user || {})[g.id] || [])));
+    g => cmdGroupEl(g, (d.user || {})[g.id] || [], off.has(g.id))));
   // Wordings outside Japanese and English have not been looked over by anyone
   // who speaks the language. So nobody reads them and assumes they are right,
   // we say so at the end. collectCmds skips children with no .rows, so adding
@@ -3151,6 +3206,17 @@ function renderCommands(d) {
 
 function collectCmds() {
   const out = {};
+  /* The kinds switched off, read from the switches rather than from the rows.
+     Three of the seven have no rows at all, and gathered off the rows those three
+     could never be switched off.
+
+     Nothing is ever taken out of the rows for being switched off, so a wording
+     added to a signal survives being switched off and comes back the moment it is
+     switched on again. Clear them instead and switching off would quietly delete
+     work the user typed. */
+  out.off = [...el.cmdGroups.children]
+    .filter(b => b.dataset.kind && !b.querySelector('.use').checked)
+    .map(b => b.dataset.kind);
   for (const box of el.cmdGroups.children) {
     const rows = box.querySelector('.rows');
     if (!rows) continue;          // a signal that takes no additions has no field

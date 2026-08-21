@@ -727,11 +727,13 @@ async def main_async(args):
         if mute_file.exists():
             return web.json_response({"dropped": "muted"})
 
-        # a trailing 「キャンセル」 or 「手直し」 gets the same treatment
-        if vd.take_tail(text, vd.CANCEL_TAIL) is not None:
+        # a trailing 「キャンセル」 or 「手直し」 gets the same treatment.
+        # active_tail hands back nothing for a signal the user switched off, and
+        # then the phrase travels on as ordinary speech, the same as in the daemon.
+        if vd.take_tail(text, vd.active_tail("cancel_tail")) is not None:
             vd.note_voice_cmd(args.log_file, "cancelled", "", text)
             return web.json_response({"dropped": "cancelled"})
-        body_text = vd.take_tail(text, vd.HOLD_TAIL)
+        body_text = vd.take_tail(text, vd.active_tail("hold_tail"))
         force_hold = body_text is not None
         if force_hold:
             if not body_text:
@@ -843,17 +845,25 @@ async def main_async(args):
         return web.json_response({k: v for k, v in data.items() if not k.startswith("_")})
 
     async def handle_commands_get(req):
-        """Give back the signals usable by voice and the phrasings a user added.
+        """Give back the signals usable by voice and what the user did with them.
 
         The phrasings come from the table the daemon holds. A separate copy on
         the page would create words that are written down but do nothing. The
         explanation of what each does lives in the page's i18n. Phrasings and
         explanations translate into different things, so they are kept apart.
+
+        off carries the names of the kinds switched off. Names, never wordings,
+        so a wording leaving the built-in table cannot take the record with it.
+        It rides at the top rather than inside groups because the page saves it
+        back whole, and a flag scattered through the groups would have to be
+        gathered up again on the way out.
         """
         import voice_daemon as vd
+        saved = vd.user_command_phrases()
         return web.json_response({
             "groups": vd.command_catalog(req.query.get("lang") or "en"),
-            "user": vd.user_command_phrases(),
+            "user": {k: saved[k] for k in vd.USER_COMMAND_KINDS},
+            "off": saved[vd.OFF_KEY],
             "slot": vd.ROUTE_SLOT,
         })
 

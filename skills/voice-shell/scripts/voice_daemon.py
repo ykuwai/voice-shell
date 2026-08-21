@@ -899,8 +899,39 @@ def _clean_phrase_list(data: dict, kind: str) -> list:
     return out[:_USER_PHRASE_LIMIT]
 
 
+# ── Signals the user switched off ──────────────
+#
+# All seven are on out of the box. Someone who never wants the mic cut by voice, or
+# who keeps losing sentences to a trailing 「キャンセル」, can drop that one signal
+# without losing the rest.
+#
+# **What gets remembered is the name of the kind, never a wording.** #15 showed what
+# the other way costs. Remember 「ミュート」 as switched off and the day that wording
+# leaves the built-in table, the record of it being off leaves with it and the mic
+# starts cutting again by itself. The kind names (COMMAND_KINDS) do not move, so
+# there is nothing for the record to fall through.
+#
+# It rides in the same file as the added wordings because both answer the one
+# question "what do I want this machine to listen for". Split across two files, a
+# wording added on one screen and a signal switched off on the other would read as
+# unrelated settings.
+OFF_KEY = "off"
+
+
+def clean_off_kinds(data) -> list:
+    """Take the kinds switched off and lay them out in the remembered shape.
+
+    Anything that is not a known kind is dropped rather than kept. A name nobody
+    recognizes can only have come from a typo or an older shape of the file, and
+    keeping it would sit there looking as if some signal were off.
+    """
+    raw = data.get(OFF_KEY) if isinstance(data, dict) else None
+    seen = raw if isinstance(raw, list) else []
+    return [k for k in COMMAND_KINDS if k in seen]
+
+
 _NO_COMMANDS = {"mute": frozenset(), "live": frozenset(), "hold": frozenset(),
-                "route": ()}
+                "route": (), OFF_KEY: frozenset()}
 _cmd_cache = (None, None)   # (mtime, contents)
 
 
@@ -934,8 +965,32 @@ def load_commands() -> dict:
         keys = _clean_phrase_list(data, kind)
         out[kind] = (tuple(_route_rx(k) for k in keys) if kind == "route"
                      else frozenset(keys))
+    out[OFF_KEY] = frozenset(clean_off_kinds(data))
     _cmd_cache = (mtime, out)
     return out
+
+
+def command_enabled(kind: str) -> bool:
+    """Whether that signal still bites when it is spoken.
+
+    Every path that turns an utterance into a command asks here rather than each one
+    keeping its own copy. Asked in one place only, a signal switched off would keep
+    working through whichever path was forgotten, and the screen would be saying it
+    is off while the mic still cuts.
+    """
+    return kind not in load_commands()[OFF_KEY]
+
+
+def active_tail(kind: str) -> tuple:
+    """The tail wordings that still bite, empty when that signal is switched off.
+
+    The tables themselves (CANCEL_TAIL / HOLD_TAIL) are left whole. Emptying them
+    would mean the list on screen loses the wordings too, and the reader could no
+    longer see what they are switching back on.
+    """
+    if not command_enabled(kind):
+        return ()
+    return CANCEL_TAIL if kind == "cancel_tail" else HOLD_TAIL
 
 
 def clean_user_commands(data) -> dict:
@@ -947,11 +1002,16 @@ def clean_user_commands(data) -> dict:
     """
     if not isinstance(data, dict):
         data = {}
-    return {kind: _clean_phrase_list(data, kind) for kind in USER_COMMAND_KINDS}
+    out = {kind: _clean_phrase_list(data, kind) for kind in USER_COMMAND_KINDS}
+    # The kinds switched off ride along here. Left out, a save that only meant to add
+    # a wording would write the file back without them and switch every signal on
+    # again behind the user's back.
+    out[OFF_KEY] = clean_off_kinds(data)
+    return out
 
 
 def user_command_phrases() -> dict:
-    """Return the phrasings remembered right now, by kind (for handing to the screen)."""
+    """Return what is remembered right now (added wordings and the kinds switched off)."""
     try:
         data = json.loads(COMMANDS_FILE.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError, ValueError):
@@ -959,8 +1019,14 @@ def user_command_phrases() -> dict:
     return clean_user_commands(data)
 
 
-def voice_command(text: str, muted: bool):
-    """Return "mute" / "unmute" when the utterance itself is an on or off command.
+def mic_command_shape(text: str, muted: bool):
+    """Return "mute" / "unmute" when the utterance has the shape of one.
+
+    **The switched-off list is not read here.** Two different questions get asked of
+    the same phrase. "What does this look like" has one answer everywhere, and
+    "would this machine act on it" depends on what its owner switched off. The
+    multi-machine check can only ask the first one, because what the machine across
+    the room has switched off is not knowable from here.
 
     Only the side that means something in the current state is checked. 「ミュート」
     while already off and 「ミュート解除」 while already on both do nothing. Half as
@@ -973,6 +1039,14 @@ def voice_command(text: str, muted: bool):
         # Added unmute phrasings are not checked (they cannot be added anyway)
         return "unmute" if key in UNMUTE_WORDS else None
     return "mute" if key in MUTE_WORDS or key in load_commands()["mute"] else None
+
+
+def voice_command(text: str, muted: bool):
+    """Return "mute" / "unmute" when the utterance itself is an on or off command."""
+    # Off and on are asked about one at a time. Someone who wants the mic never cut
+    # by voice but still wants to bring it back that way gets exactly that.
+    cmd = mic_command_shape(text, muted)
+    return cmd if cmd and command_enabled(cmd) else None
 
 
 # How a number is said drifts with every recognition. Say 「2」 and out comes 「に」,
@@ -1188,8 +1262,11 @@ def _route_rx(key: str):
     return re.compile(rf"^{re.escape(head)}({_NUM_ALT}){re.escape(tail)}$")
 
 
-def mode_command(text: str):
-    """Return "live" / "hold" when this is a command to switch how speech gets sent."""
+def mode_command_shape(text: str):
+    """Return "live" / "hold" when the utterance has that shape. Switched off or not.
+
+    Same split as mic_command_shape, and for the same reason.
+    """
     key = command_key(text)
     if not key:
         return None
@@ -1199,8 +1276,19 @@ def mode_command(text: str):
     return "hold" if key in HOLD_WORDS or key in user["hold"] else None
 
 
-def route_command(text: str):
-    """Return the number when this command chooses a target (the first on screen is 1)."""
+def mode_command(text: str):
+    """Return "live" / "hold" when this is a command to switch how speech gets sent."""
+    # The two sides are asked about separately, the same as mute and unmute. Switching
+    # off one side does not hand its wordings to the other, it just stops them biting.
+    mode = mode_command_shape(text)
+    return mode if mode and command_enabled(mode) else None
+
+
+def route_shape(text: str):
+    """Return the number a routing phrase carries. The switched-off list is not read.
+
+    Same split as mic_command_shape, and for the same reason.
+    """
     key = command_key(text)
     if not key or len(key) > 24:      # Commands are all short. No need to read a long one
         return None
@@ -1214,6 +1302,11 @@ def route_command(text: str):
         if m:
             return _NUM_WORDS[m.group(1)]
     return None
+
+
+def route_command(text: str):
+    """Return the number when this command chooses a target (the first on screen is 1)."""
+    return route_shape(text) if command_enabled("route") else None
 
 
 def command_catalog(lang: str = "en") -> list:
@@ -1300,12 +1393,20 @@ def _strip_name(text: str, names):
 
 
 def looks_like_any_command(text: str) -> bool:
-    """Whether that phrase, taken whole, looks like some command."""
+    """Whether that phrase, taken whole, looks like some command.
+
+    **Signals switched off still count here, and the tables are read whole.** This
+    is only ever asked about a phrase carrying another machine's name, and what that
+    machine has switched off cannot be seen from here. Read it through this machine's
+    list and a 「開発用ミュート」 aimed at the box next door, on a signal this one had
+    switched off, would stop being recognized as a command and arrive as an
+    instruction to Claude. That is the accident the silent drop exists to stop.
+    """
     t = text.strip()
     if not t:
         return False
-    if (voice_command(t, False) or voice_command(t, True)
-            or mode_command(t) or route_command(t)):
+    if (mic_command_shape(t, False) or mic_command_shape(t, True)
+            or mode_command_shape(t) or route_shape(t)):
         return True
     # A tail command that arrived on its own (no body, just 「キャンセル」)
     return any(take_tail(t, tails) == "" for tails in (CANCEL_TAIL, HOLD_TAIL))
@@ -2086,14 +2187,16 @@ def main():
                     continue
 
                 # When 「キャンセル」 lands at the end, throw the whole phrase away.
-                if take_tail(text, CANCEL_TAIL) is not None:
+                # active_tail hands back nothing when the user switched that signal
+                # off, and then the phrase travels on as ordinary speech.
+                if take_tail(text, active_tail("cancel_tail")) is not None:
                     note_voice_cmd(log_path, "cancelled", "", text)
                     print(f"(取り消し) {text[:40]}", file=sys.stderr, flush=True)
                     continue
 
                 # When 「手直し」 lands at the end, it goes to the draft instead of
                 # being sent. Short ones are not dropped (the person meant that).
-                body = take_tail(text, HOLD_TAIL)
+                body = take_tail(text, active_tail("hold_tail"))
                 force_hold = body is not None
                 if force_hold:
                     if not body:
