@@ -53,11 +53,12 @@ TUNING_FLAGS = {"strip_fillers"}
 TUNING_INT = {"min_chars", "idle_mute_min"}
 
 
-def _builtin_noise() -> list:
+def _builtin_noise(lang: str = "") -> list:
     """Read the words voice_daemon.py ignores from the start (for display).
 
     They should show even with the daemon not running, so they are picked out
-    of the source rather than imported.
+    of the source rather than imported. The table is split by the language being
+    spoken, so one column comes back, not the lot.
     """
     try:
         import ast
@@ -66,10 +67,40 @@ def _builtin_noise() -> list:
         for node in tree.body:
             if isinstance(node, ast.Assign) and any(
                     getattr(t, "id", None) == "NOISE_ONLY" for t in node.targets):
-                return sorted(ast.literal_eval(node.value), key=lambda s: (len(s), s))
+                table = ast.literal_eval(node.value)
+                words = table.get(lang) or table.get("en") or ()
+                return sorted(words, key=lambda s: (len(s), s))
     except Exception:
         pass
     return []
+
+
+def listening_lang(state: Path, want: str = "") -> str:
+    """Which language is being spoken into this right now, in two letters.
+
+    The one answer this side asks for. Browser recognition holds its speak
+    language in the browser, so nothing here can work it out and the page hands
+    it over as want. Every other engine runs inside the daemon, which writes
+    down what it is hearing (asr_lang). With neither, English stands in, the
+    same fallback the lists themselves take.
+    """
+    import voice_daemon as vd
+    if want:
+        return vd.lang_code(want)
+    # Whisper pinned to one language from the dropdown. Read ahead of the file
+    # below, which only moves once the next utterance has settled, so changing
+    # the dropdown changes the list on screen there and then.
+    try:
+        if (state / "engine_active").read_text(encoding="utf-8").strip() == "whisper":
+            pinned = json.loads(TUNING_FILE.read_text(encoding="utf-8")).get("language")
+            if pinned:
+                return vd.lang_code(pinned)
+    except (OSError, ValueError, AttributeError):
+        pass
+    try:
+        return vd.lang_code((state / vd.LANG_FILE.name).read_text(encoding="utf-8"))
+    except OSError:
+        return vd.FALLBACK_LANG
 
 
 def _read_dict(raw: bool = False, path: Path = None) -> dict:
@@ -88,7 +119,7 @@ def _read_dict(raw: bool = False, path: Path = None) -> dict:
             "replace": data.get("replace", {}) or {}}
 
 
-def _keep_unignore(sent, prev: dict) -> list:
+def _keep_unignore(sent, prev: dict, lang: str = "") -> list:
     """Gather the words taken out of the built-in list.
 
     The page can only put up chips for the words currently in the built-in
@@ -96,8 +127,14 @@ def _keep_unignore(sent, prev: dict) -> list:
     arrives means that on a day a word leaves the built-in list, or when the
     list could not be read, a word the user took out quietly goes back to being
     ignored. Whatever could not become a chip stays as it was and is added on.
+
+    Pass the language the page drew its chips in, the very one it was handed on
+    the read. Compare against every language at once and a word taken out while
+    speaking German would fall out of the record the moment the same person
+    saved anything while speaking Japanese. What the user took out belongs to
+    the user and follows no language.
     """
-    builtin = set(_builtin_noise())
+    builtin = set(_builtin_noise(lang))
     now = {s.strip() for s in sent if isinstance(s, str) and s.strip()}
     # Words that had a chip go by what arrives, since one pressed back in never
     # arrives. Words with no chip (gone from built-ins, list unreadable) stay.
@@ -748,6 +785,12 @@ async def main_async(args):
         if engine_running():
             return web.json_response({"dropped": "daemon_running"}, status=409)
 
+        # Which language this was spoken in. The page is the only one who knows,
+        # since browser recognition keeps its speak language in the browser. The
+        # daemon settles the same thing for itself, so the two roads pick the
+        # same list and swapping engines does not change what gets through.
+        lang = listening_lang(state, body.get("lang"))
+
         user_dict = vd.load_dictionary()
 
         # Voice-only signals. They go through the same function as the daemon,
@@ -793,11 +836,19 @@ async def main_async(args):
             return web.json_response({"dropped": "too_short"})
 
         if not force_hold and vd.is_noise(text, user_dict["ignore"],
-                                          user_dict.get("unignore", ())):
+                                          user_dict.get("unignore", ()), lang):
             return web.json_response({"dropped": "noise"})
 
-        text = vd.polish(text, user_dict, False,
-                         bool(tuning.get("strip_fillers")))
+        polished = vd.polish(text, user_dict, False,
+                             bool(tuning.get("strip_fillers")), lang)
+        # Reading the utterance can leave nothing behind, the same as it can in
+        # the daemon. Take 「えーと」 off the built-in list and it walks past the
+        # floor on length, and then the connecting words step deletes the whole
+        # of it. An empty one reaches Claude as an empty instruction and shows on
+        # screen as a card with nothing in it, so it stops here.
+        if not polished.strip():
+            return web.json_response({"dropped": "empty"})
+        text = polished
 
         stamp = time.strftime("%H:%M:%S")
         if force_hold or pause_file.exists():
@@ -861,7 +912,12 @@ async def main_async(args):
             import voice_daemon as vd
             return web.json_response(vd.load_dictionary())
         d = _read_dict(path=DICT_FILE)
-        d["builtin"] = _builtin_noise()
+        # The built-in words follow the language being spoken, so the answer says
+        # which one it laid out. The page sends that back on the save, and the
+        # words it took out are then weighed against the very list it drew.
+        lang = listening_lang(state, req.query.get("lang", ""))
+        d["lang"] = lang
+        d["builtin"] = _builtin_noise(lang)
         return web.json_response(d)
 
     async def handle_dict_put(req):
@@ -870,10 +926,11 @@ async def main_async(args):
 
         body = await req.json()
         prev = _read_dict(raw=True, path=target)
+        lang = listening_lang(state, req.query.get("lang", ""))
         data = {
             "ignore": sorted({s.strip() for s in body.get("ignore", [])
                               if isinstance(s, str) and s.strip()}),
-            "unignore": _keep_unignore(body.get("unignore", []), prev),
+            "unignore": _keep_unignore(body.get("unignore", []), prev, lang),
             "replace": {k.strip(): v.strip() for k, v in body.get("replace", {}).items()
                         if isinstance(k, str) and isinstance(v, str) and k.strip()},
         }

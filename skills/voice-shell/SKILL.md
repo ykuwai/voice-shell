@@ -184,13 +184,15 @@ things to watch for are as follows.
   meaning really cannot be recovered.
 - **Ignore fillers.** Words like "um", "well" and "you know" carry no meaning.
   Every language has its own.
-- **Short acknowledgements are dropped by the daemon.** A standalone "yeah" or
-  "mhm" and the like is often a stray noise misheard as speech, so it never
-  arrives in the first place (`NOISE_ONLY` in `voice_daemon.py`). Even so, if a
-  thin line does come through, wait instead of treating it as an instruction.
-  **But if the dictionary has moved that word to the "do not ignore" side, it
-  arrives even when short.** The user chose to let that word through, so even a
-  bare "got it" can be taken at face value as a reply.
+- **Short lines are dropped before they get here.** Anything under the minimum
+  length (15 characters by default) never arrives, which is what keeps a bare
+  "yeah" out. On top of that the daemon drops hesitation sounds on their own,
+  "hmm" and "uh" and their kind in each language (`NOISE_ONLY` in
+  `voice_daemon.py`). Words that mean something, "yeah" and "ok" among them,
+  are not on that list. If a thin line does come through, wait instead of
+  treating it as an instruction. **But if the dictionary has moved a word to the
+  "do not ignore" side, it arrives even when short.** The user chose to let that
+  word through, so even a bare "got it" can be taken at face value as a reply.
 - **Read chopped-up speech as one piece.** One sentence can arrive across
   several lines. When a sentence is cut off partway, wait for the rest before
   reading it as a whole. Long speech is also split before it arrives, so that
@@ -433,9 +435,11 @@ What is being replaced is only the look. The server rebuilds the body that gets
 sent. If the user says it again differently, it follows along.
 
 Words ignored by default (`NOISE_ONLY`) can be turned off by pressing their tag.
-**A word that was turned off passes straight through the minimum length gate
-too**, so short replies like "got it" stop disappearing. When the user
-says "my replies do not seem to be getting through", point them here.
+The list holds hesitation sounds only, and which ones show depends on the
+language being spoken, not the one on screen. **A word that was turned off
+passes straight through the minimum length gate too**, so short replies like
+"got it" stop disappearing. When the user says "my replies do not seem to be
+getting through", point them here.
 
 It lives in `~/.config/voice-shell/dictionary.json`. CSV can be read in and
 written out too. If the user keeps correcting the same misrecognition, it is
