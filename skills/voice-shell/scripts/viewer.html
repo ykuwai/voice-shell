@@ -105,17 +105,21 @@
                 data-i18n-title="editOnce"></button>
         <button class="tiny warn" id="dropOne" data-icon="delete" data-icon-size="16"
                 data-i18n-title="dropOne"></button>
-        <!-- The wait before it goes out. It sits in this row so it lines up with
-             the two tools, and it is a span rather than a button because there
-             is nothing here to press (speaking again is what clears it). It is
-             kept off the screen reader as well, since hearing it leaves no time
-             to act on it and it only cuts in while you are talking.
+        <!-- Send this one now. The ring around the plane fills with what is
+             about to happen to the utterance, so the same drawing carries the
+             wait and the way past it. Set the pause to send generously, say ten
+             seconds, and once you have finished speaking there is nothing to do
+             but sit out the rest of it, which is what this button is for. It
+             was a span with nothing to press before, so it is a real button now
+             and the screen reader gets it like the two beside it.
+             It stands clear of the pair. Sat on one base with them it reads as
+             one lump, and this is the one you go for on purpose, so a wrong
+             press here costs you the utterance.
              The seat is held whether it is showing or not. Let it come and go
              and the two buttons beside it would move under a finger already on
              its way, and this screen holds targets still above all else. -->
-        <span class="send-cue" id="sendCue" aria-hidden="true">
-          <span data-icon="send" data-icon-size="15"></span>
-        </span>
+        <button class="tiny send" id="sendOne" data-icon="send" data-icon-size="16"
+                data-i18n-title="sendOne"></button>
       </span>
     </div>
     <div class="stream"><span id="stream" data-i18n-quiet="quiet"></span><span class="caret"></span></div>

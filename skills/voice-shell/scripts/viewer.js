@@ -97,7 +97,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'miniMic','miniViz',
                   'routes','routeChips','routePick','viz','meter','meterHit','meterFill','meterMark','logoMark',
                   'tray','stream','draft','draftTime','draftActions','send','discard',
-                  'editOnce','dropOne','draftMark','sendCue',
+                  'editOnce','dropOne','sendOne','draftMark',
                   'hint','note','log','none','count','fresh','floatAsk','taken','takeBack',
                   'mic','recogLang','recogLangField','thresh','threshVal','gaugeFill','gaugeMark',
                   'silence','silenceVal','minChars','minCharsVal','clean',
@@ -731,9 +731,11 @@ function paint() {
   paintDraft();
 }
 
-/* Edit and discard stay put at all times, and only whether they can be pressed
-   changes. Showing and hiding them moves the target, and in a hurry you hit the
-   one next to it. */
+/* Edit, discard and send stay put at all times, and only whether they can be
+   pressed changes. Showing and hiding them moves the target, and in a hurry you
+   hit the one next to it. Send is settled every frame in paintSendCue instead,
+   because what it turns on goes empty on its own once an utterance settles and
+   nothing calls back here to say so. */
 function paintTinyButtons() {
   // Discard can always be pressed. Press it with nothing to discard and
   // nothing happens, because there is simply nothing being said right now.
@@ -897,9 +899,11 @@ function endsWithTailCmd(text) {
   return false;
 }
 
-/* Whether what has been heard so far is something the daemon would actually
-   send. Filling up for an utterance that gets thrown away is a promise that
-   never lands, and 「こんにちは」 under a 15 character floor is exactly that.
+/* Whether what has been heard so far is something the daemon would send on its
+   own. It picks which way the ring fills and in what color, out toward the
+   plane in the accent for going, back the other way in red for being dropped.
+   It has nothing to say about whether send can be pressed. Narrowing is there
+   to decide what leaves without being asked, and a press is being asked.
    The order matches the daemon and viewer.py (minimum length, then ignored
    words, and the dictionary rewrites only after both), so the count here is of
    the raw characters, the same ones the floor is measured against. */
@@ -928,14 +932,27 @@ function worthSending() {
 function paintSendCue(now) {
   const on = sendCountdownOn();
   if (!on) clearSendCountdown();          // once the conditions drop, it resets itself every frame
-  // The real send button comes up whenever something is part way written (text
-  // carried over from review, for one), and that one can be pressed. Two paper
-  // planes on one card leave you working out which is which, so the drawing
-  // gives way to the button.
+  // The big send button comes up whenever something is part way written (text
+  // carried over from review, for one). Two paper planes on one card, each
+  // sending a different thing, leave you working out which is which, so the
+  // small one steps aside while the big one is up. Every other time it stays
+  // where it is and says by being dim that there is nothing to send. Raising
+  // and sinking a target is what this screen refuses to do.
   // Shown and hidden by a class, never by the hidden attribute. Hidden takes the
   // seat away with it, and the two buttons beside it would slide every time this
   // comes and goes.
-  el.sendCue.classList.toggle('on', on && el.draftActions.hidden);
+  el.sendOne.classList.toggle('on', el.draftActions.hidden);
+  /* Whether it can be pressed asks a different question from whether the ring
+     fills. The fill says what happens if you say nothing, so every narrowing
+     the daemon applies counts toward it. A press says you meant this one, and
+     then the only thing that matters is that there is something to send.
+     「スタート」 at four characters never clears a fifteen character floor, so
+     the ring runs red on it, and it still goes out the moment you press.
+     Ending on the word that cancels is the same. Left alone it is thrown away,
+     but reaching for send is the opposite of meaning to throw it away, so the
+     press wins. */
+  const canSend = on && livePartial !== '';
+  if (el.sendOne.disabled === canSend) el.sendOne.disabled = !canSend;
   const wait = (Number(tuning.silence_duration) || 0) * 1000;
   /* The pause to send goes as low as 0.3s, under the held back stretch, and
      subtracting it there leaves nothing to divide by. At those settings the
@@ -946,18 +963,28 @@ function paintSendCue(now) {
   // Clamped at the bottom as well. All through the held back stretch the top of
   // this comes out negative, and a negative height is thrown out by the style,
   // which would leave whatever the drawing was showing before stuck there.
-  const r = (silentAt && wait > 0 && worthSending())
+  /* The count runs on anything heard at all, not only on what is going out.
+     An utterance that will be dropped runs the same clock and fills the same
+     way, and only the direction and the color say which of the two is coming.
+     Showing nothing for the dropped ones was the old reading, and it left the
+     case you most need to catch looking like a screen that had gone deaf. */
+  const r = (silentAt && wait > 0 && livePartial)
     ? Math.max(0, Math.min(1, (now - silentAt - dead) / (wait - dead)))
     : 0;
+  /* Which face it wears. Set only once the fill is actually moving, so nothing
+     changes color while you are still talking or across the breath the held
+     back stretch is there to absorb. Under the fill both faces look the same
+     anyway, an empty ring. */
+  el.sendOne.classList.toggle('drop', r > 0 && !worthSending());
   /* Handed over as a bare fraction, not rounded to a step. The stylesheet turns
      it into where the gradient's edge sits. Rounding it to a hundredth would put
      a floor under how small a move can be, and at three seconds of silence that
      floor is 30ms of travel, which shows as a stutter. It is worked out from the
      clock every frame, so nothing carries over between frames to smooth away. */
-  el.sendCue.style.setProperty('--r', String(r));
-  // Stop counting once the fill completes. An utterance thrown out by the min
-  // length or by an ignored word never comes back settled, so waiting for it
-  // leaves a full drawing sitting there.
+  el.sendOne.style.setProperty('--r', String(r));
+  // Stop counting once the fill completes. Full one way it has gone out, full
+  // the other it has been thrown away, and either way there is nothing left
+  // here to press or to draw.
   if (r >= 1) clearSendCountdown();
 }
 
@@ -1528,6 +1555,21 @@ el.dropOne.onclick = async () => {
   say(t('droppedOne'), 4);
   paint();
 };
+
+/* Send this one now, without sitting out the rest of the wait.
+   Nothing is wired to the daemon here yet. This is the seat it goes in, and the
+   work it has to do is to cut the current utterance short on the daemon side and
+   have it settle as if the silence had run out, the mirror of what
+   /api/drop-current does for throwing one away. Doing it in the page instead,
+   by sending el.stream.textContent, would race the recognizer and post a body
+   that the daemon has not finished writing.
+   Whether it can be pressed at all is settled in paintSendCue, and it only ever
+   comes up on the side that goes straight through, while the daemon is
+   listening, with something heard. So there is no second guard to write here. */
+function sendThisOne() {
+}
+el.sendOne.onclick = sendThisOne;
+
 /* Pressing anywhere on the draft card routes it to review. Make people aim at
    the live transcript and there is nowhere to press while nothing has shown up
    yet (bracing yourself before you misspeak is the real use for this, so it has
