@@ -1749,6 +1749,7 @@ for (const n of [el.page, el.sheet, el.helpSheet, document])
 el.draft.addEventListener('input', () => { draftTouched = true; grow(); });
 // Ctrl+Enter sends
 el.draft.addEventListener('keydown', e => {
+  if (e.isComposing || e.keyCode === 229) return;   // the input method still has it
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); el.send.click(); }
 });
 
@@ -2793,6 +2794,12 @@ function openRename(l, node) {
      the wrong chip has to be escapable, and an inline rename is the one place
      people reach for Escape expecting it to undo. */
   inp.onkeydown = ev => {
+    /* While an input method is still building a word, Enter and Escape belong
+       to that, not to us. Taking them here meant the Enter that settles 「かいはつ」
+       into 「開発」 also closed the box, and the name had to be opened again for
+       every single word. isComposing covers it, and keyCode 229 is the same
+       thing where isComposing is not reported. */
+    if (ev.isComposing || ev.keyCode === 229) return;
     if (ev.key === 'Enter') { ev.preventDefault(); finish(true); }
     else if (ev.key === 'Escape') { ev.preventDefault(); finish(false); }
   };
@@ -3326,6 +3333,7 @@ el.addIgnore.onclick = addIgnoreEntry;
 for (const [input, fn] of [[el.newFrom, addReplaceEntry], [el.newTo, addReplaceEntry],
                            [el.newIgnore, addIgnoreEntry]]) {
   input.addEventListener('keydown', e => {
+    if (e.isComposing || e.keyCode === 229) return;   // the input method still has it
     if (e.key === 'Enter') { e.preventDefault(); fn(); }
   });
 }
@@ -3744,6 +3752,7 @@ function cmdGroupEl(g, mine, off, offWords) {
   };
   btn.onclick = doAdd;
   input.addEventListener('keydown', e => {
+    if (e.isComposing || e.keyCode === 229) return;   // the input method still has it
     if (e.key === 'Enter') { e.preventDefault(); doAdd(); }
   });
   add.append(input, btn);
