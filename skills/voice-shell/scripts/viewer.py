@@ -793,6 +793,18 @@ async def main_async(args):
         (state / "drop_at").write_text(str(time.time()), encoding="utf-8")
         return web.json_response({"ok": True})
 
+    async def handle_send_current(_req):
+        """Send the line being recognized right now, without waiting the pause out.
+
+        The mirror of the one right above. Only the time of the press is left
+        behind, and the recognition loop settles the utterance as if the silence
+        had run out. Posting the text the page is holding instead would race the
+        engine that is still writing it, and would send a body the daemon never
+        finished. The file is read and left there, so nothing is deleted here.
+        """
+        (state / "send_at").write_text(str(time.time()), encoding="utf-8")
+        return web.json_response({"ok": True})
+
     async def handle_discard(_req):
         """Throw away the held utterances."""
         hold_file.write_text("", encoding="utf-8")
@@ -1045,6 +1057,7 @@ async def main_async(args):
     app.router.add_put("/api/machine", handle_machine)
     app.router.add_post("/api/discard", handle_discard)
     app.router.add_post("/api/drop-current", handle_drop_current)
+    app.router.add_post("/api/send-current", handle_send_current)
 
     runner = web.AppRunner(app)
     await runner.setup()

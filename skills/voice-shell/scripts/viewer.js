@@ -1557,16 +1557,25 @@ el.dropOne.onclick = async () => {
 };
 
 /* Send this one now, without sitting out the rest of the wait.
-   Nothing is wired to the daemon here yet. This is the seat it goes in, and the
-   work it has to do is to cut the current utterance short on the daemon side and
-   have it settle as if the silence had run out, the mirror of what
-   /api/drop-current does for throwing one away. Doing it in the page instead,
-   by sending el.stream.textContent, would race the recognizer and post a body
-   that the daemon has not finished writing.
+   We hand over the time it was pressed and let the daemon decide, the mirror of
+   what /api/drop-current does for throwing one away. It settles the utterance in
+   progress as if the silence had run out, and marks it as one that was asked
+   for, which is what carries it past the narrowing built for lines that leave on
+   their own (「スタート」 under the floor on length, a word on the ignore list, a
+   closing 「キャンセル」). Doing it in the page instead, by sending
+   el.stream.textContent, would race the recognizer and post a body that the
+   daemon has not finished writing.
+   The ring stops here because it is about to be answered, and clearing it takes
+   the button dark on the next frame on its own (paintSendCue reads the same
+   values). The live line is left alone, since the daemon wipes it the moment the
+   utterance settles and the card that appears is the real word on whether it
+   went.
    Whether it can be pressed at all is settled in paintSendCue, and it only ever
    comes up on the side that goes straight through, while the daemon is
    listening, with something heard. So there is no second guard to write here. */
-function sendThisOne() {
+async function sendThisOne() {
+  clearSendCountdown();
+  try { await post('/api/send-current'); } catch {}
 }
 el.sendOne.onclick = sendThisOne;
 

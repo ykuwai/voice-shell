@@ -2141,6 +2141,24 @@ def main():
 
     args.want_drop = want_drop
 
+    # The send button on screen writes the time it was pressed here, and the
+    # judging is done inside the VAD loop as well. Down where settled text
+    # arrives there is nothing left to cut short, the line has already gone out
+    # on the silence clock, and the words said after the press are inside it.
+    #
+    # Read and left in place, the same as the file above. What comes back from
+    # that loop for a press is an ordinary final carrying a forced flag, and
+    # that flag is the only thing that says the person asked for this one.
+    send_path = Path(args.log_file).parent / "send_at"
+
+    def want_send():
+        try:
+            return float(send_path.read_text(encoding="utf-8") or 0)
+        except (OSError, ValueError):
+            return 0.0      # Not there yet, or read mid-write. Seen next round
+
+    args.want_send = want_send
+
     # Mic sensitivity and the seconds of silence before settling are reachable from
     # the viewer too. Not even a recording swap is needed, they take effect from the
     # next re-read. With no file, one is made from the current values.
@@ -2305,6 +2323,18 @@ def main():
 
                 partial_path.write_text("", encoding="utf-8")
                 text = ev["text"].strip()
+                # Whether the send button on screen is what settled this one.
+                # asr_mic hangs it on the event, because by the time the line
+                # gets here the press has been spent and the file it was written
+                # into no longer says which utterance it belonged to.
+                #
+                # It means the person read these words on screen and asked for
+                # them. Everything below that exists to keep unasked lines from
+                # leaving (the floor on length, the words to ignore, a closing
+                # 「キャンセル」) is therefore skipped. Reading the utterance
+                # (the dictionary, the filler words) still runs, because that
+                # makes the same words easier to read and decides nothing.
+                forced = bool(ev.get("forced"))
 
                 # The dictionary is read every time, so web UI edits land next utterance.
                 user_dict = load_dictionary()
@@ -2332,13 +2362,22 @@ def main():
                 # When 「キャンセル」 lands at the end, throw the whole phrase away.
                 # active_tail hands back nothing when the user switched that signal
                 # off, and then the phrase travels on as ordinary speech.
-                if take_tail(text, active_tail("cancel_tail")) is not None:
+                # A press skips the test outright and the word rides along in the
+                # body. Reaching for send is the opposite of meaning to throw it
+                # away, and 「さっきの予約をキャンセル」 has to survive being asked
+                # for. Saying nothing still throws it away, which is what the
+                # signal was always for.
+                if not forced and take_tail(text, active_tail("cancel_tail")) is not None:
                     note_voice_cmd(log_path, "cancelled", "", text)
                     print(f"(取り消し) {text[:40]}", file=sys.stderr, flush=True)
                     continue
 
                 # When 「手直し」 lands at the end, it goes to the draft instead of
                 # being sent. Short ones are not dropped (the person meant that).
+                # A press does not turn this one off, unlike the 「キャンセル」
+                # above. That one throws the words away and a press means the
+                # opposite, while this one only decides where they land, and the
+                # person said the word after all.
                 body = take_tail(text, active_tail("hold_tail"))
                 force_hold = body is not None
                 if force_hold:
@@ -2350,8 +2389,9 @@ def main():
 
                 # Short utterances are thrown away as a rule, but words moved to the
                 # do-not-ignore side of the dictionary go through (meaningful replies
-                # like 「わかった」 or 「了解」).
-                if not force_hold and len(text) < args.min_chars \
+                # like 「わかった」 or 「了解」). A press goes through however short
+                # it is, so a four character 「スタート」 arrives when it is asked for.
+                if not force_hold and not forced and len(text) < args.min_chars \
                         and not is_allowed_short(text,
                                                  user_dict.get("unignore", ())):
                     continue
@@ -2361,17 +2401,29 @@ def main():
                     print(f"({kind}) {text[:40]}", file=sys.stderr, flush=True)
 
                 # Built-ins and dictionary judged together (dictionary read every time)
-                if not force_hold and not args.keep_noise \
+                if not force_hold and not forced and not args.keep_noise \
                         and is_noise(text, user_dict["ignore"],
                                      user_dict.get("unignore", ())):
                     drop("無視")
                     continue
-                if args.drop_non_japanese and looks_non_japanese(text):
+                if not forced and args.drop_non_japanese and looks_non_japanese(text):
                     drop("日本語以外")
                     continue
 
-                text = polish(text, user_dict, args.keep_kanji_numbers,
-                              args.strip_fillers)
+                polished = polish(text, user_dict, args.keep_kanji_numbers,
+                                  args.strip_fillers)
+                # Reading the utterance can leave nothing behind. A line that was
+                # only filler words empties out, and so does one a dictionary
+                # entry rewrites to nothing. Until a press could walk past the
+                # narrowing above, the floor on length caught every such line
+                # first. An empty one reaches Claude as an empty instruction and
+                # shows on screen as a card with nothing in it, so it stops here.
+                # The words as heard are what gets noted, since the emptied
+                # version says nothing about what happened.
+                if not polished.strip():
+                    print(f"(空) {text[:40]}", file=sys.stderr, flush=True)
+                    continue
+                text = polished
                 stamp = time.strftime("%H:%M:%S")
 
                 # While paused it goes to the hold file. Nothing reaches Claude.
