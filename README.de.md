@@ -17,7 +17,7 @@ drückst. Es läuft mit Claude Code und ebenso mit anderen Agenten wie Codex.
 
 ```bash
 npx skills add ykuwai/voice-shell
-pip install numpy aiohttp sounddevice
+pip install numpy aiohttp "sounddevice>=0.5.6"
 ```
 
 Wenn du Chrome hast, reicht das schon. **Kein Modell zum Herunterladen, kein Warten.**
