@@ -695,6 +695,25 @@ async def main_async(args):
             return web.json_response({"error": str(err)}, status=500)
         return web.json_response({"ok": True, "label": live[pid].get("label", pid)})
 
+    async def handle_rename(req):
+        """Put a display name on one of the listening sessions.
+
+        The same road `voice-shell.sh name` takes, reached from the screen so
+        nobody has to ask an agent to do it. An empty name puts the automatic
+        title back, exactly as `name ""` does. The numbers are untouched. They
+        come from the order sessions started listening, and the spoken signal
+        (「2番」) counts on them holding still.
+        """
+        import voice_daemon as vd
+        body = await req.json()
+        pid = str(body.get("pid") or "").strip()
+        entry = vd.set_display_name(args.log_file, pid, body.get("name"))
+        if entry is None:
+            return web.json_response({"error": "unknown"}, status=404)
+        return web.json_response({"ok": True, "label": entry.get("label", pid),
+                                  "custom": entry.get("custom", ""),
+                                  "auto": entry.get("auto", "")})
+
     async def handle_route(req):
         """Pick the destination. Empty means everyone."""
         body = await req.json()
@@ -1071,6 +1090,7 @@ async def main_async(args):
     app.router.add_get("/api/listeners", handle_listeners)
     app.router.add_put("/api/route", handle_route)
     app.router.add_post("/api/listeners/disconnect", handle_disconnect)
+    app.router.add_put("/api/listeners/name", handle_rename)
     app.router.add_put("/api/machine", handle_machine)
     app.router.add_post("/api/discard", handle_discard)
     app.router.add_post("/api/drop-current", handle_drop_current)

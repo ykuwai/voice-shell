@@ -1916,22 +1916,44 @@ def saved_names() -> dict:
         return {}
 
 
-def listener_title(entry):
-    """What to call that listener right now. None falls back to the folder name."""
+def custom_name(entry) -> str:
+    """The name somebody put on by hand, empty when nobody has.
+
+    Kept apart from the automatic title on purpose. The rename box on the screen
+    holds this and nothing else, because an empty box is what means "back to the
+    automatic title". Hand it the merged display name instead and pressing Enter
+    would freeze whatever the agent happened to be calling the conversation at
+    that moment into names.json, which nothing afterwards could undo.
+    """
     if entry.get("name"):
         return entry["name"]              # A hand-set name wins over everything
+    sid = entry.get("session")
+    if not sid:
+        return ""
+    # Voice mode off and on rebuilds the registration file, so check the config too
+    return saved_names().get(sid) or ""
+
+
+def _agent_title(entry):
+    """The title the agent gave that conversation, if it gave one."""
     sid, agent = entry.get("session"), entry.get("agent")
     if not sid:
         return None
-    # Voice mode off and on rebuilds the registration file, so check the config too
-    named = saved_names().get(sid)
-    if named:
-        return named
     if agent == "claude":
         return _claude_title(sid)
     if agent == "codex":
         return _codex_title(sid)
     return None
+
+
+def auto_title(entry) -> str:
+    """What that listener is called when nobody has named it. Never empty."""
+    return _agent_title(entry) or os.path.basename(entry.get("cwd", "")) or "?"
+
+
+def listener_title(entry):
+    """What to call that listener right now. None falls back to the folder name."""
+    return custom_name(entry) or _agent_title(entry)
 
 
 def label_listeners(entries):
@@ -1949,7 +1971,13 @@ def label_listeners(entries):
                                     e.get("pid", 0)))
     seen = {}
     for e in entries:
-        base = listener_title(e) or os.path.basename(e.get("cwd", "")) or "?"
+        hand = custom_name(e)
+        auto = auto_title(e)
+        base = hand or auto
+        # The screen needs these two on their own. `label` can be carrying a (2)
+        # that must never be written back as the real name, and the automatic
+        # title is what the rename box shows behind an empty field.
+        e["custom"], e["auto"] = hand, auto
         n = seen.get(base, 0) + 1
         seen[base] = n
         e["label"] = base if n == 1 else f"{base} ({n})"
@@ -2010,6 +2038,72 @@ def list_active_listeners(log_path):
             except PermissionError:
                 pass                        # Somebody else's. Leave it
     return label_listeners(out)
+
+
+def set_display_name(log_path, pid, name):
+    """Rename one listening session. Empty puts the automatic title back.
+
+    Both places `voice-shell.sh name` writes get written, and for the same
+    reasons. names.json is what survives voice mode going off and on. The
+    registration file is what `custom_name` reads first, so leaving it alone
+    would let a name the shell wrote there keep winning, and clearing the name
+    from the screen would look like it did nothing at all.
+
+    Only a session that is registered and alive can be renamed. Resolving the
+    PID here rather than taking a conversation id from the caller keeps a stray
+    request from writing a name for a conversation that is not even here.
+    Returns the renamed entry, or None when that PID is not listening.
+    """
+    # 60 characters is already past what the chip can show. The cap is here so a
+    # runaway paste cannot bloat a file every session reads on every utterance.
+    name = str(name or "").strip()[:60]
+    live = {str(l["pid"]): l for l in list_active_listeners(log_path)}
+    entry = live.get(str(pid))
+    if entry is None:
+        return None
+
+    session = entry.get("session")
+    if session:
+        names = saved_names()
+        if name:
+            names[session] = name
+        else:
+            names.pop(session, None)      # empty means back to the automatic title
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        # Write beside it and swap it in. `voice-shell.sh name` can be running
+        # in another shell at this moment, and a half-written file does not lose
+        # the one name being changed, it loses every name in there.
+        f = CONFIG_DIR / "names.json"
+        tmp = f.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(names, ensure_ascii=False, indent=2) + "\n",
+                       encoding="utf-8")
+        os.replace(tmp, f)
+
+    d = listeners_dir(log_path)
+    for reg in (d.iterdir() if d.is_dir() else []):
+        try:
+            info = json.loads(reg.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        # One conversation can be listening from more than one place at once, and
+        # the name belongs to the conversation, so they all move together. With no
+        # conversation id to go on there is only this PID, and then the name lasts
+        # no longer than the registration does.
+        if session:
+            if info.get("session") != session:
+                continue
+        elif reg.name != str(pid):
+            continue
+        info["name"] = name
+        try:
+            reg.write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
+        except OSError:
+            pass
+
+    for l in list_active_listeners(log_path):
+        if str(l["pid"]) == str(pid):
+            return l
+    return None
 
 
 def main():
