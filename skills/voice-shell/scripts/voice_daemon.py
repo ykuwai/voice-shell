@@ -1877,6 +1877,26 @@ def main():
 
     args.on_switch = on_switch
 
+    # The discard button on screen writes the time it was pressed here, and the
+    # judging is done inside the VAD loop (asr_mic), not down where the settled
+    # text arrives. Judge it down there and only the words are thrown away while
+    # the sound stays joined, so anything said right after the press falls inside
+    # the same utterance and goes out with it, and the redo is silently eaten
+    # until a pause finally settles the line.
+    #
+    # The file is read and left in place, the way the mic choice and the tuning
+    # are, with the time inside it compared against. Deleting it here would tear
+    # it out from under the loop that has to see it.
+    drop_path = Path(args.log_file).parent / "drop_at"
+
+    def want_drop():
+        try:
+            return float(drop_path.read_text(encoding="utf-8") or 0)
+        except (OSError, ValueError):
+            return 0.0      # Not there yet, or read mid-write. Seen next round
+
+    args.want_drop = want_drop
+
     # Mic sensitivity and the seconds of silence before settling are reachable from
     # the viewer too. Not even a recording swap is needed, they take effect from the
     # next re-read. With no file, one is made from the current values.
@@ -1983,33 +2003,12 @@ def main():
         mute_generation = 0
         was_muted = False
         speaking_since = None   # The generation when the utterance in progress began
-        # When the utterance in progress began. The discard button on screen should
-        # drop only the one phrase being spoken at the moment it was pressed. So a
-        # press that lands after settling does not take the next utterance with it,
-        # the start time and the press time are compared.
-        speaking_at = None
-        drop_path = log_path.parent / "drop_at"
-        dropping = False        # Got a discard from the screen. Emit nothing until settling
 
         # Stated outright so it does not disagree with the readers (the viewer and
         # Monitor). Left unspecified, Windows opens with the locale (cp932).
         with open(log_path, "a", buffering=1, encoding="utf-8") as f:
             for ev in asr_mic.stream_utterances(model, args):
                 muted_now = mute_path.exists()
-
-                # Discard from the screen. Pull back the phrase in progress at the
-                # moment it was pressed, partial text and all. Wait for settling
-                # before erasing and text stays on screen the whole time, which
-                # looks like it did not get erased.
-                if drop_path.exists():
-                    try:
-                        asked = float(drop_path.read_text(encoding="utf-8") or 0)
-                    except (OSError, ValueError):
-                        asked = 0.0
-                    drop_path.unlink(missing_ok=True)
-                    if speaking_at is not None and asked >= speaking_at:
-                        dropping = True
-                        partial_path.write_text("", encoding="utf-8")
 
                 if muted_now and not was_muted:
                     mute_generation += 1      # Turned off
@@ -2024,11 +2023,26 @@ def main():
                         encoding="utf-8")
                     if ev.get("speaking") and speaking_since is None:
                         speaking_since = mute_generation
-                        speaking_at = time.time()
                     if muted_now:
                         if partial_path.read_text(encoding="utf-8"):
                             partial_path.write_text("", encoding="utf-8")
                         continue
+                    continue
+
+                # The discard button on screen. asr_mic cut the phrase off, audio
+                # and all, so nothing settles for it and this is the last word on
+                # it. Erase the on-screen text here and now. Wait for a settle
+                # that is never coming and the text sits there looking un-erased.
+                #
+                # This sits above the mute check on purpose. Swallowed while
+                # muted, speaking_since would keep the generation of a phrase that
+                # no longer exists, and the next real utterance would be counted
+                # as one that spanned a mute and thrown away as 「マイク切」.
+                if ev["type"] == "dropped":
+                    partial_path.write_text("", encoding="utf-8")
+                    print(f"(消した) {ev.get('text', '')[:40]}",
+                          file=sys.stderr, flush=True)
+                    speaking_since = None
                     continue
 
                 if muted_now:
@@ -2039,8 +2053,6 @@ def main():
                         continue
 
                 if ev["type"] == "partial":
-                    if dropping:
-                        continue        # No partials for a phrase that was discarded
                     # Partials overwrite a separate file (the prompt log stays clean)
                     partial_path.write_text(ev["text"], encoding="utf-8")
                     continue
@@ -2049,13 +2061,6 @@ def main():
 
                 partial_path.write_text("", encoding="utf-8")
                 text = ev["text"].strip()
-
-                speaking_at = None
-                if dropping:
-                    dropping = False
-                    print(f"(消した) {text[:40]}", file=sys.stderr, flush=True)
-                    speaking_since = None
-                    continue
 
                 # The dictionary is read every time, so web UI edits land next utterance.
                 user_dict = load_dictionary()

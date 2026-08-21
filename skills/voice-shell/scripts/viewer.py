@@ -757,9 +757,11 @@ async def main_async(args):
     async def handle_drop_current(_req):
         """Throw away the line being recognized right now.
 
-        Only the time of the press is left behind, and the daemon does the
-        judging. That keeps a press landing after the settle from dragging in
-        the next utterance.
+        Only the time of the press is left behind, and the recognition loop
+        does the judging. Comparing that time with the moment the utterance
+        began keeps a press landing after the settle from dragging in the next
+        utterance. The loop reads this file and leaves it there, so nothing is
+        deleted here either.
         """
         (state / "drop_at").write_text(str(time.time()), encoding="utf-8")
         return web.json_response({"ok": True})
