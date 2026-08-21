@@ -105,9 +105,11 @@
                 data-i18n-title="editOnce"></button>
         <button class="tiny warn" id="dropOne" data-icon="delete" data-icon-size="16"
                 data-i18n-title="dropOne"></button>
-        <!-- Send this one now. The ring around the plane fills with what is
-             about to happen to the utterance, so the same drawing carries the
-             wait and the way past it. Set the pause to send generously, say ten
+        <!-- Send this one now. The drawing carries what is about to happen to
+             the utterance as well as the way past it. Going out paints the
+             inside across from the left. Being thrown away drains the ring
+             round the outside instead, so the two can never be read for one
+             another. Set the pause to send generously, say ten
              seconds, and once you have finished speaking there is nothing to do
              but sit out the rest of it, which is what this button is for. It
              was a span with nothing to press before, so it is a real button now
@@ -117,9 +119,17 @@
              press here costs you the utterance.
              The seat is held whether it is showing or not. Let it come and go
              and the two buttons beside it would move under a finger already on
-             its way, and this screen holds targets still above all else. -->
+             its way, and this screen holds targets still above all else.
+             The span inside is a second copy of the same plane, laid exactly
+             over the first in the knocked out ink. The stylesheet wipes it away
+             on the side the paint has not reached yet, so the plane flips color
+             at the very edge of the paint and never sinks into it. Two copies
+             rather than one plane in two colors, because one shape cannot hold
+             a moving color boundary without carrying its outline twice over,
+             and the drawings are built here from a single path each. -->
         <button class="tiny send" id="sendOne" data-icon="send" data-icon-size="16"
-                data-i18n-title="sendOne"></button>
+                data-i18n-title="sendOne"><span class="ink" data-icon="send"
+                data-icon-size="16" aria-hidden="true"></span></button>
       </span>
     </div>
     <div class="stream"><span id="stream" data-i18n-quiet="quiet"></span><span class="caret"></span></div>
