@@ -105,12 +105,17 @@
   /* Height is pinned to the full screen, and the log alone absorbs both the
      slack and the shortfall. Shrink the window and the log is what gets cut
      first, so the mic, the routes and the draft card stay on screen to the end. */
+  /* scrollbar-gutter because the row of four buttons is one node moved between
+     this screen and the sheets. Where the scrollbar takes width (it does not on
+     macOS, where it floats over), a sheet long enough to scroll pulled the row
+     15px left of where it sits here, and the same button changed seat just for
+     opening a longer screen. Reserving the gutter on both keeps it still. */
   .page {
     max-width:460px; margin:0 auto; height:100vh; height:100dvh;
     background:var(--panel);
     border-left:1px solid var(--line-soft); border-right:1px solid var(--line-soft);
     display:flex; flex-direction:column;
-    overflow-x:hidden; overflow-y:auto;
+    overflow-x:hidden; overflow-y:auto; scrollbar-gutter:stable;
   }
   .page > * { flex:none; }          /* Squeezed, the text inside gets clipped. Only the two below shrink */
   /* When the log is down to zero and there is still not enough room, the draft
@@ -138,9 +143,17 @@
     transition:height .12s ease-out;
   }
 
-  .icons { display:flex; align-items:center; gap:.15rem; flex:none; }
+  /* The four ways through the screen. The same node is moved between the main
+     screen's header and the two sheet headings, so margin-left:auto is here
+     rather than on whatever happens to sit to its left. It ends up hard right
+     in all three. */
+  .icons { display:flex; align-items:center; gap:.15rem; flex:none; margin-left:auto; }
+  /* flex:none because in a narrow sheet heading the back arrow was being
+     squeezed to 18px, half a target, while the row beside it kept its size and
+     spilled out of the heading anyway. Nothing here shrinks. What does not fit
+     is folded away by width instead, further down. */
   .icon {
-    position:relative; width:36px; height:36px; border-radius:50%;
+    position:relative; width:36px; height:36px; border-radius:50%; flex:none;
     display:grid; place-items:center; color:var(--dim);
     transition:background .15s, color .15s;
   }
@@ -149,8 +162,23 @@
   /* Material Symbols are filled paths. By default only the outlined one shows,
      and we swap in the filled one for whatever is currently on. */
   svg .solid { display:none; }
-  .lit > svg .solid, .on .ring svg .solid { display:inline; }
-  .lit > svg .line, .on .ring svg .line { display:none; }
+  .lit > svg .solid, .on .ring svg .solid, .icon.on > svg .solid { display:inline; }
+  .lit > svg .line, .on .ring svg .line, .icon.on > svg .line { display:none; }
+  /* The screen you are looking at right now. It is a wash of the accent rather
+     than --raise, which is what the tabs it replaces used, because --raise is
+     already what hovering does here and the two would have been the same
+     picture. Fill plus the filled drawing, so it still reads where color does
+     not come through.
+     The lit one is still pressable. Pressing it closes and puts you back on the
+     main screen, which is the only reason it may be shown lit at all. */
+  .icon.on {
+    background:color-mix(in srgb, var(--accent) 22%, transparent);
+    color:var(--accent);
+  }
+  .icon.on:hover:not(:disabled) {
+    background:color-mix(in srgb, var(--accent) 32%, transparent);
+    color:var(--accent);
+  }
   .icon > span { display:grid; place-items:center; }
   /* The dot under an icon shows on or off (same manner as the mock) */
   .icon::after {
@@ -824,24 +852,49 @@
 
   /* ── Settings panel ───────────────────── */
   .sheet {
-    position:fixed; inset:0; z-index:20; overflow-y:auto;
+    position:fixed; inset:0; z-index:20; overflow-y:auto; scrollbar-gutter:stable;
     background:var(--panel);
   }
-  .sheet-inner { max-width:460px; margin:0 auto; padding-bottom:2rem; }
+  /* The 1px is the page's own left and right border, which the sheet does not
+     have. Without it the row of buttons that moves between the two lands one
+     pixel further right in a sheet than it does on the main screen. */
+  .sheet-inner {
+    max-width:460px; margin:0 auto; padding-bottom:2rem;
+    border-left:1px solid transparent; border-right:1px solid transparent;
+  }
+  /* Same vertical padding as the main screen's header, so the row of buttons
+     that moves between the two sits at the same height in either. */
   .sheet-head {
     position:sticky; top:0; z-index:1;
     display:flex; align-items:center; gap:.4rem;
-    padding:.7rem var(--pad) .7rem .5rem; background:var(--panel);
+    padding:.85rem var(--pad) .7rem .5rem; background:var(--panel);
     border-bottom:1px solid var(--line-soft);
   }
   .sheet-head .icon::after { display:none; }   /* no need for the dot that shows state */
-  .sheet-head h2 { margin:0; font-size:1rem; font-weight:600; margin-right:auto; }
-  /* A cue for whether you are being heard while settings and the dictionary are
-     open. The sheet covers the whole screen, so neither the mic drawing nor the
-     level meter on the main screen can be seen from here. Do not make it
-     pressable. Sitting next to the back button, a misfire would cut the mic off
-     while you are still deep inside settings. */
-  .mini-mic { flex:none; width:30px; height:30px; }
+  /* It gives up its width first. The four buttons to its right are the way
+     through the screen and never shrink. */
+  .sheet-head h2 {
+    margin:0; font-size:1rem; font-weight:600;
+    min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  /* Whether you are being heard while a sheet is open. The sheet covers the
+     whole screen, so neither the mic drawing nor the level meter on the main
+     screen can be seen from here.
+     It used to be a picture and nothing more, held back from being pressable
+     because a misfire beside the back button would cut the mic off from deep
+     inside settings. The person using it asked for the opposite. Settling a
+     setting is exactly when you want to go quiet without losing your place, and
+     the only way to do it was to leave, cut it, and come back. So it presses
+     now, and it went from 30px to 34px to be worth aiming at. It is not up in
+     the row of four. The main screen already carries a big mic, and moving it
+     there would put two targets doing the same thing side by side. */
+  .mini-mic {
+    flex:none; width:34px; height:34px; border-radius:50%;
+    display:grid; place-items:center;
+    transition:background .15s;
+  }
+  .mini-mic:hover:not(:disabled) { background:var(--raise); }
+  .mini-mic:disabled { opacity:.35; }
   .mini-mic canvas { display:block; width:100%; height:100%; }
 
   .group { padding:1.1rem var(--pad); border-bottom:1px solid var(--line-soft); }
@@ -1136,15 +1189,56 @@
     :root { --pad:.7rem; }
     .machine { max-width:7rem; }
   }
+  /* Measured. The row of four is 144px at its tightest and never gives any of
+     it back, so everything sharing a sheet heading with it goes first, in this
+     order.
+     A sheet heading holds, left to right, the back arrow (36), the small mic
+     (34), the title, and the row (4 x 36 plus its gaps). All of that, with
+     the padding and before the title, comes to 253px. */
+  @media (max-width: 319px) {
+    /* The title goes first. The lit button in the row already says which of the
+       four screens you are on, so the word is the one thing here said twice. */
+    .sheet-head h2 { display:none; }
+  }
   @media (max-width: 279px) {
     :root { --pad:.55rem; }
     .brand h1, #logoMark { display:none; }   /* keep only the name tag */
     .machine { max-width:100%; }
+    /* Gaps next. The row loses its own (36px targets touching still read as
+       four, and 2.4px between them was never what told them apart), and the
+       heading is cut to a hair. This holds a whole heading down to 252px. */
+    .icons { gap:0; }
+    .sheet-head { gap:.2rem; padding-left:.35rem; }
     /* Fold settings to the same width. Send the field label up a row and hand the width to the slider */
     .field { flex-wrap:wrap; gap:.35rem .6rem; }
     .field > label { flex:1 0 100%; min-width:0; }
     .field .val { margin-left:0; }
     .gauge { margin-left:0; }
+  }
+  /* The arrow is the last thing left to give, and below 252px it goes. That is
+     against the decision to keep it, and it is still the least bad of what is
+     on the table. The small mic beside it is the only mute there is while a
+     sheet covers the big one, and the only sign you are still being heard, and
+     it is 2px narrower besides. The way out survives twice over without the
+     arrow. The lit button in the row closes, and so does Esc.
+
+     Measured. Where the scrollbar takes width, a heading gets the window less
+     the 15px gutter and the 2px of edges. Whole, it wants 235, so 252 is the
+     last width that holds it. */
+  @media (max-width: 251px) {
+    .sheet-head .icon.back { display:none; }
+  }
+  /* Measured in a window 200px wide. The heading is left 183px of it. The row
+     of four is 144 and the padding on its right is 8.8, which leaves 30.2, and
+     nothing 34px wide goes in 30.2. So the last of the spacing goes and the
+     small mic drops back to the 30px it was before it became pressable. Only
+     here. Anywhere the window is wider it is 34.
+     Where the scrollbar floats over instead (macOS as it comes) the same
+     heading has 198px and the 34px mic fits at 200 with room over. It is sized
+     for the tighter of the two, because the same window can be either. */
+  @media (max-width: 212px) {
+    .sheet-head { gap:0; padding-left:0; }
+    .mini-mic { width:30px; height:30px; }
   }
 
   /* Short. Fold the log heading and the note line, and tighten the vertical padding */
@@ -1237,6 +1331,11 @@
      (The layout no longer depends on the height. They are always side by side) */
   @media (max-height: 559px) {
     header { padding:.35rem var(--pad) .25rem; gap:.35rem; }
+    /* The sheet headings come down with it. The row of four is one node moved
+       between the three, and left out of this it sat 8px lower in a sheet than
+       on the main screen. A floating window is about 446px tall, which is to
+       say it is the usual place this bites, not a corner of one. */
+    .sheet-head { padding-top:.35rem; padding-bottom:.25rem; }
     .brand h1, #logoMark { display:none; }
     .machine { max-width:100%; }
     .status { padding:.15rem var(--pad) .1rem; }

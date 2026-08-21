@@ -94,7 +94,7 @@ const $ = id => document.getElementById(id);
 const el = {};
 for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'power','powerLabel','powerRow','powerNote','openSettings','sheet','closeSettings','floatBtn','page',
-                  'miniMic','miniViz',
+                  'miniMic','miniViz','navRow','pageHead','sheetHead','helpHead','openDict','sheetTitle',
                   'routes','routeChips','routePick','viz','meter','meterHit','meterFill','meterMark','logoMark',
                   'tray','stream','draft','draftTime','draftActions','send','discard',
                   'editOnce','dropOne','sendOne','draftMark',
@@ -110,7 +110,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'addReplace','addIgnore','newFrom','newTo','newIgnore','filterReplace',
                   'builtinChips','builtinCount',
                   'dictNote','dictExport','dictImport','dictFile',
-                  'paneBasic','paneDict','tabBasic','tabDict',
+                  'paneBasic','paneDict',
                   'openHelp','helpSheet','closeHelp','helpMini','helpMiniViz',
                   'cmdGroups','cmdNote'])
   el[id] = $(id);
@@ -587,11 +587,17 @@ addEventListener('keydown', armViz, {once:true});
 function setState(kind, text) {
   el.beacon.className = 'beacon ' + kind;
   el.stateText.textContent = text;
-  // While a sheet is open this one line is hidden. The small mic is the only
-  // cue left, so the same sentence goes on its label and its tooltip too.
+  /* While a sheet is open this one line is hidden. The small mic is the only
+     cue left, so the same sentence goes on its label and its tooltip too.
+     It presses now, so what pressing does has to come first. A screen reader
+     announcing nothing but the state would leave a button whose name never says
+     what it is for. The two are split by a newline rather than any punctuation,
+     because the mark between two sentences is not the same in all seven
+     languages and there is nothing here that has to be spelled. */
   for (const m of minis) {
-    m.box.title = text;
-    m.box.setAttribute('aria-label', text);
+    const s = t(route === 'off' ? 'resumeTitle' : 'pauseTitle') + '\n' + text;
+    m.box.title = s;
+    m.box.setAttribute('aria-label', s);
   }
 }
 
@@ -708,7 +714,11 @@ function paint() {
   }
   const off = route === 'off';
   el.modes.classList.toggle('muted', off);
-  el.segOff.setAttribute('aria-pressed', String(off));
+  // The small mics in the sheet headings press the same thing, so they carry
+  // the same state. Their wording is written in setState instead, which runs
+  // last of all and has the status line to fold in with it.
+  for (const b of [el.segOff, el.miniMic, el.helpMini])
+    b.setAttribute('aria-pressed', String(off));
   el.segOff.title = t(off ? 'resumeTitle' : 'pauseTitle');
   el.segOff.setAttribute('aria-label', el.segOff.title);
 
@@ -1157,6 +1167,16 @@ el.segLive.onclick = () => { oneShot = false; el.note.hidden = true; setRoute('l
 el.segHold.onclick = () => { oneShot = false; el.note.hidden = true; setRoute('hold'); };
 el.segOff.onclick = () => setRoute(route === 'off' ? lastMode : 'off');
 
+/* The small mics in the sheet headings do the same as the big one. While a
+   sheet is up it covers the main screen whole, and until now the only way to
+   cut the mic off from in there was to leave, cut it, and come back. Asked for
+   by the person using it, after settling a setting and wanting to go quiet
+   without losing their place.
+   They run el.segOff rather than setRoute so the one path stays the one path.
+   Everything that follows switching off (letting go of the browser mic,
+   stopping recognition) hangs off that click. */
+for (const b of [el.miniMic, el.helpMini]) b.onclick = () => el.segOff.click();
+
 /* ── Talking to the server ──────────────── */
 function connect() {
   const ws = new WebSocket(`ws://${location.host}/ws`);
@@ -1349,7 +1369,8 @@ function paintPower() {
   // Unless the browser is doing the recognizing, in which case it still works
   // with the daemon stopped.
   const usable = engineOnish() || asrActive();
-  for (const b of [el.segLive, el.segHold, el.segOff, el.mic]) b.disabled = !usable;
+  for (const b of [el.segLive, el.segHold, el.segOff, el.mic,
+                   el.miniMic, el.helpMini]) b.disabled = !usable;
 
   /* A button that does nothing when pressed is not shown. With browser
      recognition there is nothing to load, and pressing it just ends with
@@ -1621,45 +1642,117 @@ el.draft.addEventListener('keydown', e => {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); el.send.click(); }
 });
 
-/* ── Settings ───────────────────────────── */
-/* Settings and the dictionary are kept apart. Run together they go past 1400px
-   and the dictionary is buried at the bottom (it is taller than the screen, so
-   nobody notices it exists without scrolling). The top bar stays stuck in
-   place, so the moment you open it you can see the dictionary is there. */
-function showSheetTab(which) {
+/* ── Moving between the screens ──────────
+   Four screens sit behind the one row of buttons, and the row itself never
+   leaves. It is a single node, moved into the heading of whichever screen is
+   up, so a button never changes seat as you go between them.
+
+   Where you are is painted onto the button (this screen says everything with
+   color and fill, never by taking a thing away). The lit one still does
+   something when pressed, which is to close and put you back on the main
+   screen. A button that does nothing when pressed is not shown here, and that
+   goes for a lit one too.
+
+   Settings and the dictionary are two panes of one sheet rather than two
+   sheets. Run as one page they go past 1400px and the dictionary ends up
+   buried below the fold. Split as panes, the heading and the mic in it are
+   built once and the dictionary keeps every last one of its own parts
+   untouched. */
+let sheetPane = 'basic';                  // which of the two the settings sheet is showing
+
+// Which of the four you are looking at. '' is the main screen.
+const navWhere = () => !el.sheet.hidden ? sheetPane
+                     : !el.helpSheet.hidden ? 'help' : '';
+
+/* Put the row of buttons in the heading that is showing. Moving the node drops
+   focus (the browser takes it off anything leaving the document, even for the
+   instant it takes to re-insert), so it is handed back. Without that, moving
+   by keyboard lands you on nothing and the next Tab starts over from the top. */
+function placeNav() {
+  const head = !el.sheet.hidden ? el.sheetHead
+             : !el.helpSheet.hidden ? el.helpHead
+             : el.pageHead;
+  if (el.navRow.parentNode === head) return;
+  const d = uiDoc();
+  const keep = el.navRow.contains(d.activeElement) ? d.activeElement : null;
+  head.append(el.navRow);
+  if (keep) keep.focus({preventScroll: true});
+}
+
+function paintNav() {
+  const where = navWhere();
+  for (const [k, b] of [['help', el.openHelp], ['dict', el.openDict],
+                        ['basic', el.openSettings]]) {
+    b.classList.toggle('on', where === k);
+    b.setAttribute('aria-pressed', String(where === k));
+  }
+}
+
+function showSheetPane(which) {
   const basic = which !== 'dict';
+  sheetPane = basic ? 'basic' : 'dict';
   el.paneBasic.hidden = !basic;
   el.paneDict.hidden = basic;
-  el.tabBasic.classList.toggle('on', basic);
-  el.tabDict.classList.toggle('on', !basic);
   saveDict();                             // hiding it kills focus. Write before that
+  // The heading says which pane this is now that the tabs are gone. It goes
+  // through data-i18n rather than textContent alone, so switching the language
+  // while it is open repaints it along with everything else.
+  el.sheetTitle.dataset.i18n = basic ? 'settings' : 'grpDict';
+  el.sheetTitle.textContent = t(el.sheetTitle.dataset.i18n);
   el.sheet.scrollTop = 0;                 // do not carry over where you were looking before
-  store.set('sheetTab', basic ? 'basic' : 'dict');
 }
-el.tabBasic.onclick = () => showSheetTab('basic');
-el.tabDict.onclick = () => showSheetTab('dict');
 
-el.openSettings.onclick = async () => {
+async function openSettings(pane) {
+  saveCmds();                       // you can arrive here straight from the signals
   el.helpSheet.hidden = true;       // sheets never stack. Only one of them is up
   el.sheet.hidden = false;
   fitMini();                        // while it is hidden there is no size to measure
-  showSheetTab(store.get('sheetTab', 'basic'));
+  showSheetPane(pane);
+  placeNav();
+  paintNav();
   await Promise.all([loadMics(), loadLangs(), loadTuning(), loadDict(), loadWhisperModel()]);
   el.dictNote.textContent = '';
+}
+el.closeSettings.onclick = () => {
+  saveDict();
+  el.sheet.hidden = true;
+  placeNav();
+  paintNav();
 };
-el.closeSettings.onclick = () => { saveDict(); el.sheet.hidden = true; };
 
 /* The list of voice commands. Like settings, opening it swaps out the main screen. */
-el.openHelp.onclick = async () => {
+async function openHelp() {
   saveDict();                       // you can arrive here straight from settings
   el.sheet.hidden = true;
   el.helpSheet.hidden = false;
   el.helpSheet.scrollTop = 0;
   fitMini();
+  placeNav();
+  paintNav();
   el.cmdNote.textContent = '';
   await loadCommands();
+}
+el.closeHelp.onclick = () => {
+  saveCmds();
+  el.helpSheet.hidden = true;
+  placeNav();
+  paintNav();
 };
-el.closeHelp.onclick = () => { saveCmds(); el.helpSheet.hidden = true; };
+
+/* One press of a button in the row. Pressing the one you are already on closes
+   it, and that goes out through the same close handler the back arrow uses, so
+   the dictionary and the wordings are written the one way whichever route you
+   took out. */
+function navGo(to) {
+  if (navWhere() === to) {
+    (to === 'help' ? el.closeHelp : el.closeSettings).click();
+    return;
+  }
+  if (to === 'help') openHelp(); else openSettings(to);
+}
+el.openSettings.onclick = () => navGo('basic');
+el.openDict.onclick = () => navGo('dict');
+el.openHelp.onclick = () => navGo('help');
 
 /* ── What the keyboard can do ────────────
    Anything you can say out loud should also be doable with a key when your
@@ -1700,11 +1793,6 @@ function typingIn(node) {
    back as a different character. */
 const keyIs = (e, ch) => e.key.toUpperCase() === ch || e.code === 'Key' + ch;
 
-// Open it if closed, close it if open. Every press gets you back where you were
-function toggleSheet(sheet, open, close) {
-  if (sheet.hidden) open.click(); else close.click();
-}
-
 function onKey(e) {
   if (e.defaultPrevented || e.repeat || e.isComposing) return;
 
@@ -1733,7 +1821,7 @@ function onKey(e) {
   // Depending on the layout, ? may or may not need Shift, so it is checked first
   if (e.key === '?') {
     e.preventDefault();
-    toggleSheet(el.helpSheet, el.openHelp, el.closeHelp);
+    navGo('help');
     return;
   }
 
@@ -1741,7 +1829,18 @@ function onKey(e) {
     // A stand-in for Cmd+,. The way you remember opening settings stays, and it does not fight the browser.
     if (e.key === ',') {
       e.preventDefault();
-      toggleSheet(el.sheet, el.openSettings, el.closeSettings);
+      navGo('basic');
+      return;
+    }
+    /* The dictionary. It sits beside settings in the top bar, so it gets the
+       key beside the settings key. The position is read as well as the
+       character, the same way keyIs reads the letter bindings. With kana input
+       on, the same key comes back as 「。」, and on a French keyboard it comes
+       back as 「:」 with the period itself moved onto Shift. Matching the
+       character alone would leave it dead in both. */
+    if (e.key === '.' || e.code === 'Period') {
+      e.preventDefault();
+      navGo('dict');
     }
     return;
   }
@@ -2736,6 +2835,13 @@ el.floatBtn.onclick = async () => {
   // has to be detached).
   win.document.addEventListener('keydown', onKey);
   el.sheet.hidden = el.helpSheet.hidden = true;   // the small window starts on the main screen
+  // The row of buttons is one node living inside whichever screen is up. Both
+  // sheets were just put away, so it has to be walked back to the main
+  // screen's heading. Skip this and the small window opens with no way through
+  // it at all, since the row went into the small window inside a sheet that is
+  // now hidden.
+  placeNav();
+  paintNav();
   fitCanvas();
   paintFloat(true);
   store.set('floated', '1');
@@ -3489,6 +3595,9 @@ el.helpSheet.addEventListener('focusout', () => saveCmds());
 resolveLang();
 applyI18n();
 decorateIcons();
+// It starts on the main screen, so nothing in the row is lit. Say so out loud
+// anyway, or a screen reader reads four buttons that never mention their state.
+paintNav();
 // Reflect the state once the drawings are in (do it first and they go in twice)
 if (canFloat) paintFloat(false);
 // Browser recognition is Chrome only. Where it cannot be used, the setting is not shown at all.

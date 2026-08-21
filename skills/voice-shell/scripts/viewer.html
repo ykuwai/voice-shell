@@ -10,13 +10,19 @@
 <body>
 <div class="page" id="page">
 
-  <header>
+  <header id="pageHead">
     <div class="brand">
       <div class="mark" id="logoMark" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
       <h1>VoiceShell</h1>
       <span class="machine" id="machineTag" hidden></span>
     </div>
-    <div class="icons">
+    <!-- The four ways through this screen. There is one of these rows, not
+         three. viewer.js moves this very node into whichever heading is showing
+         (placeNav), so the four targets land in the same place on the main
+         screen, in settings, in the dictionary and in the list of signals. Copy
+         it per screen instead and the copies drift apart, and the state on each
+         would have to be painted three times over. -->
+    <div class="icons" id="navRow">
       <button class="icon" id="floatBtn" data-icon="picture_in_picture" data-icon-size="20"
               data-i18n-title="floatBtn" hidden></button>
       <!-- What to say out loud to make something happen. Do not leave this a
@@ -32,6 +38,13 @@
            knows it. -->
       <button class="icon" id="openHelp" data-icon="lightbulb" data-icon-size="20"
               data-i18n-title="commandsTitle"></button>
+      <!-- The dictionary used to be a tab inside settings. Nothing about it
+           belongs to settings, and a tab only shows once you are already
+           somewhere else, so it sits in the row of its own now. Left of
+           settings, because settings is the one that has always been last and
+           the hand knows where that is. -->
+      <button class="icon" id="openDict" data-icon="menu_book" data-icon-size="20"
+              data-i18n-title="grpDict"></button>
       <button class="icon" id="openSettings" data-icon="settings" data-icon-size="20"
               data-i18n-title="settingsTitle"></button>
     </div>
@@ -178,19 +191,20 @@
 <!-- ── Settings ─────────────────────────── -->
 <section class="sheet" id="sheet" hidden>
  <div class="sheet-inner">
-  <!-- Put it in the top bar. It stays visible however far you scroll, so the
-       dictionary never ends up buried down the page where nobody finds it. -->
-  <div class="sheet-head">
-    <button class="icon" id="closeSettings" data-icon="arrow_back_ios_new"
+  <!-- The heading stays stuck to the top however far you scroll, so the way
+       out and the way across are never scrolled off. -->
+  <div class="sheet-head" id="sheetHead">
+    <button class="icon back" id="closeSettings" data-icon="arrow_back_ios_new"
             data-icon-size="18" data-i18n-title="back"></button>
     <!-- A small copy of the same mic drawing as the main screen. You keep
          talking while this is open, so you need to see whether it is getting
-         through or has been cut off. The canvas draws the picture. -->
-    <span class="mini-mic" id="miniMic" role="img"><canvas id="miniViz"></canvas></span>
-    <div class="seg-row" id="sheetTabs">
-      <button id="tabBasic" class="on" data-i18n="settings">Settings</button>
-      <button id="tabDict" data-i18n="grpDict">Dictionary</button>
-    </div>
+         through or has been cut off, and pressing it cuts it off right here.
+         The canvas draws the picture. -->
+    <button class="mini-mic" id="miniMic"><canvas id="miniViz"></canvas></button>
+    <!-- Which of the two this sheet is showing. The tabs that used to say so
+         are gone. viewer.js swaps data-i18n along with the pane, so switching
+         the language reaches it through applyI18n like any other wording. -->
+    <h2 id="sheetTitle" data-i18n="settings">Settings</h2>
   </div>
 
   <div id="paneBasic">
@@ -377,11 +391,12 @@
      so nothing listed here can turn out not to work. -->
 <section class="sheet" id="helpSheet" hidden>
  <div class="sheet-inner">
-  <div class="sheet-head">
-    <button class="icon" id="closeHelp" data-icon="arrow_back_ios_new"
+  <div class="sheet-head" id="helpHead">
+    <button class="icon back" id="closeHelp" data-icon="arrow_back_ios_new"
             data-icon-size="18" data-i18n-title="back"></button>
-    <!-- Same as settings, so you can see whether you are being heard while this is open -->
-    <span class="mini-mic" id="helpMini" role="img"><canvas id="helpMiniViz"></canvas></span>
+    <!-- Same as settings, so you can see whether you are being heard while
+         this is open, and cut it off without leaving. -->
+    <button class="mini-mic" id="helpMini"><canvas id="helpMiniViz"></canvas></button>
     <h2 data-i18n="commandsTitle">Voice commands</h2>
   </div>
   <div id="cmdGroups"></div>
@@ -413,6 +428,11 @@
         ><span class="cap">Enter</span><span class="what" data-i18n="sendTitle"></span></div>
       <div class="key-row"><span class="cap">,</span
         ><span class="what" data-i18n="settings"></span></div>
+      <!-- Next to the settings key on the keyboard as well as on this list.
+           The dictionary sits next to settings in the top bar, so the pair of
+           keys reads the same way round as the pair of buttons. -->
+      <div class="key-row"><span class="cap">.</span
+        ><span class="what" data-i18n="grpDict"></span></div>
       <div class="key-row"><span class="cap">?</span
         ><span class="what" data-i18n="commandsTitle"></span></div>
       <div class="key-row"><span class="cap">Esc</span
