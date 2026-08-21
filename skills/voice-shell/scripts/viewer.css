@@ -496,63 +496,62 @@
      there was no telling whether it had gone yet or not. A number (1.5 → 1.0 →
      0.5) is exact, but it makes you read. This screen gets watched out of the
      corner of your eye while you talk, so show only the amount, on the one
-     drawing that already means sent. The paper plane fills from the bottom up,
-     the same way the mic lights up from below.
-     A line across the whole bottom edge came first. It moved too far for
-     something caught out of the corner of the eye, so the amount lives in one
-     corner now.
+     drawing that already means sent.
+     It used to hang in the bottom right corner of the card, floated out of the
+     flow. Talk long enough and the transcript grows a scrollbar, and the drawing
+     sat under it. It also cost the text a 24px strip of right margin, held open
+     at all times for a drawing that is usually idle. Both go away by taking a
+     seat in the row of tools instead, where a round drawing among round buttons
+     already has somewhere to sit.
      It is not a button. There is nothing here to press, and pressing would not
-     help anyway (speaking again is what clears it).
-     While reviewing and while paused nothing is sent on silence, so it is not
-     placed then. */
-  /* Do not let it bite into the rounded corners. The card is 20px round over a
-     1.5px border, so a child placed against the padding box has to clear a
-     curve of 18.5px. Set 12px in from the right and 5.6px up from the bottom,
-     the near corner of the drawing sits sqrt(6.5² + 12.9²) = 14.4px from the
-     center of that curve, which leaves 4px of daylight. */
-  /* Floated over the card, never in the flow. The card must not gain a single
-     pixel of height for this, or every screen grows a strip of empty room under
-     the text just to hold a drawing that is usually idle. The line it replaced
-     was placed the same way, so the trick is already proven here. */
+     help anyway (speaking again is what clears it). No hover, no focus, no
+     title, and the screen reader is not handed it.
+     While reviewing and while paused nothing is sent on silence, so it stays
+     dark then. */
   .send-cue {
-    position:absolute; right:.75rem; bottom:.35rem;
-    width:18px; height:18px; pointer-events:none;
-  }
-  /* Since it takes no height, what it can run into is the text beside it. Hold
-     the room open in the transcript at all times, showing or not. Opening it
-     only while the drawing is up would shove the words sideways in the middle
-     of a sentence, and words moving while you talk is the same flicker this
-     whole change is meant to end. 24px clears the 18px drawing with a gap left
-     over, and across 460px of card the line hardly notices. */
-  .draft-card .stream { padding-right:24px; }
-  .send-cue > span { position:absolute; left:0; bottom:0; width:18px; height:18px; display:block; }
-  /* Laid out as a block so the drawing fills its box exactly. Left inline it
-     would ride the text baseline and sit a few pixels high, and the fill would
-     stop short of the tip. */
-  .send-cue svg { display:block; }
-  /* The ground is the outline and the fill is the solid one, both already in
-     ICON. Filling up is then the drawing turning from a sketch into a thing,
-     which needs no second color to read.
-     Neon was the complaint about the version before this. Both tones are pulled
-     back toward what is behind them, far enough to stop glaring and not so far
-     that the drawing goes missing (the fill measures 5.36:1 in dark and 3.40:1
-     in light against the card, the ground 2.60:1 and 2.02:1). Nothing glows,
-     since a shadow at this size only smears the outline. */
-  .send-cue .ground { color:color-mix(in srgb, var(--accent) 35%, var(--track)); }
-  /* It grows upward because it hangs from the bottom and only its height moves.
-     JS writes that height every frame, and there is deliberately no transition.
-     A tab in the background gets no frames, so on the way back a transition
-     would slide through values that were never true.
-     Nothing here pulses or travels on its own either, so prefers-reduced-motion
-     has nothing to switch off. Stepping the fill would turn an amount into a
-     count, which is the reading we are trying to avoid. */
-  .send-cue .fill {
-    overflow:hidden; height:0;
+    display:grid; place-items:center; width:30px; height:30px; flex:none;
+    border-radius:50%; pointer-events:none;
     color:color-mix(in srgb, var(--accent) 70%, var(--panel-2));
+    border:1px solid color-mix(in srgb, var(--accent) 35%, var(--track));
+    /* The ring alone at the start, and the inside painted across as it runs.
+       Left to right, because the plane inside points right and something being
+       sent reads as travelling that way. Filling bottom up would have the
+       amount and the drawing pulling in two directions at once.
+       A gradient rather than a box that grows. A box has a width, and a width
+       across 28px of circle lands on whole pixels, which at three seconds of
+       silence turns a smooth run into about thirty visible steps. A gradient is
+       painted, not laid out, so it is free to sit between pixels.
+       The edge is soft over 18% of the width, roughly 5px. Enough that a single
+       frame's move never shows as an edge jumping, and short enough that the
+       amount can still be read at a glance. Blur it much further and the reading
+       goes with it, which is the whole point of the drawing.
+       --r is written every frame from the clock, never stepped, so no rounding
+       of its own comes in on top. */
+    --cue-on:color-mix(in srgb, var(--accent) 35%, var(--track));
+    background-image:linear-gradient(to right,
+      var(--cue-on) calc(var(--r, 0) * 100% - 9%),
+      var(--panel-2) calc(var(--r, 0) * 100% + 9%));
+    /* Held whether it is showing or not. Take the seat away and the two buttons
+       beside it slide as it comes and goes, which moves a target under a finger
+       already reaching for it. */
+    visibility:hidden;
   }
-  .send-cue .fill > span { position:absolute; left:0; bottom:0; width:18px; height:18px; display:block; }
-  .send-cue .fill svg .solid { display:inline; }
-  .send-cue .fill svg .line { display:none; }
+  .send-cue.on { visibility:visible; }
+  /* No transition on the fill. A tab in the background gets no frames, so on the
+     way back a transition would slide through amounts that were never true.
+     Nothing pulses or travels on its own either, so prefers-reduced-motion has
+     nothing to switch off here. */
+  .send-cue > span { display:grid; place-items:center; }
+  .send-cue svg { display:block; }
+  /* The plane stays solid the whole way. What changes is the circle around it,
+     which is what carries the amount. Two things changing at once would leave
+     neither one readable at this size.
+     Neon was the complaint about the version before this, so both tones stay
+     pulled back toward what is behind them. They are the same two mixes that
+     drawing used (the plane measures 5.36:1 in dark and 3.40:1 in light against
+     the card, the wash 2.60:1 and 2.02:1). Nothing glows. */
+  .send-cue svg .solid { display:inline; }
+  .send-cue svg .line { display:none; }
 
   /* The raw live transcript. It sits apart from the edit box, and only the
      settled part drops down into it. Pouring this straight into the edit box
@@ -1043,14 +1042,12 @@
     .draft-card .stream { order:1; flex:1 1 6em; min-width:0; }
     .draft-card > textarea { order:3; flex:1 1 100%; margin-top:0; }
     .draft-card .draft-actions { order:4; flex:1 1 100%; margin-top:0; }
-    /* The tools have come down beside the text here, and they end up holding
-       the bottom right corner themselves. A drawing tucked under them would
-       read as one more button in that row, and the card is only about 40px tall
-       so there is nowhere else for it to go. Drop it at this height and give the
-       room back to the words. Whether you are being heard still reads off the
-       mic drawing. */
-    .send-cue { display:none; }
-    .draft-card .stream { padding-right:0; }
+    /* It used to be dropped at this height. Back then it hung in the corner of
+       the card, and on a card about 40px tall there was nowhere for it to go
+       that was not under the tools. It rides inside the tools now, so it costs
+       no row and no corner, and the row it is in is already on screen here. So
+       it stays. Losing it was the worse trade anyway, since the small window is
+       where the card is most likely to be watched out of the corner of an eye. */
   }
 
   /* When it is short, cut the top bar down to the name tag. Neither the title
