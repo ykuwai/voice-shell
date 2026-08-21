@@ -16,7 +16,7 @@
 
 ```bash
 npx skills add ykuwai/voice-shell
-pip install numpy aiohttp
+pip install numpy aiohttp sounddevice
 ```
 
 Chrome만 있으면 이것으로 끝입니다. **내려받을 모델도, 기다릴 것도 없습니다.**
@@ -85,12 +85,10 @@ voice-shell.sh engines
 
 ## 잘 안 될 때
 
-녹음에는 `ffmpeg`(macOS와 Windows) 또는 `arecord`(Linux)가 필요합니다.
+Linux에서는 녹음에 `arecord`가 필요합니다.
 
 ```bash
-brew install ffmpeg              # macOS
 sudo apt install alsa-utils      # Linux
-winget install ffmpeg            # Windows
 ```
 
 | 이런 때 | 이렇게 |

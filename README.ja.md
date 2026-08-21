@@ -15,7 +15,7 @@ Claude Code のほか、Codex など他のエージェントからも使える�
 
 ```bash
 npx skills add ykuwai/voice-shell
-pip install numpy aiohttp
+pip install numpy aiohttp sounddevice
 ```
 
 Chrome があれば、これだけで動く。**モデルのダウンロードも待ち時間もない。**
@@ -82,12 +82,10 @@ voice-shell.sh engines
 
 ## うまくいかないとき
 
-録音には `ffmpeg`（macOS と Windows）または `arecord`（Linux）が要る。
+Linux では録音に `arecord` が要る。
 
 ```bash
-brew install ffmpeg              # macOS
 sudo apt install alsa-utils      # Linux
-winget install ffmpeg            # Windows
 ```
 
 | 出ていること | どうするか |

@@ -17,7 +17,7 @@ Entrée. Fonctionne avec Claude Code et avec d'autres agents comme Codex.
 
 ```bash
 npx skills add ykuwai/voice-shell
-pip install numpy aiohttp
+pip install numpy aiohttp sounddevice
 ```
 
 Si vous avez Chrome, il n'en faut pas plus. **Aucun modèle à télécharger, rien à
@@ -90,12 +90,10 @@ Tous vos réglages restent dans `~/.config/voice-shell/` et survivent à un red�
 
 ## Quand ça coince
 
-Pour enregistrer il faut `ffmpeg` (macOS et Windows) ou `arecord` (Linux).
+Sous Linux, pour enregistrer il faut `arecord`.
 
 ```bash
-brew install ffmpeg              # macOS
 sudo apt install alsa-utils      # Linux
-winget install ffmpeg            # Windows
 ```
 
 | Ce que vous voyez | Quoi faire |

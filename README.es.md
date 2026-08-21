@@ -16,7 +16,7 @@ Claude Code y también con otros agentes como Codex.
 
 ```bash
 npx skills add ykuwai/voice-shell
-pip install numpy aiohttp
+pip install numpy aiohttp sounddevice
 ```
 
 Si tienes Chrome, con eso basta. **No hay modelo que descargar ni nada que esperar.**
@@ -88,12 +88,10 @@ Todo lo que configures se queda en `~/.config/voice-shell/` y sobrevive a un rei
 
 ## Cuando algo va mal
 
-Para grabar hace falta `ffmpeg` (macOS y Windows) o `arecord` (Linux).
+En Linux, para grabar hace falta `arecord`.
 
 ```bash
-brew install ffmpeg              # macOS
 sudo apt install alsa-utils      # Linux
-winget install ffmpeg            # Windows
 ```
 
 | Lo que ves | Qué hacer |

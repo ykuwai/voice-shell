@@ -2203,7 +2203,12 @@ def main():
     # those it would fall back to the system default every single time.
     saved_mic = read_config().get("mic")
     if saved_mic and args.device == asr_mic.DEFAULT_DEVICE:
-        args.device = saved_mic
+        # Not used as it stands. A name saved before the mic moved onto
+        # PortAudio is spelled the old way (#59), so it gets brought up to date
+        # first, and dropped for the system default when nothing answers to it.
+        # Written straight in, it would leave the dropdown on screen matching no
+        # entry and sitting blank, which reads as though the mic were broken.
+        args.device = asr_mic.resolve_saved_device(saved_mic)
     mic_path = Path(args.log_file).parent / MIC_FILE.name
     mic_path.write_text(args.device, encoding="utf-8")
 
