@@ -34,10 +34,9 @@ Uses `SpeechAnalyzer` and `SpeechTranscriber` (`engine_apple.py`).
 Runs with `--engine apple`.
 
 ```bash
-brew install ffmpeg                      # for recording
 cd <this repository>
 python3 -m venv .venv                    # Python 3.10 to 3.13
-.venv/bin/pip install -U numpy aiohttp soxr
+.venv/bin/pip install -U numpy aiohttp soxr sounddevice
 ```
 
 The Swift helper (`speech_helper.swift`) is built automatically on the first run,
@@ -65,7 +64,7 @@ of Whisper, which runs on any OS.
 ```bash
 cd <this repository>
 python3 -m venv .venv                    # Python 3.10 to 3.13
-.venv/bin/pip install -U faster-whisper aiohttp soxr numpy
+.venv/bin/pip install -U faster-whisper aiohttp soxr numpy sounddevice
 ```
 
 If `nvidia-smi` shows an NVIDIA GPU on the machine, the defaults are fine as they are.
@@ -113,17 +112,18 @@ slower and uses the memory the model needs.
 `voice-shell.sh` finds the `.venv` at the root of the repository by itself, so there
 is no need to set `VOICE_SHELL_PYTHON`.
 
-You need a tool to record with. `ffmpeg` on macOS and Windows, `arecord` on Linux.
+`sounddevice` in the pip line above is what records on macOS and Windows, and it
+arrives as a ready built wheel, so there is nothing else to install there.
+
+Linux records through `arecord`, which is a separate program.
 
 ```bash
-brew install ffmpeg              # macOS
 sudo apt install alsa-utils      # Linux
-winget install ffmpeg            # Windows
 ```
 
 On macOS a dialog asks the terminal for mic permission on the first run, so have
-the user allow it (ffmpeg records through avfoundation). The recognition itself
-never touches the mic, so nothing else has to be allowed.
+the user allow it. The recognition itself never touches the mic, so nothing else
+has to be allowed.
 
 ## 2. Make the skill visible
 
@@ -147,9 +147,9 @@ Once `READY` shows up, have the user open http://127.0.0.1:8090 and talk.
 | Symptom | What to do |
 |---|---|
 | `No Python it can run was found` | `export VOICE_SHELL_PYTHON=/path/to/.venv/bin/python` |
-| No `arecord` or `ffmpeg` | Install it as shown under "Common to both" above |
+| Nothing here can record | `pip install sounddevice`. On Linux `sudo apt install alsa-utils` |
 | Startup says `FAILED` | Look at `voice-shell.sh status` and the tail of `daemon.out` |
 | Whisper is slow | Shrink the model (`--model base`). On a CPU add `--whisper-compute int8` |
 | You talk and nothing arrives | The trigger level is too high. Lower the mark under the mic in the viewer until the bar crosses it when you speak |
 | Noises send things on their own | The trigger level is too low. Raise that same mark until only your voice gets past it |
-| You want a different mic | List them with `arecord -L` (Linux) or the like and pass one to `--device` |
+| You want a different mic | Pick it in the viewer, or pass its name to `--device`. On Linux `--device` takes the `-D` of `arecord` (`arecord -L` lists them) |

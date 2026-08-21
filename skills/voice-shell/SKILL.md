@@ -453,7 +453,9 @@ picking a local model.
   uses is decided by the size of the model
   - `--engine apple` (macOS 26 or newer, the recognition that ships with the OS)
     loads no model, so this limit does not apply to it
-- The microphone is taken through `arecord` (Linux) or `ffmpeg` (macOS / Windows)
+- The microphone is taken through `sounddevice` (macOS and Windows) or
+  `arecord` (Linux). Without `sounddevice` installed, macOS and Windows fall
+  back to `ffmpeg`
 - When a local model was picked but the environment is not in place, `start`
   fails with `No Python it can run was found`. Either go back to browser recognition
   (`start --engine browser`) or walk them through [SETUP.md](SETUP.md)

@@ -76,8 +76,9 @@ DEAD_SLOW_SEC = 300.0
 DEFAULT_SILENCE_THRESHOLD = 0.015 if sys.platform == "darwin" else 0.054
 
 # The value that stands for "use the system default". Kept as one spelling
-# across every OS, with mic_command resolving how it is actually named
-# (":default" for avfoundation, a device name for dshow, "pipewire" for ALSA).
+# across every OS, with the opening resolving how it is actually named
+# (PortAudio's own default on macOS and Windows, "pipewire" for ALSA, and
+# ":default" for avfoundation on the machines still falling back to ffmpeg).
 #
 # It used to default to a different spelling per OS, but ":0" and "audio=default"
 # matched nothing in the list list_mics() gives back. The dropdown on the page
@@ -123,9 +124,11 @@ def add_common_args(p):
                    help="Pin the language. Write it like Japanese. Left out, it "
                         "is worked out on its own")
     p.add_argument("--device", default=DEFAULT_DEVICE,
-                   help="The recording device. On Linux it is the -D of arecord "
-                        "(pipewire, plughw:2,0), on macOS the avfoundation number "
-                        "(:0), on Windows the dshow name (audio=<mic name>)")
+                   help="The recording device. On macOS and Windows it is the "
+                        "mic's name, spelled the way the mic list in the viewer "
+                        "spells it. On Linux it is the -D of arecord (pipewire, "
+                        "plughw:2,0). A name nothing answers to falls back to "
+                        "the system default")
     p.add_argument("--input-samplerate", type=int, default=44100,
                    help="The rate the mic records at. It is converted to 16kHz "
                         "before recognizing")
@@ -144,8 +147,7 @@ def load_model(args):
     model. whisper runs faster-whisper on this machine.
     With either of them, the audio never leaves this machine.
     """
-    # Cleanup is needed whichever engine runs. The recording ffmpeg / arecord
-    # runs as a child process regardless, so register before the branching.
+    # Cleanup is needed whichever engine runs, so register before the branching.
     # (Back when this sat inside the per-engine branches, apple never reached
     #   the registration and every stop left the recording process orphaned)
     _kill_engine_on_exit()
@@ -172,7 +174,9 @@ def _kill_engine_on_exit():
     When Ctrl-C or kill ends the parent, children stay behind still holding
     resources. Two things stay behind.
 
-    - the recording ffmpeg / arecord keeps the mic open (every engine)
+    - the recording arecord (Linux), or the ffmpeg any machine without
+      sounddevice falls back to, keeps the mic open. PortAudio has no child of
+      its own, and the mic goes with the process
     - the recognition helper stays (apple)
 
     SIGTERM does not go through atexit by default, so it is turned into
@@ -248,6 +252,153 @@ def available_engines() -> list:
     return [{"id": e, "label": ENGINE_LABELS.get(e, e)} for e in out]
 
 
+# ── How the mic gets opened ──────────────
+#
+# macOS and Windows go through PortAudio (sounddevice). ffmpeg's avfoundation
+# capture throws audio away and has no way of saying so. Measured on one device
+# at one moment with both running at once, PortAudio collected 19.968 seconds
+# out of 20 (0.986, and it reported 0 overflows), while ffmpeg collected 17.909
+# (0.879, with -loglevel warning printing not one line). The missing 12 percent
+# grows with the length of the recording, so it is a steady loss and not a cost
+# paid at startup. Neither the device nor the machine's load explains it, since
+# a virtual device drops the same amount and the two ran side by side (#58, #59).
+#
+# Linux stays on arecord. It still gets sound while PipeWire holds the mic, and
+# nobody has measured whether PortAudio manages the same (there is no Linux
+# machine here to measure on). It moves when somebody can measure it.
+#
+# A machine without sounddevice falls back to ffmpeg and is told nothing about
+# it. Installing it is part of the setup steps, so anybody who followed them has
+# it, and a warning there would be read by almost nobody.
+_SD = None
+_SD_LOOKED = False
+_SD_OPEN = 0          # PortAudio streams this process holds open right now
+_SD_MISSED = set()    # device names already reported as not being here
+
+
+def _sd():
+    """Give back the sounddevice module, or None when it cannot be used.
+
+    Deliberately not an import at the top of the file. sounddevice is optional,
+    and when the PortAudio shared library is missing it raises OSError rather
+    than ImportError, so both have to be swallowed or a machine without it
+    cannot so much as load this module.
+    """
+    global _SD, _SD_LOOKED
+    if not _SD_LOOKED:
+        _SD_LOOKED = True
+        try:
+            import sounddevice
+            _SD = sounddevice
+        except Exception:
+            _SD = None
+    return _SD
+
+
+def _use_portaudio() -> bool:
+    """Whether the mic gets opened through PortAudio on this machine."""
+    if not (sys.platform == "darwin" or sys.platform.startswith("win")):
+        return False
+    return _sd() is not None
+
+
+def _sd_refresh():
+    """Make PortAudio read the list of devices again.
+
+    It reads that list once, when the library starts, and never looks again. A
+    mic plugged in after that stays invisible for the whole life of the process,
+    which would leave the viewer's dropdown stale after days of running, and
+    would have the replug recovery below reopen against a list that still
+    describes the world before the unplug. Tearing the library down and bringing
+    it back up is the only way to make it look again.
+
+    Only safe with nothing open, since terminating pulls the floor out from
+    under a running stream, so it does nothing while this process holds one.
+    """
+    sd = _sd()
+    if sd is None or _SD_OPEN:
+        return
+    try:
+        sd._terminate()
+        sd._initialize()
+    except Exception:
+        pass
+
+
+def _sd_inputs() -> list:
+    """The input devices PortAudio sees, on the default host API only.
+
+    Windows shows one microphone once per host API (MME, WASAPI, DirectSound,
+    WDM-KS), so listing them all would offer the same mic four times over and
+    the choice between them would mean nothing to anybody reading it. macOS has
+    only Core Audio, so the filter costs it nothing.
+    """
+    sd = _sd()
+    if sd is None:
+        return []
+    try:
+        host = sd.default.hostapi
+        return [(i, d) for i, d in enumerate(sd.query_devices())
+                if d["max_input_channels"] > 0 and d["hostapi"] == host]
+    except Exception:
+        return []
+
+
+def _sd_find(device: str):
+    """Look a device name up in what PortAudio can see right now.
+
+    Gives back an index, or None when nothing here answers to that name. Says
+    nothing either way, so the callers can each word the miss their own way.
+    """
+    if not device or device == SYSTEM_DEFAULT:
+        return None
+    want = device
+    # The old Windows spelling was "audio=<mic name>", and the name inside it is
+    # the very name PortAudio reports, so that one carries over rather than
+    # being thrown away. The old macOS spelling was a bare number (":0") into a
+    # list ffmpeg built, which nothing here can map, so those land on the default.
+    if want.startswith("audio="):
+        want = want[len("audio="):]
+    inputs = _sd_inputs()
+    for i, d in inputs:
+        if d["name"] == want:
+            return i
+    low = want.lower()
+    for i, d in inputs:
+        if d["name"].lower() == low:
+            return i
+    for i, d in inputs:
+        if low and low in d["name"].lower():
+            return i
+    return None
+
+
+def _sd_device(device: str):
+    """Turn a device name into something PortAudio will open.
+
+    None stands for the system default, which is what PortAudio does with
+    device=None.
+
+    A name that answers to nothing comes back as the default instead of as an
+    error. The spelling of a device changed when the mic moved off ffmpeg (#59),
+    so anyone who had picked one before that has ":0" or "audio=<mic name>"
+    sitting in ~/.config/voice-shell/config.json. Failing on those would leave
+    them with no recording at all until they went and edited a file by hand,
+    when landing on the system default puts them back where they started.
+    """
+    if not device or device == SYSTEM_DEFAULT:
+        return None
+    found = _sd_find(device)
+    if found is None and device not in _SD_MISSED:
+        # Said once per name, not once per open. read_blocks reopens the
+        # recording every few seconds while a mic is missing, and a line each
+        # time would bury everything else in the log.
+        _SD_MISSED.add(device)
+        print(f"No mic here answers to {device}. Recording from the system "
+              "default instead", file=sys.stderr, flush=True)
+    return found
+
+
 def list_mics() -> list:
     """Give back the list of usable mics. [{"id": ..., "label": ...}, ...]
 
@@ -259,6 +410,16 @@ def list_mics() -> list:
     # spots the id and takes its wording from i18n.js. Every other entry below is
     # a device name the OS handed over, which is nobody's to translate.
     out = [{"id": SYSTEM_DEFAULT, "label": "System default"}]
+
+    if _use_portaudio():
+        # The name is the id as well. It reads the same to a person as it does
+        # to PortAudio, the viewer matches the browser's own device labels
+        # against it by containment, and unlike an index it survives a replug.
+        _sd_refresh()
+        for _, d in _sd_inputs():
+            out.append({"id": d["name"], "label": d["name"]})
+        return out
+
     try:
         if sys.platform == "darwin":
             # ffmpeg puts the device list on stderr, and exits with 1 as well
@@ -309,16 +470,61 @@ def list_mics() -> list:
     return out
 
 
+def resolve_saved_device(device: str) -> str:
+    """Bring a device name remembered by an older version up to date.
+
+    Gives back the name to go on using, which is the sentinel when nothing here
+    answers to the saved one.
+
+    The spelling changed when the mic moved onto PortAudio (#59). ":0" on macOS
+    was a number into a list ffmpeg built and nothing can map it back, so those
+    land on the system default. "audio=<mic name>" on Windows carries the real
+    name inside it, so those keep the mic that was picked and only lose the
+    prefix.
+
+    Worth doing rather than leaving the stale name to fall back on its own,
+    because the dropdown on screen picks what is selected by matching this
+    against the mic list. A name that matches nothing leaves it showing the raw
+    saved string with no entry behind it, which reads as though the mic were
+    broken when the recording is in fact fine.
+    """
+    if not device or device == SYSTEM_DEFAULT:
+        return SYSTEM_DEFAULT
+    known = [m["id"] for m in list_mics()]
+    if device in known:
+        return device
+    # Nothing but the sentinel means the listing itself failed, and taking that
+    # for "the mic is gone" would throw away a choice that is perfectly good.
+    if len(known) <= 1:
+        return device
+    if _use_portaudio():
+        found = _sd_find(device)
+        inputs = dict(_sd_inputs())
+        if found in inputs:
+            name = inputs[found]["name"]
+            print(f"The mic saved last time ({device}) is spelled {name} now. "
+                  "Carrying the choice over", file=sys.stderr, flush=True)
+            return name
+    print(f"No mic here answers to the one saved last time ({device}). "
+          "Starting on the system default", file=sys.stderr, flush=True)
+    return SYSTEM_DEFAULT
+
+
 def mic_command(device: str, in_sr: int) -> list:
     """Build the command that pours raw PCM onto stdout.
 
     Linux uses arecord (it still gets sound while PipeWire holds the mic).
-    macOS and Windows use ffmpeg. Pass device anything other than "default"
-    to name a device or its number.
+
+    macOS and Windows only reach here without sounddevice installed. ffmpeg
+    drops roughly a tenth of the audio and says nothing about it (#58), so
+    _PortAudioMic is the road they normally take. Pass device anything other
+    than "default" to name a device or its number.
     """
     if sys.platform == "darwin":
         if shutil.which("ffmpeg") is None:
-            sys.exit("ffmpeg was not found (brew install ffmpeg)")
+            sys.exit("Nothing here can record. Either of these fixes it.\n"
+                     "  pip install sounddevice\n"
+                     "  brew install ffmpeg")
         # avfoundation takes the ":<audio device number>" form. ":default" works
         # too (measured, it does record from the system default input).
         if device == SYSTEM_DEFAULT:
@@ -331,7 +537,9 @@ def mic_command(device: str, in_sr: int) -> list:
 
     if sys.platform.startswith("win"):
         if shutil.which("ffmpeg") is None:
-            sys.exit("ffmpeg was not found (winget install ffmpeg)")
+            sys.exit("Nothing here can record. Either of these fixes it.\n"
+                     "  pip install sounddevice\n"
+                     "  winget install ffmpeg")
         # dshow names the device. The list comes out of the following command.
         #   ffmpeg -list_devices true -f dshow -i dummy
         # Unlike avfoundation there is no spelling that stands for the default,
@@ -360,12 +568,141 @@ def mic_command(device: str, in_sr: int) -> list:
             "-r", str(in_sr), "-c", "1", "-t", "raw", "-q"]
 
 
+class _MicStream:
+    """One open recording, whatever it was opened with.
+
+    read_blocks wants three things out of a recording and nothing more. Blocks
+    of raw 16bit mono on a queue, a way to shut it, and a count of what got
+    thrown away. Both roads wear this same shape, so the loop below and every
+    guard in it (each one paid for with a real failure) never has to ask which
+    one is running underneath.
+
+    On its own it is a recording nothing ever arrives from, which is what a
+    failed open gives back.
+    """
+
+    def __init__(self):
+        self.q = queue.Queue(maxsize=100)   # 10 seconds at BLOCK_SEC
+        self.overflows = 0   # times the mic had audio ready and nobody took it
+        self.dropped = 0     # blocks let go of because the queue was full
+        self.error = ""      # why opening failed, when it did
+
+    def close(self):
+        pass
+
+
+class _PortAudioMic(_MicStream):
+    """The mic through PortAudio, inside this process, with no child at all.
+
+    The callback runs on PortAudio's own thread and must never block, so a full
+    queue lets the block go and counts it rather than waiting. 100 blocks is 10
+    seconds of room, so it only fills when the reader has stopped dead, and
+    that is worth knowing about.
+    """
+
+    def __init__(self, device: str, in_sr: int, nbytes: int):
+        super().__init__()
+        global _SD_OPEN
+        sd = _sd()
+        # Look at the devices again before opening. After a USB mic is pulled
+        # and put back, the list PortAudio started with still describes the
+        # world without it, and reopening would bind whatever that stale list
+        # calls the default.
+        _sd_refresh()
+
+        def callback(indata, frames, at, status):
+            # status is the thing ffmpeg had no way of telling anyone. It is
+            # counted rather than printed, because this runs on the audio thread
+            # and an exception thrown here aborts the stream.
+            try:
+                if status.input_overflow:
+                    self.overflows += 1
+                self.q.put_nowait(bytes(indata))
+            except queue.Full:
+                self.dropped += 1
+            except Exception:
+                pass
+
+        # int16 mono is the very shape the rest of this file already reads out
+        # of the ffmpeg pipe, so nothing downstream has to know which road the
+        # bytes came down.
+        self.stream = sd.RawInputStream(
+            samplerate=in_sr, blocksize=nbytes // 2, dtype="int16",
+            channels=1, device=_sd_device(device), callback=callback)
+        try:
+            self.stream.start()
+        except Exception:
+            self.stream.close()
+            raise
+        _SD_OPEN += 1
+
+    def close(self):
+        global _SD_OPEN
+        try:
+            self.stream.stop()
+            self.stream.close()
+        except Exception:
+            pass
+        finally:
+            _SD_OPEN = max(0, _SD_OPEN - 1)
+
+
+class _ProcessMic(_MicStream):
+    """The mic through a child process (arecord, or ffmpeg as the fallback).
+
+    A full queue waits here instead of dropping, unlike the PortAudio one. The
+    pipe holds the sound until somebody reads it, so being slow costs nothing.
+    """
+
+    def __init__(self, device: str, in_sr: int, nbytes: int):
+        super().__init__()
+        self.proc = subprocess.Popen(mic_command(device, in_sr),
+                                     stdout=subprocess.PIPE)
+
+        def pump():
+            try:
+                while True:
+                    b = self.proc.stdout.read(nbytes)
+                    while True:
+                        try:
+                            self.q.put(b, timeout=1.0)
+                            break
+                        except queue.Full:
+                            if self.proc.poll() is not None:
+                                return        # recording already stopped. Drop it
+                    if not b:                 # empty bytes means the other end ended
+                        return
+            except (OSError, ValueError):
+                pass
+
+        threading.Thread(target=pump, daemon=True).start()
+
+    def close(self):
+        try:
+            self.proc.terminate()
+            self.proc.wait(timeout=1.5)
+        except (OSError, subprocess.SubprocessError):
+            try:
+                self.proc.kill()
+            except OSError:
+                pass
+
+
+def open_mic(device: str, in_sr: int, nbytes: int) -> _MicStream:
+    """Open the mic whichever way this machine can."""
+    if _use_portaudio():
+        return _PortAudioMic(device, in_sr, nbytes)
+    return _ProcessMic(device, in_sr, nbytes)
+
+
 def read_blocks(device: str, in_sr: int,
                 want_device=None, on_switch=None) -> Iterator[Tuple[np.ndarray, float, float]]:
     """Keep reading the mic and yield (16kHz PCM, length in seconds, RMS).
 
-    While PipeWire holds the mic, PortAudio cannot see it, so arecord is made
-    to spit out raw PCM and it comes back through a pipe.
+    macOS and Windows open it through PortAudio. Linux drives arecord and reads
+    raw PCM back through a pipe, since it still gets sound while PipeWire holds
+    the mic. Either way the blocks land on a queue and are read from there, so
+    everything below this line is the same for both.
 
     If want_device() gives back a different device name, only the recording
     process is swapped. The model stays loaded, so switching mics never waits.
@@ -382,47 +719,34 @@ def read_blocks(device: str, in_sr: int,
     """
     nbytes = int(in_sr * BLOCK_SEC) * 2  # 16bit mono
 
-    # The recording process can stay alive while the sound alone stops coming.
-    # Measured, it happens when a USB mic is unplugged and plugged back in
-    # (avfoundation stays wired to the device it opened with, so once the
-    # default swaps, not even silence arrives). proc.stdout.read() then gets no
-    # EOF either and waits forever. Measured, it sat that way for two and a half
-    # hours, the page still saying it was arriving and nothing happening.
+    # The recording can stay open while the sound alone stops coming. Measured,
+    # it happens when a USB mic is unplugged and plugged back in (avfoundation
+    # stays wired to the device it opened with, so once the default swaps, not
+    # even silence arrives, and PortAudio holds a device the same way). The read
+    # off the pipe then gets no EOF either and waits forever. Measured, it sat
+    # that way for two and a half hours, the page still saying it was arriving
+    # and nothing happening.
     #
-    # Move the reading onto another thread, wait a set time, rebuild if nothing
+    # Move the reading off this thread, wait a set time, rebuild if nothing
     # comes. A quiet room is never mistaken for it. Blocks themselves arrive
     # even in silence, and they stop only when the wiring is cut.
     # There is also a break where blocks arrive but hold zeros (DEAD_SEC has that).
     def start(dev):
-        p = subprocess.Popen(mic_command(dev, in_sr), stdout=subprocess.PIPE)
-        q = queue.Queue(maxsize=100)          # 10 seconds. Overflow waits on the pipe
-        def pump():
-            try:
-                while True:
-                    b = p.stdout.read(nbytes)
-                    while True:
-                        try:
-                            q.put(b, timeout=1.0)
-                            break
-                        except queue.Full:
-                            if p.poll() is not None:
-                                return        # recording already stopped. Drop it
-                    if not b:                 # empty bytes means the other end ended
-                        return
-            except (OSError, ValueError):
-                pass
-        threading.Thread(target=pump, daemon=True).start()
-        return p, q
+        """Open the recording, and never raise while doing it.
 
-    def stop(p):
+        A failure comes back as a recording nothing ever arrives from, on
+        purpose. PortAudio checks the device the moment it opens, unlike ffmpeg,
+        so a mic that is unplugged right now throws right here, and letting that
+        out would take the whole daemon down over something that fixes itself
+        the moment it is plugged back in. The stall watch below already knows
+        how to wait, back off, and say so exactly once.
+        """
         try:
-            p.terminate()
-            p.wait(timeout=1.5)
-        except (OSError, subprocess.SubprocessError):
-            try:
-                p.kill()
-            except OSError:
-                pass
+            return open_mic(dev, in_sr, nbytes)
+        except Exception as exc:
+            dead = _MicStream()
+            dead.error = str(exc) or exc.__class__.__name__
+            return dead
 
     def make_resampler():
         if in_sr == SAMPLE_RATE:
@@ -433,7 +757,7 @@ def read_blocks(device: str, in_sr: int,
         return soxr.ResampleStream(in_sr, SAMPLE_RATE, 1, dtype="float32").resample_chunk
 
     current = device
-    proc, blocks = start(current)
+    mic = start(current)
     to_16k = make_resampler()
     if in_sr != SAMPLE_RATE:
         print(f"Recording the mic at {in_sr}Hz and converting to {SAMPLE_RATE}Hz",
@@ -461,7 +785,7 @@ def read_blocks(device: str, in_sr: int,
     # and treated as cut off just the same. It is a break that reopening
     # sometimes cannot fix, so that one alone stays its hand.
     #
-    # Only the wait grows. Keeping ffmpeg woken the whole time nothing is
+    # Only the wait grows. Keeping the recording woken the whole time nothing is
     # plugged in is pointless. The cap is 5 seconds, so a replug is back in 5.
     STALL_SEC = 4.0           # no sound for this long means it is not connected
     RETRY_MIN, RETRY_MAX = 0.5, 5.0
@@ -471,45 +795,75 @@ def read_blocks(device: str, in_sr: int,
     dead_tries = 0            # times reopened because of zeros
     gave_up = False           # gave up fast reopening (to log it only once)
 
+    # PortAudio says outright when it had audio ready and nobody came for it.
+    # ffmpeg had no way of saying so, and that silence is the reason #58 took as
+    # long as it did to pin down. Nothing at all is printed while the count sits
+    # at zero, so this is a record of something that happened, never a warning
+    # about something that might. The counts belong to one open recording, so
+    # what has been reported resets whenever the recording is rebuilt.
+    LOST_REPORT_SEC = 30.0    # so a bad patch does not fill the log
+    lost_reported = 0
+    lost_report_at = 0.0
+
     try:
         while True:
             # if a switch was asked for, redo the recording and nothing else
             if want_device is not None:
                 asked = want_device()
                 if asked and asked != current:
-                    stop(proc)
+                    mic.close()
                     current = asked
-                    proc, blocks = start(current)
+                    mic = start(current)
                     to_16k = make_resampler()   # let it keep no history
                     # A different device now, so drop the old device's zero
                     # count. Carry it over and a device picked after giving up
                     # that is silent too waits long with no fast attempt.
                     dead_run, dead_tries, gave_up = 0.0, 0, False
+                    lost_reported = 0            # the counts belong to the old one
                     print(f"Switched the mic to {current}", file=sys.stderr, flush=True)
                     if on_switch is not None:
                         on_switch(current)
 
             def reopen():
-                """Rebuild the recording process only. Leave the model loaded."""
-                nonlocal proc, blocks, to_16k, retry_wait
-                stop(proc)
+                """Rebuild the recording only. Leave the model loaded."""
+                nonlocal mic, to_16k, retry_wait, lost_reported
+                mic.close()
                 time.sleep(retry_wait)
                 retry_wait = min(retry_wait * 2, RETRY_MAX)
-                proc, blocks = start(current)
+                mic = start(current)
                 to_16k = make_resampler()
+                lost_reported = 0        # the counts belong to the old recording
 
             def relight(why: str):
                 """Reopen the recording. As often as it takes to connect."""
                 nonlocal lost
                 if not lost:
                     lost = True
-                    print(f"{why} ({current}). Opening it again and waiting. "
+                    # The reason opening failed, when there was one. PortAudio
+                    # gives a real sentence back and it is the only thing that
+                    # tells a mic in use apart from a mic that is gone.
+                    said = f"{why} ({current})"
+                    if mic.error:
+                        said = f"{said}. {mic.error}"
+                    print(f"{said}. Opening it again and waiting. "
                           "Plugging it back in brings it straight back",
                           file=sys.stderr, flush=True)
                 reopen()
 
+            # Say what got thrown away, and only ever after it has been. The
+            # count is per open recording, so it can fall back to 0 on a reopen.
+            missed = mic.overflows + mic.dropped
+            if missed > lost_reported:
+                at = time.monotonic()
+                if lost_reported == 0 or at - lost_report_at >= LOST_REPORT_SEC:
+                    print(f"The mic has lost {missed} blocks since it opened "
+                          f"({mic.overflows} it had ready and nobody took, "
+                          f"{mic.dropped} taken but not read in time)",
+                          file=sys.stderr, flush=True)
+                    lost_reported, lost_report_at = missed, at
+
             try:
-                raw = blocks.get(timeout=STALL_SEC)
+                raw = mic.q.get(timeout=STALL_SEC)
             except queue.Empty:
                 relight(f"No sound has come from the mic for {STALL_SEC:.0f} seconds")
                 continue
@@ -564,7 +918,7 @@ def read_blocks(device: str, in_sr: int,
             rms = float(np.sqrt(block.dot(block) / block.size)) if block.size else 0.0
             yield block, len(block) / SAMPLE_RATE, rms
     finally:
-        stop(proc)
+        mic.close()
 
 
 def stream_utterances(model, args, should_stop=lambda: False):

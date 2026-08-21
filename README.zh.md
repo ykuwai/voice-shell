@@ -15,7 +15,7 @@
 
 ```bash
 npx skills add ykuwai/voice-shell
-pip install numpy aiohttp
+pip install numpy aiohttp sounddevice
 ```
 
 有 Chrome 的话，这样就够了。**不用下模型，也不用等。**
@@ -82,12 +82,10 @@ voice-shell.sh engines
 
 ## 出问题的时候
 
-录音需要 `ffmpeg`（macOS 和 Windows）或者 `arecord`（Linux）。
+在 Linux 上录音需要 `arecord`。
 
 ```bash
-brew install ffmpeg              # macOS
 sudo apt install alsa-utils      # Linux
-winget install ffmpeg            # Windows
 ```
 
 | 看到的情况 | 怎么办 |
