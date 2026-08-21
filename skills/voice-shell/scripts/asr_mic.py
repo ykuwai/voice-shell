@@ -36,6 +36,14 @@ HARD_UTTERANCE_CAP = 300.0
 # over, but the recognizer ignores silence, so no real harm.
 PREROLL_SEC = 0.6
 
+# How often the discard button on screen is looked for. The tuning read in the
+# same loop settles for 0.5 seconds, because it only has to bite eventually.
+# A press has to land before the next words are spoken, and everything recorded
+# between the press and the read goes away with the utterance being thrown out,
+# so waiting that long would clip the head of the redo. Looking on every block
+# is pointless in the other direction, nobody presses 10 times a second.
+DROP_POLL_SEC = 0.2
+
 # Once blocks whose contents are all zero run this long, count it as unplugged.
 # A live device picks up room noise however quiet the room (measured around
 # 0.0005, and 0.0022 even on the machine running right now). 16bit lined up as
@@ -539,14 +547,22 @@ def read_blocks(device: str, in_sr: int,
 def stream_utterances(model, args, should_stop=lambda: False):
     """Read the mic and yield recognition events.
 
-    The events (dicts) yielded are these 3.
+    The events (dicts) yielded are these 4.
         {"type": "level",   "rms": float, "speaking": bool}   every block
         {"type": "partial", "text": str, "language": str}     mid-recognition
         {"type": "final",   "text": str, "language": str}     utterance settled
+        {"type": "dropped", "text": str}                      utterance thrown away
 
     Silence running as long as silence_duration settles it. Nothing is broken
     up while someone keeps talking (HARD_UTTERANCE_CAP is the only brake). The
     library has no utterance splitting (VAD), so RMS is watched here to judge.
+
+    args.want_drop, when it is there, gives back the time the discard button on
+    screen was last pressed. A press cuts the utterance in progress off right
+    here and no final follows it. It has to happen at this level, because the
+    caller only ever sees settled text and the sound underneath stays joined,
+    so the words said right after the press would sit inside the same utterance
+    and be thrown away along with the part that was meant to go.
     """
     # apple and whisper both carry the same 3 methods, so everything below is
     # shared. load_model stops on an unknown name, so only those 2 get here.
@@ -558,8 +574,17 @@ def stream_utterances(model, args, should_stop=lambda: False):
     # settling). It changes too rarely to check per block, so every 0.5 seconds.
     want_tuning = getattr(args, "want_tuning", None)
     tuning_wait = 0
+    # The discard button on screen writes the time it was pressed into a file,
+    # the same way the mic choice and the tuning are handed over. It is read,
+    # never deleted, and the time inside it is what gets compared.
+    want_drop = getattr(args, "want_drop", None)
+    drop_wait = 0
+    # A press left behind by an earlier run must not throw away the first
+    # utterance of this one, so whatever the file holds now counts as handled.
+    last_drop = (want_drop() if want_drop is not None else 0.0) or 0.0
     silence_run = 0.0    # seconds of unbroken silence
     speech_seen = False  # whether speech was heard in the current utterance
+    speaking_at = None   # when the utterance in progress began (None while none runs)
     last_text = ""
     # Hold the blocks from just before the threshold, glued to the utterance head
     preroll = deque(maxlen=max(1, round(PREROLL_SEC / BLOCK_SEC)))
@@ -568,6 +593,43 @@ def stream_utterances(model, args, should_stop=lambda: False):
         model.finish_streaming_transcribe(state)
         return ({"type": "final", "text": state.text, "language": state.language}
                 if state.text.strip() else None)
+
+    def drop_asked():
+        """Whether the discard button was pressed during the utterance running now.
+
+        The press time is compared against the time the utterance began.
+        Without the compare, a press that lands just after a settle would take
+        the next utterance down with it, so undoing one line would eat the line
+        after it too. A press counts as spent whichever way the compare goes,
+        so it never fires twice.
+        """
+        nonlocal last_drop
+        asked = (want_drop() if want_drop is not None else 0.0) or 0.0
+        if asked <= last_drop:
+            return False
+        last_drop = asked
+        return speaking_at is not None and asked >= speaking_at
+
+    def cut():
+        """Let go of the utterance in progress, the collected audio included.
+
+        finish_streaming_transcribe is on purpose not called. It runs the whole
+        thing through once more to settle text nobody is going to read, and
+        with the apple engine that is a round trip to the helper while the mic
+        keeps filling the pipe. init_streaming_state hands the engine a fresh
+        state, and the abandoned one stops being written to.
+        """
+        nonlocal state, silence_run, speech_seen, last_text, speaking_at
+        ev = {"type": "dropped", "text": state.text}
+        state = new_state()
+        silence_run, speech_seen, last_text, speaking_at = 0.0, False, "", None
+        # Whatever is held for the head of an utterance is the tail of the sound
+        # just thrown away. Leave it in and the end of the cancelled words gets
+        # glued to the front of the redo, so the very part that was meant to be
+        # gone comes back. Nothing is in there while an utterance runs (it is
+        # drained at the head), so this is here to keep it that way.
+        preroll.clear()
+        return ev
 
     for block, dur, rms in read_blocks(args.device, args.input_samplerate,
                                        want_device=getattr(args, "want_device", None),
@@ -595,10 +657,26 @@ def stream_utterances(model, args, should_stop=lambda: False):
                 if args.engine == "whisper" and isinstance(tuned.get("language"), str):
                     args.language = tuned["language"] or None
 
+        # Thrown away before this block is taken in, so the sound that arrived
+        # after the press does not end up inside the utterance being cancelled.
+        if want_drop is not None:
+            drop_wait -= 1
+            if drop_wait <= 0:
+                drop_wait = max(1, round(DROP_POLL_SEC / BLOCK_SEC))
+                if drop_asked():
+                    yield cut()
+                    continue
+
         speaking = rms >= args.silence_threshold
         yield {"type": "level", "rms": rms, "speaking": speaking}
 
         if speaking:
+            # Only the moment silence turns into voice. Stamp it on every
+            # speaking block instead and the time keeps moving forward, so a
+            # press made mid-sentence always looks older than the utterance and
+            # never throws anything away.
+            if not speech_seen:
+                speaking_at = time.time()
             speech_seen = True
             silence_run = 0.0
         else:
@@ -618,6 +696,13 @@ def stream_utterances(model, args, should_stop=lambda: False):
         if state.text != last_text:
             last_text = state.text
             if state.text.strip():
+                # Look once more before showing anything. A partial that slips
+                # out in the gap after the press writes the cancelled words back
+                # onto a screen that has just been wiped, and they blink there
+                # until the watch above comes round.
+                if want_drop is not None and drop_asked():
+                    yield cut()
+                    continue
                 yield {"type": "partial", "text": state.text, "language": state.language}
 
         accum_sec = len(state.audio_accum) / SAMPLE_RATE
@@ -628,10 +713,21 @@ def stream_utterances(model, args, should_stop=lambda: False):
         way_too_long = accum_sec >= HARD_UTTERANCE_CAP
 
         if done_talking or way_too_long:
+            # One more look before settling. The watch above comes round every
+            # DROP_POLL_SEC, and a press landing in the gap right before the
+            # settle would arrive too late, with the line it meant to stop
+            # already on its way out.
+            if want_drop is not None and drop_asked():
+                yield cut()
+                continue
             done = finish()
             if done:
                 yield done
             state, silence_run, speech_seen, last_text = new_state(), 0.0, False, ""
+            # Nothing is running now, so a press from here on belongs to the
+            # next utterance. Left as it was, it would match the line that has
+            # already gone out and throw away an empty state.
+            speaking_at = None
 
     # Do not throw away an utterance in progress when interrupted
     if speech_seen:
