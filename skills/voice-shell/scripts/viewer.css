@@ -268,12 +268,15 @@
     border-color:transparent; color:var(--panel); font-weight:600;
     background:linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, var(--accent-2)));
   }
-  /* The name being typed. The chip holds its shape and keeps its number, so the
-     row does not jump under you and the number the spoken signal points at stays
-     exactly where it was. It grows into whatever width the row has left, and
-     where less than about 7rem of that is going, it takes a row of its own
-     instead of squeezing the box down to a slit you cannot read. */
-  .route-chip.editing { flex:1 1 7rem; }
+  /* The name being typed. The chip keeps its number, so the number the spoken
+     signal points at stays exactly where it was.
+     It is sized by what is in the box, not by whatever width the row happened
+     to have left. Handing it the leftover meant that with three chips already
+     up, the box came out narrower than the name it held, and 「voice-shell の
+     開発」 showed as 「シェルの開発」 with the front scrolled off. The row
+     wraps, so a box wider than the space left drops to a line of its own and
+     gets the full width there. */
+  .route-chip.editing { flex:0 1 auto; }
   /* Off the fill, the outline goes to the accent. The chip is taking keys now,
      and telling that apart from the ones that are not is the whole job here.
      On the fill it is already unmistakable, so that one is left alone. */
@@ -284,7 +287,11 @@
      border and its own bigger type, and the chip grew from 31px tall to 50px the
      moment you started typing, taking the whole row down with it. */
   .route-chip .nm-edit {
-    flex:1 1 auto; min-width:0; width:100%;
+    flex:0 1 auto; min-width:4ch; width:auto; max-width:100%;
+    /* Chrome sizes the box to what is in it. Where that is not understood the
+       size attribute carries it instead, and openRename keeps that attribute
+       up to date on every keystroke. */
+    field-sizing:content;
     font:inherit; color:inherit; background:none; border:none; border-radius:0;
     padding:0; margin:0; outline:none;
   }
