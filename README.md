@@ -1,13 +1,11 @@
 # voice-shell
 
-Read this in [日本語](README.ja.md).
+English · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [简体中文](README.zh.md) · [한국어](README.ko.md)
 
 An Agent Skill for giving Claude Code instructions with your voice. No keyboard.
 You talk and the instruction goes through.
 
-```
-mic → speech recognition → one line of JSONL → Monitor → Claude Code
-```
+> mic → speech recognition → one line of JSONL → Monitor → Claude Code
 
 Say whatever comes to mind while you work and it arrives without you pressing Enter.
 It works with Claude Code and with other agents such as Codex.
@@ -63,8 +61,6 @@ the window. The same warning is written there on the spot.
 It remembers the way you picked, so next time it starts the same way. The two ways
 that keep everything local are in [SETUP.md](skills/voice-shell/SETUP.md).
 
-Recording needs `ffmpeg` (macOS and Windows) or `arecord` (Linux).
-
 Which languages it can recognize is decided by the way you picked. The browser
 offers what Chrome carries, Apple offers the locales installed in the OS, Whisper
 offers what the model covers. The window itself comes in seven languages.
@@ -72,15 +68,41 @@ offers what the model covers. The window itself comes in seven languages.
 ## Commands
 
 ```bash
-voice-shell.sh start [--engine X] [--no-gui]   # start (it remembers your last choice)
-voice-shell.sh stop                            # stop
-voice-shell.sh status                          # what is running, and which session is listening
-voice-shell.sh engines                         # the ways it can recognize speech
+voice-shell.sh start [--engine X] [--no-gui]
+voice-shell.sh stop
+voice-shell.sh status
+voice-shell.sh engines
 ```
+
+| Command | What it does |
+|---|---|
+| `start` | Starts it, and remembers the way you picked last time |
+| `stop` | Stops it |
+| `status` | What is running, and which session is listening |
+| `engines` | The ways it can recognize speech |
 
 Everything you set stays in `~/.config/voice-shell/` and survives a restart.
 
+## When something goes wrong
+
+Recording needs `ffmpeg` (macOS and Windows) or `arecord` (Linux).
+
+```bash
+brew install ffmpeg              # macOS
+sudo apt install alsa-utils      # Linux
+winget install ffmpeg            # Windows
+```
+
+| What you see | What to do |
+|---|---|
+| You talk and nothing arrives | The trigger level is too high. Lower the mark under the mic in the window until the bar crosses it when you speak |
+| Noises send things on their own | The trigger level is too low. Raise that same mark until only your voice gets past it |
+| `No Python it can run was found` | `export VOICE_SHELL_PYTHON=/path/to/.venv/bin/python` |
+| Startup says `FAILED` | Run `voice-shell.sh status` and read the tail of `daemon.out` |
+
 ## A little more
+
+The two below are in English only. What most people need is already above.
 
 | What to read | What is in it |
 |---|---|
@@ -95,3 +117,7 @@ Everything you set stays in `~/.config/voice-shell/` and survives a restart.
 ## License
 
 MIT
+
+This file is the source. The six translations beside it are made from it, so when
+you change something here, change them too in the same pull request. Where a
+translation and this file disagree, this file is right.
