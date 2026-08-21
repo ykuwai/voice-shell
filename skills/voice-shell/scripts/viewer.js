@@ -88,6 +88,11 @@ function applyI18n(root = uiDoc()) {
   }
   // Wording that changes with the state cannot ride on data-i18n, so it gets repainted here
   if (typeof paintPower === 'function' && el.powerLabel) paintPower();
+  // silenceNote is the same story: which of the two wordings belongs there
+  // depends on asrChosen, so a plain data-i18n sweep would undo the swap and
+  // leave the note claiming the setting works again while the slider stays
+  // disabled.
+  if (typeof paintBrowserAsr === 'function' && el.silenceNote) paintBrowserAsr();
 }
 
 const $ = id => document.getElementById(id);
