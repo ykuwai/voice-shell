@@ -193,23 +193,38 @@ class Tail:
             await asyncio.sleep(0.2)
 
     async def watch_level(self):
-        """Push the volume being picked up right now.
+        """Push the volume being picked up right now, and how far the silence has run.
 
         When no text shows, you want to tell a dead mic from plain silence.
-        The level.txt the daemon writes holds 2 numbers only, the volume and
-        whether someone is speaking. The audio itself is never kept.
+        The level.txt the daemon writes holds the volume, whether someone is
+        speaking, and the seconds of silence counted toward settling the
+        utterance. The audio itself is never kept.
+
+        That third number is what the browser fills its send ring from. Counting
+        it over there off the browser's own clock ran the ring 1.0 to 1.9
+        seconds ahead of the settle, because audio reaches the daemon slower
+        than real time (#53).
+
+        A daemon from before that field writes 2 numbers. It is read as missing
+        rather than as zero, and left out of what goes over the wire, so the
+        browser knows to fall back to its clock instead of sitting on a ring
+        that never fills.
         """
         path = self.path.parent / "level.txt"
         last = None
         while True:
             try:
-                rms, speaking = path.read_text(encoding="utf-8").split()
-                cur = (round(float(rms), 3), speaking == "1")
-            except (FileNotFoundError, OSError, ValueError):
-                cur = (0.0, False)
+                parts = path.read_text(encoding="utf-8").split()
+                run = float(parts[2]) if len(parts) > 2 else None
+                cur = (round(float(parts[0]), 3), parts[1] == "1", run)
+            except (FileNotFoundError, OSError, ValueError, IndexError):
+                cur = (0.0, False, None)
             if cur != last:
                 last = cur
-                await self.broadcast({"level": cur[0], "speaking": cur[1]})
+                msg = {"level": cur[0], "speaking": cur[1]}
+                if cur[2] is not None:
+                    msg["silence_run"] = cur[2]
+                await self.broadcast(msg)
             await asyncio.sleep(0.1)      # about enough for the bar to look smooth
 
     async def watch_mic_active(self):

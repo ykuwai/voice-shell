@@ -2267,7 +2267,10 @@ def main():
         hold_path = log_path.parent / HOLD_FILE.name
         mute_path = log_path.parent / MUTE_FILE.name
         partial_path.write_text("", encoding="utf-8")
-        level_path.write_text("0 0", encoding="utf-8")
+        # 3 numbers from the very first write, so the viewer never sees the
+        # silence field blink in and out and fall back to its own clock for the
+        # first utterance after a restart.
+        level_path.write_text("0 0 0", encoding="utf-8")
         pause_path.unlink(missing_ok=True)   # Always start from the sending state
         mute_path.unlink(missing_ok=True)
         hold_path.write_text("", encoding="utf-8")
@@ -2300,8 +2303,20 @@ def main():
                 if ev["type"] == "level":
                     # Hand the volume to the viewer. When no text shows up, we
                     # want to tell a dead mic apart from a room that is just quiet.
+                    #
+                    # The third number is how far the silence that settles an
+                    # utterance has run, in seconds of audio. The viewer fills
+                    # its send ring from it. Counted over there from the
+                    # browser's clock instead, the ring finished 1.0 to 1.9
+                    # seconds before the card moved, because audio reaches this
+                    # process slower than real time (#53).
+                    #
+                    # Appended, never inserted. A viewer from before this field
+                    # splits on whitespace and reads the first two, so the older
+                    # page keeps working against the newer daemon.
                     level_path.write_text(
-                        f"{ev.get('rms', 0):.4f} {int(bool(ev.get('speaking')))}",
+                        f"{ev.get('rms', 0):.4f} {int(bool(ev.get('speaking')))} "
+                        f"{ev.get('silence_run', 0):.3f}",
                         encoding="utf-8")
                     if ev.get("speaking") and speaking_since is None:
                         speaking_since = mute_generation

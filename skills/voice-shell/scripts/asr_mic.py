@@ -563,10 +563,16 @@ def stream_utterances(model, args, should_stop=lambda: False):
     """Read the mic and yield recognition events.
 
     The events (dicts) yielded are these 4.
-        {"type": "level",   "rms": float, "speaking": bool}   every block
+        {"type": "level",   "rms": float, "speaking": bool,
+         "silence_run": float}                                every block
         {"type": "partial", "text": str, "language": str}     mid-recognition
         {"type": "final",   "text": str, "language": str}     utterance settled
         {"type": "dropped", "text": str}                      utterance thrown away
+
+    silence_run on a level is how far the silence that settles an utterance has
+    run, in seconds of the audio taken in, and 0 while no utterance is running.
+    It is the very number the settle below is judged on, and it goes out so the
+    screen can draw the countdown from it rather than guessing at one.
 
     A final also carries "forced": True when the send button on screen is what
     settled it. Nothing else in here reads that key. It is put on the event for
@@ -762,7 +768,6 @@ def stream_utterances(model, args, should_stop=lambda: False):
                     # the sound away is the whole point over there.
 
         speaking = rms >= args.silence_threshold
-        yield {"type": "level", "rms": rms, "speaking": speaking}
 
         if speaking:
             # Only the moment silence turns into voice. Stamp it on every
@@ -775,6 +780,26 @@ def stream_utterances(model, args, should_stop=lambda: False):
             silence_run = 0.0
         else:
             silence_run += dur
+
+        # Counted before the level goes out, not after it. The screen fills its
+        # send ring from this number, and reporting the count from before this
+        # block leaves the drawing one block behind the settle that is judged on
+        # the same block further down.
+        #
+        # It is handed over at all because the screen used to run the count off
+        # its own clock, and the two disagreed by 1.0 to 1.9 seconds. Audio
+        # reaches this process at 0.78 to 0.89 times real time, so a second of
+        # wall clock over there was never a second of the silence measured here,
+        # and the gap moved from utterance to utterance, which is why no fixed
+        # offset could have covered it (#53).
+        #
+        # Zero while nothing is being said. The run keeps growing right through
+        # the quiet before anyone speaks, and passing that on would fill a ring
+        # for an utterance that does not exist. It would also hand the reader a
+        # number that changes ten times a second for as long as the room stays
+        # empty, and the reader only pushes what changed.
+        yield {"type": "level", "rms": rms, "speaking": speaking,
+               "silence_run": silence_run if speech_seen else 0.0}
 
         # Silence before an utterance skips inference (the bit right before is kept)
         if not speech_seen:

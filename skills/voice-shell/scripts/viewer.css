@@ -470,8 +470,12 @@
     box-shadow:inset 0 0 0 1px var(--line);
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:12rem;
   }
-  /* Use the filled paper plane. Left as an outline, the lines disappear inside
-     a 10px chip. Stop fading it too (that was weakening an already weak drawing). */
+  /* Take the filled half of the pair. Thin outlines disappear inside a 10px
+     chip. The terminal in here is drawn the same both ways (Google publishes no
+     separate filled one), so today this only picks one of two identical paths,
+     and it is kept so that swapping the drawing again does not quietly put an
+     outline back. Nothing is faded either, that was weakening an already weak
+     drawing. */
   .entry .to svg .solid { display:inline; }
   .entry .to svg .line { display:none; }
   .entry .text { font-size:.88rem; line-height:1.65; word-break:break-word; }
