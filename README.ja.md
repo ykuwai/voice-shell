@@ -1,12 +1,12 @@
 # voice-shell
 
-英語版（こちらが原文）は [README.md](README.md)。内容が食い違ったら英語版が正しい。
+[English](README.md) · 日本語 · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [简体中文](README.zh.md) · [한국어](README.ko.md)
+
+原文は [README.md](README.md)（英語）。内容が食い違ったら英語版が正しい。
 
 声で Claude Code に指示を出す Agent Skill。キーボードを使わずに、話しかけて指示を送る。
 
-```
-マイク → 音声認識 → JSONL に1行 → Monitor → Claude Code
-```
+> マイク → 音声認識 → JSONL に1行 → Monitor → Claude Code
 
 作業中に思いついたことをそのまま口に出せば、Enter を押さなくても届く。
 Claude Code のほか、Codex など他のエージェントからも使える。
@@ -59,23 +59,47 @@ Claude Code で `/voice-shell` と打つか、「音声モードにして」と�
 選んだやり方は覚えているので、次からはそのまま起動する。手元で完結させる2つの
 入れ方は [SETUP.md](skills/voice-shell/SETUP.md) にある。
 
-録音には `ffmpeg`（macOS と Windows）または `arecord`（Linux）が要る。
-
 認識できる言語は、選んだやり方が決める。ブラウザは Chrome が持つ一覧、Apple は OS に
 入っているロケール、Whisper はモデルの対応言語。画面の表示は7言語ある。
 
 ## コマンド
 
 ```bash
-voice-shell.sh start [--engine X] [--no-gui]   # 起動（前回の選択を覚えている）
-voice-shell.sh stop                            # 停止
-voice-shell.sh status                          # 稼働状況と、聞いているセッション
-voice-shell.sh engines                         # 選べる認識のやり方
+voice-shell.sh start [--engine X] [--no-gui]
+voice-shell.sh stop
+voice-shell.sh status
+voice-shell.sh engines
 ```
+
+| コマンド | 何をするか |
+|---|---|
+| `start` | 起動する。前回選んだやり方を覚えている |
+| `stop` | 停止する |
+| `status` | 稼働状況と、聞いているセッション |
+| `engines` | 選べる認識のやり方 |
 
 設定はすべて `~/.config/voice-shell/` に残り、再起動をまたいで消えない。
 
+## うまくいかないとき
+
+録音には `ffmpeg`（macOS と Windows）または `arecord`（Linux）が要る。
+
+```bash
+brew install ffmpeg              # macOS
+sudo apt install alsa-utils      # Linux
+winget install ffmpeg            # Windows
+```
+
+| 出ていること | どうするか |
+|---|---|
+| 話しても何も届かない | 反応する音の大きさが高すぎる。画面のマイクの下にある印を、話したときに棒が越えるところまで下げる |
+| 物音で勝手に送られる | 反応する音の大きさが低すぎる。同じ印を、自分の声だけが越えるところまで上げる |
+| `No Python it can run was found` | `export VOICE_SHELL_PYTHON=/path/to/.venv/bin/python` |
+| 起動が `FAILED` になる | `voice-shell.sh status` を見て、`daemon.out` の末尾を読む |
+
 ## もう少し詳しく
+
+下の2つは英語だけ。ほとんどの人に要ることは、ここまでに書いてある。
 
 | 読むもの | 中身 |
 |---|---|
