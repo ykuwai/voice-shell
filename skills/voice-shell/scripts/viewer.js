@@ -2759,6 +2759,17 @@ function openRename(l, node) {
   inp.value = l.custom || '';
   inp.placeholder = l.auto || l.label;
   inp.setAttribute('aria-label', t('renameLabel'));
+  /* The size attribute is the fallback for anything that does not understand
+     field-sizing. It counts in average character widths, so a kana or a hanzi
+     has to count as two or a Japanese name comes out at half the box it needs. */
+  const fitWidth = () => {
+    const text = inp.value || inp.placeholder || '';
+    let n = 0;
+    for (const ch of text) n += /[\u3000-\u9fff\uff00-\uff60\uffe0-\uffe6\uac00-\ud7af]/.test(ch) ? 2 : 1;
+    inp.size = Math.max(8, n + 1);
+  };
+  fitWidth();
+  inp.addEventListener('input', fitWidth);
   box.append(no, inp);
   node.replaceWith(box);
   renaming = {pid};
