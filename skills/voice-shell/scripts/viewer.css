@@ -1,0 +1,1016 @@
+  /* This screen assumes a narrow panel floated in front of your work, not laid
+     out beside it. Built around 340 to 460px wide, and on a wide screen it
+     stays narrow and centered. */
+  :root {
+    color-scheme: dark;
+    --bg:#070a10;
+    --panel:#0d121b;
+    --panel-2:#121927;
+    /* Surfaces and lines each have a job. Mix them up and lines that never
+       needed lifting go darker, and the screen turns noisy.
+       --raise    the selected surface and the touched one. --dim sits on it, so 4.5:1 is the ceiling
+       --line     the outline of a control. It shows what you can press, so 3:1 is the floor
+       --line-soft dividers and chip edges. A seam between like things, so 3:1 is not needed
+       --track    the bed of meters and sliders. Lift it and the fill inside sinks in, and the level stops reading */
+    --raise:#31405b;    /* 1.69:1 against the base. --dim is 4.75:1, --faint is 3.06:1 */
+    --line:#5e6a7e;     /* 3.43:1 against the ground */
+    --line-soft:#232e40;
+    --track:#1d2735;
+    --text:#e8eef7;
+    --dim:#a3b0c4;      /* 8.6:1  field labels */
+    --faint:#7d8ca4;    /* 5.4:1  notes and headings. Meets the 4.5:1 floor for small text */
+    --accent:#22d3ee;         /* instant, and speech being recognized */
+    --accent-2:#a855f7;       /* review */
+    --ok:#34d399;             /* sent */
+    --warn:#fb923c;           /* paused */
+    --danger:#f87171;
+    /* Used only for the text on a chip with a faint color wash behind it. When
+       the wash and the text are the same color, moving either one never raises
+       the ratio (the sent chip measured 2.96:1 in light). The wash is itself
+       the meaning, so leave it alone and move only the text to reach the 4.5:1
+       floor for small text. */
+    --ok-ink:#34d399;         /* 6.98:1 on the wash. In dark, --ok as it is suffices */
+    --accent-2-ink:#c084fc;   /* same, 5.71:1 (3.81:1 if left as --accent-2) */
+    --glow:0 0 14px;
+    --radius:20px;
+  --pill:999px;
+    /* Sizes that change with the window. Unlike the colors these never change
+       with the theme, so this block alone tells you what shrinks. */
+    --pad:1rem;                            /* padding on the sides */
+    --viz-h:clamp(78px, 24vh, 116px);      /* height of the mic drawing */
+    --viz-pad:.25rem;
+    --ring:clamp(44px, 11vh, 64px);        /* the instant / review rings */
+    /* Height of the label hanging under a ring (gap plus one line). The same
+       value goes on the top padding of .mode so the ring lands dead center in
+       its box. */
+    --mode-label:calc(.5rem + .8rem);
+    --stream-max:11em;                     /* height cap for the live transcript */
+  }
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg:#eef1f6;
+    --panel:#ffffff;
+    --panel-2:#f4f6fa;
+    --raise:#ccd5e3;    /* 1.37:1 against the base. --dim is 4.74:1 */
+    --line:#78869b;     /* 3.70:1 against the ground */
+    --line-soft:#d9e0ea;
+    --track:#dce2ec;
+    --text:#101826;
+    --dim:#4d5a6c;      /* 7.0:1 */
+    --faint:#636f80;    /* 4.7:1  meets the small-text floor even on the tab base */
+    /* On white, a bright blue cannot carry knocked-out text (the filled buttons
+       stop being readable). Clear it with hue and saturation, not lightness.
+       Hue moved from 192 to 199 degrees and saturation went up. 6.9:1 on white. */
+    --accent:#04608b;
+    --accent-2:#7c3aed;
+    --ok:#059669;
+    --warn:#d97706;
+    --danger:#dc2626;
+    --ok-ink:#066a4b;         /* 5.20:1 on the wash (2.96:1 if left as --ok) */
+    --accent-2-ink:#6d28d9;   /* same, 5.36:1 (4.30:1 if left as --accent-2) */
+    --glow:0 0 0;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      color-scheme: light;
+      --bg:#eef1f6; --panel:#ffffff; --panel-2:#f4f6fa; --raise:#ccd5e3;
+      --line:#78869b; --line-soft:#d9e0ea; --track:#dce2ec;
+      --text:#101826; --dim:#4d5a6c; --faint:#636f80;
+      --accent:#04608b; --accent-2:#7c3aed; --ok:#059669; --warn:#d97706;
+      --danger:#dc2626; --ok-ink:#066a4b; --accent-2-ink:#6d28d9; --glow:0 0 0;
+    }
+  }
+
+  * { box-sizing:border-box; }
+  html { -webkit-text-size-adjust:100%; }
+  body {
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:"Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
+    font-size:14px; line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  button, input, select, textarea { font:inherit; color:inherit; }
+  button { cursor:pointer; background:none; border:none; padding:0; }
+  button:disabled { cursor:default; }
+
+  /* Height is pinned to the full screen, and the log alone absorbs both the
+     slack and the shortfall. Shrink the window and the log is what gets cut
+     first, so the mic, the routes and the draft card stay on screen to the end. */
+  .page {
+    max-width:460px; margin:0 auto; height:100vh; height:100dvh;
+    background:var(--panel);
+    border-left:1px solid var(--line-soft); border-right:1px solid var(--line-soft);
+    display:flex; flex-direction:column;
+    overflow-x:hidden; overflow-y:auto;
+  }
+  .page > * { flex:none; }          /* Squeezed, the text inside gets clipped. Only the two below shrink */
+  /* When the log is down to zero and there is still not enough room, the draft
+     card gives next (the live transcript inside shrinks to one line, and the
+     rest scrolls within it). */
+  .page > .draft-card { flex:0 1 auto; min-height:0; }
+  .log-wrap { flex:1 1 0; min-height:0; overflow-y:auto; overscroll-behavior:contain; }
+
+  /* ── Header ───────────────────────────── */
+  header {
+    display:flex; align-items:center; gap:.6rem;
+    padding:.85rem var(--pad) .7rem;
+    border-bottom:1px solid var(--line-soft);
+  }
+  .brand { display:flex; align-items:center; gap:.55rem; margin-right:auto; min-width:0; }
+  .brand h1 {
+    margin:0; font-size:.95rem; font-weight:600; letter-spacing:.01em;
+    white-space:nowrap;
+  }
+  /* The wave in the logo. It moves a little with the level being picked up */
+  .mark { display:flex; align-items:center; gap:2px; height:18px; flex:none; }
+  .mark i {
+    display:block; width:2.5px; border-radius:2px; height:30%;
+    background:linear-gradient(180deg,var(--accent),var(--accent-2));
+    transition:height .12s ease-out;
+  }
+
+  .icons { display:flex; align-items:center; gap:.15rem; flex:none; }
+  .icon {
+    position:relative; width:36px; height:36px; border-radius:50%;
+    display:grid; place-items:center; color:var(--dim);
+    transition:background .15s, color .15s;
+  }
+  .icon:hover:not(:disabled) { background:var(--raise); color:var(--text); }
+  .icon:disabled { opacity:.35; }
+  /* Material Symbols are filled paths. By default only the outlined one shows,
+     and we swap in the filled one for whatever is currently on. */
+  svg .solid { display:none; }
+  .lit > svg .solid, .on .ring svg .solid { display:inline; }
+  .lit > svg .line, .on .ring svg .line { display:none; }
+  .icon > span { display:grid; place-items:center; }
+  /* The dot under an icon shows on or off (same manner as the mock) */
+  .icon::after {
+    content:""; position:absolute; bottom:4px; left:50%; transform:translateX(-50%);
+    width:4px; height:4px; border-radius:50%; background:transparent;
+  }
+  .icon.lit { color:var(--text); }
+  .icon.lit::after { background:var(--ok); box-shadow:var(--glow) var(--ok); }
+  .icon.warn { color:var(--warn); }
+  .icon.warn::after { background:var(--warn); box-shadow:var(--glow) var(--warn); }
+  .icon.busy { color:var(--warn); }
+
+  /* Status */
+  .status {
+    display:flex; align-items:center; gap:.45rem;
+    padding:.5rem var(--pad) .3rem; font-size:.75rem; color:var(--dim);
+    white-space:nowrap; overflow:hidden;
+  }
+  .beacon { width:8px; height:8px; border-radius:50%; background:var(--faint); flex:none; }
+  .beacon.live { background:var(--ok); box-shadow:var(--glow) var(--ok); }
+  .beacon.hold { background:var(--accent-2); box-shadow:var(--glow) var(--accent-2); }
+  .beacon.off  { background:var(--warn); box-shadow:var(--glow) var(--warn); }
+  .beacon.down { background:transparent; box-shadow:inset 0 0 0 1.5px var(--danger); }
+  @media (prefers-reduced-motion:no-preference) {
+    .beacon.live { animation:breathe 2.4s ease-in-out infinite; }
+  }
+  @keyframes breathe { 50% { opacity:.35; } }
+
+  /* Where speech goes. Shown only when two or more sessions are listening
+     (with one there is nothing to choose, and it only takes up room). */
+  /* Scrolled sideways, the rightmost one is out of reach in a narrow window.
+     Wrap instead and show them all. Long names get trimmed, but the number at
+     the head always stays. */
+  .routes { padding:.1rem var(--pad) .5rem; }
+  .route-chips { display:flex; flex-wrap:wrap; gap:.25rem; }
+  /* The roll-up picker. It is never on screen next to the chips, but if its
+     height and marker position shifted when it swapped in it would read as a
+     different thing, so it matches the chip sizes. */
+  .route-pick-wrap { display:none; position:relative; max-width:100%; }
+  .route-pick {
+    -webkit-appearance:none; appearance:none;
+    font-size:.75rem; line-height:1.6; border:1.5px solid var(--line);
+    border-radius:var(--pill); padding:.3rem 1.5rem .3rem .7rem;
+    width:auto; max-width:100%;
+  }
+  /* When Chrome draws the arrow, neither its size nor its position can be
+     moved. Draw it ourselves at the same right padding as the × on a chip. It
+     uses the text color, so it follows both the theme and any fill. */
+  .route-pick-wrap::after {
+    content:""; position:absolute; right:.79rem; top:50%;
+    width:6px; height:6px; margin-top:-4.5px;
+    border-right:1.6px solid currentColor; border-bottom:1.6px solid currentColor;
+    transform:rotate(45deg); pointer-events:none; opacity:.45;
+  }
+  .route-chip {
+    flex:0 1 auto; min-width:0; max-width:100%;
+    display:inline-flex; align-items:center; gap:.3rem;
+    padding:.3rem .7rem; border-radius:var(--pill);
+    font-size:.75rem; white-space:nowrap;
+    border:1.5px solid var(--line); color:var(--dim);
+    transition:border-color .15s, color .15s, background .15s;
+  }
+  .route-chip .nm {
+    min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .route-chip .no { font-weight:inherit; font-variant-numeric:tabular-nums; flex:none; }
+  /* When several machines are in use at once, show which one you are looking
+     at on the main screen. Buried in settings, you could be talking to the
+     wrong machine and never notice. */
+  .machine {
+    font-size:.66rem; font-weight:600; padding:.1rem .5rem; border-radius:var(--pill);
+    color:var(--accent-2-ink); background:color-mix(in srgb, var(--accent-2) 16%, transparent);
+    max-width:9rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .route-chip:hover { color:var(--text); }
+  /* The × that stops a session listening. The first press asks, the second
+     one does it (the floating window cannot show a confirm dialog, and a
+     misfire should not cut the other side off). */
+  .route-chip .x {
+    display:grid; place-items:center; width:15px; height:15px; margin-right:-.25rem;
+    border-radius:50%; font-size:.7rem; line-height:1; opacity:.45;
+  }
+  .route-chip .x:hover { opacity:1; background:color-mix(in srgb, var(--danger) 30%, transparent); }
+  .route-chip.asking { border-color:var(--danger); color:var(--danger); background:none; }
+  .route-chip.asking .x { opacity:1; }
+  .route-chip.on {
+    border-color:transparent; color:var(--panel); font-weight:600;
+    background:linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, var(--accent-2)));
+  }
+
+  /* ── Visualizer ───────────────────────── */
+  /* The mic and the two rings always sit in a row. Stacked, those three alone
+     take more than 240px. In a row they fit in about 130px, and one more log
+     entry becomes visible. space-evenly is here so we never pick the spacing
+     ourselves. Splitting the width per ring (the old .mode { flex:1 }) opened
+     only the gap between the two rings as the window widened, which then
+     disagreed with the gap to the mic (54px against 92px at 460px wide). */
+  .control-row {
+    display:flex; align-items:center; justify-content:space-evenly;
+    padding:.1rem var(--pad) .4rem;
+  }
+  .viz { position:relative; flex:none; width:var(--viz-h); padding:var(--viz-pad) 0; }
+  /* Hit area for the big mic. The canvas draws the picture, so this is transparent. */
+  .mic-hit {
+    position:absolute; left:50%; top:calc(var(--viz-pad) + var(--viz-h) / 2);
+    transform:translate(-50%, -50%);
+    width:calc(var(--viz-h) * .8); height:calc(var(--viz-h) * .8); border-radius:50%;
+    background:transparent; cursor:pointer;
+  }
+  .mic-hit:disabled { cursor:default; }
+  /* No pressable spot when the mic is not showing (the waveform is not something you operate) */
+  /* Keep the box square, always. With a wide box, the moment you cross the line
+     between stacked and side by side, the browser stretches the picture it drew
+     before the redraw straight into the new box. A 460px wide picture lands in a
+     110px box (or the other way round), so one frame slips in where the mic looks
+     like an extreme ellipse. Square to square, the stretch is the same ratio in
+     both directions, so that frame does not break the shape. */
+  #viz { display:block; width:var(--viz-h); height:var(--viz-h); margin:0 auto; }
+  /* Put the mic on and off and the level meter on one row */
+  .meter-row { display:flex; align-items:center; gap:.55rem; padding:0 var(--pad); }
+  .meter-row .meter-hit { flex:1; min-width:0; padding-left:0; padding-right:0; }
+
+  /* The level the daemon is picking up. It comes by a different path than the
+     browser's waveform, so if the waveform moves while this stays still, you
+     know the recognition side has died. */
+  /* Take the drag over a wider area than the line itself, so it is easy to grab */
+  .meter-hit { padding:12px 0; cursor:ew-resize; touch-action:none; }
+  .meter {
+    position:relative; height:3px;
+    border-radius:var(--pill); background:var(--track);
+  }
+  .meter-hit:hover .meter-mark, .meter-hit.dragging .meter-mark {
+    height:14px; top:-5.5px; width:3px;
+  }
+  /* Where the threshold sits. Anything past it gets picked up as speech. */
+  .meter-mark {
+    position:absolute; top:-3px; width:2px; height:9px; border-radius:var(--pill);
+    background:var(--warn); box-shadow:var(--glow) var(--warn);
+    transform:translateX(-50%);
+    transition:height .12s, width .12s, top .12s;
+  }
+  .meter-fill {
+    height:100%; width:0; border-radius:2px; background:var(--faint);
+    transition:width .1s linear, background .2s;
+  }
+  .meter-fill.on { background:var(--accent); box-shadow:var(--glow) var(--accent); }
+
+  /* ── Where speech goes (instant / review) ── */
+  /* No box around them. Give them one and you are laying out two things, the
+     mic and "the pair of rings as a unit", which puts the gap between the two
+     rings on its own separate account. */
+  .modes { display:contents; }
+  .mode {
+    flex:none; display:flex; flex-direction:column; align-items:center; gap:.5rem;
+    /* A label hangs below the ring, so leave the same amount above it. Without
+       this the center of the box sits below the center of the ring, and it
+       lines up 11.5px off from the mic. */
+    padding-top:var(--mode-label);
+    color:var(--faint); transition:color .18s;
+  }
+  .mode .ring {
+    width:var(--ring); height:var(--ring); border-radius:50%;
+    display:grid; place-items:center;
+    border:2px solid var(--line);
+    background:var(--panel-2);
+    transition:border-color .18s, box-shadow .18s, background .18s, transform .12s;
+  }
+
+  .mode span { font-size:.8rem; font-weight:600; }
+  /* Pin the line height to 1. It only balances if it matches --mode-label */
+  .mode span:not(.ring) { line-height:1; }
+  /* Size the drawing inside to the ring as well. iconSvg puts the size on as an
+     inline style, so overriding it from here needs !important. */
+  .mode .ring svg {
+    width:calc(var(--ring) * .44) !important; height:calc(var(--ring) * .44) !important;
+  }
+  .mode:hover:not(:disabled) .ring { transform:translateY(-1px); }
+  .mode:disabled { opacity:.4; }
+
+  /* The pause button shows in a picture what pressing it will do.
+     While it is listening it reads as stop, and while stopped it reads as resume. */
+
+  #segLive.on { color:var(--accent); }
+  #segLive.on .ring {
+    border-color:transparent; color:var(--panel);
+    background:linear-gradient(145deg, var(--accent), color-mix(in srgb, var(--accent) 55%, var(--accent-2)));
+    box-shadow:0 0 22px color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+  #segHold.on { color:var(--accent-2); }
+  #segHold.on .ring {
+    border-color:transparent; color:var(--panel);
+    background:linear-gradient(145deg, color-mix(in srgb, var(--accent-2) 70%, var(--accent)), var(--accent-2));
+    box-shadow:0 0 22px color-mix(in srgb, var(--accent-2) 55%, transparent);
+  }
+  /* While muted there is nothing to choose, so sink them, but still show which
+     one you come back to. Pull the color out to gray and lift the selected one
+     by one step. */
+  .modes.muted .mode { opacity:.26; }
+  .modes.muted .mode.on { opacity:.55; }
+  .modes.muted #segLive.on, .modes.muted #segHold.on { color:var(--faint); }
+  .modes.muted #segLive.on .ring, .modes.muted #segHold.on .ring {
+    background:var(--raise); color:var(--faint);
+    border-color:var(--line); box-shadow:none;
+  }
+
+  .hint {
+    margin:0; padding:0 var(--pad) .6rem; min-height:1.4em;
+    font-size:.72rem; color:var(--faint);
+  }
+  /* A line for when Claude is the one that switched where speech goes.
+     A change you did not press yourself is just confusing without a reason. */
+  .note {
+    margin:0 var(--pad) .6rem; padding:.5rem .75rem;
+    border-radius:12px; font-size:.76rem; line-height:1.5;
+    color:var(--accent-2);
+    background:color-mix(in srgb, var(--accent-2) 12%, transparent);
+    border:1px solid color-mix(in srgb, var(--accent-2) 30%, transparent);
+  }
+  .hint button {
+    margin-left:.4rem; color:var(--accent); text-decoration:underline;
+    font-size:.72rem;
+  }
+
+  /* ── History ──────────────────────────── */
+  .log-head {
+    display:flex; align-items:center; gap:.5rem;
+    padding:.7rem var(--pad) .55rem; border-top:1px solid var(--line-soft);
+  }
+  .log-head h2 {
+    margin:0; margin-right:auto; font-size:.8rem; font-weight:600;
+    display:flex; align-items:center; gap:.35rem;
+  }
+  .log-head h2 svg { opacity:.75; }
+  /* How many have been sent. Back when this lived inside settings, you had to
+     open settings just to see the number. Next to the heading you read it with
+     the same eyes you are already using on the log. */
+  .log-head .count {
+    flex:none; padding:.1rem .5rem; border-radius:var(--pill);
+    font-size:.68rem; color:var(--faint); background:var(--panel-2);
+    box-shadow:inset 0 0 0 1px var(--line-soft);
+    font-variant-numeric:tabular-nums;
+  }
+  /* The base under the tabs. Lift the ground color all the way to 3:1 and a
+     quiet screen becomes a gray staircase. Show the shape with the outline
+     instead and leave the base color quiet. The selected one is shown by the
+     --raise fill and the weight of the text. The outline is drawn inside, so
+     the height does not change. .seg-row and .dict-tabs are built the same way. */
+  .filters {
+    display:flex; gap:.15rem; background:var(--panel-2); padding:3px;
+    border-radius:var(--pill); box-shadow:inset 0 0 0 1px var(--line);
+  }
+  .filters button {
+    font-size:.7rem; padding:.25rem .7rem; border-radius:var(--pill); color:var(--faint);
+    transition:background .15s, color .15s;
+  }
+  .filters button.on { background:var(--raise); color:var(--text); }
+
+  #log { padding:0 calc(var(--pad) - .25rem) .5rem; display:flex; flex-direction:column; gap:.4rem; }
+
+  .entry {
+    background:var(--panel-2); border:1px solid var(--line-soft);
+    border-radius:var(--radius); padding:.6rem .75rem;
+  }
+  .entry .gutter {
+    display:flex; align-items:center; gap:.4rem;
+    font-size:.66rem; color:var(--faint); margin-bottom:.2rem;
+    font-variant-numeric:tabular-nums;
+  }
+  .entry .mark {
+    display:inline-flex; align-items:center; gap:.25rem;
+    padding:.05rem .4rem; border-radius:5px; font-size:.64rem; font-weight:600;
+  }
+  .entry .mark::before { content:"✓"; font-size:.7em; }
+  /* The ground is itself the meaning, so leave it faint and give only the text its own ink */
+  .entry .mark.sent   { color:var(--ok-ink);       background:color-mix(in srgb, var(--ok) 14%, transparent); }
+  .entry .mark.edited { color:var(--accent-2-ink); background:color-mix(in srgb, var(--accent-2) 14%, transparent); }
+  /* Which session it went to. With several jobs going at once, this keeps you
+     from staring at the log wondering which one you said it to. */
+  .entry .to {
+    display:inline-flex; align-items:center; gap:.2rem; min-width:0;
+    padding:.05rem .4rem; border-radius:5px; font-size:.64rem;
+    color:var(--dim); background:var(--raise);
+    /* The Sent and Edited chips beside it show their ground through color, but
+       this one is only a note about where it went, so it cannot carry a color.
+       Darkening the ground alone drops the --dim riding on top under 4.5:1.
+       Show the shape with an outline and keep the ground no darker than the text
+       can stand. The outline is drawn inside so it stays level with the chips
+       next to it. */
+    box-shadow:inset 0 0 0 1px var(--line);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:12rem;
+  }
+  /* Use the filled paper plane. Left as an outline, the lines disappear inside
+     a 10px chip. Stop fading it too (that was weakening an already weak drawing). */
+  .entry .to svg .solid { display:inline; }
+  .entry .to svg .line { display:none; }
+  .entry .text { font-size:.88rem; line-height:1.65; word-break:break-word; }
+
+  /* The draft card. The live transcript shows up here too (prime spot) */
+  /* Stacked vertically, when seats run short only the live transcript has to
+     give. The rest does not move, so the buttons never shift on their own. */
+  .draft-card {
+    position:relative;                /* so the drawing in the corner is placed against this card */
+    display:flex; flex-direction:column;
+    margin:0 calc(var(--pad) - .25rem) .4rem;
+    background:var(--panel-2);
+    border:1.5px solid color-mix(in srgb, var(--accent) 55%, var(--line));
+    border-radius:var(--radius); padding:.6rem .75rem;
+    box-shadow:0 0 0 1px color-mix(in srgb, var(--accent) 10%, transparent);
+  }
+  .draft-card .gutter {
+    display:flex; align-items:center; gap:.4rem;
+    font-size:.66rem; color:var(--faint); margin-bottom:.25rem;
+    font-variant-numeric:tabular-nums;
+  }
+  .draft-card .gutter .spacer { flex:1; }
+  .draft-card .gutter, .draft-card .draft-actions { flex:none; }
+  .draft-card > textarea { flex:0 1 auto; }   /* this gives too when seats run short */
+  /* Edit and discard. They are small tools, and outlining each one is noisy.
+     Give them the same "lined up on one base" shape as the mode switch on the
+     main screen, so having a base is what tells you they are buttons. Color
+     only comes out on hover. */
+  .tiny-row {
+    display:flex; align-items:center; gap:.25rem;
+    background:var(--panel-2); border:1px solid var(--line);
+    border-radius:var(--pill); padding:3px;
+  }
+  .tiny {
+    display:grid; place-items:center; width:30px; height:30px;
+    border-radius:50%; color:var(--faint);
+    transition:color .14s, background .14s, transform .1s;
+  }
+  .tiny:hover:not(:disabled) { background:var(--raise); }
+  .tiny:active:not(:disabled) { transform:scale(.9); }
+  .tiny.edit:hover:not(:disabled) { color:var(--accent-2); }
+  .tiny.warn:hover:not(:disabled) { color:var(--danger); }
+  /* On hover it turns filled. That is the feedback that says "this one" before you press. */
+  .tiny:hover:not(:disabled) > svg .solid { display:inline; }
+  .tiny:hover:not(:disabled) > svg .line { display:none; }
+  .tiny:disabled { opacity:.28; cursor:default; }
+  /* Make it clear that pressing anywhere on the card hands it over to editing */
+  .draft-card:not(.holding):not(.editing) { cursor:text; }
+  .draft-card:not(.holding):not(.editing):hover {
+    border-color:color-mix(in srgb, var(--accent-2) 45%, var(--line));
+  }
+  .draft-card .draft-actions, .draft-card .tiny-row { cursor:default; }
+  .draft-card .mark {
+    padding:.05rem .4rem; border-radius:5px; font-size:.64rem; font-weight:600;
+    color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, transparent);
+  }
+  /* The wait before it goes out. It is sent once the pause to send has passed
+     since you stopped talking, but nothing used to show on screen for that, so
+     there was no telling whether it had gone yet or not. A number (1.5 → 1.0 →
+     0.5) is exact, but it makes you read. This screen gets watched out of the
+     corner of your eye while you talk, so show only the amount, on the one
+     drawing that already means sent. The paper plane fills from the bottom up,
+     the same way the mic lights up from below.
+     A line across the whole bottom edge came first. It moved too far for
+     something caught out of the corner of the eye, so the amount lives in one
+     corner now.
+     It is not a button. There is nothing here to press, and pressing would not
+     help anyway (speaking again is what clears it).
+     While reviewing and while paused nothing is sent on silence, so it is not
+     placed then. */
+  /* Do not let it bite into the rounded corners. The card is 20px round over a
+     1.5px border, so a child placed against the padding box has to clear a
+     curve of 18.5px. Set 12px in from the right and 5.6px up from the bottom,
+     the near corner of the drawing sits sqrt(6.5² + 12.9²) = 14.4px from the
+     center of that curve, which leaves 4px of daylight. */
+  /* Floated over the card, never in the flow. The card must not gain a single
+     pixel of height for this, or every screen grows a strip of empty room under
+     the text just to hold a drawing that is usually idle. The line it replaced
+     was placed the same way, so the trick is already proven here. */
+  .send-cue {
+    position:absolute; right:.75rem; bottom:.35rem;
+    width:18px; height:18px; pointer-events:none;
+  }
+  /* Since it takes no height, what it can run into is the text beside it. Hold
+     the room open in the transcript at all times, showing or not. Opening it
+     only while the drawing is up would shove the words sideways in the middle
+     of a sentence, and words moving while you talk is the same flicker this
+     whole change is meant to end. 24px clears the 18px drawing with a gap left
+     over, and across 460px of card the line hardly notices. */
+  .draft-card .stream { padding-right:24px; }
+  .send-cue > span { position:absolute; left:0; bottom:0; width:18px; height:18px; display:block; }
+  /* Laid out as a block so the drawing fills its box exactly. Left inline it
+     would ride the text baseline and sit a few pixels high, and the fill would
+     stop short of the tip. */
+  .send-cue svg { display:block; }
+  /* The ground is the outline and the fill is the solid one, both already in
+     ICON. Filling up is then the drawing turning from a sketch into a thing,
+     which needs no second color to read.
+     Neon was the complaint about the version before this. Both tones are pulled
+     back toward what is behind them, far enough to stop glaring and not so far
+     that the drawing goes missing (the fill measures 5.36:1 in dark and 3.40:1
+     in light against the card, the ground 2.60:1 and 2.02:1). Nothing glows,
+     since a shadow at this size only smears the outline. */
+  .send-cue .ground { color:color-mix(in srgb, var(--accent) 35%, var(--track)); }
+  /* It grows upward because it hangs from the bottom and only its height moves.
+     JS writes that height every frame, and there is deliberately no transition.
+     A tab in the background gets no frames, so on the way back a transition
+     would slide through values that were never true.
+     Nothing here pulses or travels on its own either, so prefers-reduced-motion
+     has nothing to switch off. Stepping the fill would turn an amount into a
+     count, which is the reading we are trying to avoid. */
+  .send-cue .fill {
+    overflow:hidden; height:0;
+    color:color-mix(in srgb, var(--accent) 70%, var(--panel-2));
+  }
+  .send-cue .fill > span { position:absolute; left:0; bottom:0; width:18px; height:18px; display:block; }
+  .send-cue .fill svg .solid { display:inline; }
+  .send-cue .fill svg .line { display:none; }
+
+  /* The raw live transcript. It sits apart from the edit box, and only the
+     settled part drops down into it. Pouring this straight into the edit box
+     would overwrite whatever you are in the middle of fixing. */
+  /* Talk long enough in one breath and the live transcript alone fills the
+     screen. Cap the height and scroll just this part for the overflow (keeping
+     the tail in view is handled on the JS side). */
+  .stream {
+    flex:1 1 auto; font-size:.88rem; line-height:1.65; color:var(--text);
+    min-height:1.5em; max-height:var(--stream-max);
+    overflow-y:auto; overscroll-behavior:contain;
+    /* We want to show it scrolls, but in a narrow window the bar shoves the text aside */
+    scrollbar-width:thin; scrollbar-color:var(--line) transparent;
+  }
+  /* A word that was taken as a signal. Lighting up the word itself shows it
+     was handled as an operation and not as an instruction. */
+  .stream mark.cmd {
+    display:inline-block; padding:.05rem .45rem; border-radius:7px;
+    font-weight:600; background:transparent;
+    animation:cmdFade 2.2s ease-out forwards;
+  }
+  .stream mark.cmd.live { color:var(--accent);   background:color-mix(in srgb, var(--accent) 18%, transparent); }
+  .stream mark.cmd.hold { color:var(--accent-2); background:color-mix(in srgb, var(--accent-2) 18%, transparent); }
+  .stream mark.cmd.warn { color:var(--danger);   background:color-mix(in srgb, var(--danger) 18%, transparent); }
+  @keyframes cmdFade { 0%,65% { opacity:1; } 100% { opacity:0; } }
+  #stream:empty::after { content:attr(data-quiet); color:var(--faint); font-size:.8rem; }
+  .caret {
+    display:inline-block; width:1.5px; height:1em; background:var(--accent);
+    margin-left:2px; vertical-align:-.12em; box-shadow:var(--glow) var(--accent);
+  }
+  @media (prefers-reduced-motion:no-preference) {
+    .caret { animation:blink 1.1s step-end infinite; }
+  }
+  @keyframes blink { 50% { opacity:0; } }
+  .draft-card.idle .caret { display:none; }
+  /* After Edit this one has been pressed. The mode stays on instant, so the
+     color here is the only thing saying this one utterance is being held. */
+  .draft-card.editing {
+    border-color:var(--accent-2);
+    box-shadow:0 0 0 1px color-mix(in srgb, var(--accent-2) 22%, transparent);
+  }
+  .draft-card.editing .mark {
+    /* Built the same as the Edited chip in the log, so it uses the same text
+       ink. On the wash, --accent-2 as it stands measures 4.0 and 4.47, under
+       the floor. */
+    color:var(--accent-2-ink); background:color-mix(in srgb, var(--accent-2) 16%, transparent);
+  }
+
+  #draft {
+    display:block; width:100%; margin-top:.5rem; padding:.6rem .75rem;
+    background:var(--panel); border:1px solid var(--line); border-radius:16px;
+    font-size:.88rem; line-height:1.65; resize:none; overflow-y:auto;
+    min-height:3.4em; max-height:var(--stream-max);
+  }
+  #draft:focus { outline:none; border-color:var(--accent-2); }
+  .draft-actions { display:flex; align-items:center; gap:.4rem; margin-top:.5rem; }
+  .draft-actions .spacer { flex:1; }
+  .round {
+    width:38px; height:38px; border-radius:50%; display:grid; place-items:center;
+    border:2px solid var(--line); color:var(--dim);
+    transition:border-color .15s, color .15s, box-shadow .15s;
+  }
+  .round svg { width:17px; height:17px; stroke-width:2.1; }
+  .round:hover { color:var(--text); border-color:var(--dim); }
+  .round.go { border-color:var(--accent); color:var(--accent); }
+  .round.go:hover { box-shadow:var(--glow) color-mix(in srgb, var(--accent) 50%, transparent); }
+
+  .none { padding:1.5rem var(--pad); text-align:center; font-size:.78rem; color:var(--faint); }
+
+  /* Shows only when the screen itself has been updated. No permanent button
+     for it. The floating window has no way to reload, so this is where we ask. */
+  .fresh {
+    position:fixed; left:50%; bottom:1rem; transform:translateX(-50%);
+    display:flex; align-items:center; gap:.4rem; z-index:30;
+    padding:.45rem .9rem; border-radius:var(--pill);
+    background:var(--accent); color:var(--panel);
+    font-size:.78rem; font-weight:600;
+    box-shadow:0 4px 18px color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+
+  /* The window that stepped aside. Hide the contents and leave only the way back. */
+  .taken {
+    position:fixed; inset:0; z-index:50;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:1rem; padding:2rem; text-align:center;
+    background:var(--bg); color:var(--faint); font-size:.85rem; line-height:1.7;
+  }
+  .taken p { margin:0; max-width:22rem; }
+
+  /* Putting it on top needs a person to press, so we offer it once */
+  .fresh.ask {
+    background:var(--accent-2); color:var(--panel);
+    box-shadow:0 4px 18px color-mix(in srgb, var(--accent-2) 45%, transparent);
+  }
+
+  /* ── Settings panel ───────────────────── */
+  .sheet {
+    position:fixed; inset:0; z-index:20; overflow-y:auto;
+    background:var(--panel);
+  }
+  .sheet-inner { max-width:460px; margin:0 auto; padding-bottom:2rem; }
+  .sheet-head {
+    position:sticky; top:0; z-index:1;
+    display:flex; align-items:center; gap:.4rem;
+    padding:.7rem var(--pad) .7rem .5rem; background:var(--panel);
+    border-bottom:1px solid var(--line-soft);
+  }
+  .sheet-head .icon::after { display:none; }   /* no need for the dot that shows state */
+  .sheet-head h2 { margin:0; font-size:1rem; font-weight:600; margin-right:auto; }
+  /* A cue for whether you are being heard while settings and the dictionary are
+     open. The sheet covers the whole screen, so neither the mic drawing nor the
+     level meter on the main screen can be seen from here. Do not make it
+     pressable. Sitting next to the back button, a misfire would cut the mic off
+     while you are still deep inside settings. */
+  .mini-mic { flex:none; width:30px; height:30px; }
+  .mini-mic canvas { display:block; width:100%; height:100%; }
+
+  .group { padding:1.1rem var(--pad); border-bottom:1px solid var(--line-soft); }
+  /* A heading is larger than the field labels below it (.875rem) and smaller
+     than the sheet title (1rem). The pattern that makes something look like a
+     heading with capitals and letter spacing does nothing for Japanese, which
+     has no capitals, and all that was left of it was small and faint. Build the
+     order out of size and weight instead. */
+  .group > h3 {
+    display:flex; align-items:center; gap:.4rem;
+    margin:0 0 .8rem; font-size:.9375rem; font-weight:700; color:var(--text);
+  }
+  /* Put a small drawing beside the field labels too. Do not leave it a list of nothing but words. */
+  .field > label {
+    display:flex; align-items:center; gap:.35rem;
+  }
+  .field { display:flex; align-items:center; gap:.6rem; margin-bottom:.6rem; }
+  .field:last-child { margin-bottom:0; }
+  .field > label { font-size:.875rem; color:var(--text); flex:none; min-width:7rem; }
+  .field .val {
+    margin-left:auto; font-size:.8rem; color:var(--text); text-align:right;
+    font-variant-numeric:tabular-nums; flex:none; min-width:3.2rem;
+  }
+  /* Let you type in a value past the end of the slider. It still looks like the
+     value readout, and the border only shows when you touch it. */
+  .val-num {
+    -webkit-appearance:none; appearance:none; -moz-appearance:textfield;
+    background:none; border:1px solid transparent; border-radius:8px;
+    padding:.15rem .3rem; width:3.4rem; min-width:3.4rem; text-align:right;
+  }
+  .val-num::-webkit-inner-spin-button, .val-num::-webkit-outer-spin-button {
+    -webkit-appearance:none; margin:0;
+  }
+  .field .unit { font-size:.78rem; color:var(--faint); flex:none; margin-left:-.15rem; }
+  .val-num:hover { border-color:var(--line); }
+  .val-num:focus { outline:none; border-color:var(--accent); background:var(--panel-2); }
+  select, input[type=text], input[type=file] {
+    flex:1; min-width:0; padding:.45rem .85rem;
+    background:var(--panel-2); border:1px solid var(--line); border-radius:var(--pill);
+    font-size:.85rem;
+  }
+  select:focus, input:focus, textarea:focus { outline:none; border-color:var(--accent); }
+
+  input[type=range] {
+    flex:1; min-width:0; -webkit-appearance:none; appearance:none;
+    height:4px; border-radius:3px; background:var(--track);
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance:none; width:17px; height:17px; border-radius:50%;
+    background:var(--accent); box-shadow:var(--glow) color-mix(in srgb, var(--accent) 50%, transparent);
+    cursor:pointer;
+  }
+  .range-note { font-size:.75rem; line-height:1.5; color:var(--faint); margin:-.1rem 0 .8rem; }
+  /* Where a setting stops keeping everything on this machine, say so plainly right there */
+  .warn-note {
+    margin:.6rem 0 0; padding:.55rem .75rem; border-radius:12px;
+    font-size:.75rem; line-height:1.55; color:var(--warn);
+    background:color-mix(in srgb, var(--warn) 12%, transparent);
+    border:1px solid color-mix(in srgb, var(--warn) 32%, transparent);
+  }
+
+  /* A live meter for settling on a sensitivity. The mark shows where the threshold sits. */
+  .gauge {
+    position:relative; height:6px; border-radius:var(--pill);
+    background:var(--track); overflow:visible;
+    margin:.1rem 0 .5rem calc(6.5rem + .6rem);
+  }
+  .gauge-fill {
+    height:100%; width:0; border-radius:var(--pill); background:var(--dim);
+    transition:width .1s linear, background .2s;
+  }
+  .gauge-fill.on { background:var(--accent); }
+  .gauge-mark {
+    position:absolute; top:-3px; width:2px; height:12px; border-radius:1px;
+    background:var(--warn); box-shadow:var(--glow) var(--warn);
+  }
+
+  .seg-row {
+    display:flex; flex:1; gap:.2rem; background:var(--panel-2); padding:3px;
+    border-radius:var(--pill); box-shadow:inset 0 0 0 1px var(--line);
+  }
+  .seg-row button {
+    flex:1; white-space:nowrap; font-size:.8rem; padding:.4rem .5rem;
+    border-radius:var(--pill); color:var(--faint);
+    transition:background .15s, color .15s;
+  }
+  .seg-row button.on { background:var(--raise); color:var(--text); }
+
+  .toggle { display:flex; align-items:center; gap:.55rem; font-size:.875rem; color:var(--text); }
+  .toggle input { accent-color:var(--accent); width:15px; height:15px; }
+
+  /* Three tiers. Filled is the action you want settled on that screen, tinted
+     is support, outlined is everything else. Only one filled button per section. */
+  .btn {
+    display:inline-flex; align-items:center; gap:.4rem;
+    padding:.45rem 1rem; border-radius:var(--pill); font-size:.82rem; font-weight:500;
+    border:1.5px solid var(--line); background:transparent; color:var(--dim);
+    transition:border-color .15s, color .15s, background .15s;
+  }
+  .btn:hover:not(:disabled) { color:var(--text); border-color:var(--dim); }
+  /* Filled */
+  .btn.go {
+    border-color:transparent; color:var(--panel); font-weight:600;
+    background:linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, var(--accent-2)));
+    box-shadow:0 2px 10px color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+  .btn.go:hover:not(:disabled) {
+    color:var(--panel);
+    box-shadow:0 2px 16px color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+  /* Tinted */
+  .btn.tonal {
+    border-color:transparent; color:var(--accent);
+    background:color-mix(in srgb, var(--accent) 15%, transparent);
+  }
+  .btn.tonal:hover:not(:disabled) {
+    color:var(--accent);
+    background:color-mix(in srgb, var(--accent) 24%, transparent);
+  }
+  .btn.busy { opacity:.6; }
+  .btn:disabled { opacity:.45; }
+  .btn-row { display:flex; align-items:center; gap:.4rem; flex-wrap:wrap; }
+  .btn-row .spacer { flex:1; }
+
+  /* Dictionary */
+  .dict-tabs {
+    display:flex; gap:.2rem; background:var(--panel-2); padding:3px;
+    border-radius:var(--pill); box-shadow:inset 0 0 0 1px var(--line);
+    margin-bottom:.6rem;
+  }
+  .dict-tabs button {
+    display:inline-flex; align-items:center; justify-content:center; gap:.35rem;
+    flex:1; white-space:nowrap; font-size:.8rem; padding:.4rem;
+    border-radius:var(--pill); color:var(--faint);
+  }
+  .dict-tabs button.on { background:var(--raise); color:var(--text); }
+  .dict-label { margin:0 0 .6rem; font-size:.78rem; color:var(--faint); }
+  .new-row { display:flex; align-items:center; gap:.3rem; margin-bottom:.5rem; }
+  .new-row input { flex:1; min-width:0; padding:.45rem .85rem;
+    background:var(--panel-2); border:1px solid var(--line); border-radius:var(--pill); font-size:.83rem; }
+  .arrow { color:var(--faint); font-size:.8rem; flex:none; }
+  .filter { width:100%; margin-bottom:.5rem; padding:.45rem .85rem;
+    background:var(--panel-2); border:1px solid var(--line); border-radius:var(--pill); font-size:.83rem; }
+  /* No scrolling inside a frame of its own. The sheet already scrolls, so
+     nesting one inside it showed 9 rows out of 43, and the rest only came out
+     if you dug through the inner one. */
+  .rows { display:flex; flex-direction:column; gap:.25rem; }
+  .row { display:flex; align-items:center; gap:.3rem; }
+  .row.hit input { border-color:var(--accent); }
+  .row input { flex:1; min-width:0; padding:.4rem .8rem;
+    background:var(--panel-2); border:1px solid var(--line); border-radius:var(--pill); font-size:.83rem; }
+  .row .del { display:grid; place-items:center; width:28px; height:28px;
+    color:var(--faint); border-radius:50%; flex:none; }
+  .row .del:hover { color:var(--danger); background:var(--raise); }
+  .chips { display:flex; flex-wrap:wrap; gap:.25rem; }
+  /* Words ignored out of the box. Press one to stop ignoring it (press again
+     and it goes back). The list holds words like 「わかった」「了解」 that
+     people really do say as a reply to you, so anyone who does not want them
+     ignored has to be able to take them off. */
+  .chip {
+    display:inline-flex; align-items:center; gap:.3rem; cursor:pointer;
+    font-size:.75rem; padding:.15rem .5rem .15rem .6rem; border-radius:var(--pill);
+    background:var(--panel-2); color:var(--faint); border:1px solid var(--line-soft);
+    transition:color .14s, border-color .14s, opacity .14s;
+  }
+  .chip .x { font-size:.72rem; line-height:1; opacity:.4; }
+  .chip:hover { color:var(--text); border-color:var(--line); }
+  .chip:hover .x { opacity:1; color:var(--danger); }
+  .chip.off { border-style:dashed; opacity:.55; }
+  .chip.off .w { text-decoration:line-through; }
+  .chip.off:hover .x { color:var(--ok); }
+  .builtin-head { margin-top:.7rem; }
+
+  /* The wording you say out loud. It is there to be read, not pressed. So it
+     is not mistaken for a pressable chip (.chip), it gets neither the pointer
+     cursor nor an underline. */
+  .say {
+    display:inline-flex; align-items:center;
+    font-size:.78rem; padding:.2rem .6rem; border-radius:var(--pill);
+    background:var(--panel-2); color:var(--text);
+    border:1px solid var(--line-soft);
+  }
+  /* In sections with many wordings, this shows and hides everything past the
+     first five. It sits on the heading row so the target stays in the same
+     place whether it is open or closed. */
+  .more {
+    margin-left:auto; flex:none; font-size:.75rem; font-weight:500;
+    color:var(--accent); padding:.15rem .4rem; border-radius:8px;
+  }
+  .more:hover { background:var(--raise); }
+  /* The list of what the keyboard can do. Like the spoken wordings (.say), it
+     is there to be read, so it never takes a pressable shape. Making it look
+     like a keycap keeps it from being read as ordinary letters in the sentence. */
+  .keys { display:flex; flex-direction:column; gap:.45rem; }
+  .key-row { display:flex; align-items:center; gap:.3rem; }
+  .key-row .what {
+    margin-left:auto; padding-left:.7rem; font-size:.8rem;
+    color:var(--faint); text-align:right;
+  }
+  .cap {
+    display:inline-flex; align-items:center; justify-content:center;
+    min-width:1.7rem; padding:.15rem .42rem; border-radius:7px;
+    font-size:.72rem; font-weight:600; color:var(--text);
+    background:var(--panel-2); border:1px solid var(--line-soft);
+    border-bottom-width:2px;
+  }
+  .key-row .plus { font-size:.7rem; color:var(--faint); }
+
+  /* A row written in a shape that does not fit. Sending it only gets it dropped, so show that right here */
+  .row.bad input { border-color:var(--warn); }
+  /* A line shown under the list. It sits outside the section, so it carries its own side padding. */
+  #cmdNote { padding:0 var(--pad); }
+  /* A web page is not allowed to open chrome://, so pressing it copies instead.
+     Unless it is shaped like a destination, nobody can tell where they are
+     supposed to go. */
+  .link {
+    color:var(--accent); text-decoration:underline; text-underline-offset:2px;
+    font-size:inherit; word-break:break-all; text-align:left;
+  }
+  .link:hover { color:var(--text); }
+  .dict-note { font-size:.75rem; line-height:1.5; color:var(--faint); margin:.5rem 0 0; }
+
+
+  /* ── When the window gets small ─────────
+     There is an order to what survives. Mic on and off, then instant / review,
+     then where speech goes, then the live transcript.
+
+     Text size and target size never change. A button you cannot read or cannot
+     hit defeats the point of shrinking. What gets cut is the top bar, the
+     padding, the note lines, and putting the mic and the mode side by side to
+     free up height. The log is left alone here, since .log-wrap grows and
+     shrinks on flex. */
+
+  /* Narrow. Start by tightening the side padding */
+  @media (max-width: 379px) {
+    :root { --pad:.7rem; }
+    .machine { max-width:7rem; }
+  }
+  @media (max-width: 279px) {
+    :root { --pad:.55rem; }
+    .brand h1, #logoMark { display:none; }   /* keep only the name tag */
+    .machine { max-width:100%; }
+    /* Fold settings to the same width. Send the field label up a row and hand the width to the slider */
+    .field { flex-wrap:wrap; gap:.35rem .6rem; }
+    .field > label { flex:1 0 100%; min-width:0; }
+    .field .val { margin-left:0; }
+    .gauge { margin-left:0; }
+  }
+
+  /* Short. Fold the log heading and the note line, and tighten the vertical padding */
+  @media (max-height: 639px) {
+    :root { --stream-max:6em; }
+    .hint { display:none; }
+    .log-head { display:none; }
+    .log-wrap { border-top:1px solid var(--line-soft); }   /* takes over the divider the heading had */
+    .status { padding-top:.3rem; padding-bottom:.1rem; }
+  }
+
+  /* Shorter still. The sensitivity line can be changed from settings too, so it gives here */
+  @media (max-height: 479px) {
+    :root { --stream-max:4.5em; }
+    .meter-row { display:none; }
+    /* While the edit box is open, hold the live transcript to one line. The
+       sentence you are fixing and the send button should be seen first. */
+    .draft-card:has(> textarea:not([hidden])) .stream { max-height:1.7em; }
+    #draft { min-height:2.4em; }
+  }
+
+  /* Almost no room left. Even so, keep the one status line. Take it away and
+     the screen loses the only cue that nothing is getting through */
+  @media (max-height: 429px) {
+    /* The draft card spends close to 50px on the chip row and the tool row
+       alone. Do not shrink the buttons. Cut the padding around them instead and
+       free up height for what you actually said. */
+    .draft-card { padding:.28rem .55rem .38rem; }
+    .draft-card .gutter { margin-bottom:.05rem; }
+    .tiny-row { padding:2px; }
+    /* While the edit box is open, pull the live transcript out of the way. The
+       sentence you are fixing and the send button should be seen first, and the
+       mic drawing already tells you whether you are being heard. */
+    .draft-card:has(> textarea:not([hidden])) .stream { display:none; }
+    .draft-card:has(> textarea:not([hidden])) .draft-actions { margin-top:.3rem; }
+  }
+
+  @media (max-height: 379px) {
+    :root { --stream-max:3em; }
+    #draft { min-height:2em; }
+    .mode span:not(.ring) { display:none; }   /* the drawings in the rings tell them apart */
+    .mode { gap:0; padding-top:0; }
+    .routes { padding-bottom:.35rem; }
+    /* Route chips each take a row of their own. This short, they fill the
+       screen on their own, so rather than dropping the names, switch over to
+       the roll-up picker. */
+    .route-chips { display:none; }
+    /* Give it the look of the selected chip. If only this dropped back to the
+       ground color, where your voice lands would read weaker here than it does
+       on the chips. */
+    .route-pick-wrap { display:inline-block; color:var(--panel); }
+    .route-pick {
+      display:block; font-weight:600; border-color:transparent; color:inherit;
+      background:linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, var(--accent-2)));
+    }
+    /* The opened list goes back to the ground color (on the fill the text cannot be read) */
+    .route-pick option { background:var(--panel-2); color:var(--text); font-weight:400; }
+    .draft-card { margin-bottom:.25rem; }
+  }
+
+  /* At this point, fold the whole top bar. The name tag, settings, the way
+     back to the tab, right now the room matters more than any of them. The
+     state reads from the window title and from whether the mic is moving.
+     Widen it and they come back. */
+  @media (max-height: 319px) {
+    header, .status { display:none; }
+    .control-row { padding-top:.25rem; }
+    /* Fold away the Unsent chip and the time, and move the tools beside the
+       text. That frees up a whole row, which beats tightening padding. The edit
+       box and the send button wrap to the row below only when they are open. */
+    .draft-card { flex-flow:row wrap; align-items:flex-start; gap:.4rem; }
+    .draft-card .mark, .draft-card .gutter .spacer, #draftTime { display:none; }
+    .draft-card .gutter { order:2; flex:none; margin:0; }
+    /* While editing, the text row disappears, and the tools get stranded on the left */
+    .draft-card:has(> textarea:not([hidden])) .gutter { margin-left:auto; }
+    .draft-card .stream { order:1; flex:1 1 6em; min-width:0; }
+    .draft-card > textarea { order:3; flex:1 1 100%; margin-top:0; }
+    .draft-card .draft-actions { order:4; flex:1 1 100%; margin-top:0; }
+    /* The tools have come down beside the text here, and they end up holding
+       the bottom right corner themselves. A drawing tucked under them would
+       read as one more button in that row, and the card is only about 40px tall
+       so there is nowhere else for it to go. Drop it at this height and give the
+       room back to the words. Whether you are being heard still reads off the
+       mic drawing. */
+    .send-cue { display:none; }
+    .draft-card .stream { padding-right:0; }
+  }
+
+  /* When it is short, cut the top bar down to the name tag. Neither the title
+     nor the wave needs looking at right now.
+     (The layout no longer depends on the height. They are always side by side) */
+  @media (max-height: 559px) {
+    header { padding:.35rem var(--pad) .25rem; gap:.35rem; }
+    .brand h1, #logoMark { display:none; }
+    .machine { max-width:100%; }
+    .status { padding:.15rem var(--pad) .1rem; }
+  }
+
+  [hidden] { display:none !important; }

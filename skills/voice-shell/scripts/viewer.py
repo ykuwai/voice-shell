@@ -316,8 +316,19 @@ class Tail:
 
 async def main_async(args):
     page = Path(__file__).with_name("viewer.html")
-    if not page.exists():
-        sys.exit(f"{page} が見つかりません")
+    # The page is a skeleton and the rest of it lives beside it. They are named
+    # one by one rather than served as a directory, so nothing outside this list
+    # is ever reachable through the path in a request.
+    ASSETS = {
+        "/viewer.css": "text/css",
+        "/viewer.js": "text/javascript",
+        "/i18n.js": "text/javascript",
+        "/icons.js": "text/javascript",
+    }
+    assets = {url: Path(__file__).with_name(url.lstrip("/")) for url in ASSETS}
+    for f in [page, *assets.values()]:
+        if not f.exists():
+            sys.exit(f"{f} が見つかりません")
 
     tail = Tail(Path(args.log_file))
     tail.read_existing()
@@ -328,6 +339,16 @@ async def main_async(args):
         return web.FileResponse(page, headers={
             "Cache-Control": "no-store, must-revalidate",
         })
+
+    def make_asset_handler(path, ctype):
+        async def handle_asset(_req):
+            # Same reasoning as the page. A cached stylesheet or script paired
+            # with a fresh page is the same accident, only harder to spot.
+            return web.FileResponse(path, headers={
+                "Cache-Control": "no-store, must-revalidate",
+                "Content-Type": f"{ctype}; charset=utf-8",
+            })
+        return handle_asset
 
     async def handle_ws(request):
         ws = web.WebSocketResponse(heartbeat=30)
@@ -421,13 +442,17 @@ async def main_async(args):
                 rec = Tail._parse(line)
                 if rec:
                     held.append(rec)
-        # Give back the page file's mtime too. After an edit there is no way to
+        # Give back the page's mtime too. After an edit there is no way to
         # notice an open page is still the old one (a floating small window
-        # especially is awkward to reload).
-        try:
-            ui = int(page.stat().st_mtime)
-        except OSError:
-            ui = 0
+        # especially is awkward to reload). The page is several files now, so it
+        # is the newest of them all. Editing only the stylesheet or only the
+        # wording has to raise the flag just the same.
+        ui = 0
+        for f in [page, *assets.values()]:
+            try:
+                ui = max(ui, int(f.stat().st_mtime))
+            except OSError:
+                pass    # a file that went missing is not a reason to lose the rest
         import voice_daemon as vd
         cfg = vd.read_config()
         return web.json_response({"muted": mute_file.exists(),
@@ -773,6 +798,8 @@ async def main_async(args):
 
     app = web.Application()
     app.router.add_get("/", handle_index)
+    for url, ctype in ASSETS.items():
+        app.router.add_get(url, make_asset_handler(assets[url], ctype))
     app.router.add_get("/ws", handle_ws)
     app.router.add_get("/api/state", handle_state)
     async def handle_dict_get(req):
