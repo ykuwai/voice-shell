@@ -1,0 +1,3255 @@
+// Make the failures that never reach the screen visible (a load failure just leaves the buttons doing nothing)
+window.addEventListener('error', e => {
+  const box = document.getElementById('hint');
+  if (box) box.textContent = 'Script error. ' + e.message;
+});
+
+
+/* The languages listed in the dropdown. Each name is written in that
+   language's own script. A name written in letters you cannot read is a name
+   you cannot pick, so this is the one place we do not translate.
+   Only languages recognition can handle (ASR_LANGS below) are listed. Translate
+   the screen and then offer a language your voice cannot get through in, and it
+   looks usable when it is not. */
+const UI_LANGS = [
+  ['en', 'English'], ['ja', '日本語'], ['es', 'Español'], ['fr', 'Français'],
+  ['de', 'Deutsch'], ['zh', '中文（简体）'], ['ko', '한국어'],
+];
+
+/* How the time is written. We pass hour12:false, so all of them come out on a 24 hour clock. */
+const TIME_LOCALE = {en:'en-GB', ja:'ja-JP', es:'es-ES', fr:'fr-FR',
+                     de:'de-DE', zh:'zh-CN', ko:'ko-KR'};
+const timeLocale = () => TIME_LOCALE[lang] || 'en-GB';
+
+const store = {
+  get(k, d) { try { return localStorage.getItem('vs.' + k) ?? d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('vs.' + k, v); } catch {} },
+};
+
+/* While it floats in front, the contents of the screen have been moved into
+   the floating window's document. Theme, language and color all have to be
+   written to that :root or they do nothing. Copying once at the moment it opens
+   means anything switched afterwards never reaches the small window, and it
+   stays stale until you come back. A window on its way out is still there
+   inside 'pagehide', so rather than looking at documentPictureInPicture every
+   time, we remember it ourselves and clear it ourselves.
+   (Nothing touches the identifier directly, so a browser without this feature
+   does not fall over) */
+let pipDoc = null;
+const uiDoc = () => (pipDoc && pipDoc.defaultView) ? pipDoc : document;
+
+let langPref = store.get('lang', 'auto');
+let lang = 'en';
+/* The browser announces itself with the region attached, like ja-JP or zh-TW.
+   Match the whole thing first, then match again on just the front half, and if
+   both miss, fall back to English. zh-TW ends up on a simplified Chinese
+   screen, which is still closer than falling back to English. */
+function pickLang(tag) {
+  const want = (tag || '').toLowerCase();
+  if (I18N[want]) return want;
+  const head = want.split('-')[0];
+  return I18N[head] ? head : 'en';
+}
+function resolveLang() {
+  lang = langPref !== 'auto' ? langPref : pickLang(navigator.language);
+  if (!I18N[lang]) lang = 'en';
+  // While it floats, write it to the small window too. Without also leaving it
+  // on the original document, coming back rewinds to the language it opened in.
+  for (const d of new Set([document, uiDoc()])) d.documentElement.lang = lang;
+}
+// Fill-ins like {name} are handled here as well
+const t = (key, vars) => {
+  let s = (I18N[lang] && I18N[lang][key]) ?? I18N.en[key] ?? key;
+  if (vars) for (const [k, v] of Object.entries(vars)) s = s.replaceAll('{' + k + '}', v);
+  return s;
+};
+
+// The default target is whichever document the contents are living in right
+// now. Search document while it floats and not a single [data-i18n] turns up,
+// so changing the language changes no text at all.
+function applyI18n(root = uiDoc()) {
+  for (const n of root.querySelectorAll('[data-i18n]')) {
+    // For an element holding an icon, replace only the text part (do not wipe out the svg)
+    const svg = n.querySelector(':scope > svg');
+    if (svg) {
+      const last = n.lastChild;
+      if (last && last.nodeType === 3) last.nodeValue = t(n.dataset.i18n);
+      else n.append(t(n.dataset.i18n));
+    } else {
+      n.textContent = t(n.dataset.i18n);
+    }
+  }
+  for (const n of root.querySelectorAll('[data-i18n-ph]')) n.placeholder = t(n.dataset.i18nPh);
+  // The text shown when the live transcript box is empty (CSS reads it through content)
+  for (const n of root.querySelectorAll('[data-i18n-quiet]')) n.dataset.quiet = t(n.dataset.i18nQuiet);
+  for (const n of root.querySelectorAll('[data-i18n-title]')) {
+    n.title = t(n.dataset.i18nTitle);
+    n.setAttribute('aria-label', t(n.dataset.i18nTitle));
+  }
+  // Wording that changes with the state cannot ride on data-i18n, so it gets repainted here
+  if (typeof paintPower === 'function' && el.powerLabel) paintPower();
+}
+
+const $ = id => document.getElementById(id);
+const el = {};
+for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
+                  'power','powerLabel','powerRow','powerNote','openSettings','sheet','closeSettings','floatBtn','page',
+                  'miniMic','miniViz',
+                  'routes','routeChips','routePick','viz','meter','meterHit','meterFill','meterMark','logoMark',
+                  'tray','stream','draft','draftTime','draftActions','send','discard',
+                  'editOnce','dropOne','draftMark','sendCue','sendCueFill',
+                  'hint','note','log','none','count','fresh','floatAsk','taken','takeBack',
+                  'mic','recogLang','recogLangField','thresh','threshVal','gaugeFill','gaugeMark',
+                  'silence','silenceVal','minChars','minCharsVal','clean',
+                  'engineGroup','enginePick','engineNote','whisperModel','whisperModelField','whisperModelNote',
+                  'browserAsrWarn','browserMic','micSettingsLink','asrLang','asrLangField',
+                  'idleMute','idleMuteVal','idleMuteField','idleMinsField','idleMuteOn','idleMuteNote',
+                  'themeRow','langPick','multiOn','machineName','machineNameField','machineTag',
+                  'tabReplace','tabIgnore',
+                  'paneReplace','paneIgnore','replaceRows','ignoreRows',
+                  'addReplace','addIgnore','newFrom','newTo','newIgnore','filterReplace',
+                  'builtinChips','builtinCount',
+                  'dictNote','dictExport','dictImport','dictFile',
+                  'paneBasic','paneDict','tabBasic','tabDict',
+                  'openHelp','helpSheet','closeHelp','helpMini','helpMiniViz',
+                  'cmdGroups','cmdNote'])
+  el[id] = $(id);
+
+const post = (path, body) =>
+  fetch(path, {method:'POST', headers:{'Content-Type':'application/json'},
+               body: JSON.stringify(body || {})});
+
+const putJSON = (path, body) =>
+  fetch(path, {method:'PUT', headers:{'Content-Type':'application/json'},
+               body: JSON.stringify(body || {})});
+
+
+// Build an svg holding both the outline and the fill. CSS decides which one shows.
+function iconSvg(name, size = 18) {
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 -960 960 960');
+  svg.setAttribute('fill', 'currentColor');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.style.width = svg.style.height = size + 'px';
+  svg.style.flex = 'none';
+  const pair = ICON[name] || ICON.auto_awesome;
+  for (const [i, cls] of [[0, 'line'], [1, 'solid']]) {
+    const path = document.createElementNS(NS, 'path');
+    path.setAttribute('d', pair[i]);
+    path.setAttribute('class', cls);
+    svg.appendChild(path);
+  }
+  return svg;
+}
+
+// Put a drawing at the head of every element carrying data-icon. Do not leave the screen all words.
+function decorateIcons(root = document) {
+  for (const n of root.querySelectorAll('[data-icon]:not([data-iconed])')) {
+    n.dataset.iconed = '1';
+    n.prepend(iconSvg(n.dataset.icon, Number(n.dataset.iconSize) || 18));
+  }
+}
+
+/* Cleaning up the text is the daemon's job. Fixing only the look here does
+   nothing to the body that reaches Claude (we once believed 「えーと」 was being
+   stripped when it was not). The screen shows exactly what was written to the
+   log. */
+const format = raw => raw;
+
+/* ── Visualizer ─────────────────────────
+   The browser opens the same microphone, reads the frequencies, and draws the
+   real shape of your voice. It is a separate path from the daemon (ffmpeg), so
+   if permission is refused we run on nothing but the level that comes over the
+   WebSocket (level.txt). */
+const BARS = 48;
+let audioCtx = null, analyser = null, micStream = null, freq = null;
+let daemonLevel = 0, daemonSpeaking = false;
+let vizFailed = false;
+let wave = null;
+// Like the mock, the bars stream the last little while from left to right.
+// A frequency picture tends to stand up only at the low end and leave the right
+// half lying flat, which never feels like talking.
+const bandFloor = new Array(BARS).fill(-60);   // dB
+
+const canvas = el.viz, cx = canvas.getContext('2d');
+let cw = 0, ch = 0;
+
+function fitCanvas() {
+  const r = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  cw = Math.max(1, Math.round(r.width));
+  ch = Math.max(1, Math.round(r.height));
+  canvas.width = cw * dpr;
+  canvas.height = ch * dpr;
+  cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  // Writing width or height wipes out the contents of a canvas. ResizeObserver
+  // runs **after** requestAnimationFrame, so waiting for the next frame paints
+  // one empty frame. While you have the window in your hand that repeats every
+  // frame, and the mic looks like it is blinking as it shrinks. Redraw here.
+  try { paintFrame(performance.now()); } catch {}
+}
+new ResizeObserver(fitCanvas).observe(canvas);
+
+/* The small mic that sits in a sheet heading. Same drawing as the main screen,
+   drawn from the same values. While hidden it has no measurable size (it is
+   display:none, so everything reads 0), so it gets measured again the moment
+   the sheet opens. Add any new sheet here. Skip that and, for as long as that
+   screen is open, there is no way to see whether you are being heard. */
+const minis = [[el.miniViz, el.sheet, el.miniMic],
+               [el.helpMiniViz, el.helpSheet, el.helpMini]]
+  .map(([canvas, sheet, box]) => ({canvas, sheet, box, cx: canvas.getContext('2d'), w: 0, h: 0}));
+function fitMini() {
+  const dpr = window.devicePixelRatio || 1;
+  for (const m of minis) {
+    const r = m.canvas.getBoundingClientRect();
+    if (!r.width || !r.height) { m.w = m.h = 0; continue; }
+    m.w = Math.round(r.width);
+    m.h = Math.round(r.height);
+    m.canvas.width = m.w * dpr;
+    m.canvas.height = m.h * dpr;
+    m.cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+}
+for (const m of minis) new ResizeObserver(fitMini).observe(m.canvas);
+
+// Colors are read from whichever document the contents are living in too. Read
+// them from the original document and, when the theme is switched while it
+// floats, only the mic on the canvas takes the new color while the HTML around
+// it keeps the old one.
+const cssVar = n => {
+  const d = uiDoc();
+  return d.defaultView.getComputedStyle(d.documentElement).getPropertyValue(n).trim();
+};
+// Fade a theme color as it is (assumes #rrggbb. Anything else comes back untouched)
+const color = (hex, alpha) => {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex);
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  return `rgba(${n >> 16 & 255}, ${n >> 8 & 255}, ${n & 255}, ${alpha})`;
+};
+
+// Loudness is handled on a log scale (dB). With raw amplitude, the small
+// differences down in the quiet get crushed and only the loud end stretches.
+// The 0 to 255 out of getByteFrequencyData is an even scale between
+// minDecibels and maxDecibels, so it converts straight back to dB.
+const DB_MIN = -85, DB_MAX = -25;
+const DB_SPAN = DB_MAX - DB_MIN;
+const toDb = byte => DB_MIN + (byte / 255) * DB_SPAN;
+
+// How many dB above the noise floor drawing begins, and how many dB pins it.
+// The noise floor of a quiet room wanders a few dB, so leave room for that.
+const GATE_DB = 7, RANGE_DB = 26;
+
+// Thin the bins roughly logarithmically, leaning toward the voice band. Split
+// them evenly and the high end becomes nothing but near-silent bands, and the
+// right half looks dead.
+function bandsFromFreq() {
+  const out = new Array(BARS);
+  const n = analyser.frequencyBinCount;
+  const top = Math.floor(n * 0.55);          // barely any voice rides up at the top
+  for (let i = 0; i < BARS; i++) {
+    const a = Math.floor(Math.pow(i / BARS, 1.7) * top);
+    const b = Math.max(a + 1, Math.floor(Math.pow((i + 1) / BARS, 1.7) * top));
+    let sum = 0;
+    for (let k = a; k < b && k < n; k++) sum += freq[k];
+    const db = toDb(sum / (b - a));
+
+    // Each band carries its own reference (dB) that drifts slowly toward what
+    // it reads when things are quiet. Without subtracting it, the low hum of
+    // air conditioning or a fan leaves the left side standing up for good.
+    bandFloor[i] = db < bandFloor[i] ? bandFloor[i] * 0.9 + db * 0.1
+                                     : bandFloor[i] * 0.999 + db * 0.001;
+
+    // Voice power leans toward the low end, so lift the higher bands to balance it
+    const tilt = 0.85 + 1.15 * Math.pow(i / BARS, 0.7);
+    const over = db - bandFloor[i] - GATE_DB;      // how many dB it came out above the noise floor
+    out[i] = Math.min(1, Math.max(0, over / RANGE_DB) * tilt);
+  }
+  return out;
+}
+
+// The stand-in for when the microphone cannot be used. There is only one level
+// to work with, so weight it into a hump and let the middle ride high.
+let fallbackPhase = 0;
+function bandsFromLevel() {
+  fallbackPhase += 0.08;
+  const amp = Math.min(1, daemonLevel * 22);
+  const out = new Array(BARS);
+  for (let i = 0; i < BARS; i++) {
+    const x = i / (BARS - 1);
+    const hump = Math.sin(Math.PI * x);
+    const ripple = 0.75 + 0.25 * Math.sin(fallbackPhase + x * 7);
+    out[i] = Math.max(0.02, amp * hump * ripple);
+  }
+  return out;
+}
+
+// The room's noise floor (dB). It drifts slowly toward what it reads when
+// things are quiet. With a fixed threshold, a quiet room reacts to the air
+// conditioning and the fans, and a noisy room sits pinned the other way.
+let floorDb = -60;
+
+// The height of the streaming waveform. This one also uses the amount over the sensitivity as it stands.
+
+// The level measured by the browser's own microphone (0 to 1). It still works with the daemon down.
+function browserLevel() {
+  let db;
+  if (analyser && !vizFailed) {
+    // Look at the RMS across every band and the hiss of a sibilant alone (the
+    // さ row in Japanese) pins the meter. That hiss comes out strongly above
+    // 4kHz, so we look only at 120 to 2600Hz, where the fundamental and the
+    // formants of the voice sit. getByteFrequencyData is already on a dB scale,
+    // so averaging it directly does not crush the loud parts too far.
+    const hz = (audioCtx.sampleRate / 2) / freq.length;
+    const lo = Math.max(1, Math.round(120 / hz));
+    const hi = Math.max(lo + 1, Math.min(freq.length, Math.round(2600 / hz)));
+    let sum = 0;
+    for (let k = lo; k < hi; k++) sum += freq[k];
+    db = toDb(sum / (hi - lo));
+  } else {
+    // What the daemon puts out is an RMS amplitude, so this side converts it to dB itself
+    db = 20 * Math.log10(Math.max(daemonLevel, 1e-5));
+  }
+
+  // Follow it fast on the way down and very gently on the way up
+  // (so the noise floor estimate is not dragged up while you are talking)
+  floorDb = db < floorDb ? floorDb * 0.92 + db * 0.08
+                         : floorDb * 0.9995 + db * 0.0005;
+
+  // How many dB it came out above the noise floor. Anything below this never gets drawn.
+  return Math.min(1, Math.max(0, (db - floorDb - GATE_DB) / RANGE_DB));
+}
+
+// With the daemon down, the waveform runs on the browser's microphone too
+function amplitudeFallback() {
+  return (analyser && !vizFailed) ? browserLevel() : 0;
+}
+
+
+
+// Loudness is read in dB. On top of that, anything under the threshold drops
+// away sharply (an expander). It never reaches zero, so it never reads as
+// "maybe it stopped recording", and it still does not wander around when
+// things are quiet.
+//
+//   above the threshold, left as it is
+//   below the threshold, the amount it fell is multiplied by EXPAND
+//
+// Joining the two straight leaves a visible step, so KNEE_DB smooths the bend.
+const EXPAND = 5;        // how many times faster it falls below the threshold
+const KNEE_DB = 6;       // the width that smooths the bend
+const BELOW_DB = 4;      // how many dB under the threshold counts as the floor
+const SPAN_DB = 18;      // how many dB above the threshold pins it
+
+function expand(db, kneeDb) {
+  const d = db - kneeDb;
+  if (d >= KNEE_DB / 2) return db;                       // above, left as it is
+  if (d <= -KNEE_DB / 2) return kneeDb + d * EXPAND;     // below, dropped sharply
+  return db - (EXPAND - 1) * Math.pow(d - KNEE_DB / 2, 2) / (2 * KNEE_DB);
+}
+
+// The scale is taken from the threshold. Change the sensitivity and the whole
+// mapping moves with it, so a normal voice lands around 70 percent in any room.
+//   noise floor and stray sounds → 0% (the bars stay at their thinnest, so it never looks gone)
+//   exactly at the threshold     → around 5%
+//   a normal voice               → around 65%
+//   a loud voice                 → 100%
+const levelToUnit = v => {
+  const db = 20 * Math.log10(Math.max(v, 1e-5));
+  const knee = 20 * Math.log10(Math.max(tuning.silence_threshold, 1e-5));
+  const out = expand(db, knee);
+  return Math.min(1, Math.max(0, (out - (knee - BELOW_DB)) / (SPAN_DB + BELOW_DB)));
+};
+// When the daemon is not the one recognizing, run on the level measured by
+// this microphone. Otherwise the waveform looks frozen the whole time you are
+// running on browser recognition alone.
+const amplitudeNow = () =>
+  (engine === 'off' || asrActive()) ? amplitudeFallback() : levelToUnit(daemonLevel);
+
+// A sharp rise reads as flicker, so only the fall is eased
+const smooth = new Array(BARS).fill(0);
+function currentBands() {
+  // The shape comes from the browser's FFT, the size from the amount over the
+  // sensitivity. To pull the shape out on its own, divide by the loudest band
+  // so every frame carries the same hump.
+  const shape = (analyser && !vizFailed) ? bandsFromFreq() : bandsFromLevel();
+  const peak = Math.max(...shape, 0.001);
+  const amp = amplitudeNow();
+
+  for (let i = 0; i < BARS; i++) {
+    const raw = (shape[i] / peak) * amp;
+    smooth[i] = raw > smooth[i] ? smooth[i] * 0.4 + raw * 0.6
+                                : smooth[i] * 0.88 + raw * 0.12;
+  }
+  return smooth;
+}
+
+/* The fill inside the mic gets the same easing. The raw value only changes
+   every 0.1 seconds (asr_mic.py measures 0.1 seconds at a time and viewer.py
+   pushes every 0.1 seconds) while we draw every frame, so one value sits for 6
+   frames and jumps on the 7th. With the bars, 48 of them average each other out
+   and the step disappears, but there is only one mic, so the jump shows up as a
+   stutter.
+   The rise is 0.045 seconds. By the time the next value arrives it is about 90
+   percent of the way there, so the 0.1 second step turns into one slope. The
+   start of a sentence never looks sluggish.
+   The fall is 0.15 seconds. Same as the bars, only the fall is slowed.
+   It is held in seconds rather than as a coefficient so that a 120Hz screen
+   does not follow at twice the speed. */
+const MIC_RISE = 0.045, MIC_FALL = 0.15;
+let micLevel = 0, micAt = 0;
+function stepMicLevel(now) {
+  const raw = amplitudeNow();
+  // No frames arrive while it sits in the background. Using that whole gap as
+  // it stands makes it jump all at once the instant you come back, so cap it.
+  // fitCanvas calls this too and the clock ticks can come out of order, so keep
+  // it off negative as well (the sign flips and it runs away).
+  const dt = micAt ? Math.min(Math.max((now - micAt) / 1000, 0), 0.1) : 0.1;
+  micAt = now;
+  micLevel += (raw - micLevel) * (1 - Math.exp(-dt / (raw > micLevel ? MIC_RISE : MIC_FALL)));
+  return micLevel;
+}
+// Fill the Material Symbols path as it is. It goes on a canvas, so make it a
+// Path2D and reuse it (rebuilding one every frame gets heavy on allocation and
+// disposal alone).
+const _micPaths = {};
+function micPath2D(name) {
+  if (!_micPaths[name]) _micPaths[name] = new Path2D(ICON[name][1]);   // the filled one
+  return _micPaths[name];
+}
+function paintGlyph(ctx, name, midX, midY, size, color) {
+  ctx.save();
+  ctx.translate(midX, midY);
+  const k = size / 960;                 // viewBox is 0 -960 960 960
+  ctx.scale(k, k);
+  ctx.translate(-480, 480);
+  ctx.fillStyle = color;
+  ctx.fill(micPath2D(name));
+  ctx.restore();
+}
+
+/* The same drawing goes in two places, the big one on the main screen and the
+   small one in the settings heading. It takes the target and the size as
+   arguments because giving the small one the same ring thickness fills a 30px
+   circle with nothing but ring and buries the mic inside it.
+   tone is the color that fills up with the level. It carries the mode (instant
+   / review) straight through. */
+function drawMic(ctx, w, h, tone) {
+  const midX = w / 2, midY = h / 2;
+  const size = h * 0.62;            // height of the mic drawing
+  const ring = h * 0.40;            // radius of the ring around it
+  const lw = Math.max(1.6, Math.min(3, h * 0.05));   // the main one stays at 3px
+  const lv = micLevel;               // the eased value. The raw one moves in steps
+  const off = route === 'off';
+
+  if (off) {
+    ctx.strokeStyle = cssVar('--danger');
+    ctx.lineWidth = lw;
+    ctx.beginPath();
+    ctx.arc(midX, midY, ring, 0, Math.PI * 2);
+    ctx.stroke();
+    paintGlyph(ctx, 'mic_off', midX, midY, size, cssVar('--danger'));
+    return;
+  }
+
+  // The ring around it never changes. If its color moved with your voice, how
+  // far the pressable area reaches would blur every time. Only the inside of
+  // the mic moves.
+  ctx.strokeStyle = color(cssVar('--faint'), 0.55);
+  ctx.lineWidth = lw;
+  ctx.beginPath();
+  ctx.arc(midX, midY, ring, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // The mic in its sunken state
+  paintGlyph(ctx, 'mic', midX, midY, size, cssVar('--faint'));
+
+  // The inside lights up from below. Clip to the level and repaint that much in the bright color.
+  if (lv > 0.01) {
+    const top = midY + size / 2 - size * lv;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(midX - size, top, size * 2, size);
+    ctx.clip();
+    paintGlyph(ctx, 'mic', midX, midY, size, tone);
+    ctx.restore();
+  }
+}
+let frameFailed = false;
+function frame(now) {
+  requestAnimationFrame(frame);
+  // Even when the drawing cannot happen (no measurable box size and so on), still show it building toward being sent
+  paintSendCue(now);
+  if (!cw || !ch) return;
+  try { paintFrame(now); } catch (err) {
+    // One failed frame does not stop it. The next frame redraws.
+    // It only goes quiet from the second one on. Swallow it and, even with
+    // every single frame failing, all you know is that no picture shows (which
+    // is exactly how it once went unnoticed).
+    if (!frameFailed) { frameFailed = true; console.error('paintFrame:', err); }
+    cx.setTransform(window.devicePixelRatio || 1, 0, 0, window.devicePixelRatio || 1, 0, 0);
+    cx.globalAlpha = 1;
+    cx.globalCompositeOperation = 'source-over';
+  }
+}
+
+function paintFrame(now) {
+  cx.clearRect(0, 0, cw, ch);
+
+  // The mic drawing shows being switched off through its shape too, so it keeps drawing
+  const dead = engine === 'off' && !asrActive();
+  if (analyser && !vizFailed) analyser.getByteFrequencyData(freq);
+
+  // Nothing moves while paused. The look itself has to say nothing is being recorded.
+  if (dead) smooth.fill(0);
+  const bands = dead ? smooth : currentBands();
+
+  stepMicLevel(now);
+  drawMic(cx, cw, ch, cssVar('--accent'));
+
+  // While a sheet is open the main screen is hidden entirely. Draw the same
+  // picture next to the heading so that at least whether you are being heard
+  // stays visible. Nothing is drawn while it is closed (that would only be
+  // painting something invisible every frame).
+  for (const m of minis) {
+    if (m.sheet.hidden || !m.w || !m.h) continue;
+    m.cx.clearRect(0, 0, m.w, m.h);
+    drawMic(m.cx, m.w, m.h, cssVar(shownMode === 'hold' ? '--accent-2' : '--accent'));
+  }
+
+  // The wave in the logo runs on the same value (a cue for when it is shrunk down)
+  const src = bands;
+  const marks = el.logoMark.children;
+  for (let i = 0; i < marks.length; i++) {
+    const v = src[BARS - marks.length + i] ?? src[Math.floor((i + 0.5) / marks.length * BARS)] ?? 0;
+    marks[i].style.height = (25 + v * 75) + '%';
+  }
+}
+requestAnimationFrame(frame);
+
+// We want the browser on the same microphone the daemon picked.
+// ffmpeg and Chrome write their labels differently, so we match on containment.
+async function matchDeviceId(label) {
+  if (!label) return null;
+  try {
+    const list = await navigator.mediaDevices.enumerateDevices();
+    const ins = list.filter(d => d.kind === 'audioinput' && d.label);
+    const norm = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const want = norm(label);
+    const hit = ins.find(d => norm(d.label).includes(want) || want.includes(norm(d.label)));
+    return hit ? hit.deviceId : null;
+  } catch { return null; }
+}
+
+async function startViz(label) {
+  try {
+    if (micStream) micStream.getTracks().forEach(tr => tr.stop());
+    const id = await matchDeviceId(label);
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio: id ? {deviceId: {ideal: id}} : true,
+    });
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    analyser.smoothingTimeConstant = 0.7;
+    analyser.minDecibels = -85;
+    analyser.maxDecibels = -25;
+    freq = new Uint8Array(analyser.frequencyBinCount);
+    wave = new Uint8Array(analyser.fftSize);
+    audioCtx.createMediaStreamSource(micStream).connect(analyser);
+    vizFailed = false;
+  } catch {
+    // The screen still has to hold together where permission is refused (it runs on the level alone)
+    vizFailed = true;
+    analyser = null;
+    if (el.hint.textContent === '') el.hint.textContent = t('hintNoMic');
+  }
+}
+
+function stopViz() {
+  if (micStream) micStream.getTracks().forEach(tr => tr.stop());
+  micStream = null; analyser = null;
+}
+
+// Autoplay is restricted, so we go and get the audio the first time anything is touched
+let vizArmed = false;
+function armViz() {
+  if (vizArmed) return;
+  vizArmed = true;
+  startViz(el.mic.value || '');
+}
+addEventListener('pointerdown', armViz, {once:true});
+addEventListener('keydown', armViz, {once:true});
+
+/* ── Painting ───────────────────────────── */
+function setState(kind, text) {
+  el.beacon.className = 'beacon ' + kind;
+  el.stateText.textContent = text;
+  // While a sheet is open this one line is hidden. The small mic is the only
+  // cue left, so the same sentence goes on its label and its tooltip too.
+  for (const m of minis) {
+    m.box.title = text;
+    m.box.setAttribute('aria-label', text);
+  }
+}
+
+function retally() {
+  const n = el.log.children.length;
+  el.count.textContent = n;
+  el.none.hidden = n > 0;
+}
+
+function addEntry(rec) {
+  const row = document.createElement('div');
+  row.className = 'entry';
+  row.dataset.kind = rec.edited ? 'edited' : 'sent';
+
+  const gutter = document.createElement('div');
+  gutter.className = 'gutter';
+  const mark = document.createElement('span');
+  mark.className = 'mark ' + row.dataset.kind;
+  mark.textContent = rec.edited ? t('edited') : t('sent');
+  const stamp = document.createElement('span');
+  // The log carries no timestamp, so we show the time it arrived
+  stamp.textContent = rec.time ||
+    new Date().toLocaleTimeString(timeLocale(), {hour12:false});
+  gutter.append(mark, stamp);
+
+  // Only rows that carry a destination show one. With a single session
+  // listening no destination is attached, so working alone adds nothing.
+  if (rec.to) {
+    row.dataset.to = String(rec.to);
+    const to = document.createElement('span');
+    to.className = 'to';
+    // Put it in right here. relabelEntries only looks at rows already in
+    // el.log, so leaving it to the repaint would make this one row a nameless
+    // chip until the next update.
+    to.append(iconSvg('send', 11),
+              document.createTextNode(routeNames.get(row.dataset.to) || `#${rec.to}`));
+    gutter.append(to);
+  }
+
+  const text = document.createElement('div');
+  text.className = 'text';
+  text.dataset.raw = rec.text;
+  text.textContent = format(rec.text);
+
+  row.append(gutter, text);
+  el.log.prepend(row);          // newest on top (same order as the mock)
+  retally();
+}
+
+/* Look up a name from the destination PID. Names of finished sessions are kept
+   as well. If the entry survives but the destination alone turns into #42101,
+   you still cannot tell which one it was. */
+const routeNames = new Map();
+
+function relabelEntries() {
+  for (const row of el.log.children) {
+    const to = row.dataset.to;
+    if (!to) continue;
+    const node = row.querySelector('.to');
+    if (!node) continue;
+    // Keep the icon and swap only the name
+    const label = node.lastChild;
+    if (label) label.textContent = routeNames.get(to) || `#${to}`;
+  }
+}
+
+function reformatAll() {
+  for (const row of el.log.children) {
+    const n = row.querySelector('.text');
+    n.textContent = format(n.dataset.raw);
+  }
+}
+
+/* ── Modes ──────────────────────────────
+   Three of them, instant, review and paused. The daemon never gets as far as
+   the hold decision while muted, so there is no such thing as off and
+   collecting. */
+const ROUTE = {
+  live: {muted:false, paused:false},
+  hold: {muted:false, paused:true},
+  off:  {muted:true,  paused:false},
+};
+
+let route = 'live';
+let lastMode = 'live';   // coming off pause goes back to the mode just before it
+let oneShot = false;     // whether just this one utterance is being routed to review
+/* Whether a person laid hands on the current draft. It rides along on send, and
+   the server reads it to stamp "edited". It is not decided by whether the text
+   went through the edit box. That would stamp sentences that came out of
+   recognition clean and went out untouched, and Claude would read them as
+   deliberately worded and hold back on rereading them. A recognition result
+   arrives by assignment to value, which fires no 'input', so this only goes up
+   when a person types, pastes or cuts.
+   Editing and then putting the original sentence back still counts as edited
+   (an act took place either way).
+   It comes down only on send and on discard. */
+let draftTouched = false;
+let shownMode = 'live';  // the mode shown on screen. The small mic takes its color from this
+let asrPausedByRoute = false;   // whether browser recognition was stopped for the pause
+let inFlight = false;    // keeps polling from rewinding things mid-switch
+
+function paint() {
+  // While Edit this one is on, keep showing instant. Inside it is holding, but
+  // the mode itself was never switched, so changing the display too would make
+  // it look like something else. While muted, route is 'off', which would leave
+  // neither one looking selected. Show the mode you come back to as the
+  // selected one (CSS pulls the color out).
+  const shown = oneShot ? 'live' : (route === 'off' ? lastMode : route);
+  shownMode = shown;
+
+  for (const [k, b] of [['live', el.segLive], ['hold', el.segHold]]) {
+    b.classList.toggle('on', shown === k);
+    b.setAttribute('aria-checked', String(shown === k));
+  }
+  const off = route === 'off';
+  el.modes.classList.toggle('muted', off);
+  el.segOff.setAttribute('aria-pressed', String(off));
+  el.segOff.title = t(off ? 'resumeTitle' : 'pauseTitle');
+  el.segOff.setAttribute('aria-label', el.segOff.title);
+
+  // The beacon color puts being switched off first (shown points at where you come back to)
+  setState(off ? 'off' : shown,
+           t(off ? 'statusOff' : shown === 'hold' ? 'statusHold' : 'statusLive'));
+  if (!oneShot && performance.now() > hintHoldUntil) {
+    el.hint.textContent = armPending ? t('hintArm')
+      : t(off ? 'hintOff' : shown === 'hold' ? 'hintHold' : 'hintLive');
+  }
+  // While you are working elsewhere, the tab title is the only cue left
+  setTitle(t(off ? 'titleOff' : shown === 'hold' ? 'titleHold' : 'titleLive') + ' · voice-shell');
+
+  el.tray.classList.toggle('holding', route === 'hold');
+  el.tray.classList.toggle('editing', oneShot);
+  el.draftMark.textContent = t(oneShot ? 'editingOne' : 'unsent');
+  paintTinyButtons();
+  el.tray.classList.toggle('idle', off);
+  if (off) el.stream.textContent = '';
+  paintDraft();
+}
+
+/* Edit and discard stay put at all times, and only whether they can be pressed
+   changes. Showing and hiding them moves the target, and in a hurry you hit the
+   one next to it. */
+function paintTinyButtons() {
+  // Discard can always be pressed. Press it with nothing to discard and
+  // nothing happens, because there is simply nothing being said right now.
+  // Raising and sinking it is worse to live with, since you then have to check
+  // every time whether it can be pressed when you want to press it.
+  el.editOnce.disabled = route !== 'live' || oneShot;
+}
+
+/* The setting for using several machines. It changes what it takes for a
+   signal to be accepted, so while it is on, the machine name shows on the main
+   screen too (buried in settings, you could be talking to the wrong machine and
+   never notice). */
+function paintMachine() {
+  const on = el.multiOn.checked;
+  const all = el.machineName.value.split(/[,、]/).map(v => v.trim()).filter(Boolean);
+  el.machineNameField.hidden = !on;      // a setting that is not in use is not shown
+  el.machineTag.hidden = !(on && all.length);
+  el.machineTag.textContent = all[0] || '';
+  el.machineTag.title = t('multiOn');
+}
+/* While you are typing, never overwrite with the server's value. The refetch
+   every 3 seconds would wipe out what you were part way through writing. It is
+   held as a flag rather than read off focus so that it keeps protecting you
+   when the write fails. Focus goes the moment you leave the field, but it has
+   not reached the server yet, so watching focus alone loses what you wrote on
+   the next refetch. */
+let machineDirty = false;
+
+function saveMachine() {
+  machineDirty = false;
+  paintMachine();
+  putJSON('/api/machine', {multi: el.multiOn.checked, name: el.machineName.value.trim()})
+    .catch(() => { machineDirty = true; });   // if the write failed, keep protecting what was typed
+}
+el.multiOn.onchange = saveMachine;
+el.machineName.onchange = saveMachine;       // read it the moment you leave the field
+el.machineName.onblur = saveMachine;         // for the paths where change never fires
+el.machineName.oninput = () => { machineDirty = true; paintMachine(); };
+
+// The edit box shows only in review mode, or when something is part way
+// written. In instant mode all you need to see is the live transcript.
+function paintDraft() {
+  const want = route === 'hold' || !!el.draft.value.trim();
+  el.draft.hidden = !want;
+  el.draftActions.hidden = !want;
+}
+
+/* ── The wait before it goes out ─────────
+   The daemon breaks an utterance where the time spent under the reference level
+   reaches the pause to send (asr_mic.stream_utterances). We run the same count
+   here and fill the paper plane in the corner of the card with how far along it
+   is. The rms and speaking fields from level.txt are all it takes. */
+let voiceSeen = false;   // whether this utterance has picked up voice past the reference
+let silentAt = 0;        // when the voice broke off. 0 means nothing is being counted
+let livePartial = '';    // what is being recognized, raw, before the dictionary touches it
+
+/* Nothing shows for the first stretch of the silence. A breath, or the gap
+   between two words, drops under the reference level constantly, and starting
+   to fill on every one of them puts movement in the corner of your eye while
+   you are still in the middle of a sentence. The shortest pause to send anyone
+   can choose is 0.5s, so holding back 0.4s means those gaps show nothing at all
+   and only a real stop is ever drawn. */
+const SEND_CUE_DEAD = 400;
+
+/* Counting is allowed only on the side that goes straight through, and only
+   while the daemon is listening. In review and under Edit this one, going quiet
+   sends nothing, and while paused nothing is picked up at all. Browser
+   recognition decides its own breaks, so it has nothing to do with the pause to
+   send here. */
+const sendCountdownOn = () =>
+  route === 'live' && !oneShot && engineOnish() && !asrActive();
+
+function clearSendCountdown() { voiceSeen = false; silentAt = 0; livePartial = ''; }
+
+/* The same test voice_daemon.py runs (is_noise and is_allowed_short). Compare
+   with the punctuation taken off, and count a word merely said twice
+   (「了解、了解」) as that word on its own. Reading it differently from the
+   daemon is what would make the drawing promise a send that never comes. */
+const CUE_TRIM = /^[。、．，！？!?.…・\s　]+|[。、．，！？!?.…・\s　]+$/g;
+const cueCore = s => s.replace(CUE_TRIM, '').toLowerCase();
+function isBackchannel(text, words) {
+  if (!words.size) return false;
+  const core = cueCore(text);
+  if (!core) return false;
+  if (words.has(core)) return true;
+  const parts = core.split(/[、。,.\s]+/).map(cueCore).filter(Boolean);
+  return parts.length > 0 && parts.every(p => words.has(p));
+}
+
+/* The signals that close a sentence (「〜、キャンセル」 and 「〜、手直し」). One of
+   these on the end means the utterance is thrown away or handed to the draft, so
+   it never goes out.
+
+   The wordings are read from the daemon's own table through /api/commands. A copy
+   written here would go stale the day a wording changes over there, and the
+   drawing would fill for words that get thrown away. That endpoint lays out one
+   language at a time, because it feeds the "?" list, which answers "what do I say"
+   in the reader's language. Matching follows no language at all (voice_daemon.py
+   says why at the head of COMMAND_WORDS), so every screen language is asked and
+   the answers are joined.
+
+   Read once. Unlike the dictionary, these take no additions and no removals
+   (USER_COMMAND_KINDS leaves them out), so nothing about them changes while the
+   screen is up and there is nothing to keep fresh. */
+let tailWords = new Set();
+async function loadTailWords() {
+  try {
+    const all = await Promise.all(UI_LANGS.map(
+      ([code]) => fetch('/api/commands?lang=' + code).then(r => r.json())));
+    const out = new Set();
+    for (const d of all)
+      for (const g of d.groups || [])
+        if (g.id === 'cancel_tail' || g.id === 'hold_tail')
+          // An empty wording would end every sentence and leave the drawing
+          // permanently dark, so it is dropped rather than trusted.
+          for (const w of g.phrases || []) if (w) out.add(w.toLowerCase());
+    tailWords = out;
+  } catch { /* an older server has no such endpoint. Leave the drawing as it was */ }
+}
+
+/* The same test voice_daemon.take_tail runs. All that is wanted here is whether
+   the tail matched, so the body it hands back is not rebuilt. The 「コマンド」
+   lead-in that one strips only shortens that body, it never decides the match, so
+   leaving it out cannot read the utterance differently. */
+const TAIL_TRIM = /[ \t　。、．，・！？!?.,]+$/;
+function endsWithTailCmd(text) {
+  const body = text.trim().replace(TAIL_TRIM, '').toLowerCase();
+  if (!body) return false;
+  for (const w of tailWords) if (body.endsWith(w)) return true;
+  return false;
+}
+
+/* Whether what has been heard so far is something the daemon would actually
+   send. Filling up for an utterance that gets thrown away is a promise that
+   never lands, and 「こんにちは」 under a 15 character floor is exactly that.
+   The order matches the daemon and viewer.py (minimum length, then ignored
+   words, and the dictionary rewrites only after both), so the count here is of
+   the raw characters, the same ones the floor is measured against. */
+function worthSending() {
+  const text = livePartial;
+  if (!text) return false;                    // nothing heard yet, so nothing to promise
+  // Asked before the floor, the same place the daemon asks it. 「認証まわりを直
+  // して、手直し」 goes to the draft and 「テストを実行してキャンセル」 is dropped
+  // whole, and a short one closing on 手直し clears the floor yet still never
+  // goes out. Only the very end counts. 「キャンセルの画面を直して」 is an
+  // ordinary instruction and does get sent.
+  if (endsWithTailCmd(text)) return false;
+  const min = Number(tuning.min_chars) || 0;
+  // Words taken off the built in ignore list get through however short they
+  // are, which is the whole point of being able to take them off. Staying dark
+  // for 「わかった」 would be the same lie the other way round.
+  if (text.length < min && !isBackchannel(text, dictUnignore)) return false;
+  // Words the person put on the ignore list themselves are dropped whatever
+  // their length. The built in list is not checked here. Every word on it is
+  // far under any usable minimum length, so the line above has already caught
+  // them, and carrying a copy of that list into the page would leave two
+  // versions of the same rule to keep in step.
+  return !isBackchannel(text, dictIgnore);
+}
+
+function paintSendCue(now) {
+  const on = sendCountdownOn();
+  if (!on) clearSendCountdown();          // once the conditions drop, it resets itself every frame
+  // The real send button takes this same corner whenever something is part way
+  // written (text carried over from review, for one), and that one can be
+  // pressed. Two paper planes in one corner leave you working out which is
+  // which, so the drawing gives way to the button.
+  el.sendCue.hidden = !on || !el.draftActions.hidden;
+  const wait = (Number(tuning.silence_duration) || 0) * 1000;
+  /* The pause to send goes as low as 0.3s, under the held back stretch, and
+     subtracting it there leaves nothing to divide by. At those settings the
+     holding back has nothing left to protect either, because every dip that
+     short really is where the utterance gets cut, so filling across the whole
+     wait is the honest reading. */
+  const dead = wait > SEND_CUE_DEAD ? SEND_CUE_DEAD : 0;
+  // Clamped at the bottom as well. All through the held back stretch the top of
+  // this comes out negative, and a negative height is thrown out by the style,
+  // which would leave whatever the drawing was showing before stuck there.
+  const r = (silentAt && wait > 0 && worthSending())
+    ? Math.max(0, Math.min(1, (now - silentAt - dead) / (wait - dead)))
+    : 0;
+  el.sendCueFill.style.height = (r * 100).toFixed(1) + '%';
+  // Stop counting once the fill completes. An utterance thrown out by the min
+  // length or by an ignored word never comes back settled, so waiting for it
+  // leaves a full drawing sitting there.
+  if (r >= 1) clearSendCountdown();
+}
+
+async function setRoute(next) {
+  const prev = route;
+  route = next;
+  if (next !== 'off') lastMode = next;
+  paint();                            // show it the instant it is pressed
+  inFlight = true;
+  try {
+    const w = ROUTE[next];
+    // Unmute before it starts collecting, and stop collecting when switching off
+    await post('/api/pause', {paused: w.paused});
+    await post('/api/mute', {muted: w.muted});
+  } catch (err) {
+    route = prev;
+    paint();
+    el.hint.textContent = t('switchFailed', {err: err.message});
+    return;
+  } finally {
+    inFlight = false;
+  }
+  applyRouteSideEffects(next);
+  refreshState();
+}
+
+/* Cleaning up after switching off. A switch made by voice runs through the
+   same path. Skip it and the screen says off while the browser's microphone is
+   still open, and the recording indicator on the tab stays lit. */
+function applyRouteSideEffects(next) {
+  // While paused, let go of the browser's microphone as well (leave no sense
+  // of recording behind). Stop recognition along with it. Leave it running and
+  // the screen says nothing is being recorded while the audio alone keeps going
+  // out.
+  if (next === 'off') {
+    if (recWanted) { asrPausedByRoute = true; stopRecognition(); }
+    stopViz();
+  } else {
+    if (vizArmed) startViz(el.mic.value || '');
+    if (asrPausedByRoute) {
+      asrPausedByRoute = false; recWanted = true; startRecognition();
+    }
+  }
+  paintBrowserAsr();
+}
+
+/* The floating window is a separate document, so writing our title never
+   reaches it. The small window's title shows not only in Alt+Tab but along the
+   top edge of the window itself. Without keeping the two in step, it goes on
+   saying it is sending while you are actually paused. */
+function setTitle(text) {
+  document.title = text;
+  const w = window.documentPictureInPicture?.window;
+  if (w) {
+    try { w.document.title = text; } catch { /* on its way closed */ }
+  }
+}
+
+/* The one line that answers a signal. It is held for a while so the paint()
+   every 3 seconds does not write over it. You are operating by voice because
+   you are not watching the screen, so a line you miss leaves nothing behind. */
+let hintHoldUntil = 0;
+function say(text, sec = 6) {
+  el.hint.textContent = text;
+  hintHoldUntil = performance.now() + sec * 1000;
+}
+
+/* Show the word taken as a signal in the live transcript box, lit up as it is.
+   Watching the very word you said take on color tells you what happened at a
+   glance, better than a sentence explaining that it was handled as a signal. */
+let flashTimer = null;
+/* Words in the dictionary are swapped in on the spot, even mid-recognition.
+   If 「クロードコード」 sits there and piles up, reading it back before sending
+   still tells you nothing about what will arrive.
+
+   **Only the look is swapped.** The body that gets sent is rebuilt by the
+   server along the same path the daemon takes. Recognition keeps correcting the
+   tail until you finish speaking, so carrying around characters we touched here
+   would stop those corrections from landing. Rebuild from the raw text every
+   time and it follows along even when you say it over. */
+let dictPairs = [];             // [what was heard, what it becomes], longest first
+let dictIgnore = new Set();     // said on its own, this one is not sent
+let dictUnignore = new Set();   // taken off the built in ignore list, so short but still sent
+async function loadDictPairs() {
+  try {
+    const d = await (await fetch('/api/dictionary?scope=effective')).json();
+    dictPairs = Object.entries(d.replace || {})
+      .filter(([k, v]) => k && v)
+      .sort((a, b) => b[0].length - a[0].length);   // match the longer words first
+    // The same read already carries both lists the drawing in the corner needs,
+    // so it costs no second request and there is no second thing to keep fresh.
+    // The two are tidied differently on purpose, because the daemon tidies them
+    // differently. is_noise takes the ignore list as it stands and only lowers
+    // the case, so an entry saved as 「はい。」 never matches anything there and
+    // the utterance really is sent. Trimming it here would go dark on a word
+    // that goes out. is_allowed_short does strip the punctuation off its list,
+    // so that one gets the same treatment here.
+    dictIgnore = new Set((d.ignore || []).map(w => w.trim().toLowerCase()).filter(Boolean));
+    dictUnignore = new Set((d.unignore || []).map(cueCore).filter(Boolean));
+  } catch { /* if it cannot be fetched, show the text plain */ }
+}
+function withDict(text) {
+  for (const [from, to] of dictPairs) text = text.split(from).join(to);
+  return text;
+}
+
+// The live transcript has a cap on its height. Talk long enough and it flows
+// upward, so scroll down far enough to keep the tail you are speaking in view.
+function streamTail() {
+  const box = el.stream.parentElement;      // the .stream frame (#stream is the span inside it)
+  if (box) box.scrollTop = box.scrollHeight;
+}
+
+function flashCommand(text, kind) {
+  if (!text) return;
+  const mark = document.createElement('mark');
+  mark.className = 'cmd ' + (kind || 'live');
+  mark.textContent = text;
+  el.stream.replaceChildren(mark);
+  el.tray.classList.remove('idle');
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => {
+    // If the next utterance arrived in the meantime, leave it alone
+    if (el.stream.firstChild === mark) {
+      el.stream.textContent = '';
+      el.tray.classList.add('idle');
+      paintTinyButtons();
+    }
+  }, 2200);
+}
+
+/* A short sound, played only when the switch came by voice.
+   You are operating by voice because you are not watching the screen, so a
+   change you can only see does not tell you it got through. Following the call
+   apps, switching off falls in pitch and coming back rises (which way it went
+   is clear from the sound alone). */
+const CHIME = {
+  down: [[680, 440]],              // switched off
+  up:   [[440, 680]],              // switched back on
+  ok:   [[620, 620], [880, 880]],  // where speech goes changed (two notes to tell it apart)
+  err:  [[300, 220]],              // said, and nothing came of it
+};
+let chimeCtx = null;
+function chime(kind) {
+  const seq = CHIME[kind];
+  if (!seq) return;
+  try {
+    chimeCtx = chimeCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (chimeCtx.state === 'suspended') chimeCtx.resume();
+    seq.forEach(([from, to], i) => {
+      const t0 = chimeCtx.currentTime + i * 0.13;
+      const osc = chimeCtx.createOscillator();
+      const gain = chimeCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(from, t0);
+      osc.frequency.exponentialRampToValueAtTime(to, t0 + 0.10);
+      // A straight ramp clicks at the cut, so both ends are pinched in
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(0.10, t0 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
+      osc.connect(gain).connect(chimeCtx.destination);
+      osc.start(t0);
+      osc.stop(t0 + 0.18);
+    });
+  } catch { /* where no sound can play, give up quietly (the display has already changed) */ }
+}
+
+// Choosing a mode yourself clears both Edit this one and the line from Claude
+el.segLive.onclick = () => { oneShot = false; el.note.hidden = true; setRoute('live'); };
+el.segHold.onclick = () => { oneShot = false; el.note.hidden = true; setRoute('hold'); };
+el.segOff.onclick = () => setRoute(route === 'off' ? lastMode : 'off');
+
+/* ── Talking to the server ──────────────── */
+function connect() {
+  const ws = new WebSocket(`ws://${location.host}/ws`);
+
+  ws.onopen = () => refreshState();
+
+  ws.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+
+    if ('level' in m) {
+      // Catch only the moments voice starts and breaks off. level is not sent
+      // when the value has not changed, but the level still wavers through the
+      // silence, so we spot the turning points ourselves.
+      if (m.speaking !== daemonSpeaking) {
+        if (m.speaking) { voiceSeen = sendCountdownOn(); silentAt = 0; }
+        else if (voiceSeen) silentAt = performance.now();
+      }
+      daemonLevel = m.level; daemonSpeaking = m.speaking;
+      el.meterFill.classList.toggle('on', m.speaking);
+      paintGauge();
+      return;      // falling through to the else below treats it as an utterance and breaks things
+    }
+    if ('muted' in m) {
+      // This switches by voice as well (the daemon hears 「ミュート」 and
+      // writes the file). When you press it yourself, route was updated the
+      // instant you pressed, so here it matches and nothing happens, which
+      // means it only fires when the change came from outside.
+      if (m.muted !== (route === 'off')) {
+        route = m.muted ? 'off' : lastMode;
+        paint();
+        applyRouteSideEffects(route);
+      }
+      return;
+    }
+    if ('voice_cmd' in m) {
+      // A signal is never sent as an utterance, so this is where we say it got
+      // through. Whatever was already sitting there when the page opened
+      // (first) is not something that just happened.
+      const c = m.voice_cmd || {};
+      if (c.kind === 'mute') {
+        chime('down'); say(t('voiceMuted'));       flashCommand(c.said, 'warn');
+      } else if (c.kind === 'unmute') {
+        chime('up');   say(t('voiceUnmuted'));     flashCommand(c.said, 'live');
+      } else if (c.kind === 'route') {
+        chime('ok');   say(t('voiceRoute', {name: c.label}));
+        flashCommand(c.said, 'live');
+        loadListeners();
+      } else if (c.kind === 'mode_live') {
+        chime('up');   say(t('voiceLive'));        flashCommand(c.said, 'live');
+      } else if (c.kind === 'mode_hold') {
+        chime('down'); say(t('voiceHold'));        flashCommand(c.said, 'hold');
+      } else if (c.kind === 'held') {
+        chime('down'); say(t('voiceHeld'));  flashCommand(c.said, 'hold');
+      } else if (c.kind === 'cancelled') {
+        chime('err');  say(t('voiceCancelled'));  flashCommand(c.said, 'warn');
+      } else if (c.kind === 'route_missing') {
+        chime('err');  say(t('voiceRouteMissing', {n: c.label}));
+        flashCommand(c.said, 'warn');
+      }
+      return;
+    }
+    if ('paused' in m) {
+      // This switches by voice as well. While muted the display can stay on off, so leave it alone.
+      if (route !== 'off') {
+        const next = m.paused ? 'hold' : 'live';
+        if (next !== route) { route = lastMode = next; oneShot = false; paint(); }
+      } else {
+        lastMode = m.paused ? 'hold' : 'live';
+      }
+      return;
+    }
+    if ('mic_active' in m) {
+      // Confirmation that the switch actually completed on the daemon side.
+      // Unlike the hopeful display we put up the instant it was pressed, only
+      // once this arrives can we say it really switched.
+      if (micConfirmDevice && m.mic_active === micConfirmDevice) {
+        clearTimeout(micConfirmTimer);
+        const opt = [...el.mic.options].find(o => o.value === m.mic_active);
+        el.hint.textContent = t('micSwitched', {name: opt ? opt.textContent : m.mic_active});
+        micConfirmDevice = null;
+        setTimeout(() => paint(), 2500);
+      }
+      return;
+    }
+    if ('partial' in m) {
+      // Keep the text as it came as well. The minimum length is measured before
+      // the dictionary rewrites anything, so counting the rewritten characters
+      // here would let the drawing and the daemon disagree over the same words.
+      livePartial = m.partial.trim();
+      const s = withDict(livePartial);
+      el.stream.textContent = s;
+      el.tray.classList.toggle('idle', !s);
+      streamTail();
+      paintTinyButtons();
+
+    } else if ('held' in m) {
+      // An utterance from while it was holding. It is only appended at the
+      // end, so nothing breaks if you are in the middle of editing.
+      // On the review side the line below never shows in the first place, so
+      // clearing it here is only to be safe.
+      clearSendCountdown();
+      appendHeld(m.held);
+
+    } else if (m.text != null) {
+      clearSendCountdown();   // that is one utterance done. Counting starts again with the next voice
+      // Only rows carrying a body go into the log. Every time another control
+      // message was added (level / muted / paused / voice_cmd and so on), an
+      // older screen would line it up as an utterance and make an empty card.
+      // Quietly dropping keys it does not know is the safer way.
+      addEntry(m);
+      el.stream.textContent = '';
+      el.tray.classList.add('idle');
+    }
+  };
+
+  ws.onclose = ev => {
+    // If the server folded up (voice mode ended), stop recognition too.
+    // Only trying to reconnect leaves the microphone open when you thought it
+    // was stopped, and the audio keeps going out. 1001 = GOING_AWAY.
+    if (ev.code === 1001) {
+      stopRecognition();
+      setState('off', t('statusEnded'));
+      el.hint.textContent = t('hintEnded');
+      return;
+    }
+    setState('down', t('statusDown'));
+    setTimeout(connect, 2000);
+  };
+}
+
+// Grow the height to fit the contents (so nothing scrolls inside)
+function grow() {
+  el.draft.style.height = 'auto';
+  el.draft.style.height = el.draft.scrollHeight + 'px';
+}
+
+// Append a held utterance at the end. The caret position and your edits are kept.
+function appendHeld(text) {
+  text = (text || '').trim();
+  if (!text) return;
+  // Something arriving outside review mode never opens the edit box (that display would have no explanation)
+  if (route !== 'hold') return;
+  const cur = el.draft.value;
+  el.draft.value = cur ? cur.replace(/\s*$/, '') + '\n' + text : text;
+  el.draftTime.textContent = new Date().toLocaleTimeString(
+    timeLocale(), {hour12:false});
+  paintDraft();
+  grow();
+  // Right after appending, keep the tail in view (unless you are editing)
+  if (uiDoc().activeElement !== el.draft) el.draft.scrollTop = el.draft.scrollHeight;
+}
+
+/* ── The recognition engine, on and off ──
+   Stopping it gives back whatever that engine was holding. Whisper gives back
+   the memory the model takes, Apple gives back the microphone itself (it never
+   held memory to begin with). How much comes back depends on the model chosen,
+   so no number is put on screen.
+   Four states, 'on' / 'booting' / 'stopping' / 'off'. Flipping straight between
+   on and off the instant it is pressed would change the label before anything
+   had finished, so the in-between states sit in the middle. */
+let engine = 'on';
+const engineOnish = () => engine === 'on';
+/* The engine currently selected. Whether the button shows, and what comes back
+   when you stop it, are both decided by this. loadEngines() puts the value the
+   server remembers in here every 5 seconds. It stays empty until that can be
+   read, and while it is empty we say nothing about what comes back (there is no
+   way to know). */
+let chosenEngine = '';
+
+let startedAt = 0;     // when start was pressed
+const BOOT_SEC = 40;   // measured at roughly 40 seconds
+let tick = null;
+
+function paintPower() {
+  const busy = engine === 'booting' || engine === 'stopping';
+  // Back when this sat in the header as a round icon, it got mistaken for
+  // muting the microphone (a power drawing reads as switching off). It moved
+  // into settings, and what it does is written out in words.
+  el.power.classList.toggle('busy', busy);
+  el.powerLabel.textContent = t(engine === 'off' ? 'powerStart' : 'powerStop');
+  el.power.disabled = busy;
+
+  if (engine === 'booting') {
+    const sec = (Date.now() - startedAt) / 1000;
+    const left = Math.max(0, Math.ceil(BOOT_SEC - sec));
+    el.hint.textContent = left > 0 ? t('bootingLeft', {n: left}) : t('bootingSoon');
+  }
+
+  // With nothing running, choosing a mode means nothing.
+  // Unless the browser is doing the recognizing, in which case it still works
+  // with the daemon stopped.
+  const usable = engineOnish() || asrActive();
+  for (const b of [el.segLive, el.segHold, el.segOff, el.mic]) b.disabled = !usable;
+
+  /* A button that does nothing when pressed is not shown. With browser
+     recognition there is nothing to load, and pressing it just ends with
+     engine-start saying 「ブラウザ認識が選ばれています」.
+     For Apple and Whisper it always shows. Starting it up again after a stop is
+     also the only route left on screen (picking the engine again is no use for
+     recovery, since choosing the same one twice fires no onchange). */
+  el.powerRow.hidden = chosenEngine === BROWSER_ENGINE;
+  el.powerNote.textContent =
+      engine === 'off'                   ? t('powerNoteStart')
+    : chosenEngine === WHISPER_ENGINE    ? t('powerNoteWhisper')
+    : chosenEngine === APPLE_ENGINE      ? t('powerNoteApple')
+    : '';
+}
+
+el.power.onclick = async () => {
+  const start = engine === 'off';
+  if (start) {
+    engine = 'booting';
+    startedAt = Date.now();
+    setState('down', t('statusBooting'));
+    clearInterval(tick);
+    tick = setInterval(() => { if (engine === 'booting') paintPower(); }, 1000);
+  } else {
+    engine = 'stopping';
+    clearInterval(tick);
+    setState('down', t('statusStopped'));
+    el.hint.textContent = t('hintStopping');
+  }
+  paintPower();
+  await post('/api/engine', {running: start});
+  refreshState();
+};
+
+let seeded = false;   // restores what had piled up, once, on reload
+let uiStamp = 0;      // the mtime of the screen file at the moment it was loaded
+
+// While it floats, close the small window first and reload in the original tab.
+// canFloat guards this because ?. only guards against a missing property.
+// In a browser without the identifier at all, it throws the moment you look.
+el.fresh.onclick = () => {
+  if (canFloat && documentPictureInPicture.window) documentPictureInPicture.window.close();
+  location.reload();
+};
+
+async function refreshState() {
+  if (inFlight) return;               // never overwrite mid-switch
+  try {
+    const s = await (await fetch('/api/state')).json();
+
+    // Say something when the screen file has been replaced. The floating
+    // window has no way to reload, so this is where you get back from.
+    if (s.ui) {
+      if (uiStamp === 0) uiStamp = s.ui;
+      else if (s.ui !== uiStamp) el.fresh.hidden = false;
+    }
+
+    if (typeof s.engine === 'boolean') {
+      if (s.engine) {
+        if (engine !== 'on') { clearInterval(tick); el.hint.textContent = ''; }
+        engine = 'on';
+      } else if (s.loading) {
+        // so that starting up is visible even when another tab was the one that pressed
+        if (engine !== 'booting') {
+          engine = 'booting';
+          startedAt = Date.now();
+          clearInterval(tick);
+          tick = setInterval(() => { if (engine === 'booting') paintPower(); }, 1000);
+        }
+      } else if (engine === 'booting' && Date.now() - startedAt < 12000) {
+        // Right after pressing, the process is sometimes not visible yet.
+        // Dropping to 'off' here would send the display back to Stopped.
+      } else {
+        clearInterval(tick);
+        engine = 'off';
+      }
+
+      paintPower();
+      if (engine === 'booting') { setState('down', t('statusBooting')); return; }
+      if (engine === 'off' && !asrActive()) {
+        setState('off', t('statusStopped'));
+        el.hint.textContent = t('hintStopped');
+        return;
+      }
+    }
+
+    // The setting for using several machines (another screen can change it).
+    // Never touched while you are typing.
+    if (!machineDirty) {
+      el.multiOn.checked = !!s.multiMachine;
+      el.machineName.value = s.machineName || '';
+      paintMachine();
+    }
+
+    // The line for when Claude did the switching. Nothing is attached when you pressed it yourself.
+    el.note.textContent = s.note || '';
+    el.note.hidden = !s.note;
+
+    if (!armPending) {
+      route = s.muted ? 'off' : (s.paused ? 'hold' : 'live');
+      if (route !== 'off') lastMode = route;
+    }
+    paint();
+
+    // Restore what was collected so a reload does not lose it (never touched while you are typing)
+    if (!seeded && Array.isArray(s.held) && s.held.length && !el.draft.value.trim()) {
+      el.draft.value = s.held.map(r => r.text).join('\n');
+      paintDraft();
+      grow();
+    }
+    seeded = true;
+    paintDraft();
+    if (!el.draft.hidden) grow();
+  } catch {
+    setState('down', t('statusDown'));
+  }
+}
+
+/* ── Send and discard ───────────────────── */
+el.send.onclick = async () => {
+  const text = el.draft.value.trim();
+  if (!text) return;
+  await post('/api/send', {text, edited: draftTouched});
+  el.draft.value = '';
+  draftTouched = false;
+  grow();
+  paintDraft();
+  endOneShot();
+};
+
+// What you discard can be brought back once (a confirm dialog every time is a nuisance)
+let lastDiscarded = '';
+// Kept alongside it so bringing it back does not lose the edited stamp too
+let lastDiscardedTouched = false;
+
+el.discard.onclick = async () => {
+  lastDiscarded = el.draft.value;
+  lastDiscardedTouched = draftTouched;
+  await post('/api/discard');
+  el.draft.value = '';
+  draftTouched = false;
+  grow();
+  paintDraft();
+  if (lastDiscarded.trim()) {
+    el.hint.textContent = t('discarded');
+    const undo = document.createElement('button');
+    undo.textContent = t('undo');
+    undo.onclick = () => {
+      el.draft.value = lastDiscarded;
+      draftTouched = lastDiscardedTouched;
+      paintDraft();
+      grow();
+      el.hint.textContent = '';
+    };
+    el.hint.appendChild(undo);
+  }
+  endOneShot();
+};
+
+/* Stay on instant and route just this one utterance to review.
+   For when you spot a word that came out wrong, or want to fix only this one.
+   The daemon checks whether it is holding at the moment an utterance settles,
+   so pressing while you are still talking catches what you are saying now. */
+async function editThisOne() {
+  if (route === 'hold') return;          // already in review mode
+  oneShot = true;
+  await setRoute('hold');
+  el.hint.textContent = t('hintOnce');
+  // In a small window the opened box and the send button hang off the bottom.
+  // 'nearest' moves only as far as it has to, which leaves the send button
+  // stuck at the fold.
+  el.tray.scrollIntoView({block: 'end'});
+}
+
+el.editOnce.onclick = editThisOne;
+
+/* Throw away a misspoken utterance before it goes out.
+   When the daemon is doing the recognizing, we hand over the time it was
+   pressed and let that side decide. It cuts the audio right there, so you can
+   speak the correction straight away and it comes through as a fresh
+   utterance. Clearing the screen alone would not do that, since the phrase in
+   progress would keep growing and take the correction down with it.
+   With browser recognition, we drop the next one that settles ourselves. */
+let dropNextLocal = false;
+el.dropOne.onclick = async () => {
+  el.stream.textContent = '';
+  // Throwing it away and leaving the drawing to fill would say it is on its way
+  // out at the moment you just stopped it.
+  clearSendCountdown();
+  el.tray.classList.add('idle');
+  if (asrActive()) {
+    // Clearing the screen alone brings it right back. Recognition keeps
+    // putting out everything up to that point as an interim result, so we fold
+    // up the whole current session and empty what has piled up.
+    dropNextLocal = true;
+    const r = rec;
+    rec = null; recRunning = false;
+    if (r) { try { r.abort(); } catch {} }
+    if (recWanted) setTimeout(startRecognition, 120);
+  } else {
+    try { await post('/api/drop-current'); } catch {}
+  }
+  say(t('droppedOne'), 4);
+  paint();
+};
+/* Pressing anywhere on the draft card routes it to review. Make people aim at
+   the live transcript and there is nowhere to press while nothing has shown up
+   yet (bracing yourself before you misspeak is the real use for this, so it has
+   to be pressable precisely when it is empty). */
+el.tray.onclick = e => {
+  if (route !== 'live' || oneShot) return;
+  if (e.target.closest('button, textarea, input, select, a')) return;
+  editThisOne();
+};
+
+// Once it is sent or discarded, go back to the mode it came from
+async function endOneShot() {
+  if (!oneShot) return;
+  oneShot = false;
+  await setRoute('live');
+}
+
+/* After going into review, pressing outside with nothing there counts as
+   backing out. Bracing yourself while empty is the real use for this, so we
+   only go back when both the draft and the live transcript are empty. With
+   anything in either one, pressing outside keeps it held.
+   The listener goes on in three places because el.page and el.sheet move
+   wholesale into the floating window (the same listener runs in either
+   document), while in a wide tab the margin outside the panel only ever reaches
+   document. Even if it runs twice, the second pass does nothing once oneShot is
+   down. */
+function leaveOneShotIfEmpty(e) {
+  if (!oneShot) return;
+  if (e.target.closest('#tray')) return;      // inside the card does not count as outside
+  if (el.draft.value.trim() || el.stream.textContent.trim()) return;
+  endOneShot();
+  say(t('oneShotOff'), 4);
+}
+for (const n of [el.page, el.sheet, el.helpSheet, document])
+  n.addEventListener('click', leaveOneShotIfEmpty);
+
+el.draft.addEventListener('input', () => { draftTouched = true; grow(); });
+// Ctrl+Enter sends
+el.draft.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); el.send.click(); }
+});
+
+/* ── Settings ───────────────────────────── */
+/* Settings and the dictionary are kept apart. Run together they go past 1400px
+   and the dictionary is buried at the bottom (it is taller than the screen, so
+   nobody notices it exists without scrolling). The top bar stays stuck in
+   place, so the moment you open it you can see the dictionary is there. */
+function showSheetTab(which) {
+  const basic = which !== 'dict';
+  el.paneBasic.hidden = !basic;
+  el.paneDict.hidden = basic;
+  el.tabBasic.classList.toggle('on', basic);
+  el.tabDict.classList.toggle('on', !basic);
+  saveDict();                             // hiding it kills focus. Write before that
+  el.sheet.scrollTop = 0;                 // do not carry over where you were looking before
+  store.set('sheetTab', basic ? 'basic' : 'dict');
+}
+el.tabBasic.onclick = () => showSheetTab('basic');
+el.tabDict.onclick = () => showSheetTab('dict');
+
+el.openSettings.onclick = async () => {
+  el.helpSheet.hidden = true;       // sheets never stack. Only one of them is up
+  el.sheet.hidden = false;
+  fitMini();                        // while it is hidden there is no size to measure
+  showSheetTab(store.get('sheetTab', 'basic'));
+  await Promise.all([loadMics(), loadLangs(), loadTuning(), loadDict(), loadWhisperModel()]);
+  el.dictNote.textContent = '';
+};
+el.closeSettings.onclick = () => { saveDict(); el.sheet.hidden = true; };
+
+/* The list of voice commands. Like settings, opening it swaps out the main screen. */
+el.openHelp.onclick = async () => {
+  saveDict();                       // you can arrive here straight from settings
+  el.sheet.hidden = true;
+  el.helpSheet.hidden = false;
+  el.helpSheet.scrollTop = 0;
+  fitMini();
+  el.cmdNote.textContent = '';
+  await loadCommands();
+};
+el.closeHelp.onclick = () => { saveCmds(); el.helpSheet.hidden = true; };
+
+/* ── What the keyboard can do ────────────
+   Anything you can say out loud should also be doable with a key when your
+   hands are free.
+
+   There are only two rules for the bindings. **A bare key only moves the
+   screen** (open settings, open the list, close). **A key with Shift changes
+   where your voice goes** (mic on and off, how it is delivered, discard, where
+   it lands). Nothing that silently stops your voice getting through sits on a
+   bare single letter. If a mistake only changes the screen, you can see it and
+   press again.
+
+   Cmd+, is left alone. On macOS that binding belongs to Chrome's settings and a
+   page cannot stop it. Even if it could be stopped, doing so would take away
+   the one route from this window to Chrome's settings. We look only at Shift
+   and do nothing while Cmd, Ctrl or Alt is along for the ride (so browser
+   bindings like Cmd+Shift+M are not stolen out from under it).
+
+   While you are typing, everything passes straight through. What we look at is
+   where the key landed (e.target), not uiDoc().activeElement. Focus is on that
+   element at the moment of the press, so the answer is the same in either
+   document.
+
+   The listener goes on both document and the floating window's document. The
+   contents move into the small window along with floatParts, but a key pressed
+   with focus nowhere lands on the small window's body. body sits outside
+   floatParts, so attaching to the elements alone never catches it. */
+
+// Whether you are in the middle of typing. Judged from where the key landed
+function typingIn(node) {
+  if (!node || !node.tagName) return false;
+  if (node.isContentEditable) return true;
+  return node.tagName === 'INPUT' || node.tagName === 'TEXTAREA' || node.tagName === 'SELECT';
+}
+
+/* Look at both the character (key) and the position (code) so it still works
+   on a keyboard laid out differently. With kana input switched on, key comes
+   back as a different character. */
+const keyIs = (e, ch) => e.key.toUpperCase() === ch || e.code === 'Key' + ch;
+
+// Open it if closed, close it if open. Every press gets you back where you were
+function toggleSheet(sheet, open, close) {
+  if (sheet.hidden) open.click(); else close.click();
+}
+
+function onKey(e) {
+  if (e.defaultPrevented || e.repeat || e.isComposing) return;
+
+  // Send the draft. Inside the edit box the box handles it itself, so this is only for when you are outside.
+  if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key === 'Enter') {
+    if (typingIn(e.target)) return;
+    e.preventDefault();
+    el.send.click();
+    return;
+  }
+  // From here on we look only at Shift. Keys the browser owns are left alone.
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+  /* Close whatever is open. While you are typing, the first press only gets
+     you out of the field. Both the dictionary and the wordings save the moment
+     focus leaves, so the write happens here too. Press again and it closes. */
+  if (e.key === 'Escape') {
+    if (typingIn(e.target)) { e.target.blur(); return; }
+    if (!el.helpSheet.hidden) { el.closeHelp.click(); return; }
+    if (!el.sheet.hidden) { el.closeSettings.click(); return; }
+    if (oneShot) { endOneShot(); say(t('oneShotOff'), 4); }
+    return;
+  }
+  if (typingIn(e.target)) return;
+
+  // Depending on the layout, ? may or may not need Shift, so it is checked first
+  if (e.key === '?') {
+    e.preventDefault();
+    toggleSheet(el.helpSheet, el.openHelp, el.closeHelp);
+    return;
+  }
+
+  if (!e.shiftKey) {
+    // A stand-in for Cmd+,. The way you remember opening settings stays, and it does not fight the browser.
+    if (e.key === ',') {
+      e.preventDefault();
+      toggleSheet(el.sheet, el.openSettings, el.closeSettings);
+    }
+    return;
+  }
+
+  /* From here on, where your voice goes changes. You are operating by voice
+     because you are not watching the screen, so a press has to come through in
+     a sound and a line (it runs the same ones as saying it out loud. Doing the
+     same thing and getting a different notice reads as something else having
+     happened). */
+  if (keyIs(e, 'M')) {                    // mic on and off
+    const back = route === 'off';
+    e.preventDefault();
+    el.segOff.click();
+    chime(back ? 'up' : 'down');
+    say(t(back ? 'voiceUnmuted' : 'voiceMuted'));
+    return;
+  }
+  if (keyIs(e, 'L')) {                    // send it straight through
+    e.preventDefault();
+    el.segLive.click();
+    chime('ok');
+    say(t('voiceLive'));
+    return;
+  }
+  if (keyIs(e, 'H')) {                    // route it to review
+    e.preventDefault();
+    el.segHold.click();
+    chime('ok');
+    say(t('voiceHold'));
+    return;
+  }
+  if (keyIs(e, 'E')) {                    // route just this one utterance to review
+    e.preventDefault();
+    if (el.editOnce.disabled) { chime('err'); return; }
+    el.editOnce.click();                  // editThisOne is what puts up the line
+    chime('ok');
+    return;
+  }
+  if (e.key === 'Backspace') {            // throw away the unsent one
+    e.preventDefault();
+    const had = el.draft.value.trim();
+    el.discard.click();                   // discard is what puts up the line and the undo
+    chime(had ? 'down' : 'err');
+    return;
+  }
+  /* Pick where speech goes by number. On some layouts holding Shift changes
+     the digit character itself, so here we look at the position (code). The
+     numbers are the same ones shown on the chips. */
+  const digit = /^Digit([1-9])$/.exec(e.code || '');
+  if (digit) {
+    e.preventDefault();
+    const no = Number(digit[1]);
+    const pickTo = knownListeners[no - 1];
+    if (!pickTo) { chime('err'); say(t('voiceRouteMissing', {n: no})); return; }
+    setRoute2(String(pickTo.pid));
+    chime('ok');
+    say(t('voiceRoute', {name: pickTo.label}));
+  }
+}
+
+document.addEventListener('keydown', onKey);
+
+/* The send combination is the one thing called by a different name on
+   different machines. So the list never lies, machines with a Cmd key get it
+   rewritten. */
+if (/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)) {
+  for (const n of document.querySelectorAll('.cap.mod')) n.textContent = 'Cmd';
+}
+
+// Theme. On auto it follows the OS setting (data-theme is taken off)
+// While it floats, write to both the small window and the original document.
+// The small window alone snaps back to the old color the instant you return,
+// and the original alone never changes the whole time it floats.
+function applyTheme(choice) {
+  for (const d of new Set([document, uiDoc()])) {
+    if (choice === 'auto') d.documentElement.removeAttribute('data-theme');
+    else d.documentElement.setAttribute('data-theme', choice);
+  }
+  for (const b of el.themeRow.children) b.classList.toggle('on', b.dataset.themeChoice === choice);
+  store.set('theme', choice);
+}
+for (const b of el.themeRow.children) b.onclick = () => applyTheme(b.dataset.themeChoice);
+
+function applyLang(choice) {
+  langPref = choice;
+  store.set('lang', choice);
+  resolveLang();
+  applyI18n();
+  el.langPick.value = choice;   // for when it is called from voice or from another window
+  paint();
+  reformatAll();
+  for (const row of el.log.children) {
+    const m = row.querySelector('.mark');
+    m.textContent = t(row.dataset.kind);
+  }
+  // In the command list both the text and the wordings change with the
+  // language. It can be switched while open, so we refetch and rebuild
+  // (data-i18n never brings the wordings along).
+  if (!el.helpSheet.hidden) loadCommands();
+}
+el.langPick.onchange = () => applyLang(el.langPick.value);
+
+// The microphone in use. Switching it swaps only the recording process (the model stays)
+async function loadMics() {
+  try {
+    const d = await (await fetch('/api/mics')).json();
+    if (!d.mics.length) { el.mic.hidden = true; return; }
+    el.mic.replaceChildren(...d.mics.map(m => {
+      const o = document.createElement('option');
+      o.value = m.id; o.textContent = m.label; o.selected = m.id === d.current;
+      return o;
+    }));
+    // Show it even when the one selected is not in the list
+    if (d.current && ![...el.mic.options].some(o => o.value === d.current)) {
+      const o = document.createElement('option');
+      o.value = d.current; o.textContent = d.current; o.selected = true;
+      el.mic.prepend(o);
+    }
+    el.mic.hidden = false;
+  } catch {
+    el.mic.hidden = true;
+  }
+}
+
+// Until the switch actually completes on the backend, the display stays
+// hopeful. Once mic_active (over on the ws.onmessage side) sends confirmation,
+// that is the moment it is swapped for the switched message.
+let micConfirmDevice = null;
+let micConfirmTimer = null;
+
+el.mic.onchange = async () => {
+  const label = el.mic.selectedOptions[0].textContent;
+  const dev = el.mic.value;
+  el.hint.textContent = t('micSwitching', {name: label});
+  micConfirmDevice = dev;
+  clearTimeout(micConfirmTimer);
+  // A backstop for an older daemon that never sends mic_active. If the real
+  // confirmation arrives first, that one wins (the ws.onmessage above has
+  // already handled it by then).
+  micConfirmTimer = setTimeout(() => {
+    if (micConfirmDevice === dev) {
+      el.hint.textContent = t('micSwitched', {name: label});
+      micConfirmDevice = null;
+      setTimeout(() => paint(), 2500);
+    }
+  }, 3000);
+  await putJSON('/api/mics', {device: dev});
+  if (vizArmed) startViz(dev);   // put the waveform on the same microphone
+};
+
+// The recognition language (shown only for Whisper. The other engines spell
+// them differently, so for those the dropdown itself is hidden).
+async function loadLangs() {
+  try {
+    const d = await (await fetch('/api/languages')).json();
+    if (!d.languages.length) { el.recogLangField.hidden = true; return; }
+    const auto = document.createElement('option');
+    auto.value = ''; auto.textContent = t('recogLangAuto');
+    auto.selected = !d.current;
+    el.recogLang.replaceChildren(auto, ...d.languages.map(l => {
+      const o = document.createElement('option');
+      o.value = l.code; o.textContent = l.name; o.selected = l.code === d.current;
+      return o;
+    }));
+    el.recogLangField.hidden = false;
+  } catch {
+    el.recogLangField.hidden = true;
+  }
+}
+
+el.recogLang.onchange = () => putJSON('/api/tuning', {language: el.recogLang.value});
+
+/* The Whisper model. There is no telling whether a name is right until it is
+   loaded, so nothing is checked here. The default name shows in faint type (as
+   a placeholder), so an empty box reads as leaving the default alone. */
+let whisperModelSaved = '';
+async function loadWhisperModel() {
+  try {
+    const d = await (await fetch('/api/whisper-model')).json();
+    whisperModelSaved = d.model || '';
+    el.whisperModel.placeholder = d.default || '';
+    // Never touched while you are typing (the refetch on reopening settings would wipe it)
+    if (uiDoc().activeElement !== el.whisperModel) el.whisperModel.value = whisperModelSaved;
+  } catch {}
+}
+function saveWhisperModel() {
+  const name = el.whisperModel.value.trim();
+  el.whisperModel.value = name;
+  if (name === whisperModelSaved) return;   // if it was only touched, do not write
+  whisperModelSaved = name;
+  putJSON('/api/whisper-model', {model: name});
+}
+el.whisperModel.onchange = saveWhisperModel;
+el.whisperModel.onblur = saveWhisperModel;   // for the paths where change never fires
+
+/* ── Sensitivity and breaks ──────────────
+   All three take effect on the daemon the moment they are saved (it re-reads
+   every 0.5 seconds). */
+let silenceMin = 0.3, silenceMax = 30;      // the range the server allows (overwritten on load)
+let tuning = {idle_mute_min: 5, silence_threshold: 0.015, silence_duration: 1.5,
+              min_chars: 15, strip_fillers: false};
+
+// The threshold slider runs on a log scale. The 0.003 to 0.03 range people
+// actually use takes up more than half the slider, so it can be set finely.
+let threshLo = 0.003, threshHi = 0.15;
+const threshToPos = v =>
+  Math.round(1000 * Math.log(Math.max(threshLo, v) / threshLo) / Math.log(threshHi / threshLo));
+const posToThresh = p => {
+  const v = threshLo * Math.pow(threshHi / threshLo, p / 1000);
+  return Math.round(v * 1000) / 1000;
+};
+/* What the slider and the number show is sensitivity. The lower the threshold,
+   the fainter the sounds it picks up, so the sensitivity scale runs opposite to
+   the loudness scale. This is the only place it gets flipped, and the mark on
+   the meter stays on the loudness scale. Raising the sensitivity moves the mark
+   to the left, which means the loudness where it starts listening went down. */
+const threshToSens = v => Math.max(0, Math.min(1000, 1000 - threshToPos(v)));
+const sensToThresh = s => posToThresh(1000 - s);
+
+function paintTuning() {
+  el.thresh.value = threshToSens(tuning.silence_threshold);
+  el.silence.value = tuning.silence_duration;
+  el.minChars.value = tuning.min_chars;
+  el.threshVal.textContent = Math.round(threshToSens(tuning.silence_threshold) / 10);
+  if (uiDoc().activeElement !== el.silenceVal) {          // never touched while you are typing
+    el.silenceVal.value = Number(tuning.silence_duration).toFixed(1);
+  }
+  el.minCharsVal.textContent = tuning.min_chars;
+  el.clean.checked = !!tuning.strip_fillers;
+  paintIdleMute();
+  paintGauge();
+}
+
+// Show the measured level and the threshold side by side. With nothing but a number there is no way to settle on a value.
+function paintGauge() {
+  // The meter runs on the same scale as the slider. If these did not line up,
+  // you could not compare the mark against the level you are actually making.
+  const lvl = Math.min(100, threshToPos(daemonLevel) / 10);
+  const mark = Math.min(100, threshToPos(tuning.silence_threshold) / 10);
+  el.gaugeFill.style.width = lvl + '%';
+  el.gaugeFill.classList.toggle('on', daemonSpeaking);
+  el.gaugeMark.style.left = mark + '%';
+  // The thin meter on the main screen gets the same scale
+  el.meterFill.style.width = lvl + '%';
+  el.meterMark.style.left = mark + '%';
+  // The mic button itself fills from the bottom by the level being picked up.
+  // It uses the same eased value as the drawing (taken separately, the same
+  // sound would give two different heights).
+  el.segOff.style.setProperty('--lv', Math.round(micLevel * 100) + '%');
+}
+
+async function loadTuning() {
+  try {
+    const d = await (await fetch('/api/tuning')).json();
+    for (const [k, v] of Object.entries(d.tuning || {})) if (v != null) tuning[k] = v;
+    for (const [k, r] of Object.entries(d.range || {})) {
+      if (k === 'silence_threshold') { threshLo = r.min; threshHi = r.max; continue; }
+      if (k === 'silence_duration') {
+        silenceMin = r.min; silenceMax = r.max;
+        el.silenceVal.min = r.min; el.silenceVal.max = r.max;
+        continue;
+      }
+      const node = {min_chars: el.minChars}[k];
+      if (node) { node.min = r.min; node.max = r.max; }
+    }
+    paintTuning();
+  } catch {}
+}
+
+// While you drag the slider only the display updates, and it saves once you
+// let go (writing on every move would let an extreme value along the way take
+// effect on the daemon for a moment)
+let saveTimer = null;
+function queueTuning() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => putJSON('/api/tuning', tuning), 250);
+}
+
+el.thresh.oninput = () => {
+  tuning.silence_threshold = sensToThresh(Number(el.thresh.value));
+  el.threshVal.textContent = Math.round(Number(el.thresh.value) / 10);
+  paintGauge();
+  queueTuning();
+};
+el.silence.oninput = () => { tuning.silence_duration = Number(el.silence.value); paintTuning(); queueTuning(); };
+/* The slider goes up to 10 seconds, but some people want to wait longer. The
+   number can be typed in directly, and the slider covers everything up to
+   there. */
+function commitSilence() {
+  const v = Number(el.silenceVal.value);
+  if (!Number.isFinite(v)) { paintTuning(); return; }
+  tuning.silence_duration =
+    Math.min(silenceMax, Math.max(silenceMin, Math.round(v * 10) / 10));
+  paintTuning(); queueTuning();
+}
+el.silenceVal.onchange = commitSilence;
+el.silenceVal.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); el.silenceVal.blur(); }
+});
+el.minChars.oninput = () => { tuning.min_chars = Number(el.minChars.value); paintTuning(); queueTuning(); };
+/* On and off is kept apart from the length. Give 0 the meaning of never
+   turning off and someone who dragged the slider to the end cannot tell what
+   they just chose. */
+function paintIdleMute() {
+  const idle = Number(tuning.idle_mute_min) || 0;
+  el.idleMuteOn.checked = idle > 0;
+  if (idle > 0) el.idleMute.value = idle;
+  else if (!el.idleMute.value || el.idleMute.value === '0') el.idleMute.value = 5;
+  el.idleMuteVal.textContent = t('minutesShort', {n: el.idleMute.value});
+  el.idleMinsField.hidden = el.idleMuteField.hidden || idle <= 0;
+}
+el.idleMuteOn.onchange = () => {
+  tuning.idle_mute_min = el.idleMuteOn.checked ? (Number(el.idleMute.value) || 5) : 0;
+  paintIdleMute(); queueTuning();
+};
+el.idleMute.oninput = () => { tuning.idle_mute_min = Number(el.idleMute.value); paintIdleMute(); queueTuning(); };
+
+
+/* Drag the mark on the meter to change the sensitivity.
+   Not having to open settings is faster, so it can be reached from the main
+   screen too. It reads the same value as the slider in settings, so moving
+   either one keeps them in step. */
+function threshFromX(clientX) {
+  const r = el.meter.getBoundingClientRect();
+  if (!r.width || !Number.isFinite(clientX)) return;
+  const pos = Math.min(1000, Math.max(0, ((clientX - r.left) / r.width) * 1000));
+  const next = posToThresh(pos);
+  if (!Number.isFinite(next) || next <= 0) return;   // do not let a strange value break the drawing
+  tuning.silence_threshold = next;
+  paintTuning();
+  // What you are dragging is the loudness scale, so it gets flipped when spoken of as sensitivity
+  el.hint.textContent = t('sensitivitySet', {n: Math.round((1000 - pos) / 10)});
+  queueTuning();
+}
+
+let draggingThresh = false;
+
+function endThreshDrag() {
+  if (!draggingThresh) return;
+  draggingThresh = false;
+  el.meterHit.classList.remove('dragging');
+  setTimeout(() => { if (!draggingThresh) paint(); }, 1500);
+}
+
+el.meterHit.addEventListener('pointerdown', e => {
+  draggingThresh = true;
+  el.meterHit.classList.add('dragging');
+  try { el.meterHit.setPointerCapture(e.pointerId); } catch {}
+  threshFromX(e.clientX);
+});
+el.meterHit.addEventListener('pointermove', e => {
+  if (draggingThresh) threshFromX(e.clientX);
+});
+// Letting go outside the screen, moving to another window and so on can lose
+// the pointerup. Left holding on, the value would then change from nothing more
+// than the cursor passing over, so the catch is kept wide.
+el.meterHit.addEventListener('lostpointercapture', endThreshDrag);
+for (const ev of ['pointerup', 'pointercancel']) {
+  el.meterHit.addEventListener(ev, endThreshDrag);
+  addEventListener(ev, endThreshDrag);
+}
+
+/* ── Recognizing in the browser (Web Speech API) ──
+   Uses the recognition built into Chrome. It loads no model, so it works as it
+   is even on a weak machine. But **the audio is sent to Google's servers**, so
+   anyone who needs everything to stay on this machine should use one of the
+   other engines.
+
+   The awkward part is that the session cuts itself off after 7 to 10 seconds of
+   silence. Scrambling to reconnect after it has gone loses the first words of
+   what you were starting to say. The Web Speech API has no way to pour in audio
+   you had saved up, so there is no getting it back after the fact.
+
+   So we **reconnect ahead of time, while it is quiet**. Reconnecting during
+   silence loses nothing. It is never touched while a voice is coming in. */
+// The spoken language choices. Chrome takes BCP-47 tags, so the common ones are listed.
+const ASR_LANGS = [
+  ['ja-JP', '日本語'], ['en-US', 'English (US)'], ['en-GB', 'English (UK)'],
+  ['zh-CN', '中文（简体）'], ['zh-TW', '中文（繁體）'], ['ko-KR', '한국어'],
+  ['es-ES', 'Español'], ['fr-FR', 'Français'], ['de-DE', 'Deutsch'],
+  ['it-IT', 'Italiano'], ['pt-BR', 'Português (BR)'], ['ru-RU', 'Русский'],
+  ['hi-IN', 'हिन्दी'], ['id-ID', 'Indonesia'], ['th-TH', 'ไทย'],
+  ['vi-VN', 'Tiếng Việt'],
+];
+
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const canBrowserASR = !!SR;
+
+let rec = null;              // the current SpeechRecognition
+let recRunning = false;      // start() has been called and end has not come yet
+let recWanted = false;       // whether the setting says to use it
+let lastVoiceAt = 0;         // when a voice was last coming in
+let recStartedAt = 0;        // when the current session was opened
+let recFails = 0;            // failures in a row (used to decide when to give up)
+
+/* Whether browser recognition is set to be used and whether it is running
+   right now are two different things. Treating them as one meant that the
+   instant a pause stopped it, it was judged as having no way to recognize at
+   all, and even the resume button went unpressable (we really did get stuck
+   that way). Whether the screen is live is read off the setting (asrChosen). */
+let asrChosen = false;
+const asrActive = () => canBrowserASR && asrChosen;
+
+const MAX_FAILS = 6;         // this many in a row and we give up and say so
+
+// Reconnect on our own before it cuts. Well short of the measured limit (7 to 10 seconds).
+const RENEW_AFTER_MS = 4500;
+
+function browserLang() {
+  // The language to recognize. Not the language the screen is in, the language you speak.
+  const saved = store.get('asrLang', '');
+  if (saved) return saved;
+  // navigator.language sometimes comes back with no region attached, like "ja".
+  // As it stands that matches nothing in the list, and the raw code ends up
+  // sitting among the choices.
+  const want = (navigator.language || 'en-US');
+  if (ASR_LANGS.some(([c]) => c === want)) return want;
+  const head = want.split('-')[0].toLowerCase();
+  const hit = ASR_LANGS.find(([c]) => c.split('-')[0].toLowerCase() === head);
+  return hit ? hit[0] : 'en-US';
+}
+
+function newRecognition() {
+  const r = new SR();
+  r.lang = browserLang();
+  r.continuous = true;
+  r.interimResults = true;
+  r.maxAlternatives = 1;
+
+  // Check every time whether this is still us, so a signal from an old
+  // instance does not break the new state. Without it, an old end can arrive
+  // right after a swap and start it up twice over.
+  const mine = () => rec === r;
+
+  r.onstart = () => {
+    if (!mine()) return;
+    recRunning = true; recStartedAt = performance.now(); recFails = 0;
+    asrDeniedFlag = false;
+    beat('listening');           // say so right away, without waiting
+  };
+
+  r.onresult = ev => {
+    if (!mine()) return;
+    let interim = '';
+    for (let i = ev.resultIndex; i < ev.results.length; i++) {
+      const res = ev.results[i];
+      if (res.isFinal) sendUtterance(res[0].transcript);
+      else interim += res[0].transcript;
+    }
+    el.stream.textContent = withDict(interim);
+    el.tray.classList.toggle('idle', !interim);
+    streamTail();
+    paintTinyButtons();
+    if (interim.trim()) lastVoiceAt = performance.now();
+  };
+
+  r.onerror = ev => {
+    if (!mine()) return;
+    // A refused microphone needs a person to act. Roll the setting back and say so.
+    if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
+      asrDeniedFlag = true;
+      beat('denied');            // make the refusal visible from outside too
+      disableBrowserASR(t('asrDenied'));
+      return;
+    }
+    // no-speech and aborted happen all the time (you were quiet, or we
+    // reconnected ourselves). Everything else (network, audio-capture,
+    // language-not-supported and so on) gets counted.
+    if (ev.error !== 'no-speech' && ev.error !== 'aborted') recFails++;
+  };
+
+  r.onend = () => {
+    if (!mine()) return;
+    recRunning = false;
+    el.stream.textContent = '';
+    if (!recWanted) return;
+    if (recFails > MAX_FAILS) {
+      disableBrowserASR(t('asrFailed'));
+      return;
+    }
+    // Wait only when failures are piling up. When things are going fine there
+    // is no waiting (waiting loses whatever you started saying in the meantime).
+    const wait = recFails ? Math.min(8000, 250 * Math.pow(2, recFails - 1)) : 0;
+    setTimeout(() => { if (recWanted && rec === r) startRecognition(); }, wait);
+  };
+  return r;
+}
+
+function startRecognition() {
+  if (!canBrowserASR || !recWanted || recRunning) return;
+  const r = newRecognition();
+  rec = r;
+  try {
+    r.start();
+  } catch {
+    // Sometimes the previous session has not folded up yet. Wait a little and come back.
+    recFails++;
+    setTimeout(() => { if (recWanted && rec === r) { rec = null; startRecognition(); } },
+               Math.min(8000, 250 * Math.pow(2, recFails - 1)));
+  }
+}
+
+function stopRecognition() {
+  recWanted = false;            // lower it before abort (stops the revival on end)
+  const r = rec;
+  rec = null; recRunning = false; recFails = 0;
+  if (r) { try { r.abort(); } catch {} }
+  el.stream.textContent = '';
+}
+
+// When it can no longer be used, bring the setting, what is saved and the
+// screen all into line with reality. Lower only the flag and you get a box
+// still ticked with nothing running behind it.
+function disableBrowserASR(why) {
+  stopRecognition();
+  store.set('asr', '');
+  paintBrowserAsr();
+  if (why) el.hint.textContent = why;
+  paintPower();
+}
+
+/* Whether a voice is coming in is checked on our own interval, not on rAF.
+   Drawing stops in a background tab, so riding along with it would mean
+   detection dies exactly while you have it floating and are working on
+   something else. That is precisely how this tool gets used, so it is kept
+   separate. */
+setInterval(() => {
+  if (!asrActive() || !analyser || vizFailed) return;
+  analyser.getByteFrequencyData(freq);
+  if (browserLevel() > 0.12) lastVoiceAt = performance.now();
+}, 150);
+
+/* The watch that reconnects ahead of time while it is quiet.
+   It is never touched while a voice is coming in (the one return below is what
+   guarantees that). */
+setInterval(() => {
+  if (!recWanted || !recRunning || !rec) return;
+  const now = performance.now();
+  if (now - lastVoiceAt < RENEW_AFTER_MS) return;   // still talking
+  if (now - recStartedAt < RENEW_AFTER_MS) return;  // just reconnected
+  // stop() settles the last result and then throws end (abort throws it away)
+  try { rec.stop(); } catch {}
+}, 1000);
+
+/* If nobody speaks for a while, we switch the microphone off ourselves.
+
+   Browser recognition cuts the session every 7 to 10 seconds by design, and we
+   reconnect ahead of time even while it is quiet. Which means that merely
+   stepping away keeps reconnecting to Google forever. There is no reason to
+   keep that up through time nobody is using.
+
+   The cut is announced with a sound and a line. Cut it silently and you come
+   back, talk, and never notice that nothing is getting through (we burned two
+   and a half hours on exactly that, today). */
+setInterval(() => {
+  if (!asrActive() || route === 'off' || inFlight) return;
+  const mins = Number(tuning.idle_mute_min) || 0;
+  if (!mins) return;
+  if (performance.now() - lastVoiceAt < mins * 60000) return;
+  setRoute('off').then(() => {
+    chime('down');
+    say(t('idleMuted', {n: mins}), 30);
+  });
+}, 5000);
+
+/* Settled utterances go to the server. The dictionary, the ignored words, the
+   min length and the hold decision all run through the same path the daemon
+   takes, on the server side (so the result does not change with how it was
+   recognized).
+
+   Fired and forgotten they arrive out of order, so each send is chained onto
+   the one before it and they go in series. */
+let sendChain = Promise.resolve();
+function sendUtterance(text) {
+  text = (text || '').trim();
+  if (!text) return;
+  if (dropNextLocal) { dropNextLocal = false; return; }   // an utterance that was cleared on screen
+  lastVoiceAt = performance.now();
+  sendChain = sendChain.then(async () => {
+    try {
+      const res = await post('/api/utterance', {text});
+      // Browser recognition keeps no copy on this side. If it drops, all we can do is tell the person.
+      if (res.status === 409) {
+        // The daemon is recognizing too. The screen has been left behind, so bring it back into line.
+        el.hint.textContent = t('asrDoubled');
+        loadEngines();
+      } else if (!res.ok) {
+        el.hint.textContent = t('asrSendFailed', {n: res.status});
+      }
+    } catch {
+      el.hint.textContent = t('asrSendFailed', {n: '?'});
+    }
+  });
+}
+
+/* Tell the server that we really are listening right now.
+   Without this there is no way, from outside, to tell the state where no screen
+   is open or the microphone was refused from the state where it is properly
+   listening. */
+const tabId = Math.random().toString(36).slice(2, 10);
+let asrDeniedFlag = false;
+
+function beat(state) {
+  navigator.sendBeacon
+    ? navigator.sendBeacon('/api/asr-heartbeat',
+        new Blob([JSON.stringify({tab: tabId, state})], {type: 'application/json'}))
+    : post('/api/asr-heartbeat', {tab: tabId, state}).catch(() => {});
+}
+
+setInterval(() => {
+  if (!asrChosen) return;
+  beat(asrDeniedFlag ? 'denied' : (recRunning ? 'listening' : 'idle'));
+}, 5000);
+
+// On close, say that we are gone (left behind, it still looks like someone is there)
+addEventListener('pagehide', () => { if (asrChosen) beat('gone'); });
+
+/* ── Where speech goes ───────────────────
+   Voice mode gets used on separate jobs at the same time. This picks which one
+   it reaches. The daemon decides the names (the folder name at first, and once
+   the agent titles the conversation it switches to that). */
+let routeTo = '';          // the one chosen. Empty means nothing chosen (the server decides)
+let effectiveTo = '';      // where it actually lands (the one the server picked when nothing was chosen)
+let knownListeners = [];
+
+function paintRoutes() {
+  // With only one listening there is nothing to choose
+  if (knownListeners.length < 2) { el.routes.hidden = true; return; }
+  el.routes.hidden = false;
+  // Show the numbers. This is the number you use when you say 「2番に切り替え」
+  // out loud. The daemon counts in the same order (earliest registered first),
+  // so it matches the number in front of you.
+  //
+  // There is no send to everyone. Two sessions taking the same instruction and
+  // running off separately had no use, and picking it by mistake was only hard
+  // to notice.
+  const items = knownListeners.map((l, i) => ({...l, no: i + 1}));
+  const pick = l => routeTo ? String(l.pid) === routeTo : String(l.pid) === effectiveTo;
+
+  // This is what comes up in a short window. Same numbers and same names as the chips.
+  el.routePick.replaceChildren(...items.map(l => {
+    const o = document.createElement('option');
+    o.value = String(l.pid);
+    o.textContent = `${l.no}. ${l.label}`;
+    o.selected = pick(l);
+    return o;
+  }));
+
+  el.routeChips.replaceChildren(...items.map(l => {
+    // Light up where it actually lands. With nothing chosen the server settles
+    // on whichever started later, so even with no memory of choosing you can
+    // see where it goes.
+    const on = pick(l);
+    const b = document.createElement('button');
+    b.className = 'route-chip' + (on ? ' on' : '');
+    // The number is the same one used in the spoken signal (「2番」). Even when
+    // a narrow window folds the name away, this part always stays.
+    const no = document.createElement('b');
+    no.className = 'no';
+    no.textContent = l.no + '.';
+    const nm = document.createElement('span');
+    nm.className = 'nm';
+    nm.textContent = l.label;
+    b.append(no, nm);
+    b.title = `${l.no}. ${l.label}\n${l.cwd || ''}`;
+    b.onclick = () => setRoute2(String(l.pid));
+
+    // Stop it listening. The session itself does not end.
+    const x = document.createElement('span');
+    x.className = 'x';
+    x.textContent = '×';
+    x.title = t('disconnectTitle', {name: l.label});
+    x.onclick = async ev => {
+      ev.stopPropagation();
+      if (!b.classList.contains('asking')) {
+        b.classList.add('asking');
+        nm.textContent = t('disconnectAsk');
+        setTimeout(() => { if (b.classList.contains('asking')) loadListeners(); }, 4000);
+        return;
+      }
+      try { await post('/api/listeners/disconnect', {pid: String(l.pid)}); } catch {}
+      say(t('disconnected', {name: l.label}), 5);
+      setTimeout(loadListeners, 400);
+    };
+    b.append(x);
+    return b;
+  }));
+}
+
+el.routePick.onchange = () => setRoute2(el.routePick.value);
+
+async function setRoute2(to) {
+  routeTo = to;
+  paintRoutes();
+  try { await putJSON('/api/route', {to}); } catch {}
+}
+
+async function loadListeners() {
+  let d;
+  try {
+    d = await (await fetch('/api/listeners')).json();
+  } catch { return; }
+
+  const before = knownListeners;
+  knownListeners = d.listeners || [];
+  // Remember them so log destinations can show a name (kept after they have ended)
+  knownListeners.forEach(l => routeNames.set(String(l.pid), l.label));
+  relabelEntries();
+  effectiveTo = d.target || '';
+  const live = new Set(knownListeners.map(l => String(l.pid)));
+
+  // If where it was going has ended, move to a session that is still alive and
+  // say so. Left hanging silently, you talk and never notice nothing arrives.
+  if (routeTo && !live.has(routeTo)) {
+    const gone = before.find(l => String(l.pid) === routeTo);
+    const next = knownListeners[knownListeners.length - 1];
+    routeTo = '';                       // back to nothing chosen, and leave it to the server's default
+    await putJSON('/api/route', {to: ''}).catch(() => {});
+    el.note.textContent = next
+      ? t('routeGone', {gone: gone ? gone.label : '?', next: next.label})
+      : t('routeGoneAll', {gone: gone ? gone.label : '?'});
+    el.note.hidden = false;
+  } else {
+    routeTo = d.route || '';
+  }
+  // The default (whichever started later) is the server's call. Nothing is
+  // pinned here, so it behaves the same even with no screen open.
+  paintRoutes();
+}
+
+/* ── Browser recognition settings ───────── */
+function paintAsrLangs() {
+  const cur = browserLang();
+  const list = ASR_LANGS.some(([c]) => c === cur) ? ASR_LANGS : [[cur, cur], ...ASR_LANGS];
+  el.asrLang.replaceChildren(...list.map(([code, name]) => {
+    const o = document.createElement('option');
+    o.value = code; o.textContent = name; o.selected = code === cur;
+    return o;
+  }));
+}
+
+/* Choosing how recognition is done.
+
+   The browser's recognition (Web Speech API) runs with nothing installed, so
+   that is the default. For people who need everything to stay on this machine,
+   or who want to choose on accuracy or on language, the dropdown lists only
+   what is actually installed.
+
+   Running both at once writes the same utterance to the log twice, so exactly
+   one is chosen at any time. */
+const BROWSER_ENGINE = 'browser';
+// The two that run on this machine. What comes back when you stop them differs, so they are told apart by name.
+const APPLE_ENGINE = 'apple';
+const WHISPER_ENGINE = 'whisper';
+let localEngines = [];
+
+function paintBrowserAsr() {
+  el.browserAsrWarn.hidden = !asrChosen;
+  el.browserMic.hidden = !asrChosen;
+  el.asrLangField.hidden = !asrChosen;
+  el.idleMuteField.hidden = !asrChosen;
+  el.idleMuteNote.hidden = !asrChosen;
+  paintIdleMute();
+  el.engineNote.textContent = t(asrChosen ? 'browserAsrNote' : 'localAsrNote');
+  // For turning listening on and off, paintPower() decides both whether it
+  // shows and what it says (it changes with more than the engine, it changes
+  // with whether anything is running).
+  paintPower();
+  if (el.recogLangField) el.recogLangField.hidden = asrChosen || el.recogLangField.hidden;
+  /* The Whisper model field. It shows while stopped as well. You use it by
+     swapping the name and then loading again, so if the field vanished the
+     moment you stopped, you could never reach it. */
+  const whisper = chosenEngine === WHISPER_ENGINE;
+  el.whisperModelField.hidden = !whisper;
+  el.whisperModelNote.hidden = !whisper;
+}
+
+async function loadEngines() {
+  let d;
+  try {
+    d = await (await fetch('/api/engines')).json();
+  } catch { return; }
+  localEngines = d.engines || [];
+  const was = asrChosen;
+
+  const opts = [];
+  if (canBrowserASR) opts.push([BROWSER_ENGINE, t('engineBrowser')]);
+  for (const e of localEngines) opts.push([e.id, e.label]);
+
+  // There can be machines with no browser recognition and no installed model either
+  if (!opts.length) opts.push(['', t('engineNone')]);
+
+  // The remembered choice lives on the server. Make localStorage the truth and
+  // changing browsers puts it out of step with the branch taken at startup.
+  const cur = d.chosen || BROWSER_ENGINE;
+  chosenEngine = cur;
+  asrChosen = canBrowserASR && cur === BROWSER_ENGINE;
+  recWanted = asrChosen && !asrPausedByRoute;
+
+  // If another tab or a command switched it, follow along here too.
+  // Without following, recognition runs twice over, our send gets rejected and
+  // the text simply disappears.
+  if (was && !asrChosen) {
+    stopRecognition();
+    beat('gone');
+  } else if (!was && asrChosen && vizArmed) {
+    startRecognition();
+  }
+  el.enginePick.replaceChildren(...opts.map(([id, label]) => {
+    const o = document.createElement('option');
+    o.value = id; o.textContent = label; o.selected = id === cur;
+    return o;
+  }));
+  paintBrowserAsr();
+}
+
+el.enginePick.onchange = async () => {
+  const pick = el.enginePick.value;
+  // Do not wait for the loadEngines every 5 seconds. Line up what shows from the moment it is chosen
+  chosenEngine = pick;
+  el.enginePick.disabled = true;
+  try {
+    if (pick === BROWSER_ENGINE) {
+      asrChosen = true;
+      recWanted = true;
+      asrPausedByRoute = false;
+      lastVoiceAt = performance.now();
+      // Take the model side down first. Connect before it is down and whatever is said in between arrives twice.
+      if (engineOnish()) {
+        engine = 'stopping';
+        paintPower();
+        await post('/api/engine', {running: false});
+      }
+      startRecognition();
+    } else {
+      asrChosen = false;
+      stopRecognition();
+      engine = 'booting';
+      startedAt = Date.now();
+      paintPower();
+      await post('/api/engine', {running: true, engine: pick});
+    }
+  } finally {
+    el.enginePick.disabled = false;
+  }
+  paintBrowserAsr();
+  refreshState();
+  paint();
+};
+
+el.asrLang.onchange = () => {
+  store.set('asrLang', el.asrLang.value);
+  // The language takes effect on the next reconnect. If it is in use, reconnect right now.
+  if (recWanted && rec) { try { rec.stop(); } catch {} }
+};
+
+/* ── Floating on top ─────────────────────
+   So you never have to line browsers up side by side, it moves into a small
+   window that always floats in front. It uses Chrome's Document
+   Picture-in-Picture, so nothing extra has to be installed. */
+const canFloat = 'documentPictureInPicture' in window;
+el.floatBtn.hidden = !canFloat;
+// The small window is a separate document and inherits none of our styling.
+// Cloning the <style> nodes used to carry it over, but the sheet lives in its
+// own file now and there is nothing left to clone. So fetch the text once, up
+// front, and hand it to the small window as a <style> when it opens. Starting
+// it here rather than at open time keeps the wait off the moment of the click,
+// and keeps it off the first paint of this page as well.
+const pipCss = canFloat
+  ? fetch('viewer.css').then(r => r.ok ? r.text() : '').catch(() => '')
+  : null;
+// What moves into the small window. To add more, add it only here. If the list
+// differs between opening and coming back, whatever was added disappears along
+// with the small window when you return.
+const floatParts = [el.page, el.sheet, el.helpSheet];
+paintFloatAsk();
+
+// The drawing and the description swap with whether it is floating.
+// Left on the same drawing, there is no reading whether a press floats it or
+// brings it back.
+function paintFloat(on) {
+  if (on === undefined) on = !!(canFloat && documentPictureInPicture.window);
+  const name = on ? 'picture_in_picture_off' : 'picture_in_picture';
+  el.floatBtn.dataset.icon = name;
+  const svg = el.floatBtn.querySelector(':scope > svg');
+  if (svg) {
+    // Replace only the contents of the drawing already there (rebuilding it can leave two)
+    const paths = svg.querySelectorAll('path');
+    if (paths.length === 2) {
+      paths[0].setAttribute('d', ICON[name][0]);
+      paths[1].setAttribute('d', ICON[name][1]);
+    }
+  } else {
+    el.floatBtn.replaceChildren(iconSvg(name, 20));
+  }
+  el.floatBtn.classList.toggle('lit', on);
+  el.floatBtn.title = t(on ? 'unfloatBtn' : 'floatBtn');
+  el.floatBtn.setAttribute('aria-label', el.floatBtn.title);
+  el.floatBtn.setAttribute('aria-pressed', String(on));
+}
+
+/* ── Only one screen ─────────────────────
+   Open the same screen twice and you see the same thing, only the mic gets
+   grabbed twice over. Where speech goes is chosen inside the screen, so there
+   is never a reason to see two of them side by side. The one opened later
+   becomes the real one and the older one steps aside (it closes the window if
+   it can. Some windows the browser will not let a page close, and there the
+   contents are hidden and only the way back is shown). */
+const soleId = Math.random().toString(36).slice(2);
+let soleChannel = null;
+try { soleChannel = new BroadcastChannel('voice-shell-viewer'); } catch {}
+
+function standDown() {
+  el.taken.hidden = false;
+  stopViz();
+  if (typeof stopRecognition === 'function') stopRecognition();
+  recWanted = false;
+  try { window.close(); } catch {}
+}
+
+function claimSole() {
+  el.taken.hidden = true;
+  if (soleChannel) soleChannel.postMessage({claim: soleId});
+}
+
+if (soleChannel) {
+  soleChannel.onmessage = ev => {
+    if (ev.data?.claim && ev.data.claim !== soleId) standDown();
+  };
+}
+el.takeBack.onclick = () => { claimSole(); location.reload(); };
+claimSole();
+
+/* A window of its own can be opened automatically, but pinning it on top
+   cannot start unless a person presses (a browser rule). That leaves it half
+   done, a window that never comes forward, so we put something pressable right
+   there, once. Once it has been used, it never shows again. */
+function paintFloatAsk() {
+  el.floatAsk.hidden = !(canFloat
+                         && !documentPictureInPicture.window
+                         && !store.get('floated'));
+}
+el.floatAsk.onclick = () => { el.floatAsk.hidden = true; el.floatBtn.click(); };
+
+// On browser recognition, with the screen not yet touched. It is shown as off,
+// but the mute on the server side has not been touched (that only goes on the
+// moment something is pressed).
+let armPending = false;
+
+let floating = false;      // waiting on requestWindow. Keeps a flurry of presses from opening two
+
+el.floatBtn.onclick = async () => {
+  if (!canFloat || floating) return;
+  // A toggle. Press it again while it floats and it goes back to the original
+  // screen (the code that brings it back on 'pagehide' already exists. Calling
+  // window.close() is what runs it).
+  if (documentPictureInPicture.window) {
+    documentPictureInPicture.window.close();
+    return;
+  }
+  floating = true;
+  let win;
+  try {
+    win = await documentPictureInPicture.requestWindow({width: 400, height: 720});
+  } catch {
+    floating = false;
+    el.hint.textContent = t('floatFailed');
+    return;
+  }
+  floating = false;
+  // Carry the styles over as they are so it looks the same. This has to stay
+  // after requestWindow, because an await before it would spend the user
+  // gesture and the request to open would be refused.
+  const css = await pipCss;
+  if (css) {
+    const sheet = win.document.createElement('style');
+    sheet.textContent = css;
+    win.document.head.appendChild(sheet);
+  }
+  // From here on the small window is the target. Rather than copying, repaint
+  // through the usual path. Auto is the state with no data-theme at all, so
+  // copying would leave no way to take it off.
+  pipDoc = win.document;
+  resolveLang();
+  applyTheme(store.get('theme', 'auto'));
+  // Move the elements themselves. The references stay live, so no JS has to change.
+  win.document.body.append(...floatParts);
+  // The small window is a new document every time. The key listener is
+  // reattached here (closing it takes the whole document with it, so nothing
+  // has to be detached).
+  win.document.addEventListener('keydown', onKey);
+  el.sheet.hidden = el.helpSheet.hidden = true;   // the small window starts on the main screen
+  fitCanvas();
+  paintFloat(true);
+  store.set('floated', '1');
+  paintFloatAsk();
+  paint();                    // put the same title on the small window too
+  win.addEventListener('pagehide', () => {
+    // Put the target back first. A small window on its way closed is still
+    // there, so left alone we would go and write the theme and the colors into
+    // a document that is about to disappear.
+    pipDoc = null;
+    document.body.append(...floatParts);
+    paintFloat(false);          // mid-close the window is still around
+    paintFloatAsk();
+    fitCanvas();
+    fitMini();                  // it can come back with a sheet left open from the small window
+  });
+};
+
+/* A page cannot open chrome://, so pressing it only copies. */
+el.micSettingsLink.onclick = async () => {
+  const url = el.micSettingsLink.textContent.trim();
+  try { await navigator.clipboard.writeText(url); } catch { return; }
+  const was = el.micSettingsLink.textContent;
+  el.micSettingsLink.textContent = t('copied');
+  setTimeout(() => { el.micSettingsLink.textContent = was; }, 1400);
+};
+
+/* ── The user dictionary ─────────────────
+   One entry per row of the form. Nobody has to write arrows or JSON by hand. */
+function replaceRow(from = '', to = '') {
+  const row = document.createElement('div');
+  row.className = 'row';
+  const a = document.createElement('input'); a.className = 'from'; a.value = from;
+  a.placeholder = t('dictHeard');
+  const arrow = document.createElement('span'); arrow.className = 'arrow'; arrow.textContent = '→';
+  const b = document.createElement('input'); b.className = 'to'; b.value = to;
+  b.placeholder = t('dictSendAs');
+  const del = document.createElement('button');
+  del.className = 'del'; del.title = t('remove');
+  del.appendChild(iconSvg('close', 17));
+  // Deleting moves no focus, so unless it is called from here there is no chance to save
+  del.onclick = () => { row.remove(); saveDict(); };
+  row.append(a, arrow, b, del);
+  return row;
+}
+
+function ignoreRow(word = '') {
+  const row = document.createElement('div');
+  row.className = 'row';
+  const a = document.createElement('input'); a.className = 'word'; a.value = word;
+  a.placeholder = t('dictIgnorePh');
+  const del = document.createElement('button');
+  del.className = 'del'; del.title = t('remove');
+  del.appendChild(iconSvg('close', 17));
+  del.onclick = () => { row.remove(); saveDict(); };
+  row.append(a, del);
+  return row;
+}
+
+function renderDict(d) {
+  el.replaceRows.replaceChildren(
+    ...Object.entries(d.replace || {}).map(([k, v]) => replaceRow(k, v)));
+  el.ignoreRows.replaceChildren(...(d.ignore || []).map(w => ignoreRow(w)));
+
+  // The words ignored out of the box cannot be edited, so they line up as something to look at
+  if (d.builtin) {
+    const off = new Set(d.unignore || []);
+    el.builtinChips.replaceChildren(...d.builtin.map(w => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chip' + (off.has(w) ? ' off' : '');
+      b.dataset.word = w;
+      const label = document.createElement('span');
+      label.className = 'w'; label.textContent = w;
+      const x = document.createElement('span');
+      x.className = 'x'; x.textContent = off.has(w) ? '＋' : '×';
+      b.append(label, x);
+      const paint = () => {
+        const gone = b.classList.contains('off');
+        x.textContent = gone ? '＋' : '×';
+        b.title = t(gone ? 'dictBuiltinBack' : 'dictBuiltinDrop', {w});
+      };
+      paint();
+      // A chip toggles without ever taking focus. Unless it writes the moment
+      // it is pressed, the struck-through look and what is actually in effect
+      // stay out of step.
+      b.onclick = () => { b.classList.toggle('off'); paint(); saveDict(); };
+      return b;
+    }));
+    el.builtinCount.textContent = d.builtin.length;
+  }
+  // If it is empty, put one row there (so you can start typing straight away)
+  if (!el.replaceRows.children.length) el.replaceRows.appendChild(replaceRow());
+  if (!el.ignoreRows.children.length) el.ignoreRows.appendChild(ignoreRow());
+}
+
+// Build the dictionary data out of the input fields on screen
+function collectDict() {
+  const replace = {};
+  for (const row of el.replaceRows.children) {
+    const from = row.querySelector('.from').value.trim();
+    const to = row.querySelector('.to').value.trim();
+    if (from && to) replace[from] = to;
+  }
+  const ignore = [...el.ignoreRows.children]
+    .map(r => r.querySelector('.word').value.trim()).filter(Boolean);
+  // Built-in words that were pressed off. They go over to the not ignored side
+  const unignore = [...el.builtinChips.children]
+    .filter(c => c.classList.contains('off')).map(c => c.dataset.word);
+  return {ignore, unignore, replace};
+}
+
+/* ── Saving ──────────────────────────────
+   It writes the moment focus leaves. The sliders in the top half save silently
+   as soon as you move them, while the bottom half alone lost everything unless
+   you pressed a button, and that mismatch was where the accidents came from. */
+let dictReady = false;                // nothing is written until it has been read once
+let dictLast = '';                    // what was written last. If it matches, nothing is sent
+let dictSaving = Promise.resolve();   // keeps the writes in a single line
+let noteTimer = null;
+
+// The mark does not stay up. Left there, you lose track of which save it is about.
+function flashNote(msg, ms) {
+  clearTimeout(noteTimer);
+  el.dictNote.textContent = msg;
+  noteTimer = setTimeout(() => { el.dictNote.textContent = ''; }, ms);
+}
+
+async function saveDict(quiet = false) {
+  // Writing before it has loaded overwrites the real dictionary with a still empty screen
+  if (!dictReady) return;
+  const d = collectDict();
+  const body = JSON.stringify(d);
+  // It is called every time focus leaves, mid-typing included. If the contents match, do nothing.
+  if (body === dictLast) return;
+  dictLast = body;
+  // The next write goes out only once the one before it has finished. Delete a
+  // row and press a chip right away, and the older contents sent alongside it
+  // can land afterward and bring the deleted row back.
+  const mine = dictSaving = dictSaving.then(() => putJSON('/api/dictionary', d))
+                                      .then(r => r.ok, () => false);
+  if (!await mine) { dictLast = ''; return; }   // it gets sent again the next time anything is touched
+  loadDictPairs();       // make it take on the mid-recognition display too, from the next utterance
+  if (!quiet) flashNote(t('dictSaved'), 1600);
+}
+
+function showDictTab(which) {
+  const isReplace = which === 'replace';
+  el.paneReplace.hidden = !isReplace;
+  el.paneIgnore.hidden = isReplace;
+  el.tabReplace.classList.toggle('on', isReplace);
+  el.tabIgnore.classList.toggle('on', !isReplace);
+}
+el.tabReplace.onclick = () => showDictTab('replace');
+el.tabIgnore.onclick = () => showDictTab('ignore');
+
+async function loadDict() {
+  renderDict(await (await fetch('/api/dictionary')).json());
+  // Note down how it looked right after loading. Skip this and merely opening it writes once.
+  dictLast = JSON.stringify(collectDict());
+  dictReady = true;
+}
+
+// Nothing is written while you type. It writes only when focus leaves.
+el.paneDict.addEventListener('focusout', () => saveDict());
+
+// New entries go at the head of the list (no scrolling to the bottom)
+function addReplaceEntry() {
+  const from = el.newFrom.value.trim(), to = el.newTo.value.trim();
+  if (!from || !to) { el.newFrom.focus(); return; }
+  el.replaceRows.prepend(replaceRow(from, to));
+  el.newFrom.value = el.newTo.value = '';
+  el.newFrom.focus();
+  // A newly added row never takes focus. Unless it writes here, it is gone the moment you close.
+  saveDict();
+}
+
+function addIgnoreEntry() {
+  const w = el.newIgnore.value.trim();
+  if (!w) return;
+  el.ignoreRows.prepend(ignoreRow(w));
+  el.newIgnore.value = '';
+  el.newIgnore.focus();
+  saveDict();
+}
+
+el.addReplace.onclick = addReplaceEntry;
+el.addIgnore.onclick = addIgnoreEntry;
+
+// Enter adds it (so several can go in one after another)
+for (const [input, fn] of [[el.newFrom, addReplaceEntry], [el.newTo, addReplaceEntry],
+                           [el.newIgnore, addIgnoreEntry]]) {
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); fn(); }
+  });
+}
+
+// Filtering (find what is already saved)
+el.filterReplace.addEventListener('input', () => {
+  const q = el.filterReplace.value.trim().toLowerCase();
+  for (const row of el.replaceRows.children) {
+    const text = row.querySelector('.from').value + ' ' + row.querySelector('.to').value;
+    const hit = q && text.toLowerCase().includes(q);
+    row.hidden = q && !hit;
+    row.classList.toggle('hit', !!hit);
+  }
+});
+
+/* ── CSV ─────────────────────────────────
+   One entry per line. The columns are type,from,to
+     replace,クロードコード,Claude Code
+     ignore,チャンネル登録,
+*/
+const csvCell = s => /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+
+el.dictExport.onclick = () => {
+  const d = collectDict();
+  const lines = ['type,from,to'];
+  for (const [k, v] of Object.entries(d.replace)) lines.push(`replace,${csvCell(k)},${csvCell(v)}`);
+  for (const w of d.ignore) lines.push(`ignore,${csvCell(w)},`);
+  // Put a BOM on it so Excel can tell it is UTF-8
+  const blob = new Blob(['﻿' + lines.join('\n') + '\n'], {type: 'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'voice-shell-dictionary.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+// A small parser that also handles quoted cells
+function parseCsvLine(line) {
+  const out = [];
+  let cur = '', quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (quoted) {
+      if (c === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+      else if (c === '"') quoted = false;
+      else cur += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ',') { out.push(cur); cur = ''; }
+    else cur += c;
+  }
+  out.push(cur);
+  return out.map(s => s.trim());
+}
+
+el.dictImport.onclick = () => el.dictFile.click();
+
+el.dictFile.onchange = async ev => {
+  const file = ev.target.files[0];
+  if (!file) return;
+  const text = (await file.text()).replace(/^﻿/, '');
+
+  // Added to what is already on screen. Replace the lot and reading a file
+  // with 3 entries wipes out the 43 you had. The import saves the moment it is
+  // pressed, so there is no turning back.
+  const cur = collectDict();
+  const replace = {...cur.replace}, ignore = [...cur.ignore];
+  let skipped = 0, added = 0, updated = 0, first = true;
+  for (const raw of text.split(/\r?\n/)) {
+    if (!raw.trim()) continue;
+    const [type, from, to] = parseCsvLine(raw);
+    // The header row. Anything exported from a spreadsheet always carries one,
+    // so it is skipped whatever the columns are called. Only the first line is
+    // checked. Real rows always start with replace or ignore, so none are lost.
+    if (first) {
+      first = false;
+      if (type !== 'replace' && type !== 'ignore') continue;
+    }
+    if (type === 'replace' && from && to) {
+      if (!(from in replace)) added++;
+      else if (replace[from] !== to) updated++;
+      replace[from] = to;
+    }
+    else if (type === 'ignore' && from) {
+      if (!ignore.includes(from)) { ignore.push(from); added++; }
+    }
+    else skipped++;
+  }
+
+  renderDict({replace, ignore});
+  el.dictFile.value = '';                          // so the same file can be picked again
+  await saveDict(true);                            // no mark. The counts below say more
+  flashNote(t('dictLoaded', {
+    a: added, u: updated,
+    s: skipped ? t('dictSkipped', {n: skipped}) : '',
+  }), 6000);
+};
+
+// Whether filler words get dropped is a daemon setting. It takes effect from the next utterance.
+el.clean.onchange = () => {
+  tuning.strip_fillers = el.clean.checked;
+  putJSON('/api/tuning', tuning);
+};
+
+/* ── The list of voice commands ───────────────
+   The explanation of what happens lives here (i18n), and the wording you say
+   out loud lives in the daemon's table. They translate into different things,
+   so they are kept in different places. When adding a language, the text on the
+   screen goes here and the words actually spoken go in COMMAND_WORDS in
+   voice_daemon.py.
+
+   The wordings are never copied over to this side. Copy them and you end up
+   with words written on screen that do nothing, and words that work but are
+   written nowhere. */
+const CMD_ICON = {mute:'mic_off', unmute:'mic', live:'bolt', hold:'edit',
+                  route:'swap_horiz', cancel_tail:'delete', hold_tail:'edit'};
+// Only the ones that have conditions. For the ones without, we do not go writing that they always work.
+const CMD_WHEN = {unmute:'cmdUnmuteWhen', route:'cmdRouteWhen'};
+const SAY_MAX = 6;      // how many wordings show at once. Listing them all is more than anyone reads
+// mute → cmdMute, cancel_tail → cmdCancelTail
+const cmdI18nBase = id =>
+  'cmd' + id.replace(/(^|_)([a-z])/g, (_m, _s, c) => c.toUpperCase());
+
+/* Tidied by the same rules the server uses. Rejecting here is so the person
+   typing sees it right away. The server is what decides, and it runs through
+   again on save.
+
+   Which signals accept an addition is learned from the server's answer, with no
+   copy kept on the screen. Keep a copy and, the day the accepted kinds change
+   over there, one side is left stale. */
+let cmdEditable = new Set();
+const CMD_WIDE = '１２３４５６７８９０';
+const CMD_DROP = /[ \t　。、．，・…！？!?.,\-~〜"'「」『』()（）]/g;
+const cmdNormal = s => s.trim()
+  .replace(/[１２３４５６７８９０]/g, c => '1234567890'[CMD_WIDE.indexOf(c)])
+  .replace(CMD_DROP, '').toLowerCase();
+
+function cleanPhrase(kind, s) {
+  if (!cmdEditable.has(kind)) return '';
+  const key = cmdNormal(s);
+  const slots = (key.match(/\{n\}/g) || []).length;
+  if (kind === 'route' ? slots !== 1 : slots > 0) return '';
+  const bare = key.replaceAll('{n}', '');
+  return bare.length >= 2 && bare.length <= 24 ? key : '';
+}
+
+let cmdNoteTimer = null;
+function flashCmdNote(msg, ms) {
+  clearTimeout(cmdNoteTimer);
+  el.cmdNote.textContent = msg;
+  cmdNoteTimer = setTimeout(() => { el.cmdNote.textContent = ''; }, ms);
+}
+
+// One row for an added wording. Same shape as a dictionary row (down to how it is deleted).
+function cmdRow(kind, phrase = '') {
+  const row = document.createElement('div');
+  row.className = 'row';
+  const a = document.createElement('input');
+  a.className = 'phrase';
+  a.value = phrase;
+  a.placeholder = t(kind === 'route' ? 'cmdAddRoutePh' : 'cmdAddPh');
+  // A wording that cannot be used shows as such right there, before it is sent and disappears
+  const mark = () => row.classList.toggle(
+    'bad', !!a.value.trim() && !cleanPhrase(kind, a.value));
+  a.addEventListener('input', mark);
+  mark();
+  const del = document.createElement('button');
+  del.className = 'del';
+  del.title = t('remove');
+  del.appendChild(iconSvg('close', 17));
+  // Deleting moves no focus, so unless it is called from here there is no chance to save
+  del.onclick = () => { row.remove(); saveCmds(); };
+  row.append(a, del);
+  return row;
+}
+
+function cmdGroupEl(g, mine) {
+  const base = cmdI18nBase(g.id);
+  const box = document.createElement('div');
+  box.className = 'group';
+  box.dataset.kind = g.id;
+
+  const head = document.createElement('h3');
+  head.dataset.icon = CMD_ICON[g.id] || 'auto_awesome';
+  head.dataset.iconSize = '16';
+  head.append(t(base));
+  box.append(head);
+
+  const what = document.createElement('p');
+  what.className = 'dict-label';
+  what.textContent = t(base + 'What');
+  box.append(what);
+
+  // The wordings themselves. They are there to be read, so they never take a pressable shape.
+  const says = document.createElement('div');
+  says.className = 'chips';
+  const paintSays = () => {
+    const all = box.classList.contains('open');
+    says.replaceChildren(...(all ? g.phrases : g.phrases.slice(0, SAY_MAX))
+      .map(p => {
+        const s = document.createElement('span');
+        s.className = 'say';
+        s.textContent = p;
+        return s;
+      }));
+  };
+  if (g.phrases.length > SAY_MAX) {
+    const more = document.createElement('button');
+    more.className = 'more';
+    const paintMore = () => {
+      more.textContent = t(box.classList.contains('open') ? 'cmdShowLess' : 'cmdShowAll');
+    };
+    more.onclick = () => { box.classList.toggle('open'); paintMore(); paintSays(); };
+    paintMore();
+    head.append(more);      // it sits on the heading row. Opening it does not move the target
+  }
+  paintSays();
+  box.append(says);
+
+  // Where a language has no wording yet, the English one is showing as it is.
+  // Put up silently, there is no telling whether you simply cannot read it or
+  // there really is none, so we say so. An older server sends no fallback, so
+  // when it is absent nothing is shown.
+  if (g.fallback) {
+    const fb = document.createElement('p');
+    fb.className = 'dict-note';
+    fb.textContent = t('cmdFallback');
+    box.append(fb);
+  }
+
+  if (CMD_WHEN[g.id]) {
+    const when = document.createElement('p');
+    when.className = 'dict-note';
+    when.textContent = t(CMD_WHEN[g.id]);
+    box.append(when);
+  }
+
+  // For a signal that takes no additions, the reason is written out too.
+  // Without a readable reason for the missing field, there is no telling
+  // whether you overlooked it or it is by design.
+  if (!g.editable) {
+    const fixed = document.createElement('p');
+    fixed.className = 'dict-note';
+    fixed.textContent = t('cmdFixed');
+    box.append(fixed);
+    return box;
+  }
+
+  const label = document.createElement('p');
+  label.className = 'dict-label builtin-head';
+  label.textContent = t('cmdYours');
+  box.append(label);
+
+  if (g.id === 'route') {
+    const slot = document.createElement('p');
+    slot.className = 'dict-note';
+    slot.textContent = t('cmdSlotNote');
+    box.append(slot);
+  }
+
+  const rows = document.createElement('div');
+  rows.className = 'rows';
+  rows.append(...mine.map(p => cmdRow(g.id, p)));
+
+  const add = document.createElement('div');
+  add.className = 'new-row';
+  const input = document.createElement('input');
+  input.placeholder = t(g.id === 'route' ? 'cmdAddRoutePh' : 'cmdAddPh');
+  const btn = document.createElement('button');
+  btn.className = 'btn tonal';
+  btn.dataset.icon = 'add';
+  btn.dataset.iconSize = '17';
+  btn.append(t('add'));
+  const doAdd = () => {
+    const v = input.value.trim();
+    if (!v) { input.focus(); return; }
+    if (!cleanPhrase(g.id, v)) {
+      flashCmdNote(t('cmdBadPhrase'), 6000);
+      input.focus();
+      return;
+    }
+    rows.prepend(cmdRow(g.id, v));
+    input.value = '';
+    input.focus();
+    saveCmds();       // a newly added row never takes focus. Unless it writes here, it is gone
+  };
+  btn.onclick = doAdd;
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); doAdd(); }
+  });
+  add.append(input, btn);
+  box.append(add, rows);
+  return box;
+}
+
+function renderCommands(d) {
+  // Remember it first. cleanPhrase reads this to drop the kinds that take no additions.
+  cmdEditable = new Set((d.groups || []).filter(g => g.editable).map(g => g.id));
+  el.cmdGroups.replaceChildren(...(d.groups || []).map(
+    g => cmdGroupEl(g, (d.user || {})[g.id] || [])));
+  // Wordings outside Japanese and English have not been looked over by anyone
+  // who speaks the language. So nobody reads them and assumes they are right,
+  // we say so at the end. collectCmds skips children with no .rows, so adding
+  // this here does not disturb saving.
+  if (lang !== 'ja' && lang !== 'en') {
+    const draft = document.createElement('p');
+    draft.className = 'dict-note';
+    draft.textContent = t('cmdDraft');
+    el.cmdGroups.append(draft);
+  }
+  decorateIcons(el.cmdGroups);    // it can be floating, so the target gets passed in
+}
+
+function collectCmds() {
+  const out = {};
+  for (const box of el.cmdGroups.children) {
+    const rows = box.querySelector('.rows');
+    if (!rows) continue;          // a signal that takes no additions has no field
+    out[box.dataset.kind] = [...rows.children]
+      .map(r => cleanPhrase(box.dataset.kind, r.querySelector('.phrase').value))
+      .filter(Boolean);
+  }
+  return out;
+}
+
+/* Same as the dictionary, it writes the moment focus leaves. No save button. */
+let cmdsReady = false;                // nothing is written until it has been read once
+let cmdsLast = '';                    // what was written last. If it matches, nothing is sent
+let cmdsSaving = Promise.resolve();   // keeps the writes in a single line
+
+async function saveCmds(quiet = false) {
+  if (!cmdsReady) return;
+  const d = collectCmds();
+  const body = JSON.stringify(d);
+  if (body === cmdsLast) return;
+  cmdsLast = body;
+  const mine = cmdsSaving = cmdsSaving.then(() => putJSON('/api/commands', d))
+                                      .then(r => r.ok, () => false);
+  if (!await mine) { cmdsLast = ''; return; }   // it gets sent again the next time anything is touched
+  if (!quiet) flashCmdNote(t('dictSaved'), 1600);
+}
+
+async function loadCommands() {
+  cmdsReady = false;
+  let d;
+  try {
+    d = await (await fetch('/api/commands?lang=' + lang)).json();
+  } catch {
+    return;               // an older server has no such endpoint. Just open it and stay quiet
+  }
+  renderCommands(d);
+  // Note down how it looked right after loading. Skip this and merely opening it writes once.
+  cmdsLast = JSON.stringify(collectCmds());
+  cmdsReady = true;
+}
+
+// Nothing is written while you type. It writes only when focus leaves.
+el.helpSheet.addEventListener('focusout', () => saveCmds());
+
+/* ── Startup ────────────────────────────── */
+resolveLang();
+applyI18n();
+decorateIcons();
+// Reflect the state once the drawings are in (do it first and they go in twice)
+if (canFloat) paintFloat(false);
+// Browser recognition is Chrome only. Where it cannot be used, the setting is not shown at all.
+if (canBrowserASR) {
+  paintAsrLangs();
+  // Which one to use is remembered by the server (loadEngines reads it and
+  // applies it). All this does is build the screen.
+  paintBrowserAsr();
+  // By browser rule the microphone cannot open until something is touched, so
+  // it starts the moment it is touched. Some people work from the keyboard
+  // alone, so a keypress starts it too.
+  const arm = () => {
+    vizArmed = true;
+    armPending = false;
+    if (recWanted) startRecognition();
+  };
+  addEventListener('pointerdown', arm, {once:true});
+  addEventListener('keydown', arm, {once:true});
+}
+loadEngines().then(() => {
+  if (!recWanted) return;
+  if (vizArmed) { startRecognition(); return; }
+  // By browser rule the microphone cannot open until the screen has been
+  // touched once. Instead of asking anyone to please click, we start switched
+  // off. Pressing the mic to turn it on, the obvious thing to do, is itself the
+  // touch.
+  armPending = true;
+  route = 'off';
+  paint();
+});
+applyTheme(store.get('theme', 'auto'));
+el.langPick.append(...UI_LANGS.map(([code, name]) => {
+  const o = document.createElement('option');
+  o.value = code; o.textContent = name;
+  return o;
+}));
+// If the remembered choice is not in the list, fall back to auto. No blank option is shown
+if (langPref !== 'auto' && !I18N[langPref]) langPref = 'auto';
+el.langPick.value = langPref;
+fitCanvas();
+retally();
+paintPower();
+paint();
+loadTuning();
+loadDictPairs();
+loadTailWords();
+connect();
+loadListeners();
+setInterval(refreshState, 3000);
+setInterval(loadDictPairs, 30000);   // keep up with changes from another screen or a CSV import
+// A title changes as the conversation goes on, so it is fetched again on a schedule
+setInterval(loadListeners, 5000);
+// How recognition is done can change from outside (another tab, a command, another session)
+setInterval(loadEngines, 5000);
