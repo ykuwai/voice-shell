@@ -336,7 +336,7 @@ What it can do is as follows.
   destinations change from tags to a single picker. Text and buttons do not
   shrink. What is kept, in order, is the mic on and off > instant / review >
   destination > the text being recognized. Widening it brings everything back
-- **Sensitivity can also be changed by dragging the mark under the microphone**
+- **The trigger level can also be changed by dragging the mark under the microphone**
   (no need to open the settings)
 - Editing the viewer file makes "Updated. Tap to reload" appear at the bottom of
   an open screen. Pressing it reloads (a floated small window has no way to reload)
@@ -377,18 +377,18 @@ Moving a control takes effect right then. No daemon restart is needed.
 | Item | What it decides | Default |
 |---|---|---|
 | Microphone | Which input device to use | The system default |
-| Sensitivity | 0 to 100. Higher picks up fainter sounds | macOS 59 / Linux 26 |
+| Trigger level | 0 to 100. Lower picks up fainter sounds | macOS 41 / Linux 74 |
 | Pause to send | Being quiet this long marks the end of a chunk | 1.5 seconds |
 | Min length | Recognition results shorter than this are dropped | 15 characters |
 | Strip filler words | Drops the connecting words before sending (**this affects what is sent too**) | Off |
 | Theme / Language | Looks | Automatic |
 
-Sensitivity is set by **dragging the mark under the microphone**. The bar just
-above it is the current level, so have the user talk and put the mark where only
-their voice crosses it. When they say "I am talking but nothing arrives", the
-first thing to suggest is **raising the sensitivity**. The larger the number,
-the fainter the sound it picks up. The mark sits on a scale of loudness, so
-raising the sensitivity moves the mark to the left.
+The trigger level is set by **dragging the mark under the microphone**. The bar
+just above it is the current level, so have the user talk and put the mark where
+only their voice crosses it. When they say "I am talking but nothing arrives",
+the first thing to suggest is **lowering the trigger level**. The smaller the
+number, the fainter the sound it starts picking up. The slider and the mark both
+sit on the same scale of loudness, so lowering it moves both to the left.
 
 It lives in `~/.config/voice-shell/tuning.json`. The daemon re-reads it every
 0.5 seconds.

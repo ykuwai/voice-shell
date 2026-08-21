@@ -1953,19 +1953,17 @@ const posToThresh = p => {
   const v = threshLo * Math.pow(threshHi / threshLo, p / 1000);
   return Math.round(v * 1000) / 1000;
 };
-/* What the slider and the number show is sensitivity. The lower the threshold,
-   the fainter the sounds it picks up, so the sensitivity scale runs opposite to
-   the loudness scale. This is the only place it gets flipped, and the mark on
-   the meter stays on the loudness scale. Raising the sensitivity moves the mark
-   to the left, which means the loudness where it starts listening went down. */
-const threshToSens = v => Math.max(0, Math.min(1000, 1000 - threshToPos(v)));
-const sensToThresh = s => posToThresh(1000 - s);
+/* The slider, the number and the mark all sit on the same loudness scale, so
+   they move together. Calling this a trigger level rather than a sensitivity is
+   what lets them agree. A sensitivity would have to count the other way round,
+   and the knob would then run against the mark right underneath it. */
+const threshToSlider = v => Math.max(0, Math.min(1000, threshToPos(v)));
 
 function paintTuning() {
-  el.thresh.value = threshToSens(tuning.silence_threshold);
+  el.thresh.value = threshToSlider(tuning.silence_threshold);
   el.silence.value = tuning.silence_duration;
   el.minChars.value = tuning.min_chars;
-  el.threshVal.textContent = Math.round(threshToSens(tuning.silence_threshold) / 10);
+  el.threshVal.textContent = Math.round(threshToSlider(tuning.silence_threshold) / 10);
   if (uiDoc().activeElement !== el.silenceVal) {          // never touched while you are typing
     el.silenceVal.value = Number(tuning.silence_duration).toFixed(1);
   }
@@ -2021,7 +2019,7 @@ function queueTuning() {
 }
 
 el.thresh.oninput = () => {
-  tuning.silence_threshold = sensToThresh(Number(el.thresh.value));
+  tuning.silence_threshold = posToThresh(Number(el.thresh.value));
   el.threshVal.textContent = Math.round(Number(el.thresh.value) / 10);
   paintGauge();
   queueTuning();
@@ -2060,7 +2058,7 @@ el.idleMuteOn.onchange = () => {
 el.idleMute.oninput = () => { tuning.idle_mute_min = Number(el.idleMute.value); paintIdleMute(); queueTuning(); };
 
 
-/* Drag the mark on the meter to change the sensitivity.
+/* Drag the mark on the meter to change the trigger level.
    Not having to open settings is faster, so it can be reached from the main
    screen too. It reads the same value as the slider in settings, so moving
    either one keeps them in step. */
@@ -2072,8 +2070,12 @@ function threshFromX(clientX) {
   if (!Number.isFinite(next) || next <= 0) return;   // do not let a strange value break the drawing
   tuning.silence_threshold = next;
   paintTuning();
-  // What you are dragging is the loudness scale, so it gets flipped when spoken of as sensitivity
-  el.hint.textContent = t('sensitivitySet', {n: Math.round((1000 - pos) / 10)});
+  // Read back what was actually kept, not where the finger is. Near the quiet
+  // end several positions round to one threshold, and a hint taken from the
+  // finger would count on while the value stands still, and disagree with the
+  // number in settings.
+  el.hint.textContent =
+    t('sensitivitySet', {n: Math.round(threshToSlider(tuning.silence_threshold) / 10)});
   queueTuning();
 }
 
