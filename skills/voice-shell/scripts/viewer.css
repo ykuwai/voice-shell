@@ -851,13 +851,63 @@
     border:1px solid var(--line-soft);
   }
   /* In sections with many wordings, this shows and hides everything past the
-     first five. It sits on the heading row so the target stays in the same
-     place whether it is open or closed. */
+     first five. It used to sit on the heading row, which kept the target still
+     when the list opened. The switch for the whole signal is up there now, and a
+     stray press on that cuts a signal off with nothing on screen moving enough to
+     notice, so the two are kept apart (viewer.js says more about the trade).
+
+     It is faint rather than accent-colored. Every section has one, so seven of
+     them in accent down a single sheet pulled the eye away from the wordings
+     themselves, which are what the section is for. */
   .more {
-    margin-left:auto; flex:none; font-size:.75rem; font-weight:500;
-    color:var(--accent); padding:.15rem .4rem; border-radius:8px;
+    display:inline-flex; margin-top:.55rem; font-size:.75rem; font-weight:500;
+    color:var(--faint); padding:.15rem .4rem; border-radius:8px;
   }
-  .more:hover { background:var(--raise); }
+  .more:hover { background:var(--raise); color:var(--dim); }
+
+  /* Whether this signal is listened for at all. A knob rather than a check box,
+     because it sits alone on a heading row with no words beside it and a bare
+     check box there reads as an item in a list of somethings.
+
+     On is filled and the knob is over to the right. Off is hollow and the knob is
+     back on the left. The fill carries it and the position backs it up, so it
+     still reads where the color does not come through. */
+  .switch {
+    margin-left:auto; flex:none; display:inline-flex; align-items:center;
+    cursor:pointer; position:relative;
+  }
+  /* The box itself is hidden behind the drawing rather than removed, so it keeps
+     the keyboard and the screen reader. It is pinned inside the label, because
+     left to find its own ancestor it can land off the sheet and push out a
+     scrollbar. */
+  .switch input { position:absolute; width:1px; height:1px; opacity:0; }
+  .switch .track {
+    display:block; width:38px; height:22px; border-radius:var(--pill);
+    border:2px solid var(--line); background:transparent;
+    transition:background .15s, border-color .15s;
+  }
+  .switch .knob {
+    display:block; width:12px; height:12px; margin:3px; border-radius:50%;
+    background:var(--dim); transition:transform .15s, background .15s;
+  }
+  .switch input:checked + .track {
+    background:var(--accent); border-color:var(--accent);
+  }
+  .switch input:checked + .track .knob {
+    background:var(--panel); transform:translateX(16px);
+  }
+  .switch input:focus-visible + .track {
+    outline:2px solid var(--accent); outline-offset:2px;
+  }
+  /* A section whose signal is switched off. Every field stays, because the
+     wordings added to it are still remembered and come back the moment it is
+     switched on again. Only the weight drops, so one look down the sheet says
+     which signals are asleep. The heading keeps its weight, since that is where
+     the way back is. */
+  .group.off > *:not(h3) { opacity:.5; }
+  /* Back to full weight while you are typing in it. Faded text you are editing is
+     unreadable, and the fields here still work whatever the switch says. */
+  .group.off:focus-within > *:not(h3) { opacity:1; }
   /* The list of what the keyboard can do. Like the spoken wordings (.say), it
      is there to be read, so it never takes a pressable shape. Making it look
      like a keycap keeps it from being read as ordinary letters in the sentence. */

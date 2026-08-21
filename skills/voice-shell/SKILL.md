@@ -302,6 +302,11 @@ What it can do is as follows.
   add their own wording (`~/.config/voice-shell/commands.json`). Only phrases said
   as a whole utterance can be added, not unmute and not the ones tacked onto the
   end of a sentence, because a false trigger costs too much.
+  **Each kind can also be switched off from that same screen**, and the same file
+  remembers which ones. All seven are independent, so somebody who does not want
+  to mute by voice at all can turn both mute and unmute off. A kind that is off
+  does nothing when spoken, and the words stay listed so it is clear what comes
+  back when it is switched on again.
   **When several machines are in use at once, turn on "Several machines" in the
   settings and give each machine a name.** Then only a phrase with the name in
   front, like 「会社用ミュート」, is taken (without it, a phrase said at one machine
