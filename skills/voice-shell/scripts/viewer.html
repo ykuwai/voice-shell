@@ -3357,6 +3357,49 @@ function isBackchannel(text, words) {
   return parts.length > 0 && parts.every(p => words.has(p));
 }
 
+/* The signals that close a sentence (「〜、キャンセル」 and 「〜、手直し」). One of
+   these on the end means the utterance is thrown away or handed to the draft, so
+   it never goes out.
+
+   The wordings are read from the daemon's own table through /api/commands. A copy
+   written here would go stale the day a wording changes over there, and the
+   drawing would fill for words that get thrown away. That endpoint lays out one
+   language at a time, because it feeds the "?" list, which answers "what do I say"
+   in the reader's language. Matching follows no language at all (voice_daemon.py
+   says why at the head of COMMAND_WORDS), so every screen language is asked and
+   the answers are joined.
+
+   Read once. Unlike the dictionary, these take no additions and no removals
+   (USER_COMMAND_KINDS leaves them out), so nothing about them changes while the
+   screen is up and there is nothing to keep fresh. */
+let tailWords = new Set();
+async function loadTailWords() {
+  try {
+    const all = await Promise.all(UI_LANGS.map(
+      ([code]) => fetch('/api/commands?lang=' + code).then(r => r.json())));
+    const out = new Set();
+    for (const d of all)
+      for (const g of d.groups || [])
+        if (g.id === 'cancel_tail' || g.id === 'hold_tail')
+          // An empty wording would end every sentence and leave the drawing
+          // permanently dark, so it is dropped rather than trusted.
+          for (const w of g.phrases || []) if (w) out.add(w.toLowerCase());
+    tailWords = out;
+  } catch { /* an older server has no such endpoint. Leave the drawing as it was */ }
+}
+
+/* The same test voice_daemon.take_tail runs. All that is wanted here is whether
+   the tail matched, so the body it hands back is not rebuilt. The 「コマンド」
+   lead-in that one strips only shortens that body, it never decides the match, so
+   leaving it out cannot read the utterance differently. */
+const TAIL_TRIM = /[ \t　。、．，・！？!?.,]+$/;
+function endsWithTailCmd(text) {
+  const body = text.trim().replace(TAIL_TRIM, '').toLowerCase();
+  if (!body) return false;
+  for (const w of tailWords) if (body.endsWith(w)) return true;
+  return false;
+}
+
 /* Whether what has been heard so far is something the daemon would actually
    send. Filling up for an utterance that gets thrown away is a promise that
    never lands, and 「こんにちは」 under a 15 character floor is exactly that.
@@ -3366,6 +3409,12 @@ function isBackchannel(text, words) {
 function worthSending() {
   const text = livePartial;
   if (!text) return false;                    // nothing heard yet, so nothing to promise
+  // Asked before the floor, the same place the daemon asks it. 「認証まわりを直
+  // して、手直し」 goes to the draft and 「テストを実行してキャンセル」 is dropped
+  // whole, and a short one closing on 手直し clears the floor yet still never
+  // goes out. Only the very end counts. 「キャンセルの画面を直して」 is an
+  // ordinary instruction and does get sent.
+  if (endsWithTailCmd(text)) return false;
   const min = Number(tuning.min_chars) || 0;
   // Words taken off the built in ignore list get through however short they
   // are, which is the whole point of being able to take them off. Staying dark
@@ -3947,8 +3996,10 @@ el.editOnce.onclick = editThisOne;
 
 /* Throw away a misspoken utterance before it goes out.
    When the daemon is doing the recognizing, we hand over the time it was
-   pressed and let that side decide (the settled text arrives after we do, so
-   clearing the screen does not stop the send).
+   pressed and let that side decide. It cuts the audio right there, so you can
+   speak the correction straight away and it comes through as a fresh
+   utterance. Clearing the screen alone would not do that, since the phrase in
+   progress would keep growing and take the correction down with it.
    With browser recognition, we drop the next one that settles ourselves. */
 let dropNextLocal = false;
 el.dropOne.onclick = async () => {
@@ -5713,6 +5764,7 @@ paintPower();
 paint();
 loadTuning();
 loadDictPairs();
+loadTailWords();
 connect();
 loadListeners();
 setInterval(refreshState, 3000);
