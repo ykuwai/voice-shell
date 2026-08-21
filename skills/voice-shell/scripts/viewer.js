@@ -632,7 +632,12 @@ function addEntry(rec) {
     // Put it in right here. relabelEntries only looks at rows already in
     // el.log, so leaving it to the repaint would make this one row a nameless
     // chip until the next update.
-    to.append(iconSvg('send', 11),
+    // A terminal, not the paper plane it used to carry. The plane is already on
+    // the button that sends and on the mark that says something was sent, and a
+    // third one here made a note about where it landed read as one more thing
+    // about sending, or as something you could press. What sits at the other
+    // end is a shell session, so the terminal names it outright.
+    to.append(iconSvg('terminal', 11),
               document.createTextNode(routeNames.get(row.dataset.to) || `#${rec.to}`));
     gutter.append(to);
   }
@@ -795,12 +800,58 @@ function paintDraft() {
 
 /* ── The wait before it goes out ─────────
    The daemon breaks an utterance where the time spent under the reference level
-   reaches the pause to send (asr_mic.stream_utterances). We run the same count
-   here and fill the paper plane in the corner of the card with how far along it
-   is. The rms and speaking fields from level.txt are all it takes. */
+   reaches the pause to send (asr_mic.stream_utterances). It counts that in
+   seconds of the audio it has actually taken in, sends the running count out
+   with every level, and the paper plane in the corner of the card is filled
+   from that number.
+
+   Running the same count here off this machine's clock is what used to make the
+   drawing finish 1.0 to 1.9 seconds before the card moved. Audio reaches the
+   daemon at 0.78 to 0.89 times real time, so a second of wall clock here was
+   never a second of the silence being measured over there, and the shortfall
+   moved from one utterance to the next, which is why no fixed offset would have
+   covered it (#53).
+
+   The clock is kept as the fallback, for a daemon old enough that its level
+   carries the volume and nothing else. */
 let voiceSeen = false;   // whether this utterance has picked up voice past the reference
-let silentAt = 0;        // when the voice broke off. 0 means nothing is being counted
+let silentAt = 0;        // when the voice broke off, by this machine's clock. The fallback alone reads it
 let livePartial = '';    // what is being recognized, raw, before the dictionary touches it
+
+/* The daemon's own count, in seconds of audio. cueOn says whether the last
+   level carried one at all, and it is settled per message rather than latched,
+   so a daemon swapped underneath us is followed in both directions. It is
+   deliberately not cleared along with the count below, because it answers what
+   the daemon sends, not where this utterance stands. */
+let cueOn = false, cueRun = 0;
+function takeSilenceRun(m) {
+  cueOn = 'silence_run' in m;
+  if (cueOn) cueRun = m.silence_run;
+}
+
+/* One count lands per block, which is 0.1 seconds of audio and about 0.12 of
+   wall clock, while the ring is drawn every frame. Taken whole it would sit
+   still for 6 frames and step on the 7th, the same stutter #19 found in the
+   fill inside the mic, and it is smoothed the same way and with that fix's time
+   constant. By the time the next count lands the drawing is about 90 percent of
+   the way to the last one, so the step becomes one slope and nothing trails by
+   more than a block. Held in seconds, not as a coefficient, so a 120Hz screen
+   does not run it at twice the speed. */
+const CUE_EASE = 0.045;
+let cueShown = 0, cueShownAt = 0;
+
+/* Full, and staying that way until the utterance really lands. The daemon still
+   has to run the whole thing through recognition once more to settle it, which
+   measured 0.13 to 0.47 seconds here and runs longer on whisper, and the line
+   then takes up to 0.25 more to reach this page. Snapping the ring back to
+   empty in that gap was the old reading, and it said the opposite of what was
+   happening. Holding adds no movement. It takes one away.
+   The cap is a backstop for the case where nothing ever comes to end the hold,
+   an utterance the daemon threw out for a reason this page cannot see. Long
+   enough to cover the slowest settle measured, short enough not to sit there
+   looking stuck. */
+const CUE_HOLD_MAX = 2500;
+let cueFull = false, cueFullDrop = false, cueFullAt = 0;
 
 /* Nothing shows for the first stretch of the silence. A breath, or the gap
    between two words, drops under the reference level constantly, and starting
@@ -818,7 +869,10 @@ const SEND_CUE_DEAD = 400;
 const sendCountdownOn = () =>
   route === 'live' && !oneShot && engineOnish() && !asrActive();
 
-function clearSendCountdown() { voiceSeen = false; silentAt = 0; livePartial = ''; }
+function clearSendCountdown() {
+  voiceSeen = false; silentAt = 0; livePartial = '';
+  cueRun = 0; cueShown = 0; cueFull = false;
+}
 
 /* The same test voice_daemon.py runs (is_noise and is_allowed_short). Compare
    with the punctuation taken off, and count a word merely said twice
@@ -952,17 +1006,6 @@ function paintSendCue(now) {
   // seat away with it, and the two buttons beside it would slide every time this
   // comes and goes.
   el.sendOne.classList.toggle('on', el.draftActions.hidden);
-  /* Whether it can be pressed asks a different question from whether the ring
-     fills. The fill says what happens if you say nothing, so every narrowing
-     the daemon applies counts toward it. A press says you meant this one, and
-     then the only thing that matters is that there is something to send.
-     「スタート」 at four characters never clears a fifteen character floor, so
-     the ring runs red on it, and it still goes out the moment you press.
-     Ending on the word that cancels is the same. Left alone it is thrown away,
-     but reaching for send is the opposite of meaning to throw it away, so the
-     press wins. */
-  const canSend = on && livePartial !== '';
-  if (el.sendOne.disabled === canSend) el.sendOne.disabled = !canSend;
   const wait = (Number(tuning.silence_duration) || 0) * 1000;
   /* The pause to send goes as low as 0.3s, under the held back stretch, and
      subtracting it there leaves nothing to divide by. At those settings the
@@ -977,25 +1020,81 @@ function paintSendCue(now) {
      An utterance that will be dropped runs the same clock and fills the same
      way, and only the direction and the color say which of the two is coming.
      Showing nothing for the dropped ones was the old reading, and it left the
-     case you most need to catch looking like a screen that had gone deaf. */
-  const r = (silentAt && wait > 0 && livePartial)
-    ? Math.max(0, Math.min(1, (now - silentAt - dead) / (wait - dead)))
+     case you most need to catch looking like a screen that had gone deaf.
+     The daemon's own count when it sends one, this machine's clock when it does
+     not. Both are milliseconds of silence, so only where the number comes from
+     changes and the reading built on it stays put. Note that the held back
+     stretch now lands in audio time rather than wall clock, which lets it cover
+     slightly more of a breath than before. That is the direction it was always
+     meant to work in. */
+  const ran = cueOn ? cueRun * 1000 : (silentAt ? now - silentAt : 0);
+  const target = (ran > 0 && wait > 0 && livePartial)
+    ? Math.max(0, Math.min(1, (ran - dead) / (wait - dead)))
     : 0;
+  /* Eased only on the daemon's side of the fork. The clock on the other side
+     already moves every frame and has nothing in it to smooth away. */
+  let r = cueOn ? stepCue(now, target) : target;
+  /* Landed the instant the count that actually arrived reaches the wait, not
+     when the eased drawing catches up to it. That instant is the one the settle
+     is made on, and easing into it would leave the ring at 0.97 as the card
+     moves, which is the very miss this is here to close. */
+  if (target >= 1) r = cueShown = 1;
   /* Which face it wears. Set only once the fill is actually moving, so nothing
      changes color while you are still talking or across the breath the held
      back stretch is there to absorb. Under the fill both faces look the same
-     anyway, an empty ring. */
-  el.sendOne.classList.toggle('drop', r > 0 && !worthSending());
+     anyway, an empty ring.
+     Frozen at the moment it fills. What comes in after that belongs to whatever
+     is said next, and letting it still reach here would flip a finished drawing
+     over to the other face while it waits to be replaced. */
+  if (r >= 1 && !cueFull) { cueFull = true; cueFullDrop = !worthSending(); cueFullAt = now; }
+  if (cueFull) {
+    r = 1;
+    /* What ends the hold is the utterance landing, and the two faces land
+       differently. The one going out lands as a line in the log, and that path
+       runs clearSendCountdown where the socket reads it. The one going away
+       never produces a line at all, so what marks it is the live text going
+       empty underneath, which is the daemon clearing what it just threw out. */
+    if ((cueFullDrop && !livePartial) || now - cueFullAt > CUE_HOLD_MAX) {
+      clearSendCountdown();
+      r = 0;
+    }
+  }
+  el.sendOne.classList.toggle('drop', cueFull ? cueFullDrop : (r > 0 && !worthSending()));
+  /* Whether it can be pressed asks a different question from whether the ring
+     fills. The fill says what happens if you say nothing, so every narrowing
+     the daemon applies counts toward it. A press says you meant this one, and
+     then the only thing that matters is that there is something to send.
+     「スタート」 at four characters never clears a fifteen character floor, so
+     the ring runs red on it, and it still goes out the moment you press.
+     Ending on the word that cancels is the same. Left alone it is thrown away,
+     but reaching for send is the opposite of meaning to throw it away, so the
+     press wins.
+     It goes dim across the hold. The daemon settled this one already, so a
+     press lands on an utterance that no longer exists and nothing happens,
+     and a button that does nothing is exactly what this screen refuses to
+     show. Dimming there is also what it did before the hold existed, when the
+     whole count was thrown away the moment the ring filled. */
+  const canSend = on && livePartial !== '' && !cueFull;
+  if (el.sendOne.disabled === canSend) el.sendOne.disabled = !canSend;
   /* Handed over as a bare fraction, not rounded to a step. The stylesheet turns
      it into where the gradient's edge sits. Rounding it to a hundredth would put
      a floor under how small a move can be, and at three seconds of silence that
-     floor is 30ms of travel, which shows as a stutter. It is worked out from the
-     clock every frame, so nothing carries over between frames to smooth away. */
+     floor is 30ms of travel, which shows as a stutter. What does carry over
+     between frames is the easing above, and that is there to take a step out,
+     not to put one in. */
   el.sendOne.style.setProperty('--r', String(r));
-  // Stop counting once the fill completes. Full one way it has gone out, full
-  // the other it has been thrown away, and either way there is nothing left
-  // here to press or to draw.
-  if (r >= 1) clearSendCountdown();
+}
+
+/* Ease toward the count instead of taking it whole, the way stepMicLevel does
+   for the fill inside the mic. Same guards for the same reasons. No frames
+   arrive while the tab sits in the background, so the whole gap taken as it
+   stands would jump the ring the instant you come back, and the clock can tick
+   out of order, which flips the sign and runs it away. */
+function stepCue(now, target) {
+  const dt = cueShownAt ? Math.min(Math.max((now - cueShownAt) / 1000, 0), 0.1) : 0.1;
+  cueShownAt = now;
+  cueShown += (target - cueShown) * (1 - Math.exp(-dt / CUE_EASE));
+  return cueShown;
 }
 
 async function setRoute(next) {
@@ -1191,9 +1290,16 @@ function connect() {
       // when the value has not changed, but the level still wavers through the
       // silence, so we spot the turning points ourselves.
       if (m.speaking !== daemonSpeaking) {
-        if (m.speaking) { voiceSeen = sendCountdownOn(); silentAt = 0; }
-        else if (voiceSeen) silentAt = performance.now();
+        if (m.speaking) {
+          voiceSeen = sendCountdownOn(); silentAt = 0;
+          // Voice again means the ring starts over, whether that is a breath in
+          // the middle of a sentence or the next utterance beginning while the
+          // last one is still being settled. Not clearSendCountdown, which
+          // would take the live text with it and dim send mid-sentence.
+          cueFull = false; cueShown = 0;
+        } else if (voiceSeen) silentAt = performance.now();
       }
+      takeSilenceRun(m);
       daemonLevel = m.level; daemonSpeaking = m.speaking;
       el.meterFill.classList.toggle('on', m.speaking);
       paintGauge();
@@ -1216,6 +1322,10 @@ function connect() {
       // through. Whatever was already sitting there when the page opened
       // (first) is not something that just happened.
       const c = m.voice_cmd || {};
+      // A signal settles the utterance it was spoken in, and no line ever
+      // reaches the log for it, so this is the only word that the ring holding
+      // itself full is going to get.
+      clearSendCountdown();
       if (c.kind === 'mute') {
         chime('down'); say(t('voiceMuted'));       flashCommand(c.said, 'warn');
       } else if (c.kind === 'unmute') {
