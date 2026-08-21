@@ -2144,7 +2144,12 @@ async function loadLangs() {
   }
 }
 
-el.recogLang.onchange = () => putJSON('/api/tuning', {language: el.recogLang.value});
+el.recogLang.onchange = async () => {
+  await putJSON('/api/tuning', {language: el.recogLang.value});
+  // Same as the browser's dropdown below. The built-in words follow whichever
+  // language is being listened to, and this is Whisper's way of saying it.
+  saveDict().then(loadDict);
+};
 
 /* The Whisper model. There is no telling whether a name is right until it is
    loaded, so nothing is checked here. The default name shows in faint type (as
@@ -2398,6 +2403,21 @@ function browserLang() {
   return hit ? hit[0] : 'en-US';
 }
 
+/* Which language is being spoken into this, in the shape the server takes.
+
+   The words ignored out of the box and the connecting words that get stripped
+   are matched against what the recognizer wrote down, so they follow the
+   language being spoken and never the language the screen is in. Browser
+   recognition is the only engine this page drives and its speak language lives
+   in this browser, so it is handed over. Every other engine runs inside the
+   daemon, which writes down what it is hearing, and an empty string is how we
+   say that the server knows better than we do. */
+const spokenLang = () => asrActive() ? browserLang() : '';
+
+// The name of a language, written in that language (UI_LANGS is the one place
+// we do not translate, for the reason written at the head of this file).
+const langName = code => (UI_LANGS.find(([c]) => c === code) || [, code])[1];
+
 function newRecognition() {
   const r = new SR();
   r.lang = browserLang();
@@ -2556,7 +2576,7 @@ function sendUtterance(text) {
   lastVoiceAt = performance.now();
   sendChain = sendChain.then(async () => {
     try {
-      const res = await post('/api/utterance', {text});
+      const res = await post('/api/utterance', {text, lang: spokenLang()});
       // Browser recognition keeps no copy on this side. If it drops, all we can do is tell the person.
       if (res.status === 409) {
         // The daemon is recognizing too. The screen has been left behind, so bring it back into line.
@@ -2979,12 +2999,20 @@ el.enginePick.onchange = async () => {
   paintBrowserAsr();
   refreshState();
   paint();
+  // Swapping the engine swaps which of the three holds the language being
+  // spoken, so the built-in words are read again from whoever holds it now.
+  saveDict().then(loadDict);
 };
 
 el.asrLang.onchange = () => {
   store.set('asrLang', el.asrLang.value);
   // The language takes effect on the next reconnect. If it is in use, reconnect right now.
   if (recWanted && rec) { try { rec.stop(); } catch {} }
+  // The words ignored out of the box are matched against what the recognizer
+  // wrote down, so they follow this dropdown. Write what is on screen out under
+  // the old language before reading the new one back, or a chip pressed just
+  // now would be weighed against a list it was never drawn from.
+  saveDict().then(loadDict);
 };
 
 /* ── Floating on top ─────────────────────
@@ -3199,6 +3227,26 @@ function ignoreRow(word = '') {
   return row;
 }
 
+/* Which language the words ignored out of the box belong to, said under them.
+
+   Without it the list looks like it shrank overnight when you change the
+   language you speak. The two lists above it, the words you added and the ones
+   you pressed off, follow no language and stay where they are.
+
+   viewer.html has no slot for this line, so it is made here the first time and
+   kept after that. isConnected covers the small floating window, where the
+   contents move into another document and the line has to be made again. */
+let builtinLangNote = null;
+function paintBuiltinLang(code) {
+  if (!code || !el.builtinChips) return;
+  if (!builtinLangNote || !builtinLangNote.isConnected) {
+    builtinLangNote = document.createElement('p');
+    builtinLangNote.className = 'dict-note';
+    el.builtinChips.after(builtinLangNote);
+  }
+  builtinLangNote.textContent = t('dictBuiltinLang', {lang: langName(code)});
+}
+
 function renderDict(d) {
   el.replaceRows.replaceChildren(
     ...Object.entries(d.replace || {}).map(([k, v]) => replaceRow(k, v)));
@@ -3230,6 +3278,7 @@ function renderDict(d) {
       return b;
     }));
     el.builtinCount.textContent = d.builtin.length;
+    paintBuiltinLang(d.lang);
   }
   // If it is empty, put one row there (so you can start typing straight away)
   if (!el.replaceRows.children.length) el.replaceRows.appendChild(replaceRow());
@@ -3258,6 +3307,7 @@ function collectDict() {
    you pressed a button, and that mismatch was where the accidents came from. */
 let dictReady = false;                // nothing is written until it has been read once
 let dictLast = '';                    // what was written last. If it matches, nothing is sent
+let dictLang = '';                    // the language the built-in chips were drawn in
 let dictSaving = Promise.resolve();   // keeps the writes in a single line
 let noteTimer = null;
 
@@ -3279,7 +3329,12 @@ async function saveDict(quiet = false) {
   // The next write goes out only once the one before it has finished. Delete a
   // row and press a chip right away, and the older contents sent alongside it
   // can land afterward and bring the deleted row back.
-  const mine = dictSaving = dictSaving.then(() => putJSON('/api/dictionary', d))
+  // The language goes back exactly as it arrived on the read, so the words
+  // pressed off are weighed against the very list the chips were drawn from.
+  // Work it out again here and a language switched mid-edit would let a word
+  // taken out under the old one fall out of the record.
+  const url = '/api/dictionary' + (dictLang ? '?lang=' + encodeURIComponent(dictLang) : '');
+  const mine = dictSaving = dictSaving.then(() => putJSON(url, d))
                                       .then(r => r.ok, () => false);
   if (!await mine) { dictLast = ''; return; }   // it gets sent again the next time anything is touched
   loadDictPairs();       // make it take on the mid-recognition display too, from the next utterance
@@ -3297,7 +3352,11 @@ el.tabReplace.onclick = () => showDictTab('replace');
 el.tabIgnore.onclick = () => showDictTab('ignore');
 
 async function loadDict() {
-  renderDict(await (await fetch('/api/dictionary')).json());
+  const want = spokenLang();
+  const d = await (await fetch(
+    '/api/dictionary' + (want ? '?lang=' + encodeURIComponent(want) : ''))).json();
+  dictLang = d.lang || '';
+  renderDict(d);
   // Note down how it looked right after loading. Skip this and merely opening it writes once.
   dictLast = JSON.stringify(collectDict());
   dictReady = true;

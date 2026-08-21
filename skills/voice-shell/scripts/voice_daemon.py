@@ -91,29 +91,70 @@ MUTE_FILE = STATE_DIR / "muted"
 # The mic to use. The viewer writes it, the daemon reads it and swaps out only the
 # recording (the model stays loaded, so there is no waiting).
 MIC_FILE = STATE_DIR / "mic"
+# The language being listened to, two letters. The viewer has no other way to
+# learn what a local engine is hearing (Apple takes it on the command line, and
+# Whisper on auto-detect settles it per utterance), so the daemon writes it down.
+LANG_FILE = STATE_DIR / "asr_lang"
 
-# Stock phrases that tend to come out when only a noise or a breath got picked up.
-# An utterance that is nothing but one of these is not an instruction, so drop it.
-# (The model fits a backchannel onto input that is close to silence.)
+# The languages the backchannel and filler lists are written for. Speech in any
+# other language falls back to English, the way the voice signals do (#4).
+NOISE_LANGS = ("ja", "en", "es", "fr", "de", "zh", "ko")
+FALLBACK_LANG = "en"
+
+# The spelled-out form --language takes (voice-shell.sh passes "Japanese")
+_LANG_NAMES = {"japanese": "ja", "english": "en", "spanish": "es",
+               "french": "fr", "german": "de", "chinese": "zh",
+               "mandarin": "zh", "korean": "ko"}
+
+
+def lang_code(*values) -> str:
+    """The two-letter code of the language being listened to.
+
+    Each engine holds that in a shape of its own. Browser recognition keeps the
+    speak-language setting ("ja-JP"), Apple keeps a locale ("ja-JP"), Whisper
+    keeps a bare code ("ja") or nothing at all while it works each utterance out
+    for itself. Everything asks here rather than reading one of the three, so
+    which list gets used is decided in one place instead of three.
+
+    The first value that is filled in decides, and the rest are there for when it
+    is not (Whisper detecting per utterance beats what it was told, and falls back
+    to what it was told when it says nothing). A language with no list of its own
+    comes back as English rather than as nothing, because an empty list would
+    silently turn both tests below off for that speaker. It does not read on
+    through to the next value either, since the utterance really was in that
+    language and the list behind it would be the wrong one.
+    """
+    for value in values:
+        if not value:
+            continue
+        s = str(value).strip().lower().replace("_", "-")
+        code = _LANG_NAMES.get(s) or s.split("-")[0][:2]
+        return code if code in NOISE_LANGS else FALLBACK_LANG
+    return FALLBACK_LANG
+
+
+# The sounds a mouth makes while it is still deciding. An utterance that is
+# nothing but one of these is not an instruction, so drop it.
+#
+# Only hesitation sounds go in. A backchannel or a word for "yes" is a whole
+# reply on its own, and an utterance that matches here is thrown away whole.
+# The floor on length (min_chars, 15 by default) already stops short noise, so
+# this stays small and the dictionary is where anyone adds their own.
 NOISE_ONLY = {
-    # Replies and backchannels
-    "はい", "はいはい", "はーい", "うん", "うんうん", "ううん", "ええ", "ええと",
-    "そう", "そうそう", "そうか", "そうね", "そうですね", "なるほど", "たしかに",
-    "オーケー", "オッケー", "よし", "よしよし", "わかった", "了解",
-    # Breaths and hesitations
-    "あ", "あー", "ああ", "あっ", "い", "う", "うー", "うーん", "え", "えー",
-    "えっ", "お", "おー", "おお", "おっ", "ん", "んー", "んん", "は", "はっ",
-    "ふ", "ふう", "ふん", "ふーん", "ふむ", "へ", "へえ", "ほう", "ほー",
-    "まあ", "ねえ", "あの", "あのー", "えっと", "えーと", "なんか",
-    # Stock video phrases (the Japanese "thanks for watching" sign-off and such)
-    # do not go here. People in any country use this tool, and a list that opens
-    # with turns of phrase from Japanese videos leaves a first-time reader unable
-    # to tell what it is for. Whoever needs them can add them in the dictionary.
-    # The same kind of backchannel comes out in English
-    "yeah", "yes", "yep", "ok", "okay", "uh", "uh-huh", "um", "umm",
-    "hmm", "hm", "mm", "mhm", "oh", "ah", "ahh", "eh", "huh",
-    "right", "so", "well", "sure", "wow", "hey",
+    "ja": {"えーと", "えっと", "ええと"},
+    "en": {"hmm", "uh"},
+    "es": {"eh"},
+    "fr": {"euh"},
+    "de": {"ähm", "äh"},
+    "zh": {"呃", "嗯"},
+    "ko": {"음", "어"},
 }
+
+
+def noise_words(lang: str = "") -> set:
+    """The list of hesitation sounds for the language being spoken."""
+    return NOISE_ONLY[lang_code(lang)]
+
 
 # Characters stripped before comparing, punctuation and symbols and whitespace
 _TRIM = "。、．，！？!?.…・ 　\n"
@@ -413,18 +454,51 @@ def apply_replacements(text: str, replace: dict) -> str:
 
 # Filler words that carry no meaning. Turned on and off in the viewer settings. Removing
 # them here takes them out of the body that reaches Claude, not just the screen.
-FILLERS = ["えーと", "えっと", "ええと", "あのー", "あの", "えー", "えっ",
-           "まあ", "なんか", "そのー", "うーん", "んー"]
-# Longest first (so 「あのー」 is not eaten by 「あの」 beforehand)
-_FILLER_RE = re.compile("|".join(re.escape(w) for w in
-                                 sorted(FILLERS, key=len, reverse=True)))
+#
+# These are taken out of the middle of a sentence, so only forms that are spelled
+# apart from a real word go in (「あのー」 is in, the demonstrative 「あの」 is not,
+# or 「あのファイルを開いて」 loses what it points at).
+FILLERS = {
+    "ja": ["えーと", "えっと", "ええと", "あのー", "そのー", "うーん", "んー"],
+    "en": ["um", "uh"],
+    "es": ["eh"],
+    "fr": ["euh"],
+    "de": ["ähm", "äh"],
+    "zh": ["呃", "嗯"],
+    "ko": ["음", "어"],
+}
+
+# Japanese runs its words together, so a filler is matched wherever it sits. Every
+# other language here is written with breaks, and matching bare would eat the sound
+# out of the middle of real words (음악 down to 악, "album" down to "alb"). The guard
+# takes the hyphen in too, so "uh-huh" is left whole. Chinese has no breaks either
+# and so only loses a filler that sits next to punctuation, which is the safer way
+# round for a step that deletes.
+_BARE_FILLER_LANGS = {"ja"}
+_filler_cache = {}
 
 
-def strip_fillers(text: str) -> str:
+def _filler_re(lang: str = ""):
+    """The filler pattern for one language. Longest first, so 「あのー」 survives."""
+    code = lang_code(lang)
+    if code not in _filler_cache:
+        body = "|".join(re.escape(w) for w in
+                        sorted(FILLERS[code], key=len, reverse=True))
+        pattern = body if code in _BARE_FILLER_LANGS \
+            else rf"(?<![\w-])(?:{body})(?![\w-])"
+        _filler_cache[code] = re.compile(pattern, re.IGNORECASE)
+    return _filler_cache[code]
+
+
+def strip_fillers(text: str, lang: str = "") -> str:
     """Drop the filler words and tidy up the punctuation they leave behind."""
-    text = _FILLER_RE.sub("", text)
+    text = _filler_re(lang).sub("", text)
+    # A word lifted out of the middle leaves its comma standing next to the one
+    # before it ("say, um, this" would come out "say, , this").
+    text = re.sub(r"[、，,]\s*(?=[、，,])", "", text)
     text = re.sub("、{2,}", "、", text)
-    text = re.sub(r"^[、。\s]+", "", text)
+    text = re.sub(r"^[、，。,.\s]+", "", text)
+    text = re.sub(r"[、，,\s]+$", "", text)
     return re.sub(r"\s{2,}", " ", text).strip()
 
 
@@ -494,7 +568,7 @@ def resolve_engine(want: str = "") -> str:
 
 
 def polish(text: str, user_dict: dict, keep_kanji_numbers: bool = False,
-           drop_fillers: bool = False) -> str:
+           drop_fillers: bool = False, lang: str = "") -> str:
     """Tidy the recognized text so it reads well.
 
     Acronyms get squeezed first because the dictionary matches exactly. Left as
@@ -506,24 +580,26 @@ def polish(text: str, user_dict: dict, keep_kanji_numbers: bool = False,
         text = kanji_numbers_to_arabic(text)
     text = fix_latin_commas(text)
     if drop_fillers:
-        text = strip_fillers(text)
+        text = strip_fillers(text, lang)
     return text
 
 
-def is_noise(text: str, extra=(), allow=()) -> bool:
-    """Whether the utterance is nothing but a backchannel.
+def is_noise(text: str, extra=(), allow=(), lang: str = "") -> bool:
+    """Whether the utterance is nothing but a hesitation sound.
 
-    A word merely repeated with a break, like 「はい、はい」, counts as a backchannel
-    too. An utterance with substance (「はい、それでは始めます」) is kept.
+    A sound merely repeated with a break, like 「えーと、えーと」, counts too. An
+    utterance with substance (「えーと、それでは始めます」) is kept.
 
     Pass the dictionary's ignore list as extra. It is treated the same as the built-in
     list, so words the user added also work in the 「〜、〜」 repeat test.
 
-    Pass words to take out of the built-in list as allow. Words people really do say
-    back to you, like 「わかった」 or 「了解」, are in the built-in list.
+    Pass words to take out of the built-in list as allow, and the language being
+    spoken as lang. The built-in list follows what is being said, not what the screen
+    is in, since it is matched against what the recognizer wrote down. The user's own
+    two lists follow neither, they are the user's.
     """
     off = {w.strip().lower() for w in allow}
-    words = ({w for w in NOISE_ONLY if w.lower() not in off}
+    words = ({w for w in noise_words(lang) if w.lower() not in off}
              | {w.lower() for w in extra})
     core = text.strip().strip(_TRIM)
     if core.lower() in words:
@@ -1698,7 +1774,8 @@ def parse_args():
     p.add_argument("--drop-non-japanese", action="store_true",
                    help="Throw away an utterance that holds Chinese, Korean and "
                         "the like. They are sent by default, because people do "
-                        "speak another language on purpose")
+                        "speak another language on purpose. It only bites while "
+                        "Japanese is the language being listened to")
     p.add_argument("--status", action="store_true",
                    help="Print whether it is running and exit")
     p.add_argument("--stop", action="store_true",
@@ -2365,6 +2442,7 @@ def main():
         pause_path = log_path.parent / PAUSE_FILE.name
         hold_path = log_path.parent / HOLD_FILE.name
         mute_path = log_path.parent / MUTE_FILE.name
+        lang_path = log_path.parent / LANG_FILE.name
         partial_path.write_text("", encoding="utf-8")
         # 3 numbers from the very first write, so the viewer never sees the
         # silence field blink in and out and fall back to its own clock for the
@@ -2382,6 +2460,12 @@ def main():
         mute_generation = 0
         was_muted = False
         speaking_since = None   # The generation when the utterance in progress began
+
+        # The language being listened to. What the engine settled on beats what it
+        # was told, so Whisper left to detect for itself lands on the right list.
+        # It is written out for the viewer, which draws the same list on screen.
+        heard_lang = lang_code(getattr(args, "language", None))
+        lang_path.write_text(heard_lang, encoding="utf-8")
 
         # Stated outright so it does not disagree with the readers (the viewer and
         # Monitor). Left unspecified, Windows opens with the locale (cp932).
@@ -2470,6 +2554,13 @@ def main():
                 # makes the same words easier to read and decides nothing.
                 forced = bool(ev.get("forced"))
 
+                # Which language this utterance came in. Only written out when it
+                # moves, so a fixed language costs one write for the whole session.
+                spoken = lang_code(ev.get("language"), args.language)
+                if spoken != heard_lang:
+                    heard_lang = spoken
+                    lang_path.write_text(spoken, encoding="utf-8")
+
                 # The dictionary is read every time, so web UI edits land next utterance.
                 user_dict = load_dictionary()
 
@@ -2537,15 +2628,20 @@ def main():
                 # Built-ins and dictionary judged together (dictionary read every time)
                 if not force_hold and not forced and not args.keep_noise \
                         and is_noise(text, user_dict["ignore"],
-                                     user_dict.get("unignore", ())):
+                                     user_dict.get("unignore", ()), spoken):
                     drop("ignored")
                     continue
-                if not forced and args.drop_non_japanese and looks_non_japanese(text):
+                # Only while Japanese is the language being listened to. The test
+                # throws away every utterance holding Hangul or Chinese characters,
+                # so left ungated it would swallow whole what someone speaking
+                # Korean or Chinese just said.
+                if not forced and args.drop_non_japanese and spoken == "ja" \
+                        and looks_non_japanese(text):
                     drop("not Japanese")
                     continue
 
                 polished = polish(text, user_dict, args.keep_kanji_numbers,
-                                  args.strip_fillers)
+                                  args.strip_fillers, spoken)
                 # Reading the utterance can leave nothing behind. A line that was
                 # only filler words empties out, and so does one a dictionary
                 # entry rewrites to nothing. Until a press could walk past the
