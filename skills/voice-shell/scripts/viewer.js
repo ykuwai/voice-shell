@@ -100,7 +100,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'editOnce','dropOne','sendOne','draftMark',
                   'hint','note','log','none','count','fresh','floatAsk','taken','takeBack',
                   'mic','recogLang','recogLangField','thresh','threshVal','gaugeFill','gaugeMark',
-                  'silence','silenceVal','minChars','minCharsVal','clean',
+                  'silence','silenceVal','silenceNote','minChars','minCharsVal','clean',
                   'engineGroup','enginePick','engineNote','whisperModel','whisperModelField','whisperModelNote',
                   'browserAsrWarn','browserMic','micSettingsLink','asrLang','asrLangField',
                   'idleMute','idleMuteVal','idleMuteField','idleMinsField','idleMuteOn','idleMuteNote',
@@ -2931,6 +2931,12 @@ function paintBrowserAsr() {
   el.idleMuteField.hidden = !asrChosen;
   el.idleMuteNote.hidden = !asrChosen;
   paintIdleMute();
+  // Browser recognition decides for itself when an utterance ends (the
+  // browser's own isFinal), so "Pause to send" has nothing to act on there.
+  // Leaving the slider live would say otherwise.
+  el.silence.disabled = asrChosen;
+  el.silenceVal.disabled = asrChosen;
+  el.silenceNote.textContent = t(asrChosen ? 'silenceNoteBrowser' : 'silenceNote');
   el.engineNote.textContent = t(asrChosen ? 'browserAsrNote' : 'localAsrNote');
   // For turning listening on and off, paintPower() decides both whether it
   // shows and what it says (it changes with more than the engine, it changes
