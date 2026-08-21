@@ -302,6 +302,97 @@ def _use_portaudio() -> bool:
     return _sd() is not None
 
 
+_MIC_AUTH = None          # the call into AVCaptureDevice, once it is wired up
+_MIC_AUTH_LOOKED = False
+
+
+def _mic_permission():
+    """What macOS says about this process being allowed the microphone.
+
+    One of "authorized", "denied", "restricted", "undetermined", or None when
+    there is no answer to be had (every other OS, and any macOS where the
+    lookup fails).
+
+    Worth asking, because a refusal is otherwise invisible. PortAudio opens the
+    stream, reports no error at all, and hands back blocks of zeros for as long
+    as you like (sounddevice #332), which is the very shape an unplugged mic
+    has. ffmpeg used to die outright, so nothing here ever had to tell the two
+    apart before (#60).
+
+    Asked of AVCaptureDevice through the Objective-C runtime, not through the
+    Swift helper this repository already builds. speech_helper.swift wants the
+    macOS 26 SDK and a swiftc, so Whisper users and anyone without the command
+    line tools would get no answer at all, and a second binary to build would
+    cost a second of startup for what is one dlopen here.
+
+    The answer is looked up every time and never kept. Somebody who allows the
+    mic in System Settings while this is running changes it, and asking again
+    once the sound has gone to zeros is the whole point.
+    """
+    global _MIC_AUTH, _MIC_AUTH_LOOKED
+    if sys.platform != "darwin":
+        return None
+    if not _MIC_AUTH_LOOKED:
+        _MIC_AUTH_LOOKED = True
+        try:
+            import ctypes
+            import ctypes.util
+            objc = ctypes.CDLL(ctypes.util.find_library("objc"))
+            av = ctypes.CDLL("/System/Library/Frameworks/"
+                             "AVFoundation.framework/AVFoundation")
+            objc.objc_getClass.restype = ctypes.c_void_p
+            objc.objc_getClass.argtypes = [ctypes.c_char_p]
+            objc.sel_registerName.restype = ctypes.c_void_p
+            objc.sel_registerName.argtypes = [ctypes.c_char_p]
+            # objc_msgSend has to be told the shape of the call it is standing
+            # in for. It is declared variadic, and on arm64 a variadic call
+            # puts its arguments somewhere else entirely, so leaving these off
+            # hands the method the wrong register and takes the process down.
+            send = objc.objc_msgSend
+            send.restype = ctypes.c_long          # NSInteger
+            send.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+            cls = objc.objc_getClass(b"AVCaptureDevice")
+            sel = objc.sel_registerName(b"authorizationStatusForMediaType:")
+            audio = ctypes.c_void_p.in_dll(av, "AVMediaTypeAudio")
+            if cls and sel and audio:
+                _MIC_AUTH = lambda: send(cls, sel, audio)
+        except Exception:
+            # No AVFoundation, no Objective-C runtime, a renamed symbol. Any of
+            # them leaves the question unanswerable, which is a thing to stay
+            # quiet about rather than to fail over.
+            _MIC_AUTH = None
+    if _MIC_AUTH is None:
+        return None
+    try:
+        # AVAuthorizationStatus, in the order the header declares it. Anything
+        # outside it is a value this was not written for, so it says nothing.
+        return {0: "undetermined", 1: "restricted",
+                2: "denied", 3: "authorized"}.get(_MIC_AUTH())
+    except Exception:
+        return None
+
+
+def _mic_permission_line() -> str:
+    """The one thing worth saying about mic permission, or "" for nothing.
+
+    Nothing is said unless macOS actually reported a refusal, so this is never
+    a guess. "undetermined" says nothing, because the permission dialog comes
+    up by itself the moment the mic is opened a breath later, and a line before
+    it would read as a fault when it is the ordinary first run. A machine that
+    cannot answer says nothing at all and leaves the wording exactly as it was.
+    """
+    auth = _mic_permission()
+    if auth == "denied":
+        return ("macOS is refusing the microphone to the terminal this runs in, "
+                "so nothing can be heard until that changes. Allow Microphone "
+                "for it under Privacy and Security in System Settings")
+    if auth == "restricted":
+        return ("macOS is holding the microphone back under a policy set for "
+                "this machine, so nothing can be heard. System Settings cannot "
+                "undo that one")
+    return ""
+
+
 def _sd_refresh():
     """Make PortAudio read the list of devices again.
 
@@ -325,23 +416,62 @@ def _sd_refresh():
         pass
 
 
+def _sd_wasapi():
+    """The index of the WASAPI host API, or None when there is no such thing.
+
+    Windows only. PortAudio's own default there is MME, which wins by sitting
+    first in pa_win_hostapis.c and being the first to initialize, and MME hands
+    back a device name cut at 31 characters, because WAVEINCAPS.szPname holds
+    32 bytes (PortAudio #1058). A mic is remembered here by its name and opened
+    again by that name, so a long name would be written down already cut and
+    match nothing afterwards. WASAPI carries 128. sd.default.hostapi cannot be
+    written to, so the way to ask for one is to look it up and open a device
+    that belongs to it (#60).
+
+    None on macOS, which has Core Audio and nothing else, and None on a Windows
+    without WASAPI. Everything then falls back to exactly what it was.
+    """
+    sd = _sd()
+    if sd is None or not sys.platform.startswith("win"):
+        return None
+    try:
+        for i, h in enumerate(sd.query_hostapis()):
+            if "wasapi" in h["name"].lower():
+                return i
+    except Exception:
+        pass
+    return None
+
+
 def _sd_inputs() -> list:
-    """The input devices PortAudio sees, on the default host API only.
+    """The input devices PortAudio sees, on one host API only.
 
     Windows shows one microphone once per host API (MME, WASAPI, DirectSound,
     WDM-KS), so listing them all would offer the same mic four times over and
     the choice between them would mean nothing to anybody reading it. macOS has
     only Core Audio, so the filter costs it nothing.
+
+    WASAPI is the one asked for on Windows, for the names it keeps whole (see
+    _sd_wasapi). PortAudio's own default host takes over when WASAPI is not
+    there, and equally when it is there but shows no input, since a host API
+    with nothing on it would otherwise leave somebody with an empty mic list.
     """
     sd = _sd()
     if sd is None:
         return []
     try:
-        host = sd.default.hostapi
-        return [(i, d) for i, d in enumerate(sd.query_devices())
-                if d["max_input_channels"] > 0 and d["hostapi"] == host]
+        devices = list(enumerate(sd.query_devices()))
+        hosts = [_sd_wasapi(), sd.default.hostapi]
     except Exception:
         return []
+    for host in hosts:
+        if host is None:
+            continue
+        found = [(i, d) for i, d in devices
+                 if d["max_input_channels"] > 0 and d["hostapi"] == host]
+        if found:
+            return found
+    return []
 
 
 def _sd_find(device: str):
@@ -397,6 +527,32 @@ def _sd_device(device: str):
         print(f"No mic here answers to {device}. Recording from the system "
               "default instead", file=sys.stderr, flush=True)
     return found
+
+
+def _sd_extra(index):
+    """What a WASAPI device needs asked of it, or None for every other device.
+
+    WASAPI in shared mode takes the format the Windows mixer is already set to
+    and refuses anything else, so a mic sitting at 48000 turns the 44100 asked
+    for here into a plain failure to open. MME never showed this, because winmm
+    resamples down in the kernel and nobody had to know. auto_convert puts the
+    system's own converter and channel matrix in front of the stream, which is
+    what makes a rate and a channel count that do not match the mixer work.
+
+    None whenever the device is not a WASAPI one, since WASAPI settings handed
+    to an MME device are refused outright, and None on a sounddevice too old to
+    know the argument (#60).
+    """
+    sd = _sd()
+    host = _sd_wasapi()
+    if sd is None or host is None or index is None:
+        return None
+    try:
+        if sd.query_devices(index)["hostapi"] != host:
+            return None
+        return sd.WasapiSettings(auto_convert=True)
+    except Exception:
+        return None
 
 
 def list_mics() -> list:
@@ -626,9 +782,11 @@ class _PortAudioMic(_MicStream):
         # int16 mono is the very shape the rest of this file already reads out
         # of the ffmpeg pipe, so nothing downstream has to know which road the
         # bytes came down.
+        index = _sd_device(device)
         self.stream = sd.RawInputStream(
             samplerate=in_sr, blocksize=nbytes // 2, dtype="int16",
-            channels=1, device=_sd_device(device), callback=callback)
+            channels=1, device=index, callback=callback,
+            extra_settings=_sd_extra(index))
         try:
             self.stream.start()
         except Exception:
@@ -755,6 +913,14 @@ def read_blocks(device: str, in_sr: int,
         # Build the streaming resampler just once. Calling soxr.resample() per
         # block builds and tears down the filter every time and runs 4x slower.
         return soxr.ResampleStream(in_sr, SAMPLE_RATE, 1, dtype="float32").resample_chunk
+
+    # Ask macOS about the mic before opening anything. A refusal there is
+    # silent (see _mic_permission), so finding out first puts the real reason
+    # at the head of the log instead of four seconds of nothing followed by a
+    # line about plugging it back in, which no amount of plugging would fix.
+    refusal = _mic_permission_line()
+    if refusal:
+        print(refusal, file=sys.stderr, flush=True)
 
     current = device
     mic = start(current)
@@ -884,6 +1050,14 @@ def read_blocks(device: str, in_sr: int,
                         print("Everything arriving from the mic is zero. "
                               f"Opening {current} again",
                               file=sys.stderr, flush=True)
+                        # Zeros are what a mic without permission gives back
+                        # just as much as what an unplugged one gives back, and
+                        # macOS will say which of the two it is for the asking.
+                        # Asked here and not only at the start, because
+                        # permission can be taken away while this runs.
+                        refusal = _mic_permission_line()
+                        if refusal:
+                            print(refusal, file=sys.stderr, flush=True)
                     if dead_tries > DEAD_TRIES and not gave_up:
                         gave_up = True
                         print("However many times it is opened again, everything "

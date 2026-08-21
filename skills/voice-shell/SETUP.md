@@ -36,7 +36,7 @@ Runs with `--engine apple`.
 ```bash
 cd <this repository>
 python3 -m venv .venv                    # Python 3.10 to 3.13
-.venv/bin/pip install -U numpy aiohttp soxr sounddevice
+.venv/bin/pip install -U numpy aiohttp soxr "sounddevice>=0.5.6"
 ```
 
 The Swift helper (`speech_helper.swift`) is built automatically on the first run,
@@ -64,7 +64,7 @@ of Whisper, which runs on any OS.
 ```bash
 cd <this repository>
 python3 -m venv .venv                    # Python 3.10 to 3.13
-.venv/bin/pip install -U faster-whisper aiohttp soxr numpy sounddevice
+.venv/bin/pip install -U faster-whisper aiohttp soxr numpy "sounddevice>=0.5.6"
 ```
 
 If `nvidia-smi` shows an NVIDIA GPU on the machine, the defaults are fine as they are.
@@ -113,7 +113,10 @@ slower and uses the memory the model needs.
 is no need to set `VOICE_SHELL_PYTHON`.
 
 `sounddevice` in the pip line above is what records on macOS and Windows, and it
-arrives as a ready built wheel, so there is nothing else to install there.
+arrives as a ready built wheel, so there is nothing else to install there. It is
+held at 0.5.6 or newer, because before that it read which chip the machine has
+rather than which one the Python was built for, and loaded the wrong dll on a
+Windows machine with an ARM chip.
 
 Linux records through `arecord`, which is a separate program.
 
@@ -147,7 +150,7 @@ Once `READY` shows up, have the user open http://127.0.0.1:8090 and talk.
 | Symptom | What to do |
 |---|---|
 | `No Python it can run was found` | `export VOICE_SHELL_PYTHON=/path/to/.venv/bin/python` |
-| Nothing here can record | `pip install sounddevice`. On Linux `sudo apt install alsa-utils` |
+| Nothing here can record | `pip install "sounddevice>=0.5.6"`. On Linux `sudo apt install alsa-utils` |
 | Startup says `FAILED` | Look at `voice-shell.sh status` and the tail of `daemon.out` |
 | Whisper is slow | Shrink the model (`--model base`). On a CPU add `--whisper-compute int8` |
 | You talk and nothing arrives | The trigger level is too high. Lower the mark under the mic in the viewer until the bar crosses it when you speak |

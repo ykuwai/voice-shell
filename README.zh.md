@@ -15,7 +15,7 @@
 
 ```bash
 npx skills add ykuwai/voice-shell
-pip install numpy aiohttp sounddevice
+pip install numpy aiohttp "sounddevice>=0.5.6"
 ```
 
 有 Chrome 的话，这样就够了。**不用下模型，也不用等。**
