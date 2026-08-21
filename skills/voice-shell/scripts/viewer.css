@@ -268,6 +268,29 @@
     border-color:transparent; color:var(--panel); font-weight:600;
     background:linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, var(--accent-2)));
   }
+  /* The name being typed. The chip holds its shape and keeps its number, so the
+     row does not jump under you and the number the spoken signal points at stays
+     exactly where it was. It grows into whatever width the row has left, and
+     where less than about 7rem of that is going, it takes a row of its own
+     instead of squeezing the box down to a slit you cannot read. */
+  .route-chip.editing { flex:1 1 7rem; }
+  /* Off the fill, the outline goes to the accent. The chip is taking keys now,
+     and telling that apart from the ones that are not is the whole job here.
+     On the fill it is already unmistakable, so that one is left alone. */
+  .route-chip.editing:not(.on) { border-color:var(--accent); color:var(--text); }
+  /* Two class names on purpose. Further down, `select, input[type=text]` gives
+     every text field on the settings sheet a pill of its own, and that selector
+     outweighs a single class. Left as `.nm-edit`, the box came out with its own
+     border and its own bigger type, and the chip grew from 31px tall to 50px the
+     moment you started typing, taking the whole row down with it. */
+  .route-chip .nm-edit {
+    flex:1 1 auto; min-width:0; width:100%;
+    font:inherit; color:inherit; background:none; border:none; border-radius:0;
+    padding:0; margin:0; outline:none;
+  }
+  /* The automatic title waits in here. Emptying the box is what puts that title
+     back, so it has to be readable enough to be worth emptying the box for. */
+  .route-chip .nm-edit::placeholder { color:currentColor; opacity:.65; }
 
   /* ── Visualizer ───────────────────────── */
   /* The mic and the two rings always sit in a row. Stacked, those three alone

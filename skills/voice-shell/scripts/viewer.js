@@ -2050,29 +2050,51 @@ function applyLang(choice) {
   // language. It can be switched while open, so we refetch and rebuild
   // (data-i18n never brings the wordings along).
   if (!el.helpSheet.hidden) loadCommands();
+  /* Both of these lists are built in JS, so data-i18n never reaches them.
+     Repaint them from what was last fetched. Waiting for the five second poll
+     instead would leave the two of them sitting in the old language while every
+     other word on the screen had already moved. */
+  paintEnginePick();
+  paintMicPick();
 }
 el.langPick.onchange = () => applyLang(el.langPick.value);
 
 // The microphone in use. Switching it swaps only the recording process (the model stays)
+let micList = [];
+let micCurrent = '';
+/* The id the recorder hands back for "whatever the OS is set to". It is written
+   into the config file, so it stays this string whatever the screen calls it. */
+const MIC_SYSTEM_DEFAULT = 'default';
+/* Every other entry is a device name the OS handed over. Those are not ours to
+   translate, and 「MacBook Pro のマイク」 is already in the reader's language
+   anyway. The one at the head is ours, so that one goes through I18N. */
+const micLabel = m => m.id === MIC_SYSTEM_DEFAULT ? t('micSystemDefault') : (m.label || m.id);
+
+function paintMicPick() {
+  if (!micList.length) { el.mic.hidden = true; return; }
+  el.mic.replaceChildren(...micList.map(m => {
+    const o = document.createElement('option');
+    o.value = m.id; o.textContent = micLabel(m); o.selected = m.id === micCurrent;
+    return o;
+  }));
+  // Show it even when the one selected is not in the list
+  if (micCurrent && ![...el.mic.options].some(o => o.value === micCurrent)) {
+    const o = document.createElement('option');
+    o.value = micCurrent; o.textContent = micCurrent; o.selected = true;
+    el.mic.prepend(o);
+  }
+  el.mic.hidden = false;
+}
+
 async function loadMics() {
   try {
     const d = await (await fetch('/api/mics')).json();
-    if (!d.mics.length) { el.mic.hidden = true; return; }
-    el.mic.replaceChildren(...d.mics.map(m => {
-      const o = document.createElement('option');
-      o.value = m.id; o.textContent = m.label; o.selected = m.id === d.current;
-      return o;
-    }));
-    // Show it even when the one selected is not in the list
-    if (d.current && ![...el.mic.options].some(o => o.value === d.current)) {
-      const o = document.createElement('option');
-      o.value = d.current; o.textContent = d.current; o.selected = true;
-      el.mic.prepend(o);
-    }
-    el.mic.hidden = false;
+    micList = d.mics || [];
+    micCurrent = d.current || '';
   } catch {
-    el.mic.hidden = true;
+    micList = [];
   }
+  paintMicPick();
 }
 
 // Until the switch actually completes on the backend, the display stays
@@ -2578,7 +2600,17 @@ let routeTo = '';          // the one chosen. Empty means nothing chosen (the se
 let effectiveTo = '';      // where it actually lands (the one the server picked when nothing was chosen)
 let knownListeners = [];
 
+/* While a name is being typed, the chips have to hold still. paintRoutes runs
+   off the five second poll as well, and rebuilding underneath would take the
+   box away along with everything typed into it. */
+let renaming = null;     // {pid} while the rename box is open
+
 function paintRoutes() {
+  if (renaming) {
+    // Still there. Leave the row exactly as it is until the box is done with.
+    if (knownListeners.some(l => String(l.pid) === renaming.pid)) return;
+    renaming = null;     // that session ended while the box was open
+  }
   // With only one listening there is nothing to choose
   if (knownListeners.length < 2) { el.routes.hidden = true; return; }
   el.routes.hidden = false;
@@ -2608,6 +2640,7 @@ function paintRoutes() {
     const on = pick(l);
     const b = document.createElement('button');
     b.className = 'route-chip' + (on ? ' on' : '');
+    b.dataset.pid = String(l.pid);
     // The number is the same one used in the spoken signal (「2番」). Even when
     // a narrow window folds the name away, this part always stays.
     const no = document.createElement('b');
@@ -2617,8 +2650,43 @@ function paintRoutes() {
     nm.className = 'nm';
     nm.textContent = l.label;
     b.append(no, nm);
-    b.title = `${l.no}. ${l.label}\n${l.cwd || ''}`;
-    b.onclick = () => setRoute2(String(l.pid));
+    b.title = [`${l.no}. ${l.label}`, l.cwd || '', t('renameHint')]
+                .filter(Boolean).join('\n');
+
+    /* Double click the chip to change its name. A long press does the same, for
+       screens where a double tap is either awkward or already spoken for by the
+       browser's own zoom. */
+    let holdFrom = null, holdTimer = null, longFired = false;
+    const cancelHold = () => { clearTimeout(holdTimer); holdTimer = null; };
+    b.onpointerdown = ev => {
+      if (ev.button || ev.target.closest('.x')) return;
+      longFired = false;
+      holdFrom = {x: ev.clientX, y: ev.clientY};
+      holdTimer = setTimeout(() => { longFired = true; openRename(l, b); }, 550);
+    };
+    // A drag or a scroll is not a long press. 10px of slop, because a finger
+    // resting on glass never holds perfectly still.
+    b.onpointermove = ev => {
+      if (holdTimer && Math.hypot(ev.clientX - holdFrom.x, ev.clientY - holdFrom.y) > 10)
+        cancelHold();
+    };
+    b.onpointerup = cancelHold;
+    b.onpointercancel = cancelHold;
+    b.onpointerleave = cancelHold;
+    // Without this a long press on a touch screen drops the context menu on top
+    // of the box that just opened.
+    b.oncontextmenu = ev => ev.preventDefault();
+
+    b.onclick = () => {
+      if (longFired) { longFired = false; return; }   // the long press already opened it
+      setRoute2(String(l.pid));
+    };
+    b.ondblclick = ev => {
+      // The × has a two step press of its own. stopPropagation on its click does
+      // nothing to a dblclick listener sitting up here, so it is checked again.
+      if (ev.target.closest('.x')) return;
+      openRename(l, b);
+    };
 
     // Stop it listening. The session itself does not end.
     const x = document.createElement('span');
@@ -2642,11 +2710,89 @@ function paintRoutes() {
   }));
 }
 
+/* Move the fill without rebuilding the row.
+
+   Picking a destination is the busy path here, and a rebuild puts a brand new
+   node under the pointer between the two clicks of a double click, which is
+   exactly what stops the pair from ever being read as one. */
+function markChosen() {
+  const on = pid => routeTo ? pid === routeTo : pid === effectiveTo;
+  for (const b of el.routeChips.children) b.classList.toggle('on', on(b.dataset.pid || ''));
+  for (const o of el.routePick.options) o.selected = on(o.value);
+}
+
+/* Change a destination's name right where it stands.
+
+   What gets written is the same names.json `voice-shell.sh name` writes, so a
+   name given here outlives voice mode going off and on, and nobody has to ask
+   an agent for it.
+
+   Every destination on the row can be renamed, not just this session's own.
+   They are all in front of you with numbers on, telling them apart is the whole
+   reason to rename one, and a name decides nothing about where a word lands.
+
+   The first of the two clicks picks that destination, the way a single click
+   always does. Holding that back to wait and see whether a second click follows
+   would put a lag on every destination change. Changing destination is the
+   common act by a wide margin and renaming is rare, so renaming rides on top
+   rather than slowing it down. Where speech goes is filled in, so the move shows. */
+function openRename(l, node) {
+  if (renaming) return;
+  const pid = String(l.pid);
+  const box = document.createElement('span');
+  box.className = 'route-chip editing' + (node.classList.contains('on') ? ' on' : '');
+  box.dataset.pid = pid;
+  // The number never moves. It is what the spoken signal points at.
+  const no = document.createElement('b');
+  no.className = 'no';
+  no.textContent = l.no + '.';
+  const inp = document.createElement('input');
+  inp.type = 'text';
+  inp.className = 'nm-edit';
+  inp.maxLength = 60;
+  inp.autocomplete = 'off';
+  inp.spellcheck = false;
+  /* Only a name put on by hand goes in the box, and an empty box is what puts
+     the automatic title back. Filling it with the automatic title instead would
+     mean pressing Enter froze whatever the agent happened to be calling the
+     conversation right then, and no later title could ever replace it. */
+  inp.value = l.custom || '';
+  inp.placeholder = l.auto || l.label;
+  inp.setAttribute('aria-label', t('renameLabel'));
+  box.append(no, inp);
+  node.replaceWith(box);
+  renaming = {pid};
+  inp.focus();
+  inp.select();
+
+  let done = false;   // Escape blurs the field, and blur on its own would save it back
+  const finish = async keep => {
+    if (done) return;
+    done = true;
+    const name = inp.value.trim();
+    renaming = null;
+    if (keep) {
+      try { await putJSON('/api/listeners/name', {pid, name}); } catch {}
+      say(name ? t('renamed', {name}) : t('renameCleared'), 4);
+    }
+    loadListeners();    // build the row back, carrying whatever name it holds now
+  };
+  /* Escape throws away what was typed. Everywhere else on this screen Escape
+     only steps out of the field and the value is kept, but a name typed onto
+     the wrong chip has to be escapable, and an inline rename is the one place
+     people reach for Escape expecting it to undo. */
+  inp.onkeydown = ev => {
+    if (ev.key === 'Enter') { ev.preventDefault(); finish(true); }
+    else if (ev.key === 'Escape') { ev.preventDefault(); finish(false); }
+  };
+  inp.onblur = () => finish(true);
+}
+
 el.routePick.onchange = () => setRoute2(el.routePick.value);
 
 async function setRoute2(to) {
   routeTo = to;
-  paintRoutes();
+  markChosen();
   try { await putJSON('/api/route', {to}); } catch {}
 }
 
@@ -2709,6 +2855,31 @@ const APPLE_ENGINE = 'apple';
 const WHISPER_ENGINE = 'whisper';
 let localEngines = [];
 
+/* What each engine is called on screen.
+
+   The server hands over the id together with an English label, and that label
+   stays English because the very same one is what `voice-shell.sh engines`
+   prints for an agent to read. On screen the id is looked up here instead, so
+   the moment the display language changes the list changes with it.
+
+   An engine added later that nobody has worded yet falls back to the server's
+   English label and then to its bare id, so the row is never left blank. */
+const ENGINE_KEYS = {browser:'engineBrowser', apple:'engineApple', whisper:'engineWhisper'};
+const engineLabel = e => ENGINE_KEYS[e.id] ? t(ENGINE_KEYS[e.id]) : (e.label || e.id);
+
+function paintEnginePick() {
+  const opts = [];
+  if (canBrowserASR) opts.push([BROWSER_ENGINE, engineLabel({id: BROWSER_ENGINE})]);
+  for (const e of localEngines) opts.push([e.id, engineLabel(e)]);
+  // There can be machines with no browser recognition and no installed model either
+  if (!opts.length) opts.push(['', t('engineNone')]);
+  el.enginePick.replaceChildren(...opts.map(([id, label]) => {
+    const o = document.createElement('option');
+    o.value = id; o.textContent = label; o.selected = id === chosenEngine;
+    return o;
+  }));
+}
+
 function paintBrowserAsr() {
   el.browserAsrWarn.hidden = !asrChosen;
   el.browserMic.hidden = !asrChosen;
@@ -2738,13 +2909,6 @@ async function loadEngines() {
   localEngines = d.engines || [];
   const was = asrChosen;
 
-  const opts = [];
-  if (canBrowserASR) opts.push([BROWSER_ENGINE, t('engineBrowser')]);
-  for (const e of localEngines) opts.push([e.id, e.label]);
-
-  // There can be machines with no browser recognition and no installed model either
-  if (!opts.length) opts.push(['', t('engineNone')]);
-
   // The remembered choice lives on the server. Make localStorage the truth and
   // changing browsers puts it out of step with the branch taken at startup.
   const cur = d.chosen || BROWSER_ENGINE;
@@ -2761,11 +2925,7 @@ async function loadEngines() {
   } else if (!was && asrChosen && vizArmed) {
     startRecognition();
   }
-  el.enginePick.replaceChildren(...opts.map(([id, label]) => {
-    const o = document.createElement('option');
-    o.value = id; o.textContent = label; o.selected = id === cur;
-    return o;
-  }));
+  paintEnginePick();
   paintBrowserAsr();
 }
 

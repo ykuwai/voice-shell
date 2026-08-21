@@ -207,6 +207,11 @@ def _kill_engine_on_exit():
 # language, list what is installed so they can choose. What is not installed is
 # left out, since listing it would only offer something unpickable.
 
+# These stay English. They are what `voice-shell.sh engines` prints, and an agent
+# reads that and puts it to the user in whatever language the user speaks. The
+# screen does not use them. It looks the id up in i18n.js instead, so the list
+# changes the moment the display language does. Only an engine added later that
+# nobody has worded yet falls back to what is written here.
 ENGINE_LABELS = {
     "apple":    "Apple on-device recognition (light, local)",
     "whisper":  "Whisper (strong on proper nouns, local)",
@@ -250,6 +255,9 @@ def list_mics() -> list:
     """
     # The head of the list is always the system default. Without it, the dropdown
     # for anyone still on the default matches nothing and looks blank.
+    # This label is English on purpose, the same way ENGINE_LABELS is. The screen
+    # spots the id and takes its wording from i18n.js. Every other entry below is
+    # a device name the OS handed over, which is nobody's to translate.
     out = [{"id": SYSTEM_DEFAULT, "label": "System default"}]
     try:
         if sys.platform == "darwin":
