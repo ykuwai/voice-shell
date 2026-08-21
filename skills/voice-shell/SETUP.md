@@ -152,6 +152,6 @@ The first row is left in Japanese because that is exactly what gets printed.
 | No `arecord` or `ffmpeg` | Install it as shown under "Common to both" above |
 | Startup says `FAILED` | Look at `voice-shell.sh status` and the tail of `daemon.out` |
 | Whisper is slow | Shrink the model (`--model base`). On a CPU add `--whisper-compute int8` |
-| You talk and nothing arrives | The sensitivity is too low. Raise the mark under the mic in the viewer until the bar only crosses it when you speak |
-| Noises send things on their own | The sensitivity is too high. Lower that same mark |
+| You talk and nothing arrives | The trigger level is too high. Lower the mark under the mic in the viewer until the bar crosses it when you speak |
+| Noises send things on their own | The trigger level is too low. Raise that same mark until only your voice gets past it |
 | You want a different mic | List them with `arecord -L` (Linux) or the like and pass one to `--device` |

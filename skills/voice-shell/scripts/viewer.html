@@ -66,8 +66,8 @@
 
   <!-- The level the daemon is picking up. It comes by a different path than
        the browser's waveform, so if the waveform moves while this does not, you
-       know the recognition side is down. Drag the mark to change the
-       sensitivity. A thin line is impossible to grab, so the parent carries a
+       know the recognition side is down. Drag the mark to change the trigger
+       level. A thin line is impossible to grab, so the parent carries a
        hit area wider than what you see. -->
   <div class="meter-row">
     <div class="meter-hit" id="meterHit" data-i18n-title="thresholdMark">
@@ -197,7 +197,7 @@
       <select id="recogLang"></select>
     </div>
     <div class="field">
-      <label for="thresh" data-icon="graphic_eq" data-icon-size="17" data-i18n="sensitivity">Sensitivity</label>
+      <label for="thresh" data-icon="graphic_eq" data-icon-size="17" data-i18n="sensitivity">Trigger level</label>
       <input type="range" id="thresh" min="0" max="1000" step="1">
       <span class="val" id="threshVal"></span>
     </div>
