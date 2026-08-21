@@ -708,8 +708,14 @@ COMMAND_WORDS = {
         "ja": [
             "手直し", "手直しにして", "手直しモード", "手直しに回して", "溜めて", "保留",
             "てなおし", "てなおしもーど", "手直しに", "ためて", "溜める", "ためる",
+            # The English loanword comes out as readily as the native word here.
+            # Left out, somebody who reaches for it gets no answer and no reason.
+            "エディット", "えでぃっと", "エディットモード",
         ],
-        "en": ["hold", "hold mode", "draft", "draft mode"],
+        # Not bare "edit". It ends ordinary sentences, which is why it was taken
+        # out of the trailing signals, and a whole utterance of just that word is
+        # a plausible thing to say about a file.
+        "en": ["hold", "hold mode", "draft", "draft mode", "edit mode"],
         # Verbs you would plausibly say straight out as an instruction to Claude,
         # like 「guardar」, 「Prüfen」 or 「存下来」, are left out.
         "es": ["revisar", "modo revisar", "modo revisión", "borrador",
