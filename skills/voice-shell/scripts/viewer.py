@@ -857,6 +857,13 @@ async def main_async(args):
         It rides at the top rather than inside groups because the page saves it
         back whole, and a flag scattered through the groups would have to be
         gathered up again on the way out.
+
+        off_words carries single wordings, which can only be remembered as the
+        wording. **It goes back whole, every kind and every language, not just
+        the language being laid out.** The page needs the ones it cannot draw
+        too, because the tail wordings it tests the send drawing against are
+        gathered across all seven languages, and a wording struck while the
+        screen was in another language still has to stop filling that drawing.
         """
         import voice_daemon as vd
         saved = vd.user_command_phrases()
@@ -864,6 +871,7 @@ async def main_async(args):
             "groups": vd.command_catalog(req.query.get("lang") or "en"),
             "user": {k: saved[k] for k in vd.USER_COMMAND_KINDS},
             "off": saved[vd.OFF_KEY],
+            "off_words": saved[vd.OFF_WORDS_KEY],
             "slot": vd.ROUTE_SLOT,
         })
 
@@ -873,9 +881,29 @@ async def main_async(args):
         What comes in is cleaned by the same function the daemon uses. Unusable
         forms (too short, no slot for the number, a kind that cannot be added)
         drop out here, so what goes back is exactly what actually bites.
+
+        The single wordings switched off are folded into what was there before
+        rather than replacing it. The page was handed one language's worth of
+        wordings, so it can only answer for those, and taking its answer as the
+        whole record would switch every wording outside that view back on. The
+        wordings it was handed are worked out here from the same call that
+        answered the GET, with the language it drew in coming along on the query,
+        so the two sides cannot come to a different idea of what had a chip. A
+        page too old to send off_words at all leaves the record untouched, since
+        an answer that was never asked for cannot mean "none of them".
         """
         import voice_daemon as vd
-        data = vd.clean_user_commands(await req.json())
+        body = await req.json()
+        data = vd.clean_user_commands(body)
+        if isinstance(body, dict) and vd.OFF_WORDS_KEY in body:
+            prev = vd.user_command_phrases()[vd.OFF_WORDS_KEY]
+            shown = {g["id"]: g["phrases"] for g
+                     in vd.command_catalog(req.query.get("lang") or "en")
+                     if g.get("strikable")}
+            data[vd.OFF_WORDS_KEY] = vd.keep_off_words(
+                body.get(vd.OFF_WORDS_KEY), prev, shown)
+        else:
+            data[vd.OFF_WORDS_KEY] = vd.user_command_phrases()[vd.OFF_WORDS_KEY]
         vd.COMMANDS_FILE.parent.mkdir(parents=True, exist_ok=True)
         vd.COMMANDS_FILE.write_text(
             json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

@@ -97,7 +97,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'miniMic','miniViz',
                   'routes','routeChips','routePick','viz','meter','meterHit','meterFill','meterMark','logoMark',
                   'tray','stream','draft','draftTime','draftActions','send','discard',
-                  'editOnce','dropOne','draftMark','sendCue','sendCueFill',
+                  'editOnce','dropOne','draftMark','sendCue',
                   'hint','note','log','none','count','fresh','floatAsk','taken','takeBack',
                   'mic','recogLang','recogLangField','thresh','threshVal','gaugeFill','gaugeMark',
                   'silence','silenceVal','minChars','minCharsVal','clean',
@@ -835,34 +835,65 @@ function isBackchannel(text, words) {
    says why at the head of COMMAND_WORDS), so every screen language is asked and
    the answers are joined.
 
-   Read once. Unlike the dictionary, these take no additions and no removals
-   (USER_COMMAND_KINDS leaves them out), so nothing about them changes while the
-   screen is up and there is nothing to keep fresh. */
-let tailWords = new Set();
+   The tables themselves are read once. Nothing is ever added to them or taken
+   out of them (USER_COMMAND_KINDS leaves these two out), so they cannot go stale
+   while the screen is up. What the user switched off is another matter and does
+   move, so it is held apart in cmdOff and refreshed on every save. */
+const TAIL_IDS = ['cancel_tail', 'hold_tail'];
+let tailWords = {cancel_tail: new Set(), hold_tail: new Set()};
 async function loadTailWords() {
   try {
     const all = await Promise.all(UI_LANGS.map(
       ([code]) => fetch('/api/commands?lang=' + code).then(r => r.json())));
-    const out = new Set();
-    for (const d of all)
+    const out = {cancel_tail: new Set(), hold_tail: new Set()};
+    for (const d of all) {
       for (const g of d.groups || [])
-        if (g.id === 'cancel_tail' || g.id === 'hold_tail')
+        if (out[g.id])
           // An empty wording would end every sentence and leave the drawing
           // permanently dark, so it is dropped rather than trusted.
-          for (const w of g.phrases || []) if (w) out.add(w.toLowerCase());
+          for (const w of g.phrases || []) if (w) out[g.id].add(w.toLowerCase());
+      takeCmdOff(d);
+    }
     tailWords = out;
   } catch { /* an older server has no such endpoint. Leave the drawing as it was */ }
 }
 
-/* The same test voice_daemon.take_tail runs. All that is wanted here is whether
-   the tail matched, so the body it hands back is not rebuilt. The 「コマンド」
-   lead-in that one strips only shortens that body, it never decides the match, so
-   leaving it out cannot read the utterance differently. */
+/* What the user switched off, kept beside the tables above rather than folded
+   into them. The tables answer "what wordings exist", which is the same on every
+   screen, and this answers "which of them does this machine still listen for",
+   which the user moves while the screen is up.
+
+   Kinds and single wordings both live here. **The wordings arrive whole, every
+   language, not just the one being laid out**, because the tables above are
+   gathered across all seven languages and a wording struck while the screen was
+   in Japanese still has to stop filling the drawing when the screen is English. */
+let cmdOff = {kinds: new Set(), words: {}};
+function takeCmdOff(d) {
+  if (!d || typeof d !== 'object') return;
+  const words = {};
+  for (const id of TAIL_IDS)
+    words[id] = new Set(((d.off_words || {})[id] || []).map(w => w.toLowerCase()));
+  cmdOff = {kinds: new Set(d.off || []), words};
+}
+
+/* The same test voice_daemon.take_tail runs, against the same wordings
+   voice_daemon.active_tail hands it. All that is wanted here is whether the tail
+   matched, so the body it hands back is not rebuilt. The 「コマンド」 lead-in that
+   one strips only shortens that body, it never decides the match, so leaving it
+   out cannot read the utterance differently.
+   Both ways of switching off are asked about, because both change what the daemon
+   will do with the utterance. Miss either one and the drawing goes dark for a
+   wording that is going to be sent after all, which is the promise this drawing
+   exists to keep. */
 const TAIL_TRIM = /[ \t　。、．，・！？!?.,]+$/;
 function endsWithTailCmd(text) {
   const body = text.trim().replace(TAIL_TRIM, '').toLowerCase();
   if (!body) return false;
-  for (const w of tailWords) if (body.endsWith(w)) return true;
+  for (const id of TAIL_IDS) {
+    if (cmdOff.kinds.has(id)) continue;
+    const off = cmdOff.words[id] || new Set();
+    for (const w of tailWords[id]) if (!off.has(w) && body.endsWith(w)) return true;
+  }
   return false;
 }
 
@@ -897,11 +928,14 @@ function worthSending() {
 function paintSendCue(now) {
   const on = sendCountdownOn();
   if (!on) clearSendCountdown();          // once the conditions drop, it resets itself every frame
-  // The real send button takes this same corner whenever something is part way
-  // written (text carried over from review, for one), and that one can be
-  // pressed. Two paper planes in one corner leave you working out which is
-  // which, so the drawing gives way to the button.
-  el.sendCue.hidden = !on || !el.draftActions.hidden;
+  // The real send button comes up whenever something is part way written (text
+  // carried over from review, for one), and that one can be pressed. Two paper
+  // planes on one card leave you working out which is which, so the drawing
+  // gives way to the button.
+  // Shown and hidden by a class, never by the hidden attribute. Hidden takes the
+  // seat away with it, and the two buttons beside it would slide every time this
+  // comes and goes.
+  el.sendCue.classList.toggle('on', on && el.draftActions.hidden);
   const wait = (Number(tuning.silence_duration) || 0) * 1000;
   /* The pause to send goes as low as 0.3s, under the held back stretch, and
      subtracting it there leaves nothing to divide by. At those settings the
@@ -915,7 +949,12 @@ function paintSendCue(now) {
   const r = (silentAt && wait > 0 && worthSending())
     ? Math.max(0, Math.min(1, (now - silentAt - dead) / (wait - dead)))
     : 0;
-  el.sendCueFill.style.height = (r * 100).toFixed(1) + '%';
+  /* Handed over as a bare fraction, not rounded to a step. The stylesheet turns
+     it into where the gradient's edge sits. Rounding it to a hundredth would put
+     a floor under how small a move can be, and at three seconds of silence that
+     floor is 30ms of travel, which shows as a stutter. It is worked out from the
+     clock every frame, so nothing carries over between frames to smooth away. */
+  el.sendCue.style.setProperty('--r', String(r));
   // Stop counting once the fill completes. An utterance thrown out by the min
   // length or by an ignored word never comes back settled, so waiting for it
   // leaves a full drawing sitting there.
@@ -3012,7 +3051,7 @@ function cmdRow(kind, phrase = '') {
   return row;
 }
 
-function cmdGroupEl(g, mine, off) {
+function cmdGroupEl(g, mine, off, offWords) {
   const base = cmdI18nBase(g.id);
   const box = document.createElement('div');
   box.className = 'group';
@@ -3070,21 +3109,100 @@ function cmdGroupEl(g, mine, off) {
     saveCmds();     // no field loses focus here, so nothing else would write it
   };
 
-  // The wordings themselves. They are there to be read, so they never take a pressable shape.
+  /* The wordings themselves. Press one and this machine stops listening for that
+     one wording, the same press and the same struck-through look the built-in
+     ignore words in the dictionary already use. #27 said these were to be read
+     and never made to look pressable. That held while they could not be pressed.
+     They can now, so the shape follows.
+
+     Kind by kind and wording by wording are kept apart on purpose. Strike every
+     wording here and the switch above still reads as on, because it is. The two
+     answer different questions, and folding one into the other would mean
+     switching the kind off and on again quietly threw away which wordings had
+     been struck. Whichever way round, what was struck comes back exactly as it
+     was left.
+
+     **What is struck is held here, not read back off the chips.** Only the first
+     few wordings are on screen until the list is opened, so gathering from the
+     chips would quietly let go of everything struck past the sixth. */
+  // An older server says nothing about this. Then nothing is pressable and
+  // nothing is sent back, which leaves a machine that never knew about striking
+  // doing exactly what it did before.
+  const knows = 'strikable' in g;
+  const strikable = g.strikable === true;
+  const struck = new Set((offWords[g.id] || []).filter(w => g.phrases.includes(w)));
+  box._struck = strikable ? struck : null;
+
   const says = document.createElement('div');
   says.className = 'chips';
+  /* Every wording of this kind struck. The signal is not switched off (the
+     switch above says what it says), it simply has nothing left to answer to in
+     this language. Say so, or the section reads as working while nothing in it
+     does. It counts across the whole kind, not the few on screen, so opening the
+     list does not change the answer. */
+  const allOff = document.createElement('p');
+  allOff.className = 'dict-note';
+  const paintAllOff = () => {
+    const every = strikable && g.phrases.length > 0
+      && g.phrases.every(p => struck.has(p));
+    allOff.textContent = every ? t('cmdAllOff') : '';
+    // Taken out of the flow rather than merely emptied. A note carries a margin
+    // above it, and an empty one would hold that gap open under the wordings in
+    // all seven sections for a line that is almost never there.
+    allOff.hidden = !every;
+  };
+  const sayEl = (p) => {
+    if (!strikable) {
+      const s = document.createElement('span');
+      s.className = 'say';
+      s.textContent = p;
+      return s;
+    }
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip';
+    const label = document.createElement('span');
+    label.className = 'w';
+    label.textContent = p;
+    const x = document.createElement('span');
+    x.className = 'x';
+    b.append(label, x);
+    const paint = () => {
+      const gone = struck.has(p);
+      b.classList.toggle('off', gone);
+      x.textContent = gone ? '＋' : '×';
+      b.title = t(gone ? 'cmdWordBack' : 'cmdWordDrop', {w: p});
+    };
+    paint();
+    // A chip takes no focus when pressed, so unless it writes right here the
+    // struck look and what the machine listens for drift apart.
+    b.onclick = () => {
+      if (struck.has(p)) struck.delete(p); else struck.add(p);
+      paint();
+      paintAllOff();
+      saveCmds();
+    };
+    return b;
+  };
   const paintSays = () => {
     const all = box.classList.contains('open');
     says.replaceChildren(...(all ? g.phrases : g.phrases.slice(0, SAY_MAX))
-      .map(p => {
-        const s = document.createElement('span');
-        s.className = 'say';
-        s.textContent = p;
-        return s;
-      }));
+      .map(sayEl));
   };
   paintSays();
-  box.append(says);
+  paintAllOff();
+  box.append(says, allOff);
+
+  /* Routing matches a pattern, so what is laid out for it are examples rather
+     than wordings, and a chip there would look like it took something out and
+     take nothing out. Say why the chips are missing. The server decides which
+     kinds these are, so no second opinion is kept here. */
+  if (knows && !strikable) {
+    const ex = document.createElement('p');
+    ex.className = 'dict-note';
+    ex.textContent = t('cmdExamples');
+    box.append(ex);
+  }
 
   /* It used to sit on the heading row, where opening the list left the target
      where it was. The switch that decides whether this signal is heard at all
@@ -3189,8 +3307,14 @@ function renderCommands(d) {
   // Which ones are switched off. An older server sends no off list, and then
   // nothing is off, which is what a machine that never knew about it was doing.
   const off = new Set(d.off || []);
+  // The wordings switched off. Every kind and every language comes back, and each
+  // section keeps only the ones it was given chips for. Hand a section a wording
+  // it cannot draw and it would send that wording back as "still struck" without
+  // ever having shown it, which is a claim it has no standing to make.
+  const offWords = d.off_words || {};
+  takeCmdOff(d);          // the send drawing reads the same record
   el.cmdGroups.replaceChildren(...(d.groups || []).map(
-    g => cmdGroupEl(g, (d.user || {})[g.id] || [], off.has(g.id))));
+    g => cmdGroupEl(g, (d.user || {})[g.id] || [], off.has(g.id), offWords)));
   // Wordings outside Japanese and English have not been looked over by anyone
   // who speaks the language. So nobody reads them and assumes they are right,
   // we say so at the end. collectCmds skips children with no .rows, so adding
@@ -3217,6 +3341,27 @@ function collectCmds() {
   out.off = [...el.cmdGroups.children]
     .filter(b => b.dataset.kind && !b.querySelector('.use').checked)
     .map(b => b.dataset.kind);
+  /* The single wordings struck, read from what each section is holding rather
+     than off the chips on screen. Only the first few chips are up until the list
+     is opened, so the chips are not the record.
+
+     Only the wordings this section actually put up go back. The server folds them
+     into everything else it was already holding (keep_off_words in
+     voice_daemon.py), so wordings in another language, or ones that have left the
+     built-in table, are not touched by a save from here. Sorted, so a save that
+     changed nothing else still compares equal and never goes out.
+
+     Left out entirely when no section could strike anything, which is what an
+     older server that says nothing about striking looks like. Sending an empty
+     set there would read as "none of them are struck". */
+  const words = {};
+  let anyStrikable = false;
+  for (const box of el.cmdGroups.children) {
+    if (!box._struck) continue;
+    anyStrikable = true;
+    if (box._struck.size) words[box.dataset.kind] = [...box._struck].sort();
+  }
+  if (anyStrikable) out.off_words = words;
   for (const box of el.cmdGroups.children) {
     const rows = box.querySelector('.rows');
     if (!rows) continue;          // a signal that takes no additions has no field
@@ -3238,9 +3383,25 @@ async function saveCmds(quiet = false) {
   const body = JSON.stringify(d);
   if (body === cmdsLast) return;
   cmdsLast = body;
-  const mine = cmdsSaving = cmdsSaving.then(() => putJSON('/api/commands', d))
-                                      .then(r => r.ok, () => false);
-  if (!await mine) { cmdsLast = ''; return; }   // it gets sent again the next time anything is touched
+  /* The language being laid out rides along. The server works out which wordings
+     this screen was able to put a chip on from the same catalog it answered the
+     GET with, and folds the answer into what it already holds rather than
+     replacing it. Without the language it cannot tell which wordings had a chip,
+     and every wording outside this screen's view would switch itself back on. */
+  // Nothing below is allowed to leave this chain rejected. Every later save waits
+  // on it, so one refusal left as a rejection would stop all of them.
+  const mine = cmdsSaving = cmdsSaving
+    .then(() => putJSON('/api/commands?lang=' + lang, d))
+    .then(r => r.ok ? r.json().then(j => ({ok: true, data: j}),
+                                    () => ({ok: true, data: null}))
+                    : {ok: false, data: null},
+          () => ({ok: false, data: null}));
+  const res = await mine;
+  if (!res.ok) { cmdsLast = ''; return; }   // it gets sent again the next time anything is touched
+  // Read back what the server ended up holding, so the send drawing stops
+  // filling for a wording just struck. It carries the ones this screen could not
+  // draw as well, which is the only way those reach the drawing at all.
+  if (res.data) takeCmdOff(res.data);
   if (!quiet) flashCmdNote(t('dictSaved'), 1600);
 }
 

@@ -22,8 +22,15 @@
       <!-- What to say out loud to make something happen. Do not leave this a
            thing only people already in the know can use. Put it next to
            settings (same open, read, go back shape, so it sits where you
-           already look). -->
-      <button class="icon" id="openHelp" data-icon="help" data-icon-size="20"
+           already look).
+           A bulb rather than a question mark. What is behind it stopped being
+           somewhere you go when stuck. The wordings are laid out there, your own
+           can be added, whole signals and single wordings can be switched off. A
+           question mark says "answers to problems" and reads past all of that. A
+           bulb says "here is what this can do", which is what it holds. The seat
+           in the row does not move, so the target stays where the hand already
+           knows it. -->
+      <button class="icon" id="openHelp" data-icon="lightbulb" data-icon-size="20"
               data-i18n-title="commandsTitle"></button>
       <button class="icon" id="openSettings" data-icon="settings" data-icon-size="20"
               data-i18n-title="settingsTitle"></button>
@@ -98,6 +105,17 @@
                 data-i18n-title="editOnce"></button>
         <button class="tiny warn" id="dropOne" data-icon="delete" data-icon-size="16"
                 data-i18n-title="dropOne"></button>
+        <!-- The wait before it goes out. It sits in this row so it lines up with
+             the two tools, and it is a span rather than a button because there
+             is nothing here to press (speaking again is what clears it). It is
+             kept off the screen reader as well, since hearing it leaves no time
+             to act on it and it only cuts in while you are talking.
+             The seat is held whether it is showing or not. Let it come and go
+             and the two buttons beside it would move under a finger already on
+             its way, and this screen holds targets still above all else. -->
+        <span class="send-cue" id="sendCue" aria-hidden="true">
+          <span data-icon="send" data-icon-size="15"></span>
+        </span>
       </span>
     </div>
     <div class="stream"><span id="stream" data-i18n-quiet="quiet"></span><span class="caret"></span></div>
@@ -109,16 +127,6 @@
       <button class="round go" id="send" data-icon="send" data-icon-size="20"
               data-i18n-title="sendTitle"></button>
     </div>
-    <!-- The wait before it goes out. It is sent the moment the fill finishes.
-         It is kept off the screen reader (hearing it leaves you no time to act
-         on it, and it only cuts in while you are talking).
-         Two copies of the same paper plane, the outline underneath and the
-         solid one clipped over it. Both come out of ICON, so no path is written
-         by hand here and the drawing stays the one the send button uses. -->
-    <span class="send-cue" id="sendCue" aria-hidden="true" hidden>
-      <span class="ground" data-icon="send" data-icon-size="18"></span>
-      <span class="fill" id="sendCueFill"><span data-icon="send" data-icon-size="18"></span></span>
-    </span>
   </section>
 
   <div class="log-head">

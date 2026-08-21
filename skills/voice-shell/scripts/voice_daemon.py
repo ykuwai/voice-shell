@@ -930,8 +930,102 @@ def clean_off_kinds(data) -> list:
     return [k for k in COMMAND_KINDS if k in seen]
 
 
+# ── Single wordings the user switched off ──────
+#
+# Switching off a whole kind is one answer. It is the wrong size for the problem
+# people actually have, which is that one built-in wording collides with a word they
+# say all day. Someone who ends sentences with 「キャンセル」 wants that one wording
+# to stop biting and 「取り消し」 to go on working. Off by kind can only take the
+# whole signal away from them.
+#
+# **Here there is nothing to remember but the wording itself.** A kind has a name
+# that never moves. A wording is its own name, so the record can only be the word,
+# and that is exactly the shape #15 fell through. What holds it up instead is the
+# save path (keep_off_words below), which never lets a wording it could not put on
+# screen fall out of the record.
+#
+# What is stored is the wording as it stands in the table, not the folded key. It is
+# read by a person in a file, and 「マイクをオフにして」 is readable where
+# 「マイクをオフにして」 folded down is not. Folding happens where the comparison
+# happens, one place per kind, since the four spoken-alone kinds compare on
+# command_key and the two tail kinds compare on a lowercased tail.
+OFF_WORDS_KEY = "off_words"
+
+
+def clean_off_words(data) -> dict:
+    """Take the wordings switched off and lay them out in the remembered shape.
+
+    **Unlike clean_off_kinds right above, nothing is dropped for being absent from
+    the built-in table.** That function drops unknown kind names because a name it
+    does not know can only be a typo, and kind names never move. Wordings do move.
+    Drop one for being unknown and the day it leaves the table, the first save after
+    that erases the record of it being off, and a wording the user switched off comes
+    back to life the moment it returns. That is #15 exactly. Any non-empty string is
+    kept, whatever the table currently says.
+    """
+    raw = data.get(OFF_WORDS_KEY) if isinstance(data, dict) else None
+    out = {}
+    if not isinstance(raw, dict):
+        return out
+    for kind in COMMAND_KINDS:
+        words = raw.get(kind)
+        if not isinstance(words, list):
+            continue
+        keep = []
+        for w in words:
+            if isinstance(w, str) and w.strip() and w.strip() not in keep:
+                keep.append(w.strip())
+        if keep:
+            out[kind] = sorted(keep)
+    return out
+
+
+def keep_off_words(sent, prev: dict, shown: dict) -> dict:
+    """Fold the wordings switched off into what was remembered before.
+
+    Built the same way as viewer._keep_unignore, and against the same hole. The page
+    can only put up a chip for the wordings it was handed, which is one language's
+    worth of one catalog, so only that much can ever come back. Take what arrives as
+    the whole truth and every wording outside that view quietly switches itself back
+    on. Someone who struck 「キャンセル」 with the screen in Japanese would find it
+    biting again the moment they opened the screen in English and touched anything.
+
+    So the answer arriving decides only the wordings that had a chip. Everything else
+    (another language's, one that left the table, one from a catalog that could not be
+    read) stays exactly as it was and is added back on.
+
+    shown maps kind to the wordings the page was handed for the language it drew in.
+    It is worked out here from the same call the page was answered with, rather than
+    taken from the page, so the two can never drift apart.
+    """
+    now = clean_off_words({OFF_WORDS_KEY: sent})
+    out = {}
+    for kind in COMMAND_KINDS:
+        had_chip = set(shown.get(kind) or ())
+        # Wordings with a chip go by what arrives, since one pressed back on never
+        # arrives. Wordings with no chip stay as they were.
+        keep = [w for w in (prev.get(kind) or ()) if w not in had_chip]
+        merged = sorted(set(keep) | set(now.get(kind) or ()))
+        if merged:
+            out[kind] = merged
+    return out
+
+
+# The two that attach to the end of a sentence. They are compared against a tail as
+# written, so their switched-off wordings fold with lower() and the rest with
+# command_key.
+TAIL_KINDS = ("cancel_tail", "hold_tail")
+
+
+def _fold_off(kind: str, words) -> frozenset:
+    """Put the switched-off wordings into the shape that kind gets compared in."""
+    if kind in TAIL_KINDS:
+        return frozenset(w.lower() for w in words)
+    return frozenset(command_key(w) for w in words)
+
+
 _NO_COMMANDS = {"mute": frozenset(), "live": frozenset(), "hold": frozenset(),
-                "route": (), OFF_KEY: frozenset()}
+                "route": (), OFF_KEY: frozenset(), OFF_WORDS_KEY: {}}
 _cmd_cache = (None, None)   # (mtime, contents)
 
 
@@ -966,6 +1060,11 @@ def load_commands() -> dict:
         out[kind] = (tuple(_route_rx(k) for k in keys) if kind == "route"
                      else frozenset(keys))
     out[OFF_KEY] = frozenset(clean_off_kinds(data))
+    # Folded here, once per re-read, rather than at every comparison. The two shapes
+    # differ because the comparisons differ, and folding at the call site would leave
+    # each caller to remember which shape its kind wanted.
+    out[OFF_WORDS_KEY] = {k: _fold_off(k, w)
+                          for k, w in clean_off_words(data).items()}
     _cmd_cache = (mtime, out)
     return out
 
@@ -981,16 +1080,47 @@ def command_enabled(kind: str) -> bool:
     return kind not in load_commands()[OFF_KEY]
 
 
+def word_enabled(kind: str, text: str) -> bool:
+    """Whether this one wording still bites, for a signal that is otherwise on.
+
+    Asked next to command_enabled and never inside the shape functions. The shape
+    functions answer "what does this phrase look like", which has one answer on every
+    machine in the room. What this machine was told to stop listening for belongs on
+    the acting side, or a 「開発用ミュート」 meant for the box next door would stop
+    reading as a command here and arrive at Claude as an instruction.
+
+    **A wording the user typed in themselves wins over the record.** Typing it back in
+    by hand is a plainer statement than the chip it was struck with, and the two can
+    only collide when a built-in wording was struck and then added again by hand.
+    """
+    key = command_key(text)
+    if key not in load_commands()[OFF_WORDS_KEY].get(kind, ()):
+        return True
+    # Only these three hold a set of added keys to look in. route keeps compiled
+    # patterns instead, and its list on screen is examples of a pattern rather than
+    # wordings, so nothing there can be struck in the first place.
+    mine = load_commands().get(kind) if kind in ("mute", "live", "hold") else None
+    return bool(mine) and key in mine
+
+
 def active_tail(kind: str) -> tuple:
     """The tail wordings that still bite, empty when that signal is switched off.
 
     The tables themselves (CANCEL_TAIL / HOLD_TAIL) are left whole. Emptying them
     would mean the list on screen loses the wordings too, and the reader could no
     longer see what they are switching back on.
+
+    Wordings struck one at a time drop out here, in written order, because take_tail
+    takes the first that matches and that order is what decides which of two
+    overlapping tails wins.
     """
     if not command_enabled(kind):
         return ()
-    return CANCEL_TAIL if kind == "cancel_tail" else HOLD_TAIL
+    table = CANCEL_TAIL if kind == "cancel_tail" else HOLD_TAIL
+    off = load_commands()[OFF_WORDS_KEY].get(kind)
+    if not off:
+        return table
+    return tuple(w for w in table if w.lower() not in off)
 
 
 def clean_user_commands(data) -> dict:
@@ -1007,11 +1137,16 @@ def clean_user_commands(data) -> dict:
     # a wording would write the file back without them and switch every signal on
     # again behind the user's back.
     out[OFF_KEY] = clean_off_kinds(data)
+    # Same reason for the single wordings, and one more on top. This function is what
+    # reads the file back as well, so anything it drops here is gone at the next save.
+    # clean_off_words drops nothing for being off the table, which is what keeps a
+    # wording that left the built-ins from being erased on the way through.
+    out[OFF_WORDS_KEY] = clean_off_words(data)
     return out
 
 
 def user_command_phrases() -> dict:
-    """Return what is remembered right now (added wordings and the kinds switched off)."""
+    """Return what is remembered right now (added wordings and what was switched off)."""
     try:
         data = json.loads(COMMANDS_FILE.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError, ValueError):
@@ -1046,7 +1181,7 @@ def voice_command(text: str, muted: bool):
     # Off and on are asked about one at a time. Someone who wants the mic never cut
     # by voice but still wants to bring it back that way gets exactly that.
     cmd = mic_command_shape(text, muted)
-    return cmd if cmd and command_enabled(cmd) else None
+    return cmd if cmd and command_enabled(cmd) and word_enabled(cmd, text) else None
 
 
 # How a number is said drifts with every recognition. Say 「2」 and out comes 「に」,
@@ -1281,7 +1416,7 @@ def mode_command(text: str):
     # The two sides are asked about separately, the same as mute and unmute. Switching
     # off one side does not hand its wordings to the other, it just stops them biting.
     mode = mode_command_shape(text)
-    return mode if mode and command_enabled(mode) else None
+    return mode if mode and command_enabled(mode) and word_enabled(mode, text) else None
 
 
 def route_shape(text: str):
@@ -1330,8 +1465,16 @@ def command_catalog(lang: str = "en") -> list:
         if fallback:
             words = (ROUTE_EXAMPLES["en"] if kind == "route"
                      else builtin_words(kind, "en"))
+        # Whether these wordings can be struck one at a time. Everywhere but routing
+        # they are the wordings themselves, so striking one takes that wording out.
+        # Routing matches a pattern, and what is laid out for it are examples of that
+        # pattern rather than entries in a table. A chip on 「2番」 would look like it
+        # takes 「2番」 out and take nothing out, since 「3番」 comes from the same
+        # pattern. The page is told rather than working it out, so the two cannot
+        # drift the day routing gains a real table.
         out.append({"id": kind, "phrases": list(words), "fallback": fallback,
-                    "editable": kind in USER_COMMAND_KINDS})
+                    "editable": kind in USER_COMMAND_KINDS,
+                    "strikable": kind != "route"})
     return out
 # Some people say 「コマンド◯◯」 so it reads as a command. The lead-in is dropped.
 _TAIL_PREFIX = ("コマンド", "こまんど", "command")
