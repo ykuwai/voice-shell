@@ -2,15 +2,15 @@ __pycache__/
 *.pyc
 *.log
 .venv/
-# speech_helper.swift のビルド結果（初回起動時に作り直せる）
+# What speech_helper.swift builds into. The first run remakes it
 skills/voice-shell/scripts/build/
-# 検証用に落としたサンプル音声（README の手順で再取得できる）
+# Sample audio pulled down for checking. The README says how to get it again
 sample_*.wav
 sample_*.flac
 
 
-# swiftc の出力
+# What swiftc puts out
 build/
 
-# 開発中の覚え書き。手元には残すが GitHub には出さない
+# Notes taken while working. Kept here, never pushed to GitHub
 docs/

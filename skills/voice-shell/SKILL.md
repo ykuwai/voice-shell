@@ -1,6 +1,6 @@
 ---
 name: "voice-shell"
-description: "Let the user send prompts by voice. Start a resident process that keeps listening to the microphone, take what the user says through Monitor, and treat it as an instruction. Use it when the user says \"voice mode\", \"talk to me\", \"hands-free\", \"dictate my prompts\", \"speak instead of typing\", or 「音声モード」「声で指示したい」「マイクで話す」「ハンズフリー」「音声で操作」. To stop, \"stop voice mode\" or 「音声モード終了」. If the user asks to set voice-shell up (\"set up voice-shell\" / 「voice-shell をセットアップして」), follow SETUP.md, work out which environment this is (macOS 26 or newer, or not), and guide them from there."
+description: "Let the user send prompts by voice. Start a resident process that keeps listening to the microphone, take what the user says through Monitor, and treat it as an instruction. Use it when the user says \"voice mode\", \"talk to me\", \"hands-free\", \"dictate my prompts\", or \"speak instead of typing\", in whatever language they say it. To stop, \"stop voice mode\". If the user asks to set voice-shell up (\"set up voice-shell\"), follow SETUP.md, work out which environment this is (macOS 26 or newer, or not), and guide them from there."
 version: "0.1.0"
 license: "MIT"
 argument-hint: "[start | stop | status]"
@@ -32,7 +32,7 @@ The argument is `$ARGUMENTS` (`start` / `stop` / `status` / `setup`. `start` whe
 
 ## When it is not set up yet
 
-If `start` fails with 「Python が見つかりません」, or if the user says
+If `start` fails with `No Python it can run was found`, or if the user says
 "set it up", walk them through [SETUP.md](SETUP.md).
 
 On macOS 26 or newer there is nothing to install, anywhere else it means
@@ -62,8 +62,9 @@ picked last time (`~/.config/voice-shell/config.json`), and the first time it is
 
    **Say where the audio goes once, the first time only.** The first time
    `start` runs on that machine, and only then, `start` itself prints
-   「音声は Google のサーバへ送られます」 along with the name of a local way that
-   machine can use. Pass that line straight through to the user.
+   `The audio is sent to Google's servers to be recognized` along with the name
+   of a local way that machine can use. Pass that line straight through to the
+   user.
    **Do not say it again after that.** Repeating it every time does not change
    the choice, it only adds more to read.
 
@@ -98,7 +99,7 @@ picked last time (`~/.config/voice-shell/config.json`), and the first time it is
    `--no-gui` only when the user says they do not want it.
 
    **With browser recognition nothing arrives at all until the viewer is open.**
-   When it could not be opened automatically (`ブラウザを自動で開けませんでした`
+   When it could not be opened automatically (`Could not open a browser for you`
    is printed), point the user at the URL.
 
    To keep it **always on top**, ask the user to press "Float on top" in the
@@ -139,20 +140,20 @@ same pattern and goes down with it.
 
 | What was seen | What is going on | What to do |
 |---|---|---|
-| With browser recognition, `status` says 「このブラウザで認識します」 | **Normal** (there is no daemon on this machine) | Nothing. Do not try to start a daemon |
+| With browser recognition, `status` says `This browser does the recognizing` | **Normal** (there is no daemon on this machine) | Nothing. Do not try to start a daemon |
 | Nothing arrives when speaking with browser recognition | The viewer is not open / the mic was refused / not Chrome | Say "open the viewer in Chrome and allow the microphone". Also ask whether a red warning is showing on screen |
-| `動かせる Python が見つかりません` | Nothing is installed | Tell them `pip install numpy aiohttp` is enough (for browser recognition alone) |
+| `No Python it can run was found` | Nothing is installed | Tell them `pip install numpy aiohttp` is enough (for browser recognition alone) |
 | `wait-ready` returns `FAILED` | The model failed to start | Pass the error through as it is. Show what is installed with `engines`, and switch **only after confirming** |
 | `wait-ready` returns `TIMEOUT` | Dragging on, a first model download for instance | Look at the tail of `daemon.out` and describe the situation |
 | A plain `start` gives the same error every time | The remembered choice is in a failing state | Say "the choice from last time is failing", and revert it once confirmed |
-| `「…」は使えません` | The engine name is wrong | Pick again from the choices that were shown |
+| `"<name>" cannot be used` | The engine name is wrong | Pick again from the choices that were shown |
 
 ## What to do with speech that arrives
 
 Each line that comes from Monitor is JSON. Only the body is in it.
 
 ```json
-{"text": "テストを実行して"}
+{"text": "run the tests"}
 ```
 
 **A line with a `"system_warning"` key is not the user speaking.** It is a
@@ -163,7 +164,7 @@ explain anything they do not recognize. Ask the user before stopping anything
 that is not in use).
 
 ```json
-{"system_warning": "モニターが2個同時に発話ログを聞いています。..."}
+{"system_warning": "2 monitors are listening to the utterance log at once. ..."}
 ```
 
 **It arrives in this shape when listening was ended from the screen too.**
@@ -178,25 +179,27 @@ That is **a sentence the user deliberately tidied**, so take it at face value in
 things to watch for are as follows.
 
 - **Expect recognition errors.** It is speech recognition, so proper nouns and
-  technical terms break. Read them back from context, 「クロードコード」→ Claude Code,
-  「ギット」→ git. Ask again only when the meaning really cannot be recovered.
-- **Ignore fillers.** 「あの」「まあ」「えっと」 carry no meaning.
-- **Short acknowledgements are dropped by the daemon.** A standalone 「はい」
-  「うん」 and the like is often a stray noise misheard as speech, so it never
+  technical terms break, whatever language is being spoken. Read them back from
+  context, "cloud code" is Claude Code and "get" is git. Ask again only when the
+  meaning really cannot be recovered.
+- **Ignore fillers.** Words like "um", "well" and "you know" carry no meaning.
+  Every language has its own.
+- **Short acknowledgements are dropped by the daemon.** A standalone "yeah" or
+  "mhm" and the like is often a stray noise misheard as speech, so it never
   arrives in the first place (`NOISE_ONLY` in `voice_daemon.py`). Even so, if a
   thin line does come through, wait instead of treating it as an instruction.
   **But if the dictionary has moved that word to the "do not ignore" side, it
   arrives even when short.** The user chose to let that word through, so even a
-  two-character 「わかった」「了解」 can be taken at face value as a reply.
+  bare "got it" can be taken at face value as a reply.
 - **Read chopped-up speech as one piece.** One sentence can arrive across
   several lines. When a sentence is cut off partway, wait for the rest before
   reading it as a whole. Long speech is also split before it arrives, so that
   each piece fits what one line can carry. The pieces line up inside the same
   notification, so **when one notification holds several lines, read all of them
   as one continuous utterance before acting**. Even if the first line ends with
-  a full stop, that does not mean the point is finished there. Japanese puts the
-  conclusion at the end, so running ahead gets the crucial part of the request
-  wrong.
+  a full stop, that does not mean the point is finished there. Some languages,
+  Japanese among them, put the conclusion at the end, so running ahead gets the
+  crucial part of the request wrong.
 - **Always confirm destructive operations.** Speech can be misheard, so confirm
   with "shall I go ahead with ..." before deleting, pushing, deploying and so on.
 - **An event is the user speaking, but it is not a demand for an answer.** When
@@ -263,12 +266,12 @@ press is only confusing without a reason, so always write something.
 talking with nothing getting through. Do it only when all of the following hold.
 
 - **Twice or more in a row**, speech arrived that is plainly not an instruction
-  for you (a conversation with a third person, 「もしもし」, a topic unrelated to
-  the work here)
+  for you (a conversation with a third person, a "hello?" into a phone, a topic
+  unrelated to the work here)
 - You have not just asked a question (you are not in the middle of waiting for
   an answer)
-- The user did not say something like 「これは独り言」 or 「ちょっと電話」
-  (if they did, just do as they said, no guessing needed)
+- The user did not say something like "I am just thinking out loud" or "hold
+  on, a phone call" (if they did, just do as they said, no guessing needed)
 
 **When in doubt, do not switch.** It is enough to take it and say "that did not
 seem to be for me, so I will wait". When you do switch, always write it in the
@@ -289,19 +292,20 @@ What it can do is as follows.
   that were touched in the draft before sending**. A line that went to review but
   was sent without a single character changed does not get it
 - **Pause** (the ⏸ in the header). Speech while it is stopped is kept nowhere (for use during other work)
-- **It can be driven by voice alone.** 「ミュート」「ミュート解除」 (`mute` /
-  `unmute`), 「手直し」「即時」 (`hold` / `instant`) to switch how things are sent,
-  「キャンセル」 **at the end of a sentence** to take that whole utterance back,
-  and 「手直し」 likewise at the end to send it to the draft instead,
-  「2番目」「2番」「2に切り替え」「ナンバー2」「番号2」「1つ目」 (`switch to 2` /
-  `number two`) to change the destination.
+- **It can be driven by voice alone.** "mute" and "unmute" for the microphone,
+  "draft" and "instant" to switch how things are sent, "cancel that" **at the end
+  of a sentence** to take that whole utterance back, and "edit this" likewise at
+  the end to send it to the draft instead, "switch to 2" or "number two" to
+  change the destination.
+  **Every language the screen can show has wordings of its own, and they can all
+  be read from the lightbulb on screen.** The phrases above are the English ones.
   It only counts when **that phrase alone** is spoken (saying it inside a
-  sentence does nothing). Variations in how numbers are read (に／ツー／two) are
+  sentence does nothing). The different ways a number gets read out loud are
   absorbed. A short sound plays when it switches.
-  **The list of phrases that work can be read from the "?" on screen.** Users can
-  add their own wording (`~/.config/voice-shell/commands.json`). Only phrases said
-  as a whole utterance can be added, not unmute and not the ones tacked onto the
-  end of a sentence, because a false trigger costs too much.
+  Users can add wording of their own
+  (`~/.config/voice-shell/commands.json`). Only phrases said as a whole utterance
+  can be added, not unmute and not the ones tacked onto the end of a sentence,
+  because a false trigger costs too much.
   **Each kind can also be switched off from that same screen**, and the same file
   remembers which ones. All seven are independent, so somebody who does not want
   to mute by voice at all can turn both mute and unmute off. A kind that is off
@@ -309,13 +313,13 @@ What it can do is as follows.
   back when it is switched on again.
   **When several machines are in use at once, turn on "Several machines" in the
   settings and give each machine a name.** Then only a phrase with the name in
-  front, like 「会社用ミュート」, is taken (without it, a phrase said at one machine
+  front, like "work mute", is taken (without it, a phrase said at one machine
   sets off every machine). The destination numbers follow the order of the chips
   on screen, and they can be switched while the mic is off too. **Destination
   phrases only work when there are two or more listeners** (so that an utterance
   which was just an answer with a number in it is not eaten). The same code
   decides this for browser recognition and local models alike. **The one thing
-  that cannot be heard is 「ミュート解除」 after browser recognition was cut**
+  that cannot be heard is "unmute" after browser recognition was cut**
   (cutting it lets go of the audio itself). Turn it back on from the screen
 - **It can be driven from the keyboard too.** Bare keys only move around the
   screen, keys with `Shift` change where the voice goes. `Shift`+`M` turns the
@@ -324,7 +328,7 @@ What it can do is as follows.
   unsent, `Shift`+`1` through `Shift`+`9` pick the destination. As bare keys, `,`
   opens the settings, `?` the list of phrases, `Esc` closes whatever is open.
   `Ctrl` (`Cmd`)+`Enter` sends the draft. **None of them work while text is
-  being typed.** The list is further down under the "?" on screen
+  being typed.** The list is further down under the lightbulb on screen
 - **Fix just this one.** Pressing the pencil on the unsent card holds that one
   utterance so it can be fixed. The destination display stays on instant (so it
   does not look like a permanent switch). Sending it or clearing it puts it back
@@ -417,19 +421,20 @@ has the OS do the recognizing, so it was never holding memory in the first place
 ## The user dictionary
 
 Words that are often misheard can be registered with a replacement, and
-utterances to ignore can be registered too. Edit them from **Settings (the gear)
-→ Dictionary** in the viewer. **It saves automatically the moment focus leaves,
-and takes effect from the next utterance** (there is no save button, and no
-daemon restart either).
+utterances to ignore can be registered too. Edit them from the **dictionary**
+in the viewer (the book in the header). **It saves automatically the moment
+focus leaves, and takes effect from the next utterance** (there is no save
+button, and no daemon restart either).
 
 It also hits the text while it is still being recognized, so **it already looks
-replaced inside the card before it is sent** (「クロードコード」→ `Claude Code`).
+replaced inside the card before it is sent** ("cloud code" turns into
+`Claude Code`).
 What is being replaced is only the look. The server rebuilds the body that gets
 sent. If the user says it again differently, it follows along.
 
 Words ignored by default (`NOISE_ONLY`) can be turned off by pressing their tag.
 **A word that was turned off passes straight through the minimum length gate
-too**, so short replies like 「わかった」「了解」 stop disappearing. When the user
+too**, so short replies like "got it" stop disappearing. When the user
 says "my replies do not seem to be getting through", point them here.
 
 It lives in `~/.config/voice-shell/dictionary.json`. CSV can be read in and
@@ -450,5 +455,5 @@ picking a local model.
     loads no model, so this limit does not apply to it
 - The microphone is taken through `arecord` (Linux) or `ffmpeg` (macOS / Windows)
 - When a local model was picked but the environment is not in place, `start`
-  fails with 「Python が見つかりません」. Either go back to browser recognition
+  fails with `No Python it can run was found`. Either go back to browser recognition
   (`start --engine browser`) or walk them through [SETUP.md](SETUP.md)

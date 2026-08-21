@@ -10,7 +10,7 @@
 #   voice-shell.sh listen                 tail the utterance log (for Monitor, shaped so double starts show)
 #   voice-shell.sh engines                the ways of recognizing on offer, and the last choice
 #   voice-shell.sh listeners              the sessions listening right now
-#   voice-shell.sh name "…"               give this session a display name
+#   voice-shell.sh name "NAME"            give this session a display name
 #   voice-shell.sh whisper                recognize with Whisper (strong on proper nouns)
 #   voice-shell.sh apple                  run on the recognition that ships with macOS 26 (light)
 
@@ -136,11 +136,11 @@ detach() {
 }
 
 if [[ -z "$PY" ]]; then
-  echo "動かせる Python が見つかりません。" >&2
-  echo "  ブラウザで認識するだけなら、これだけで足ります。" >&2
+  echo "No Python it can run was found." >&2
+  echo "  For recognizing in the browser, this much is enough." >&2
   echo "    pip install numpy aiohttp" >&2
-  echo "  手元のモデルで認識する場合は SETUP.md を参照してください。" >&2
-  echo "  場所を直接指定するなら export VOICE_SHELL_PYTHON=/path/to/python と書きます" >&2
+  echo "  To recognize with a model on this machine, see SETUP.md." >&2
+  echo "  To name one outright, write export VOICE_SHELL_PYTHON=/path/to/python" >&2
   exit 1
 fi
 # Named after the recognition model once, so it was "qwen-voice". It now takes
@@ -200,7 +200,7 @@ open_gui() {
       fi
       ;;
   esac
-  echo "  ブラウザを自動で開けませんでした → $url" >&2
+  echo "  Could not open a browser for you. Open $url" >&2
   return 1
 }
 
@@ -263,24 +263,24 @@ case "$cmd" in
       "$0" viewer >/dev/null
       # Print only whether it started and what to do next.
       # The log path and the list of other listening sessions both come from status.
-      echo "聞き取りを始めました。"
-      echo "Chrome の画面を開いてマイクを許可すると届き始めます。"
+      echo "Listening has started."
+      echo "Open the screen in Chrome and allow the microphone, and it starts arriving."
       # On a first run only, name where the audio goes and the stand-in this
       # machine can use. General wording stalls at "so which do I pick", so go
       # all the way to the name. Never after that. It only gets in the way.
       if [[ "$first_run" == 1 ]]; then
         echo
-        echo "※ 音声は認識のため Google のサーバへ送られます。"
+        echo "Note. The audio is sent to Google's servers to be recognized."
         alt="$("$PY" "$APP" --list-engines | sed -n '2p' | awk '{print $1}')"
         if [[ -n "$alt" ]]; then
-          echo "   手元だけで完結させたいなら、この機械では次も使えます。"
+          echo "   To keep it all on this machine, this one can be used here too."
           echo "     voice-shell.sh start --engine $alt"
         fi
       fi
       exit 0
     fi
-    if "$PY" "$APP" --status | grep -q 稼働中; then
-      echo "すでに稼働しています。"; exit 0
+    if "$PY" "$APP" --status | grep -q "^Running"; then
+      echo "It is already running."; exit 0
     fi
     mkdir -p "$STATE_DIR"
     # Clear away a viewer running under the old path (left behind by a layout change)
@@ -297,8 +297,8 @@ case "$cmd" in
     # The log path and the list of other listening sessions both come from status.
     # Print before the viewer. By this point the daemon is on its way, so even
     # if bringing up the screen fails, the fact that it started should land.
-    echo "聞き取りを始めました。"
-    echo "モデルの用意ができるまで少しかかります。voice-shell.sh wait-ready で待てます。"
+    echo "Listening has started."
+    echo "The model takes a little while to be ready. voice-shell.sh wait-ready waits for it."
     # Bring the viewer up alongside it (so nobody has to remember to type viewer).
     # It does not use the mic, so it can run with the daemon. Drop the output.
     "$0" viewer >/dev/null
@@ -331,7 +331,7 @@ case "$cmd" in
     ;;
   engine-start)
     if [[ "$("$PY" "$APP" --resolve-engine "")" == "browser" ]]; then
-      echo "ブラウザ認識が選ばれています。この機械にモデルは積みません。" >&2
+      echo "Browser recognition is the choice. No model is loaded on this machine." >&2
       exit 0
     fi
     # Bring only the recognition back up (leave the viewer alone).
@@ -340,14 +340,14 @@ case "$cmd" in
     #
     # This check leans on the PID file, so it slips through during loading.
     # A double start is stopped for certain by the lock on the daemon side.
-    if "$PY" "$APP" --status | grep -q 稼働中; then
-      echo "すでに稼働しています。"; exit 0
+    if "$PY" "$APP" --status | grep -q "^Running"; then
+      echo "It is already running."; exit 0
     fi
     mkdir -p "$STATE_DIR"
     set_engine_args
     detach "$PY" "$APP" --language Japanese "${ENGINE_ARGS[@]+"${ENGINE_ARGS[@]}"}" "$@" \
       > "$BOOT_LOG" 2>&1 &
-    echo "起動中… (モデル読み込みに1〜2分かかります)"
+    echo "Starting up. Loading the model takes 1 to 2 minutes"
     ;;
   whisper)
     # Use Whisper for recognition. Strong on proper nouns.
@@ -359,29 +359,29 @@ case "$cmd" in
     ;;
   status)
     # When the browser is doing the recognizing, having no daemon on this
-    # machine is normal. A bare 「停止しています」 on its own reads as broken,
+    # machine is normal. A bare "Stopped." on its own reads as broken,
     # so say what is doing the recognizing first.
     engine="$("$PY" "$APP" --resolve-engine "")"
     if [[ "$engine" == "browser" ]]; then
-      echo "このブラウザで認識します（この機械にモデルは積みません）"
+      echo "This browser does the recognizing. No model is loaded on this machine"
       if ! port_open; then
-        echo "  ビューアが動いていません → voice-shell.sh viewer" >&2
+        echo "  The viewer is not running. Start it with voice-shell.sh viewer" >&2
       else
-        echo "  ビューアは http://127.0.0.1:8090"
+        echo "  The viewer is at http://127.0.0.1:8090"
         # Go as far as whether the screen is really listening. Without this,
         # not open or mic refused cannot be told from properly listening.
         http_get /api/asr-status \
-          | "$PY" "$HERE/asr_status.py" || echo "  画面の状態を確認できませんでした"
+          | "$PY" "$HERE/asr_status.py" || echo "  Could not check the state of the screen"
       fi
     else
-      echo "認識のやり方は $engine"
+      echo "The way of recognizing is $engine"
       "$PY" "$APP" --status
     fi
     echo
-    echo "この音声を聞いているセッション"
+    echo "Sessions listening to this voice"
     listeners_now="$(list_listeners)"
     if [ -n "$listeners_now" ]; then echo "$listeners_now"
-    else echo "  なし（音声はどこにも届いていません）"; fi
+    else echo "  none (the voice is reaching nowhere)"; fi
     ;;
   engines)
     # The ways of recognizing on offer. Prints what is installed and what was picked last time.
@@ -390,7 +390,7 @@ case "$cmd" in
   listeners)
     listeners_now="$(list_listeners)"
     if [ -n "$listeners_now" ]; then echo "$listeners_now"
-    else echo "  なし（音声はどこにも届いていません）"; fi
+    else echo "  none (the voice is reaching nowhere)"; fi
     ;;
   listen)
     # Used from Monitor. Tails the utterance log and registers its own presence
@@ -479,8 +479,8 @@ import json, os, sys
 from pathlib import Path
 d, session, name = sys.argv[1:4]
 if not session:
-    sys.exit("この道具はセッションの id を持っていません。"
-             "VOICE_SHELL_NAME を設定して listen し直してください。")
+    sys.exit("This tool has no session id. "
+             "Set VOICE_SHELL_NAME and run listen again.")
 
 # Keep it on the config side too. Restarting voice mode rebuilds the registration
 # file, so without this the name given here vanishes and the auto title comes back.
@@ -510,12 +510,12 @@ for f in os.scandir(d) if os.path.isdir(d) else []:
     json.dump(info, open(f.path, "w", encoding="utf-8"), ensure_ascii=False)
     hit += 1
 if not name:
-    print("自動の題名に戻しました")
+    print("Back to the automatic title")
 elif hit:
-    print(f"表示名を「{name}」にしました")
+    print(f"The display name is now {name!r}")
 else:
-    print(f"表示名を「{name}」で覚えました"
-          "（このセッションはまだ聞いていません。始めれば反映されます）")
+    print(f"Remembered {name!r} as the display name. "
+          "This session is not listening yet, so it shows once it starts")
 NAMEIT
     ;;
   hold)
@@ -525,14 +525,14 @@ NAMEIT
     # not watching the screen cannot tell that nothing is getting through.
     http_post /api/pause \
       "$(printf '{"paused":true,"note":%s}' "$(printf '%s' "${1:-}" | "$PY" -c 'import json,sys; print(json.dumps(sys.stdin.read()))')")" \
-      && echo "溜める側に切り替えました（画面から送れます）" \
-      || { echo "ビューアが動いていません" >&2; exit 1; }
+      && echo "Switched to the side that collects. It can be sent from the screen" \
+      || { echo "The viewer is not running" >&2; exit 1; }
     ;;
   live)
     # Back to the side where utterances land as they come
     http_post /api/pause '{"paused":false}' \
-      && echo "そのまま届く側に戻しました" \
-      || { echo "ビューアが動いていません" >&2; exit 1; }
+      && echo "Back to the side where it arrives as it comes" \
+      || { echo "The viewer is not running" >&2; exit 1; }
     ;;
   log-path)
     echo "$LOG_FILE"
@@ -550,7 +550,7 @@ NAMEIT
     }
     if viewer_running; then
       # Do not open a window here. One should be open already, and opening adds more.
-      echo "すでに起動しています → http://127.0.0.1:8090"
+      echo "It is already running at http://127.0.0.1:8090"
       exit 0
     fi
     mkdir -p "$STATE_DIR"
@@ -561,21 +561,21 @@ NAMEIT
       > "$STATE_DIR/viewer.out" 2>&1 &
     sleep 2
     if viewer_running; then
-      echo "ビューアを起動しました → http://127.0.0.1:8090"
+      echo "The viewer started at http://127.0.0.1:8090"
       # Open in a window of its own (--no-gui means do not open)
       [[ "${VOICE_SHELL_NO_GUI:-0}" == "1" ]] || open_gui || true
     else
-      echo "起動に失敗しました。" >&2; tail -5 "$STATE_DIR/viewer.out" >&2; exit 1
+      echo "It failed to start." >&2; tail -5 "$STATE_DIR/viewer.out" >&2; exit 1
     fi
     ;;
   viewer-stop)
     if have pkill; then
       rm -f "$STATE_DIR/gui_opened"
-      pkill -f "voice-shell/scripts/viewer\.p[y]" && echo "ビューアを停止しました" \
-        || echo "動いていません"
+      pkill -f "voice-shell/scripts/viewer\.p[y]" && echo "The viewer stopped" \
+        || echo "It is not running"
     else
-      echo "このOSでは自動停止できません（pkill が無いため）。" >&2
-      echo "  タスクマネージャーで viewer.py の python プロセスを終了してください。" >&2
+      echo "This OS cannot stop it for you, because there is no pkill." >&2
+      echo "  End the python process for viewer.py from the task manager." >&2
     fi
     ;;
   wait-ready)
@@ -585,8 +585,8 @@ NAMEIT
     fi
     # Wait until startup finishes (or errors out)
     for _ in $(seq 1 90); do
-      if grep -q "聞いています" "$BOOT_LOG" 2>/dev/null; then echo READY; exit 0; fi
-      if grep -qE "Traceback|Error:|すでに動いて" "$BOOT_LOG" 2>/dev/null; then
+      if grep -q "Listening. Speak and it gets appended" "$BOOT_LOG" 2>/dev/null; then echo READY; exit 0; fi
+      if grep -qE "Traceback|Error:|Already running" "$BOOT_LOG" 2>/dev/null; then
         echo FAILED; tail -5 "$BOOT_LOG" >&2; exit 1
       fi
       sleep 2
@@ -594,7 +594,7 @@ NAMEIT
     echo TIMEOUT; exit 1
     ;;
   *)
-    echo "使い方は voice-shell.sh {start [--engine X] [--no-gui]|stop|status|engines}" >&2
+    echo "Usage is voice-shell.sh {start [--engine X] [--no-gui]|stop|status|engines}" >&2
     echo "        voice-shell.sh {listen|listeners|name|hold|live|log-path|wait-ready|viewer}" >&2
     echo "        voice-shell.sh {apple|whisper}" >&2
     exit 1

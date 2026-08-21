@@ -107,8 +107,9 @@ def _keep_unignore(sent, prev: dict) -> list:
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="音声プロンプトのライブビューア")
-    p.add_argument("--log-file", default=str(DEFAULT_LOG), help="追尾する JSONL")
+    p = argparse.ArgumentParser(description="The live viewer for voice prompts")
+    p.add_argument("--log-file", default=str(DEFAULT_LOG),
+                   help="The JSONL to follow")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8090)
     return p.parse_args()
@@ -328,7 +329,7 @@ async def main_async(args):
     assets = {url: Path(__file__).with_name(url.lstrip("/")) for url in ASSETS}
     for f in [page, *assets.values()]:
         if not f.exists():
-            sys.exit(f"{f} が見つかりません")
+            sys.exit(f"{f} was not found")
 
     tail = Tail(Path(args.log_file))
     tail.read_existing()
@@ -664,8 +665,9 @@ async def main_async(args):
             with open(args.log_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps({
                     "system_warning":
-                        "画面の操作で、このセッションは音声を聞くのをやめました。"
-                        "もう一度使うには /voice-shell と入力してください。",
+                        "Someone acted on the screen, and this session stopped "
+                        "listening to the voice. To use it again, type "
+                        "/voice-shell.",
                     "to": pid,
                 }, ensure_ascii=False) + "\n")
             await asyncio.sleep(0.5)
@@ -1063,8 +1065,9 @@ async def main_async(args):
     await runner.setup()
     await web.TCPSite(runner, args.host, args.port).start()
 
-    print(f"\n  ブラウザで開いてください →  http://{args.host}:{args.port}"
-          f"\n  追尾しているログは {args.log_file}\n", file=sys.stderr, flush=True)
+    print(f"\n  Open this in a browser.  http://{args.host}:{args.port}"
+          f"\n  The log being followed is {args.log_file}\n",
+          file=sys.stderr, flush=True)
 
     tasks = [asyncio.create_task(tail.watch()),
              asyncio.create_task(tail.watch_partial()),
@@ -1088,7 +1091,7 @@ def main():
     try:
         asyncio.run(main_async(parse_args()))
     except KeyboardInterrupt:
-        print("\n終了します。", file=sys.stderr)
+        print("\nQuitting.", file=sys.stderr)
 
 
 if __name__ == "__main__":

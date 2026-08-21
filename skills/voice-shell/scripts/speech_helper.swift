@@ -41,7 +41,7 @@ struct SpeechHelper {
 
         guard let locale = await SpeechTranscriber.supportedLocale(
             equivalentTo: Locale(identifier: localeID)) else {
-            emit(["error": "\(localeID) は SpeechTranscriber が対応していません"])
+            emit(["error": "SpeechTranscriber does not support \(localeID)"])
             exit(1)
         }
 
@@ -52,11 +52,11 @@ struct SpeechHelper {
             if let request = try await AssetInventory.assetInstallationRequest(
                 supporting: [makeTranscriber(locale)]) {
                 FileHandle.standardError.write(
-                    "音声認識モデルを用意しています…\n".data(using: .utf8)!)
+                    "Getting the speech model ready\n".data(using: .utf8)!)
                 try await request.downloadAndInstall()
             }
         } catch {
-            emit(["error": "モデル資産の用意に失敗しました。\(error)"])
+            emit(["error": "Getting the model assets ready failed. \(error)"])
             exit(1)
         }
 

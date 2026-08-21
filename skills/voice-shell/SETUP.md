@@ -144,11 +144,9 @@ Once `READY` shows up, have the user open http://127.0.0.1:8090 and talk.
 
 ## When you get stuck
 
-The first row is left in Japanese because that is exactly what gets printed.
-
 | Symptom | What to do |
 |---|---|
-| `Python が見つかりません` (no Python it can run) | `export VOICE_SHELL_PYTHON=/path/to/.venv/bin/python` |
+| `No Python it can run was found` | `export VOICE_SHELL_PYTHON=/path/to/.venv/bin/python` |
 | No `arecord` or `ffmpeg` | Install it as shown under "Common to both" above |
 | Startup says `FAILED` | Look at `voice-shell.sh status` and the tail of `daemon.out` |
 | Whisper is slow | Shrink the model (`--model base`). On a CPU add `--whisper-compute int8` |
