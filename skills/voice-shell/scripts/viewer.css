@@ -498,11 +498,15 @@
   .tiny:hover:not(:disabled) > svg .solid { display:inline; }
   .tiny:hover:not(:disabled) > svg .line { display:none; }
   .tiny:disabled { opacity:.28; cursor:default; }
-  /* Make it clear that pressing anywhere on the card hands it over to editing */
+  /* Make it clear that pressing anywhere on the card hands it over to editing.
+     The cursor is the whole of the cue now. Hovering used to pull the border
+     partway to accent-2, which is the color editing itself wears, so the card
+     rehearsed a state it was not in every time the pointer crossed it. A finger
+     never hovers, so half the machines never saw that cue anyway. Leaving it out
+     makes accent-2 mean one thing, and it arrives when the card is pressed.
+     Which one is about to be pressed is already said twice over, by the pencil
+     button and by the help. */
   .draft-card:not(.holding):not(.editing) { cursor:text; }
-  .draft-card:not(.holding):not(.editing):hover {
-    border-color:color-mix(in srgb, var(--accent-2) 45%, var(--line));
-  }
   .draft-card .draft-actions, .draft-card .tiny-row { cursor:default; }
   .draft-card .mark {
     padding:.05rem .4rem; border-radius:5px; font-size:.64rem; font-weight:600;
@@ -978,7 +982,13 @@
   .new-row { display:flex; align-items:center; gap:.3rem; margin-bottom:.5rem; }
   .new-row input { flex:1; min-width:0; padding:.45rem .85rem;
     background:var(--panel-2); border:1px solid var(--line); border-radius:var(--pill); font-size:.83rem; }
-  .arrow { color:var(--faint); font-size:.8rem; flex:none; }
+  /* Between the heard word and the word to send. It holds a drawing, not the
+     character, so font-size has nothing left to size and the box is laid out
+     round the svg instead. The row is as tall as its boxes either way, so the
+     16px drawing sits well inside and the rows keep the height they had.
+     --faint because this only says which way the pair reads. The two words are
+     what people are here to look at. */
+  .arrow { display:inline-flex; align-items:center; color:var(--faint); flex:none; }
   .filter { width:100%; margin-bottom:.5rem; padding:.45rem .85rem;
     background:var(--panel-2); border:1px solid var(--line); border-radius:var(--pill); font-size:.83rem; }
   /* No scrolling inside a frame of its own. The sheet already scrolls, so

@@ -2765,12 +2765,22 @@ el.micSettingsLink.onclick = async () => {
 
 /* ── The user dictionary ─────────────────
    One entry per row of the form. Nobody has to write arrows or JSON by hand. */
+
+/* What sits between the heard word and the word to send. It was the character
+   「→」, the last one left on screen after the rest of the arrows on this screen
+   became drawings. A character also carries whatever the reader's font decides,
+   which on some of them is a thin stroke of a different weight to everything
+   around it. This is the same drawing in every font.
+   The add row at the top of the pane carries the same drawing, put there with
+   data-icon so the markup says what it holds. */
+function arrowIcon() { return iconSvg('arrow_right_alt', 16); }
+
 function replaceRow(from = '', to = '') {
   const row = document.createElement('div');
   row.className = 'row';
   const a = document.createElement('input'); a.className = 'from'; a.value = from;
   a.placeholder = t('dictHeard');
-  const arrow = document.createElement('span'); arrow.className = 'arrow'; arrow.textContent = '→';
+  const arrow = document.createElement('span'); arrow.className = 'arrow'; arrow.appendChild(arrowIcon());
   const b = document.createElement('input'); b.className = 'to'; b.value = to;
   b.placeholder = t('dictSendAs');
   const del = document.createElement('button');
