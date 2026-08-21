@@ -1132,6 +1132,12 @@ function applyRouteSideEffects(next) {
     if (recWanted) { asrPausedByRoute = true; stopRecognition(); }
     stopViz();
   } else {
+    // Coming back from off (by hand or by voice) always counts as a voice just
+    // heard. Otherwise the idle-mute clock, still holding the timestamp from
+    // before the mute, finds itself already past its own deadline and mutes
+    // again within the next 5-second check, sometimes just seconds after the
+    // person turned it back on.
+    lastVoiceAt = performance.now();
     if (vizArmed) startViz(el.mic.value || '');
     if (asrPausedByRoute) {
       asrPausedByRoute = false; recWanted = true; startRecognition();
