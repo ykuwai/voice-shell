@@ -44,6 +44,13 @@ PREROLL_SEC = 0.6
 # is pointless in the other direction, nobody presses 10 times a second.
 DROP_POLL_SEC = 0.2
 
+# How often the send button on screen is looked for. The same 0.2 seconds as the
+# discard button, for a different reason. Nothing recorded is lost while this
+# wait runs, but every word spoken inside it lands in the line that was already
+# meant to go, so the window has to stay shorter than a breath. Looking on every
+# block would buy 0.1 seconds and cost a file read 10 times a second.
+SEND_POLL_SEC = 0.2
+
 # Once blocks whose contents are all zero run this long, count it as unplugged.
 # A live device picks up room noise however quiet the room (measured around
 # 0.0005, and 0.0022 even on the machine running right now). 16bit lined up as
@@ -553,6 +560,11 @@ def stream_utterances(model, args, should_stop=lambda: False):
         {"type": "final",   "text": str, "language": str}     utterance settled
         {"type": "dropped", "text": str}                      utterance thrown away
 
+    A final also carries "forced": True when the send button on screen is what
+    settled it. Nothing else in here reads that key. It is put on the event for
+    the caller, which narrows what leaves on its own (a floor on length, words
+    to ignore) and has to let a line the person asked for through untouched.
+
     Silence running as long as silence_duration settles it. Nothing is broken
     up while someone keeps talking (HARD_UTTERANCE_CAP is the only brake). The
     library has no utterance splitting (VAD), so RMS is watched here to judge.
@@ -563,6 +575,12 @@ def stream_utterances(model, args, should_stop=lambda: False):
     caller only ever sees settled text and the sound underneath stays joined,
     so the words said right after the press would sit inside the same utterance
     and be thrown away along with the part that was meant to go.
+
+    args.want_send is the mirror of it, the time the send button was last
+    pressed. A press settles the utterance in progress right there, as if the
+    silence had run out. It belongs at this level for the same reason. The
+    sound underneath is one stream, so anything said after the press has to
+    start a fresh utterance rather than ride along inside the one going out.
     """
     # apple and whisper both carry the same 3 methods, so everything below is
     # shared. load_model stops on an unknown name, so only those 2 get here.
@@ -582,6 +600,13 @@ def stream_utterances(model, args, should_stop=lambda: False):
     # A press left behind by an earlier run must not throw away the first
     # utterance of this one, so whatever the file holds now counts as handled.
     last_drop = (want_drop() if want_drop is not None else 0.0) or 0.0
+    # The send button leaves its press time in a file of its own, read the same
+    # way and never deleted either.
+    want_send = getattr(args, "want_send", None)
+    send_wait = 0
+    # A press left behind by an earlier run must not cut the first utterance of
+    # this one short, so whatever the file holds now counts as handled.
+    last_send = (want_send() if want_send is not None else 0.0) or 0.0
     silence_run = 0.0    # seconds of unbroken silence
     speech_seen = False  # whether speech was heard in the current utterance
     speaking_at = None   # when the utterance in progress began (None while none runs)
@@ -631,6 +656,50 @@ def stream_utterances(model, args, should_stop=lambda: False):
         preroll.clear()
         return ev
 
+    def send_asked():
+        """Whether the send button was pressed during the utterance running now.
+
+        Written the way drop_asked is, and compared the same way. Without the
+        compare, a press landing just after a settle would cut the next
+        utterance short the instant it began and send a syllable or two. A
+        press counts as spent whichever way the compare goes, so one made while
+        nobody was talking does nothing and cannot come back to bite later.
+        """
+        nonlocal last_send
+        asked = (want_send() if want_send is not None else 0.0) or 0.0
+        if asked <= last_send:
+            return False
+        last_send = asked
+        return speaking_at is not None and asked >= speaking_at
+
+    def cut_short():
+        """Settle the utterance in progress now, as if the silence had run out.
+
+        The opposite of cut right above. finish_streaming_transcribe is called,
+        because these words are going out and that last pass is what turns the
+        audio collected so far into the text that gets sent.
+
+        The final is stamped forced. The caller cannot work this out for itself.
+        By the time settled text reaches it the press has already been spent and
+        the file it was written into says nothing about which line it belonged
+        to, so the answer has to travel on the event.
+        """
+        nonlocal state, silence_run, speech_seen, last_text, speaking_at
+        ev = finish()
+        if ev:
+            ev["forced"] = True
+        state = new_state()
+        silence_run, speech_seen, last_text, speaking_at = 0.0, False, "", None
+        # preroll is deliberately left as it is, unlike in cut. There what it
+        # holds is the tail of the sound being thrown away, so leaving it in
+        # glues the cancelled words onto the front of the redo. Here the line
+        # goes out whole, and whatever gets held from this moment on is the
+        # run-up to the words said next, which is the very thing PREROLL_SEC
+        # exists to keep. It is empty at this instant either way, since it
+        # drains at the head of every utterance, so the two only read
+        # differently if that drain ever moves.
+        return ev
+
     for block, dur, rms in read_blocks(args.device, args.input_samplerate,
                                        want_device=getattr(args, "want_device", None),
                                        on_switch=getattr(args, "on_switch", None)):
@@ -666,6 +735,23 @@ def stream_utterances(model, args, should_stop=lambda: False):
                 if drop_asked():
                     yield cut()
                     continue
+
+        # Settled before this block is taken in as well, and for the mirror of
+        # the reason above. What arrived after the press belongs to whatever
+        # gets said next, not to the line on its way out.
+        if want_send is not None:
+            send_wait -= 1
+            if send_wait <= 0:
+                send_wait = max(1, round(SEND_POLL_SEC / BLOCK_SEC))
+                if send_asked():
+                    done = cut_short()
+                    if done:
+                        yield done
+                    # Nothing is skipped here, unlike the discard above. This
+                    # block is the first of whatever comes next, and letting go
+                    # of it clips the head of words spoken straight after the
+                    # press. Discarding can afford to lose it, since throwing
+                    # the sound away is the whole point over there.
 
         speaking = rms >= args.silence_threshold
         yield {"type": "level", "rms": rms, "speaking": speaking}
@@ -703,6 +789,13 @@ def stream_utterances(model, args, should_stop=lambda: False):
                 if want_drop is not None and drop_asked():
                     yield cut()
                     continue
+                # The send button gets no look of its own here, unlike the
+                # discard above. That one is here because a partial slipping out
+                # after a press writes cancelled words back onto a wiped screen.
+                # Nothing of the sort happens for a send, the words on screen
+                # are the words about to go. Looking here would only cost, since
+                # this block has already gone into the text and firing on it
+                # would eat it out of the line that starts next.
                 yield {"type": "partial", "text": state.text, "language": state.language}
 
         accum_sec = len(state.audio_accum) / SAMPLE_RATE
@@ -720,8 +813,17 @@ def stream_utterances(model, args, should_stop=lambda: False):
             if want_drop is not None and drop_asked():
                 yield cut()
                 continue
+            # A press landing in the gap right before the settle is still a
+            # press. The line goes out either way at this point, so what is at
+            # stake is only the flag, and the flag is what tells the caller to
+            # skip its narrowing. Without this look a four character
+            # 「スタート」 settles unasked and gets thrown away for being short,
+            # right after the person pressed send on it.
+            forced = want_send is not None and send_asked()
             done = finish()
             if done:
+                if forced:
+                    done["forced"] = True
                 yield done
             state, silence_run, speech_seen, last_text = new_state(), 0.0, False, ""
             # Nothing is running now, so a press from here on belongs to the
