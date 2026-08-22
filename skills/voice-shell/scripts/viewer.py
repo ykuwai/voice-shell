@@ -545,6 +545,7 @@ async def main_async(args):
         "/viewer.js": "text/javascript",
         "/i18n.js": "text/javascript",
         "/icons.js": "text/javascript",
+        "/browser_unmute_gesture.js": "text/javascript",
     }
     assets = {url: Path(__file__).with_name(url.lstrip("/")) for url in ASSETS}
     for f in [page, *assets.values()]:
