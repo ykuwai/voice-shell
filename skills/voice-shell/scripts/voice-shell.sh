@@ -8,6 +8,7 @@
 #   voice-shell.sh viewer / viewer-stop
 #   voice-shell.sh log-path / wait-ready
 #   voice-shell.sh listen                 tail the utterance log (for Monitor, shaped so double starts show)
+#   voice-shell.sh codex-forward          send new utterances to this Codex App Server thread
 #   voice-shell.sh engines                the ways of recognizing on offer, and the last choice
 #   voice-shell.sh listeners              the sessions listening right now
 #   voice-shell.sh name "NAME"            give this session a display name
@@ -392,6 +393,21 @@ case "$cmd" in
     if [ -n "$listeners_now" ]; then echo "$listeners_now"
     else echo "  none (the voice is reaching nowhere)"; fi
     ;;
+  codex-forward)
+    if [[ -z "${CODEX_THREAD_ID:-}" ]]; then
+      echo "codex-forward needs CODEX_THREAD_ID from a Codex CLI or App Server thread." >&2
+      echo "  It does not attach to an arbitrary ChatGPT desktop task." >&2
+      exit 2
+    fi
+    mkdir -p "$STATE_DIR"
+    forward_pipe="$STATE_DIR/codex-forward-$$.pipe"
+    rm -f "$forward_pipe"
+    mkfifo "$forward_pipe"
+    "$HERE/voice-shell.sh" listen > "$forward_pipe" &
+    listen_pid=$!
+    trap 'rm -f "$forward_pipe"; kill "$listen_pid" 2>/dev/null || true; wait "$listen_pid" 2>/dev/null || true' EXIT INT TERM HUP
+    "$PY" -u "$HERE/codex_app_server.py" --input-filtered < "$forward_pipe"
+    ;;
   listen)
     # Used from Monitor. Tails the utterance log and registers its own presence
     # in $STATE_DIR/listeners/ (the filename is its own PID).
@@ -595,7 +611,7 @@ NAMEIT
     ;;
   *)
     echo "Usage is voice-shell.sh {start [--engine X] [--no-gui]|stop|status|engines}" >&2
-    echo "        voice-shell.sh {listen|listeners|name|hold|live|log-path|wait-ready|viewer}" >&2
+    echo "        voice-shell.sh {listen|codex-forward|listeners|name|hold|live|log-path|wait-ready|viewer}" >&2
     echo "        voice-shell.sh {apple|whisper}" >&2
     exit 1
     ;;
