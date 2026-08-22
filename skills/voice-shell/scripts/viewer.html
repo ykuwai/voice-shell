@@ -292,6 +292,27 @@
       <span class="val" id="idleMuteVal"></span>
     </div>
     <p class="range-note" id="idleMuteNote" data-i18n="idleMuteNote" hidden></p>
+    <div id="browserGestureField" hidden>
+      <label class="toggle" style="margin-top:.7rem">
+        <input type="checkbox" id="browserGestureOn"><span data-i18n="browserGesture">Unmute with loud sounds</span>
+      </label>
+      <div class="field" style="margin-top:.6rem">
+        <label for="browserGesturePeaks" data-icon="graphic_eq" data-icon-size="17" data-i18n="browserGesturePeaks">Loud sounds</label>
+        <input type="range" id="browserGesturePeaks" min="1" max="6" step="1">
+        <span class="val" id="browserGesturePeaksVal"></span>
+      </div>
+      <div class="field">
+        <label for="browserGestureWindow" data-icon="timer" data-icon-size="17" data-i18n="browserGestureWindow">Time window</label>
+        <input type="range" id="browserGestureWindow" min="0.5" max="5" step="0.1">
+        <span class="val" id="browserGestureWindowVal"></span>
+      </div>
+      <div class="field">
+        <label for="browserGestureThreshold" data-icon="volume_up" data-icon-size="17" data-i18n="browserGestureThreshold">Loudness</label>
+        <input type="range" id="browserGestureThreshold" min="0.65" max="1" step="0.01">
+        <span class="val" id="browserGestureThresholdVal"></span>
+      </div>
+      <p class="range-note" data-i18n="browserGestureNote">While paused, make several loud sounds to turn the microphone on. This only works with browser recognition.</p>
+    </div>
     <p class="warn-note" id="browserAsrWarn" data-i18n="browserAsrWarn" hidden></p>
     <div id="powerRow">
       <div class="btn-row" style="margin-top:.7rem">
@@ -454,6 +475,7 @@
      are pure data and load first so viewer.js finds them already there. -->
 <script src="i18n.js"></script>
 <script src="icons.js"></script>
+<script src="browser_unmute_gesture.js"></script>
 <script src="viewer.js"></script>
 </body>
 </html>

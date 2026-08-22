@@ -47,11 +47,14 @@ TUNING_RANGE = {"silence_threshold": (0.003, 0.15),
                 "min_chars": (1, 40),
                 # in browser recognition, cut the mic once no voice for this long.
                 # 0 never cuts. No reconnecting to Google through unused time.
-                "idle_mute_min": (0, 30)}
+                "idle_mute_min": (0, 30),
+                "browser_unmute_peaks": (1, 6),
+                "browser_unmute_window": (0.5, 5.0),
+                "browser_unmute_threshold": (0.65, 1.0)}
 # the ones held as on and off rather than a number
-TUNING_FLAGS = {"strip_fillers"}
+TUNING_FLAGS = {"strip_fillers", "browser_unmute_gesture"}
 # the ones held as integers. Left as floats, comparing character counts reads badly.
-TUNING_INT = {"min_chars", "idle_mute_min"}
+TUNING_INT = {"min_chars", "idle_mute_min", "browser_unmute_peaks"}
 
 
 def _builtin_noise(lang: str = "") -> list:

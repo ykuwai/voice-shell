@@ -104,6 +104,8 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'engineGroup','enginePick','engineNote','whisperModel','whisperModelField','whisperModelNote',
                   'browserAsrWarn','browserMic','micSettingsLink','asrLang','asrLangField',
                   'idleMute','idleMuteVal','idleMuteField','idleMinsField','idleMuteOn','idleMuteNote',
+                  'browserGestureField','browserGestureOn','browserGesturePeaks','browserGesturePeaksVal',
+                  'browserGestureWindow','browserGestureWindowVal','browserGestureThreshold','browserGestureThresholdVal',
                   'themeRow','langPick','multiOn','machineName','machineNameField','machineTag',
                   'tabReplace','tabIgnore',
                   'paneReplace','paneIgnore','replaceRows','ignoreRows',
@@ -168,6 +170,7 @@ const MARK_GAIN = 24;
 let audioCtx = null, analyser = null, micStream = null, freq = null;
 let daemonLevel = 0, daemonSpeaking = false;
 let vizFailed = false;
+let vizGeneration = 0, vizStarting = false;
 
 const canvas = el.viz, cx = canvas.getContext('2d');
 let cw = 0, ch = 0;
@@ -472,33 +475,56 @@ async function matchDeviceId(label) {
 }
 
 async function startViz(label) {
+  const generation = ++vizGeneration;
+  vizStarting = true;
+  const outdated = () => generation !== vizGeneration;
+  let stream = null;
   try {
     if (micStream) micStream.getTracks().forEach(tr => tr.stop());
+    micStream = null;
+    analyser = null;
     const id = await matchDeviceId(label);
-    micStream = await navigator.mediaDevices.getUserMedia({
+    if (outdated()) return;
+    stream = await navigator.mediaDevices.getUserMedia({
       audio: id ? {deviceId: {ideal: id}} : true,
     });
+    if (outdated()) {
+      stream.getTracks().forEach(tr => tr.stop());
+      return;
+    }
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
     if (audioCtx.state === 'suspended') await audioCtx.resume();
-    analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 512;
-    analyser.smoothingTimeConstant = 0.7;
-    analyser.minDecibels = -85;
-    analyser.maxDecibels = -25;
-    freq = new Uint8Array(analyser.frequencyBinCount);
-    audioCtx.createMediaStreamSource(micStream).connect(analyser);
+    if (outdated()) {
+      stream.getTracks().forEach(tr => tr.stop());
+      return;
+    }
+    const nextAnalyser = audioCtx.createAnalyser();
+    nextAnalyser.fftSize = 512;
+    nextAnalyser.smoothingTimeConstant = 0.7;
+    nextAnalyser.minDecibels = -85;
+    nextAnalyser.maxDecibels = -25;
+    audioCtx.createMediaStreamSource(stream).connect(nextAnalyser);
+    micStream = stream;
+    analyser = nextAnalyser;
+    freq = new Uint8Array(nextAnalyser.frequencyBinCount);
     vizFailed = false;
   } catch {
+    if (outdated()) return;
+    if (stream && micStream !== stream) stream.getTracks().forEach(tr => tr.stop());
     // The screen still has to hold together where permission is refused (it runs on the level alone)
     vizFailed = true;
     analyser = null;
     if (el.hint.textContent === '') el.hint.textContent = t('hintNoMic');
+  } finally {
+    if (!outdated()) vizStarting = false;
   }
 }
 
 function stopViz() {
+  vizGeneration++;
+  vizStarting = false;
   if (micStream) micStream.getTracks().forEach(tr => tr.stop());
-  micStream = null; analyser = null;
+  micStream = null; analyser = null; freq = null;
 }
 
 // Autoplay is restricted, so we go and get the audio the first time anything is touched
@@ -506,7 +532,7 @@ let vizArmed = false;
 function armViz() {
   if (vizArmed) return;
   vizArmed = true;
-  startViz(el.mic.value || '');
+  syncVizCapture();
 }
 addEventListener('pointerdown', armViz, {once:true});
 addEventListener('keydown', armViz, {once:true});
@@ -1037,6 +1063,7 @@ function setRoute(next) {
   const prev = route;
   const revision = ++routeRevision;
   route = next;
+  resetBrowserGesture();
   if (next !== 'off') lastMode = next;
   paint();                            // show it the instant it is pressed
   inFlight = true;
@@ -1090,6 +1117,7 @@ function setRemoteRoute(next) {
   const prev = route;
   const revision = ++routeRevision;
   route = next;
+  resetBrowserGesture();
   if (next !== 'off') lastMode = next;
   paint();
   inFlight = true;
@@ -1108,13 +1136,13 @@ function applyRouteSideEffects(next) {
   // out.
   if (next === 'off') {
     if (recWanted) { asrPausedByRoute = true; stopRecognition(); }
-    stopViz();
   } else {
-    if (vizArmed) startViz(el.mic.value || '');
+    resetBrowserGesture();
     if (asrPausedByRoute) {
       asrPausedByRoute = false; recWanted = true; startRecognition();
     }
   }
+  syncVizCapture();
   paintBrowserAsr();
 }
 
@@ -2153,7 +2181,7 @@ el.mic.onchange = async () => {
     }
   }, 3000);
   await putJSON('/api/mics', {device: dev});
-  if (vizArmed) startViz(dev);   // put the waveform on the same microphone
+  syncVizCapture(true);
 };
 
 // The recognition language (shown only for Whisper. The other engines spell
@@ -2211,7 +2239,9 @@ el.whisperModel.onblur = saveWhisperModel;   // for the paths where change never
    every 0.5 seconds). */
 let silenceMin = 0.3, silenceMax = 30;      // the range the server allows (overwritten on load)
 let tuning = {idle_mute_min: 5, silence_threshold: 0.015, silence_duration: 1.5,
-              min_chars: 15, strip_fillers: false};
+              min_chars: 15, strip_fillers: false, browser_unmute_gesture: true,
+              browser_unmute_peaks: 3, browser_unmute_window: 2,
+              browser_unmute_threshold: 0.82};
 
 // The threshold slider runs on a log scale. The 0.003 to 0.03 range people
 // actually use takes up more than half the slider, so it can be set finely.
@@ -2239,6 +2269,7 @@ function paintTuning() {
   el.minCharsVal.textContent = tuning.min_chars;
   el.clean.checked = !!tuning.strip_fillers;
   paintIdleMute();
+  paintBrowserGesture();
   paintGauge();
 }
 
@@ -2271,8 +2302,15 @@ async function loadTuning() {
         el.silenceVal.min = r.min; el.silenceVal.max = r.max;
         continue;
       }
-      const node = {min_chars: el.minChars}[k];
+      const node = {min_chars: el.minChars, browser_unmute_peaks: el.browserGesturePeaks,
+                    browser_unmute_window: el.browserGestureWindow,
+                    browser_unmute_threshold: el.browserGestureThreshold}[k];
       if (node) { node.min = r.min; node.max = r.max; }
+    }
+    const thresholdRange = d.range && d.range.browser_unmute_threshold;
+    if (thresholdRange) {
+      tuning.browser_unmute_threshold = Math.min(thresholdRange.max,
+        Math.max(thresholdRange.min, Number(tuning.browser_unmute_threshold) || thresholdRange.min));
     }
     paintTuning();
   } catch {}
@@ -2325,6 +2363,34 @@ el.idleMuteOn.onchange = () => {
   paintIdleMute(); queueTuning();
 };
 el.idleMute.oninput = () => { tuning.idle_mute_min = Number(el.idleMute.value); paintIdleMute(); queueTuning(); };
+
+function paintBrowserGesture() {
+  el.browserGestureOn.checked = !!tuning.browser_unmute_gesture;
+  el.browserGesturePeaks.value = tuning.browser_unmute_peaks;
+  el.browserGesturePeaksVal.textContent = tuning.browser_unmute_peaks;
+  el.browserGestureWindow.value = tuning.browser_unmute_window;
+  el.browserGestureWindowVal.textContent = Number(tuning.browser_unmute_window).toFixed(1) + ' s';
+  el.browserGestureThreshold.value = tuning.browser_unmute_threshold;
+  el.browserGestureThresholdVal.textContent = Math.round(tuning.browser_unmute_threshold * 100) + '%';
+}
+el.browserGestureOn.onchange = () => {
+  tuning.browser_unmute_gesture = el.browserGestureOn.checked;
+  resetBrowserGesture();
+  syncVizCapture();
+  queueTuning();
+};
+el.browserGesturePeaks.oninput = () => {
+  tuning.browser_unmute_peaks = Number(el.browserGesturePeaks.value);
+  paintBrowserGesture(); queueTuning();
+};
+el.browserGestureWindow.oninput = () => {
+  tuning.browser_unmute_window = Number(el.browserGestureWindow.value);
+  paintBrowserGesture(); queueTuning();
+};
+el.browserGestureThreshold.oninput = () => {
+  tuning.browser_unmute_threshold = Number(el.browserGestureThreshold.value);
+  resetBrowserGesture(); paintBrowserGesture(); queueTuning();
+};
 
 
 /* Drag the mark on the meter to change the trigger level.
@@ -2416,10 +2482,45 @@ let recFails = 0;            // failures in a row (used to decide when to give u
 let asrChosen = false;
 const asrActive = () => canBrowserASR && asrChosen;
 
+function syncVizCapture(force = false) {
+  if (shouldKeepVizCapture({
+    route, asrChosen: asrActive(), gestureEnabled: tuning.browser_unmute_gesture, vizArmed,
+  })) {
+    if (force) stopViz();
+    if ((!micStream || !analyser) && !vizStarting) startViz(el.mic.value || '');
+  } else {
+    stopViz();
+  }
+}
+
 const MAX_FAILS = 6;         // this many in a row and we give up and say so
 
 // Reconnect on our own before it cuts. Well short of the measured limit (7 to 10 seconds).
 const RENEW_AFTER_MS = 4500;
+
+const BROWSER_GESTURE_MIN_GAP_MS = 300;
+const BROWSER_GESTURE_MIN_RISE = 0.28;
+let browserGestureState = emptyBrowserGestureState();
+function resetBrowserGesture() {
+  browserGestureState = emptyBrowserGestureState();
+}
+
+function watchBrowserGesture(level, now) {
+  const result = nextBrowserGesture(browserGestureState, {
+    level, now,
+    enabled: route === 'off' && asrActive() && !!tuning.browser_unmute_gesture,
+    active: asrActive(), inFlight,
+    threshold: tuning.browser_unmute_threshold,
+    windowMs: (Number(tuning.browser_unmute_window) || 0) * 1000,
+    peakCount: tuning.browser_unmute_peaks,
+    minGapMs: BROWSER_GESTURE_MIN_GAP_MS,
+    minRise: BROWSER_GESTURE_MIN_RISE,
+  });
+  browserGestureState = result.state;
+  if (!result.triggered) return;
+  lastVoiceAt = now;
+  setRoute(lastMode);
+}
 
 function browserLang() {
   // The language to recognize. Not the language the screen is in, the language you speak.
@@ -2557,7 +2658,10 @@ function disableBrowserASR(why) {
 setInterval(() => {
   if (!asrActive() || !analyser || vizFailed) return;
   analyser.getByteFrequencyData(freq);
-  if (browserLevel() > 0.12) lastVoiceAt = performance.now();
+  const now = performance.now();
+  const level = browserLevel();
+  if (route !== 'off' && level > 0.12) lastVoiceAt = now;
+  watchBrowserGesture(level, now);
 }, 150);
 
 /* The watch that reconnects ahead of time while it is quiet.
@@ -2956,6 +3060,7 @@ function paintBrowserAsr() {
   el.asrLangField.hidden = !asrChosen;
   el.idleMuteField.hidden = !asrChosen;
   el.idleMuteNote.hidden = !asrChosen;
+  el.browserGestureField.hidden = !asrChosen;
   paintIdleMute();
   el.engineNote.textContent = t(asrChosen ? 'browserAsrNote' : 'localAsrNote');
   // For turning listening on and off, paintPower() decides both whether it
@@ -2984,6 +3089,7 @@ async function loadEngines() {
   const cur = d.chosen || BROWSER_ENGINE;
   chosenEngine = cur;
   asrChosen = canBrowserASR && cur === BROWSER_ENGINE;
+  asrPausedByRoute = asrChosen && route === 'off';
   recWanted = asrChosen && !asrPausedByRoute;
 
   // If another tab or a command switched it, follow along here too.
@@ -2992,9 +3098,12 @@ async function loadEngines() {
   if (was && !asrChosen) {
     stopRecognition();
     beat('gone');
-  } else if (!was && asrChosen && vizArmed) {
+  } else if (!was && asrChosen && recWanted && vizArmed) {
     startRecognition();
+  } else if (asrChosen && !recWanted) {
+    stopRecognition();
   }
+  syncVizCapture();
   paintEnginePick();
   paintBrowserAsr();
 }
@@ -3007,19 +3116,23 @@ el.enginePick.onchange = async () => {
   try {
     if (pick === BROWSER_ENGINE) {
       asrChosen = true;
-      recWanted = true;
-      asrPausedByRoute = false;
+      asrPausedByRoute = route === 'off';
+      recWanted = !asrPausedByRoute;
       lastVoiceAt = performance.now();
+      syncVizCapture();
       // Take the model side down first. Connect before it is down and whatever is said in between arrives twice.
       if (engineOnish()) {
         engine = 'stopping';
         paintPower();
         await post('/api/engine', {running: false});
       }
-      startRecognition();
+      if (recWanted) startRecognition();
     } else {
       asrChosen = false;
+      recWanted = false;
+      asrPausedByRoute = false;
       stopRecognition();
+      syncVizCapture();
       engine = 'booting';
       startedAt = Date.now();
       paintPower();
