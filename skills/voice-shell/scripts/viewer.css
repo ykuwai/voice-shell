@@ -135,8 +135,8 @@
     margin:0; font-size:.95rem; font-weight:600; letter-spacing:.01em;
     white-space:nowrap;
   }
-  .mark { display:flex; align-items:center; width:24px; height:18px; flex:none; }
-  .mark svg { display:block; width:24px; height:18px; overflow:visible; }
+  .logo-mark { display:flex; align-items:center; width:24px; height:18px; flex:none; }
+  .logo-mark svg { display:block; width:24px; height:18px; overflow:visible; }
 
   /* The four ways through the screen. The same node is moved between the main
      screen's header and the two sheet headings, so margin-left:auto is here
