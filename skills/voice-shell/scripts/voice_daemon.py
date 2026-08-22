@@ -2322,14 +2322,26 @@ def main():
     # are, with the time inside it compared against. Deleting it here would tear
     # it out from under the loop that has to see it.
     drop_path = Path(args.log_file).parent / "drop_at"
+    drop_done_path = Path(args.log_file).parent / "drop_done"
 
     def want_drop():
         try:
-            return float(drop_path.read_text(encoding="utf-8") or 0)
-        except (OSError, ValueError):
-            return 0.0      # Not there yet, or read mid-write. Seen next round
+            raw = drop_path.read_text(encoding="utf-8").strip()
+            if raw.startswith("{"):
+                item = json.loads(raw)
+                return float(item["at"]), str(item["id"])
+            return float(raw or 0), raw
+        except (OSError, ValueError, KeyError, TypeError):
+            return 0.0, ""      # Not there yet, or read mid-write. Seen next round
 
     args.want_drop = want_drop
+
+    def mark_drop_done(drop_id):
+        if drop_id is None:
+            return
+        tmp = drop_done_path.with_suffix(".tmp")
+        tmp.write_text(str(drop_id), encoding="utf-8")
+        os.replace(tmp, drop_done_path)
 
     # The send button on screen writes the time it was pressed here, and the
     # judging is done inside the VAD loop as well. Down where settled text
@@ -2520,9 +2532,14 @@ def main():
                 # as one that spanned a mute and thrown away as 「マイク切」.
                 if ev["type"] == "dropped":
                     partial_path.write_text("", encoding="utf-8")
+                    mark_drop_done(ev.get("drop_id"))
                     print(f"(discarded) {ev.get('text', '')[:40]}",
                           file=sys.stderr, flush=True)
                     speaking_since = None
+                    continue
+
+                if ev["type"] == "drop_done":
+                    mark_drop_done(ev.get("drop_id"))
                     continue
 
                 if muted_now:

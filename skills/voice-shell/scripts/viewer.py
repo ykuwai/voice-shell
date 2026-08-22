@@ -159,6 +159,8 @@ class Tail:
         self.path = path
         self.clients: set[web.WebSocketResponse] = set()
         self.history: list[dict] = []
+        self.broadcast_lock = asyncio.Lock()
+        self.drop_pending = None
 
     def read_existing(self):
         """Read everything up to startup (open it later, the history is there)."""
@@ -204,16 +206,35 @@ class Tail:
                 # this log directly through Monitor). Mixed into the browser's
                 # utterance list it looks broken, so it is not pushed.
                 if rec and "system_warning" not in rec:
-                    self.history.append(rec)
-                    await self.broadcast(rec)
+                    if await self.broadcast_result(rec):
+                        self.history.append(rec)
 
     async def broadcast(self, rec: dict):
+        async with self.broadcast_lock:
+            await self._broadcast_locked(rec)
+
+    async def _broadcast_locked(self, rec: dict):
         payload = json.dumps(rec, ensure_ascii=False)
         for ws in list(self.clients):
             try:
                 await ws.send_str(payload)
             except Exception:
                 self.clients.discard(ws)
+
+    async def broadcast_result(self, rec: dict) -> bool:
+        async with self.broadcast_lock:
+            if self.drop_pending is not None:
+                return False
+            await self._broadcast_locked(rec)
+            return True
+
+    async def finish_drop(self, request_id: str):
+        async with self.broadcast_lock:
+            if self.drop_pending != request_id:
+                return False
+            await self._broadcast_locked({"drop_done": request_id})
+            self.drop_pending = None
+            return True
 
     async def watch_partial(self):
         """Push the mid-recognition text (reading the file the daemon overwrites)."""
@@ -226,7 +247,7 @@ class Tail:
                 text = ""
             if text != last:
                 last = text
-                await self.broadcast({"partial": text})
+                await self.broadcast_result({"partial": text})
             await asyncio.sleep(0.2)
 
     async def watch_level(self):
@@ -362,7 +383,7 @@ class Tail:
             for line in lines[seen:]:
                 rec = self._parse(line)
                 if rec:
-                    await self.broadcast({"held": rec.get("text", "")})
+                    await self.broadcast_result({"held": rec.get("text", "")})
             seen = len(lines)
             await asyncio.sleep(0.25)
 
@@ -423,6 +444,10 @@ async def main_async(args):
     pause_file = state / "paused"
     hold_file = state / "held.jsonl"
     mute_file = state / "muted"
+    partial_file = state / "partial.txt"
+    drop_path = state / "drop_at"
+    drop_done_path = state / "drop_done"
+    drop_lock = asyncio.Lock()
 
     pid_file = state / "daemon.pid"
 
@@ -871,14 +896,37 @@ async def main_async(args):
     async def handle_drop_current(_req):
         """Throw away the line being recognized right now.
 
-        Only the time of the press is left behind, and the recognition loop
-        does the judging. Comparing that time with the moment the utterance
-        began keeps a press landing after the settle from dragging in the next
-        utterance. The loop reads this file and leaves it there, so nothing is
-        deleted here either.
+        The request id is left behind, and the recognition loop does the
+        judging. Comparing its timestamp with the moment the utterance began
+        keeps a press landing after the settle from dragging in the next
+        utterance. The response waits for the daemon to acknowledge the event.
         """
-        (state / "drop_at").write_text(str(time.time()), encoding="utf-8")
-        return web.json_response({"ok": True})
+        body = await _req.json()
+        request = str(body.get("id") or time.time_ns())[:80]
+        async with drop_lock:
+            tail.drop_pending = request
+            tmp = drop_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"id": request, "at": time.time()}), encoding="utf-8")
+            os.replace(tmp, drop_path)
+            if not engine_running():
+                partial_file.write_text("", encoding="utf-8")
+                await tail.finish_drop(request)
+                return web.json_response({"ok": True, "id": request, "dropped": "inactive"})
+
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline:
+                try:
+                    done = drop_done_path.read_text(encoding="utf-8").strip() == request
+                    cleared = partial_file.read_text(encoding="utf-8") == ""
+                    if done and cleared:
+                        await tail.finish_drop(request)
+                        return web.json_response({"ok": True, "id": request})
+                except OSError:
+                    pass
+                await asyncio.sleep(0.02)
+            if tail.drop_pending == request:
+                tail.drop_pending = None
+            return web.json_response({"error": "drop_timeout"}, status=504)
 
     async def handle_send_current(_req):
         """Send the line being recognized right now, without waiting the pause out.

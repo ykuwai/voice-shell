@@ -1098,12 +1098,13 @@ def read_blocks(device: str, in_sr: int,
 def stream_utterances(model, args, should_stop=lambda: False):
     """Read the mic and yield recognition events.
 
-    The events (dicts) yielded are these 4.
+    The events (dicts) yielded are these.
         {"type": "level",   "rms": float, "speaking": bool,
          "silence_run": float}                                every block
         {"type": "partial", "text": str, "language": str}     mid-recognition
         {"type": "final",   "text": str, "language": str}     utterance settled
         {"type": "dropped", "text": str}                      utterance thrown away
+        {"type": "drop_done", "drop_id": str}                no active utterance
 
     silence_run on a level is how far the silence that settles an utterance has
     run, in seconds of the audio taken in, and 0 while no utterance is running.
@@ -1149,7 +1150,8 @@ def stream_utterances(model, args, should_stop=lambda: False):
     drop_wait = 0
     # A press left behind by an earlier run must not throw away the first
     # utterance of this one, so whatever the file holds now counts as handled.
-    last_drop = (want_drop() if want_drop is not None else 0.0) or 0.0
+    last_drop = (want_drop() if want_drop is not None else (0.0, "")) or (0.0, "")
+    last_drop_at = float(last_drop[0] if isinstance(last_drop, tuple) else last_drop)
     # The send button leaves its press time in a file of its own, read the same
     # way and never deleted either.
     want_send = getattr(args, "want_send", None)
@@ -1178,12 +1180,17 @@ def stream_utterances(model, args, should_stop=lambda: False):
         after it too. A press counts as spent whichever way the compare goes,
         so it never fires twice.
         """
-        nonlocal last_drop
+        nonlocal last_drop_at
         asked = (want_drop() if want_drop is not None else 0.0) or 0.0
-        if asked <= last_drop:
-            return False
-        last_drop = asked
-        return speaking_at is not None and asked >= speaking_at
+        if isinstance(asked, tuple):
+            at, drop_id = asked
+        else:
+            at, drop_id = float(asked), str(asked)
+        if at <= last_drop_at:
+            return None
+        last_drop_at = at
+        return {"id": drop_id,
+                "active": speaking_at is not None and at >= speaking_at}
 
     def cut():
         """Let go of the utterance in progress, the collected audio included.
@@ -1282,8 +1289,11 @@ def stream_utterances(model, args, should_stop=lambda: False):
             drop_wait -= 1
             if drop_wait <= 0:
                 drop_wait = max(1, round(DROP_POLL_SEC / BLOCK_SEC))
-                if drop_asked():
-                    yield cut()
+                drop = drop_asked()
+                if drop:
+                    if drop["active"]:
+                        yield cut()
+                    yield {"type": "drop_done", "drop_id": drop["id"]}
                     continue
 
         # Settled before this block is taken in as well, and for the mirror of
@@ -1355,9 +1365,13 @@ def stream_utterances(model, args, should_stop=lambda: False):
                 # out in the gap after the press writes the cancelled words back
                 # onto a screen that has just been wiped, and they blink there
                 # until the watch above comes round.
-                if want_drop is not None and drop_asked():
-                    yield cut()
-                    continue
+                if want_drop is not None:
+                    drop = drop_asked()
+                    if drop:
+                        if drop["active"]:
+                            yield cut()
+                        yield {"type": "drop_done", "drop_id": drop["id"]}
+                        continue
                 # The send button gets no look of its own here, unlike the
                 # discard above. That one is here because a partial slipping out
                 # after a press writes cancelled words back onto a wiped screen.
@@ -1379,9 +1393,13 @@ def stream_utterances(model, args, should_stop=lambda: False):
             # DROP_POLL_SEC, and a press landing in the gap right before the
             # settle would arrive too late, with the line it meant to stop
             # already on its way out.
-            if want_drop is not None and drop_asked():
-                yield cut()
-                continue
+            if want_drop is not None:
+                drop = drop_asked()
+                if drop:
+                    if drop["active"]:
+                        yield cut()
+                    yield {"type": "drop_done", "drop_id": drop["id"]}
+                    continue
             # A press landing in the gap right before the settle is still a
             # press. The line goes out either way at this point, so what is at
             # stake is only the flag, and the flag is what tells the caller to

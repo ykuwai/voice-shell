@@ -631,6 +631,14 @@ let draftTouched = false;
 let shownMode = 'live';  // the mode shown on screen. The small mic takes its color from this
 let asrPausedByRoute = false;   // whether browser recognition was stopped for the pause
 let inFlight = false;    // keeps polling from rewinding things mid-switch
+let routeRevision = 0;
+let routeQueue = Promise.resolve();
+let wsMessageQueue = Promise.resolve();
+let discardInProgress = 0;
+let wsMessageNumber = 0;
+let discardResultCutoff = 0;
+let discardQueue = Promise.resolve();
+const dropBarriers = new Set();
 
 function paint() {
   // While Edit this one is on, keep showing instant. Inside it is holding, but
@@ -1025,27 +1033,69 @@ function stepCue(now, target) {
   return cueShown;
 }
 
-async function setRoute(next) {
+function setRoute(next) {
   const prev = route;
+  const revision = ++routeRevision;
   route = next;
   if (next !== 'off') lastMode = next;
   paint();                            // show it the instant it is pressed
   inFlight = true;
+  const task = routeQueue.then(() => changeRoute(next, prev, revision, true));
+  routeQueue = task.catch(() => {});
+  return task;
+}
+
+async function changeRoute(next, prev, revision, syncServer) {
+  let applied = false;
   try {
+    if (revision !== routeRevision) return;
     const w = ROUTE[next];
-    // Unmute before it starts collecting, and stop collecting when switching off
-    await post('/api/pause', {paused: w.paused});
-    await post('/api/mute', {muted: w.muted});
+    if (prev === 'off' && next !== 'off' && engineOnish() && !asrActive()) {
+      const discarded = await discardCurrent({announce: false});
+      if (!discarded) throw new Error('Could not discard current utterance');
+      if (revision !== routeRevision) return;
+    }
+    if (syncServer) {
+      await post('/api/pause', {paused: w.paused});
+      if (revision !== routeRevision) return;
+      await post('/api/mute', {muted: w.muted});
+    }
+    if (revision !== routeRevision) return;
+    applyRouteSideEffects(next);
+    applied = true;
   } catch (err) {
+    if (revision !== routeRevision) return;
+    let rollbackError = null;
+    if (!syncServer && prev === 'off' && next !== 'off') {
+      try {
+        const response = await post('/api/mute', {muted: true});
+        if (!response.ok) rollbackError = new Error(`HTTP ${response.status}`);
+      } catch (rollbackErr) { rollbackError = rollbackErr; }
+    }
     route = prev;
+    if (prev !== 'off') lastMode = prev;
     paint();
-    el.hint.textContent = t('switchFailed', {err: err.message});
-    return;
+    applyRouteSideEffects(prev);
+    const message = rollbackError ? `${err.message} (${rollbackError.message})` : err.message;
+    el.hint.textContent = t('switchFailed', {err: message});
   } finally {
-    inFlight = false;
+    if (revision === routeRevision) {
+      inFlight = false;
+      if (applied) refreshState();
+    }
   }
-  applyRouteSideEffects(next);
-  refreshState();
+}
+
+function setRemoteRoute(next) {
+  const prev = route;
+  const revision = ++routeRevision;
+  route = next;
+  if (next !== 'off') lastMode = next;
+  paint();
+  inFlight = true;
+  const task = routeQueue.then(() => changeRoute(next, prev, revision, false));
+  routeQueue = task.catch(() => {});
+  return task;
 }
 
 /* Cleaning up after switching off. A switch made by voice runs through the
@@ -1208,10 +1258,45 @@ for (const b of [el.miniMic, el.helpMini]) b.onclick = () => el.segOff.click();
 function connect() {
   const ws = new WebSocket(`ws://${location.host}/ws`);
 
-  ws.onopen = () => refreshState();
+  ws.onopen = () => {
+    dropBarriers.clear();
+    refreshState();
+  };
 
   ws.onmessage = ev => {
-    const m = JSON.parse(ev.data);
+    let message = null;
+    try { message = JSON.parse(ev.data); } catch {}
+    if (message?.drop_done) dropBarriers.delete(message.drop_done);
+    const packet = {ev, message, number: ++wsMessageNumber,
+                    discardInProgress: discardInProgress > 0};
+    wsMessageQueue = wsMessageQueue
+      .then(() => handleWsMessage(packet))
+      .catch(() => {});
+  };
+
+  ws.onclose = ev => {
+    // If the server folded up (voice mode ended), stop recognition too.
+    // Only trying to reconnect leaves the microphone open when you thought it
+    // was stopped, and the audio keeps going out. 1001 = GOING_AWAY.
+    if (ev.code === 1001) {
+      dropBarriers.clear();
+      stopRecognition();
+      setState('off', t('statusEnded'));
+      el.hint.textContent = t('hintEnded');
+      return;
+    }
+    dropBarriers.clear();
+    setState('down', t('statusDown'));
+    setTimeout(connect, 2000);
+  };
+}
+
+async function handleWsMessage({ev, message, number, discardInProgress: wasDiscarding}) {
+    await routeQueue;
+    const m = message || JSON.parse(ev.data);
+    if (m.drop_done) return;
+    const result = 'partial' in m || 'held' in m || m.text != null;
+    if (result && (wasDiscarding || number <= discardResultCutoff || dropBarriers.size)) return;
 
     if ('level' in m) {
       // Catch only the moments voice starts and breaks off. level is not sent
@@ -1239,9 +1324,7 @@ function connect() {
       // instant you pressed, so here it matches and nothing happens, which
       // means it only fires when the change came from outside.
       if (m.muted !== (route === 'off')) {
-        route = m.muted ? 'off' : lastMode;
-        paint();
-        applyRouteSideEffects(route);
+        await setRemoteRoute(m.muted ? 'off' : lastMode);
       }
       return;
     }
@@ -1328,21 +1411,6 @@ function connect() {
       el.stream.textContent = '';
       el.tray.classList.add('idle');
     }
-  };
-
-  ws.onclose = ev => {
-    // If the server folded up (voice mode ended), stop recognition too.
-    // Only trying to reconnect leaves the microphone open when you thought it
-    // was stopped, and the audio keeps going out. 1001 = GOING_AWAY.
-    if (ev.code === 1001) {
-      stopRecognition();
-      setState('off', t('statusEnded'));
-      el.hint.textContent = t('hintEnded');
-      return;
-    }
-    setState('down', t('statusDown'));
-    setTimeout(connect, 2000);
-  };
 }
 
 // Grow the height to fit the contents (so nothing scrolls inside)
@@ -1455,9 +1523,11 @@ el.fresh.onclick = () => {
 };
 
 async function refreshState() {
+  const revision = routeRevision;
   if (inFlight) return;               // never overwrite mid-switch
   try {
     const s = await (await fetch('/api/state')).json();
+    if (revision !== routeRevision) return;
 
     // Say something when the screen file has been replaced. The floating
     // window has no way to reload, so this is where you get back from.
@@ -1593,27 +1663,61 @@ el.editOnce.onclick = editThisOne;
    progress would keep growing and take the correction down with it.
    With browser recognition, we drop the next one that settles ourselves. */
 let dropNextLocal = false;
-el.dropOne.onclick = async () => {
-  el.stream.textContent = '';
-  // Throwing it away and leaving the drawing to fill would say it is on its way
-  // out at the moment you just stopped it.
-  clearSendCountdown();
-  el.tray.classList.add('idle');
-  if (asrActive()) {
-    // Clearing the screen alone brings it right back. Recognition keeps
-    // putting out everything up to that point as an interim result, so we fold
-    // up the whole current session and empty what has piled up.
-    dropNextLocal = true;
-    const r = rec;
-    rec = null; recRunning = false;
-    if (r) { try { r.abort(); } catch {} }
-    if (recWanted) setTimeout(startRecognition, 120);
-  } else {
-    try { await post('/api/drop-current'); } catch {}
+function newDropId() {
+  return globalThis.crypto?.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+}
+
+function discardCurrent(options) {
+  const task = discardQueue.then(() => discardCurrentNow(options));
+  discardQueue = task.catch(() => {});
+  return task;
+}
+
+async function discardCurrentNow({announce = true} = {}) {
+  discardResultCutoff = Math.max(discardResultCutoff, wsMessageNumber);
+  discardInProgress++;
+  try {
+    if (asrActive()) {
+      el.stream.textContent = '';
+      clearSendCountdown();
+      el.tray.classList.add('idle');
+      // Clearing the screen alone brings it right back. Recognition keeps
+      // putting out everything up to that point as an interim result, so we fold
+      // up the whole current session and empty what has piled up.
+      dropNextLocal = true;
+      const r = rec;
+      rec = null; recRunning = false;
+      if (r) { try { r.abort(); } catch {} }
+      if (recWanted) setTimeout(startRecognition, 120);
+    } else {
+      const id = newDropId();
+      dropBarriers.add(id);
+      let response;
+      try {
+        response = await post('/api/drop-current', {id});
+        const body = await response.json();
+        if (!response.ok || body.ok !== true || body.id !== id) {
+          dropBarriers.delete(id);
+          return false;
+        }
+      } catch {
+        dropBarriers.delete(id);
+        return false;
+      }
+      discardResultCutoff = Math.max(discardResultCutoff, wsMessageNumber);
+      el.stream.textContent = '';
+      clearSendCountdown();
+      el.tray.classList.add('idle');
+    }
+    if (announce) say(t('droppedOne'), 4);
+    paint();
+    return true;
+  } finally {
+    discardInProgress--;
   }
-  say(t('droppedOne'), 4);
-  paint();
-};
+}
+
+el.dropOne.onclick = () => discardCurrent();
 
 /* Send this one now, without sitting out the rest of the wait.
    We hand over the time it was pressed and let the daemon decide, the mirror of
