@@ -163,6 +163,7 @@ const format = raw => raw;
    if permission is refused we run on nothing but the level that comes over the
    WebSocket (level.txt). */
 const MARK_BASE_HEIGHTS = [23, 36, 18, 31, 20];
+const MARK_MIN_HEIGHT = 8;
 const MARK_GAIN = 24;
 let audioCtx = null, analyser = null, micStream = null, freq = null;
 let daemonLevel = 0, daemonSpeaking = false;
@@ -444,13 +445,12 @@ function paintFrame(now) {
     drawMic(m.cx, m.w, m.h, cssVar(shownMode === 'hold' ? '--accent-2' : '--accent'));
   }
 
-  // The five bars in the logo use the same voice signal as the main drawing.
-  // Sample across the spectrum so the mark keeps the balanced shape of the SVG
-  // instead of crowding all five bars into the high end.
   const marks = el.logoMark.querySelectorAll('rect');
   const markLevel = route === 'off' ? 0 : micLevel;
   for (let i = 0; i < marks.length; i++) {
-    const h = Math.min(60, MARK_BASE_HEIGHTS[i] + markLevel * MARK_GAIN);
+    const h = route === 'off'
+      ? MARK_MIN_HEIGHT
+      : Math.min(60, MARK_BASE_HEIGHTS[i] + markLevel * MARK_GAIN);
     marks[i].setAttribute('y', ((66 - h) / 2).toFixed(2));
     marks[i].setAttribute('height', h.toFixed(2));
   }

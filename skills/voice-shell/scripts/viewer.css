@@ -135,7 +135,6 @@
     margin:0; font-size:.95rem; font-weight:600; letter-spacing:.01em;
     white-space:nowrap;
   }
-  /* The wave in the logo. It moves a little with the level being picked up */
   .mark { display:flex; align-items:center; width:24px; height:18px; flex:none; }
   .mark svg { display:block; width:24px; height:18px; overflow:visible; }
 
