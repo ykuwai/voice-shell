@@ -8,6 +8,7 @@ It uses neither GPU nor mic, so it can run alongside voice mode.
 """
 import argparse
 import asyncio
+from contextlib import contextmanager
 import json
 import os
 import signal
@@ -18,6 +19,25 @@ from pathlib import Path
 
 from aiohttp import web, WSCloseCode
 from port_config import configured_port, parse_port
+
+if sys.platform.startswith("win"):
+    import msvcrt
+
+    def _lock_asr_lease(file):
+        file.seek(0)
+        msvcrt.locking(file.fileno(), msvcrt.LK_NBLCK, 1)
+
+    def _unlock_asr_lease(file):
+        file.seek(0)
+        msvcrt.locking(file.fileno(), msvcrt.LK_UNLCK, 1)
+else:
+    import fcntl
+
+    def _lock_asr_lease(file):
+        fcntl.flock(file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def _unlock_asr_lease(file):
+        fcntl.flock(file, fcntl.LOCK_UN)
 
 # For the same reason as voice_daemon.py (the "/tmp" mismatch on Windows),
 # a real path handed over by voice-shell.sh wins if there is one.
@@ -55,6 +75,125 @@ TUNING_RANGE = {"silence_threshold": (0.003, 0.15),
 TUNING_FLAGS = {"strip_fillers", "browser_unmute_gesture"}
 # the ones held as integers. Left as floats, comparing character counts reads badly.
 TUNING_INT = {"min_chars", "idle_mute_min", "browser_unmute_peaks"}
+
+ASR_BEAT_STALE = 15
+
+
+def _read_json(path: Path, fallback):
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return fallback
+    return value
+
+
+def _write_json(path: Path, value) -> None:
+    temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temp.write_text(json.dumps(value), encoding="utf-8")
+    os.replace(temp, path)
+
+
+@contextmanager
+def _asr_lease_lock(owner_path: Path):
+    lock = None
+    try:
+        owner_path.parent.mkdir(parents=True, exist_ok=True)
+        lock = open(owner_path.with_name("asr-lease.lock"), "a+", encoding="utf-8")
+        lock.seek(0)
+        lock.write("x")
+        lock.flush()
+        _lock_asr_lease(lock)
+    except OSError:
+        if lock:
+            lock.close()
+        yield False
+        return
+    try:
+        yield True
+    finally:
+        try:
+            _unlock_asr_lease(lock)
+        finally:
+            lock.close()
+
+
+def live_asr_beats(path: Path, now: float = None) -> dict:
+    now = time.time() if now is None else now
+    raw = _read_json(path, {})
+    if not isinstance(raw, dict):
+        return {}
+    return {tab: beat for tab, beat in raw.items()
+            if isinstance(tab, str) and isinstance(beat, dict)
+            and isinstance(beat.get("t"), (int, float))
+            and now - beat["t"] < ASR_BEAT_STALE}
+
+
+def read_asr_owner(path: Path, now: float = None) -> dict:
+    now = time.time() if now is None else now
+    owner = _read_json(path, {})
+    if (not isinstance(owner, dict) or not isinstance(owner.get("tab"), str)
+            or not isinstance(owner.get("t"), (int, float))
+            or now - owner["t"] >= ASR_BEAT_STALE):
+        return {}
+    return owner
+
+
+def update_asr_lease(beats_path: Path, owner_path: Path, tab: str, state: str,
+                     now: float = None) -> tuple:
+    now = time.time() if now is None else now
+    with _asr_lease_lock(owner_path) as locked:
+        if not locked:
+            return None
+        beats = live_asr_beats(beats_path, now)
+        owner = read_asr_owner(owner_path, now)
+        if state == "gone":
+            beats.pop(tab, None)
+            if owner.get("tab") == tab:
+                owner = {}
+        else:
+            recorded_state = ("conflict" if state in {"listening", "conflict"}
+                              and owner and owner.get("tab") != tab else state)
+            beats[tab] = {"t": now, "state": recorded_state}
+            if state == "denied" and owner.get("tab") == tab:
+                owner = {}
+            elif owner.get("tab") == tab:
+                owner = {"tab": tab, "t": now}
+            elif state in {"listening", "conflict"} and not owner:
+                owner = {"tab": tab, "t": now}
+        try:
+            _write_json(beats_path, beats)
+            _write_json(owner_path, owner)
+        except OSError:
+            return None
+        return beats, owner, owner.get("tab") == tab
+
+
+def read_asr_lease(beats_path: Path, owner_path: Path, now: float = None):
+    now = time.time() if now is None else now
+    with _asr_lease_lock(owner_path) as locked:
+        if not locked:
+            return None
+        return live_asr_beats(beats_path, now), read_asr_owner(owner_path, now)
+
+
+def owns_asr_lease(beats_path: Path, owner_path: Path, tab: str, now: float = None):
+    lease = read_asr_lease(beats_path, owner_path, now)
+    if lease is None:
+        return None, None
+    _, owner = lease
+    return owner.get("tab") == tab, owner
+
+
+def append_asr_owned(owner_path: Path, tab: str, path: Path, line: str):
+    with _asr_lease_lock(owner_path) as locked:
+        if not locked:
+            return None, None
+        owner = read_asr_owner(owner_path)
+        if owner.get("tab") != tab:
+            return False, owner
+        with open(path, "a", encoding="utf-8") as out:
+            out.write(line)
+        return True, owner
 
 
 def _builtin_noise(lang: str = "") -> list:
@@ -653,16 +792,10 @@ async def main_async(args):
     # opened, the mic was denied), and someone told to go ahead and speak ends
     # up talking into a void.
     beat_file = state / "asr-heartbeat.json"
-    BEAT_STALE = 15        # nothing heard for this long means that page is gone
+    asr_owner_file = state / "asr-owner.json"
 
-    def read_beats() -> dict:
-        try:
-            d = json.loads(beat_file.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return {}
-        now = time.time()
-        return {k: v for k, v in d.items()
-                if isinstance(v, dict) and now - v.get("t", 0) < BEAT_STALE}
+    def read_lease():
+        return read_asr_lease(beat_file, asr_owner_file)
 
     async def handle_heartbeat(req):
         body = await req.json()
@@ -670,22 +803,28 @@ async def main_async(args):
         st = str(body.get("state") or "")[:20]
         if not tab:
             return web.json_response({"error": "no tab"}, status=400)
-        beats = read_beats()
-        if st == "gone":
-            beats.pop(tab, None)
-        else:
-            beats[tab] = {"t": time.time(), "state": st}
-        beat_file.write_text(json.dumps(beats), encoding="utf-8")
-        return web.json_response({"tabs": len(beats)})
+        lease = update_asr_lease(beat_file, asr_owner_file, tab, st)
+        if lease is None:
+            return web.json_response({"error": "asr_lease_unavailable"}, status=503)
+        beats, owner, owns = lease
+        data = {"tabs": len(beats), "owner": owner or None,
+                "leaseSeconds": ASR_BEAT_STALE}
+        if st in {"listening", "conflict"} and not owns:
+            return web.json_response({"error": "asr_owner_conflict", **data}, status=409)
+        return web.json_response(data)
 
     async def handle_asr_status(_req):
         """Whether browser recognition is really listening. voice-shell.sh status reads it."""
-        beats = read_beats()
+        lease = read_lease()
+        if lease is None:
+            return web.json_response({"error": "asr_lease_unavailable"}, status=503)
+        beats, owner = lease
         states = [v.get("state") for v in beats.values()]
         return web.json_response({
             "tabs": len(beats),
             "listening": states.count("listening"),
             "denied": states.count("denied"),
+            "owner": owner or None,
         })
 
     async def handle_engines(_req):
@@ -808,6 +947,15 @@ async def main_async(args):
         text = (body.get("text") or "").strip()
         if not text:
             return web.json_response({"error": "empty"}, status=400)
+        tab = str(body.get("tab") or "")[:40]
+        if not tab:
+            return web.json_response({"error": "asr_owner_required"}, status=400)
+        owns, owner = owns_asr_lease(beat_file, asr_owner_file, tab)
+        if owns is None:
+            return web.json_response({"error": "asr_lease_unavailable"}, status=503)
+        if not owns:
+            return web.json_response({"error": "asr_owner_conflict",
+                                      "owner": owner or None}, status=409)
 
         import voice_daemon as vd
 
@@ -816,7 +964,7 @@ async def main_async(args):
         # The page side excludes it as well, but tabs can be opened more than
         # once, so it is stopped here too.
         if engine_running():
-            return web.json_response({"dropped": "daemon_running"}, status=409)
+            return web.json_response({"error": "daemon_running"}, status=409)
 
         # Which language this was spoken in. The page is the only one who knows,
         # since browser recognition keeps its speak language in the browser. The
@@ -885,9 +1033,14 @@ async def main_async(args):
 
         stamp = time.strftime("%H:%M:%S")
         if force_hold or pause_file.exists():
-            with open(hold_file, "a", encoding="utf-8") as h:
-                h.write(json.dumps({"time": stamp, "text": text},
-                                   ensure_ascii=False) + "\n")
+            written, owner = append_asr_owned(
+                asr_owner_file, tab, hold_file,
+                json.dumps({"time": stamp, "text": text}, ensure_ascii=False) + "\n")
+            if written is None:
+                return web.json_response({"error": "asr_lease_unavailable"}, status=503)
+            if not written:
+                return web.json_response({"error": "asr_owner_conflict",
+                                          "owner": owner or None}, status=409)
             if force_hold:
                 vd.note_voice_cmd(args.log_file, "held", "", text)
             return web.json_response({"held": text})
@@ -897,8 +1050,14 @@ async def main_async(args):
         to = vd.resolve_target(args.log_file)
         if to:
             rec_out["to"] = to
-        with open(args.log_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(rec_out, ensure_ascii=False) + "\n")
+        written, owner = append_asr_owned(
+            asr_owner_file, tab, args.log_file,
+            json.dumps(rec_out, ensure_ascii=False) + "\n")
+        if written is None:
+            return web.json_response({"error": "asr_lease_unavailable"}, status=503)
+        if not written:
+            return web.json_response({"error": "asr_owner_conflict",
+                                      "owner": owner or None}, status=409)
         return web.json_response({"time": stamp, "text": text})
 
     async def handle_drop_current(_req):

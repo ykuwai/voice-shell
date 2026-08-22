@@ -102,7 +102,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'mic','recogLang','recogLangField','thresh','threshVal','gaugeFill','gaugeMark',
                   'silence','silenceVal','minChars','minCharsVal','clean',
                   'engineGroup','enginePick','engineNote','whisperModel','whisperModelField','whisperModelNote',
-                  'browserAsrWarn','browserMic','micSettingsLink','asrLang','asrLangField',
+                  'browserAsrWarn','asrConflict','browserMic','micSettingsLink','asrLang','asrLangField',
                   'idleMute','idleMuteVal','idleMuteField','idleMinsField','idleMuteOn','idleMuteNote',
                   'browserGestureField','browserGestureOn','browserGesturePeaks','browserGesturePeaksVal',
                   'browserGestureWindow','browserGestureWindowVal','browserGestureThreshold','browserGestureThresholdVal',
@@ -2473,6 +2473,8 @@ let recWanted = false;       // whether the setting says to use it
 let lastVoiceAt = 0;         // when a voice was last coming in
 let recStartedAt = 0;        // when the current session was opened
 let recFails = 0;            // failures in a row (used to decide when to give up)
+let recStarting = false;
+let recGeneration = 0;
 
 /* Whether browser recognition is set to be used and whether it is running
    right now are two different things. Treating them as one meant that the
@@ -2481,6 +2483,8 @@ let recFails = 0;            // failures in a row (used to decide when to give u
    that way). Whether the screen is live is read off the setting (asrChosen). */
 let asrChosen = false;
 const asrActive = () => canBrowserASR && asrChosen;
+let asrOwnsLease = false;
+let asrConflict = null;
 
 function syncVizCapture(force = false) {
   if (shouldKeepVizCapture({
@@ -2551,7 +2555,7 @@ const spokenLang = () => asrActive() ? browserLang() : '';
 // we do not translate, for the reason written at the head of this file).
 const langName = code => (UI_LANGS.find(([c]) => c === code) || [, code])[1];
 
-function newRecognition() {
+function newRecognition(generation) {
   const r = new SR();
   r.lang = browserLang();
   r.continuous = true;
@@ -2561,13 +2565,13 @@ function newRecognition() {
   // Check every time whether this is still us, so a signal from an old
   // instance does not break the new state. Without it, an old end can arrive
   // right after a swap and start it up twice over.
-  const mine = () => rec === r;
+  const mine = () => rec === r && generation === recGeneration;
 
   r.onstart = () => {
     if (!mine()) return;
+    recStarting = false;
     recRunning = true; recStartedAt = performance.now(); recFails = 0;
     asrDeniedFlag = false;
-    beat('listening');           // say so right away, without waiting
   };
 
   r.onresult = ev => {
@@ -2587,6 +2591,7 @@ function newRecognition() {
 
   r.onerror = ev => {
     if (!mine()) return;
+    recStarting = false;
     // A refused microphone needs a person to act. Roll the setting back and say so.
     if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
       asrDeniedFlag = true;
@@ -2602,7 +2607,9 @@ function newRecognition() {
 
   r.onend = () => {
     if (!mine()) return;
+    recStarting = false;
     recRunning = false;
+    rec = null;
     el.stream.textContent = '';
     if (!recWanted) return;
     if (recFails > MAX_FAILS) {
@@ -2612,29 +2619,40 @@ function newRecognition() {
     // Wait only when failures are piling up. When things are going fine there
     // is no waiting (waiting loses whatever you started saying in the meantime).
     const wait = recFails ? Math.min(8000, 250 * Math.pow(2, recFails - 1)) : 0;
-    setTimeout(() => { if (recWanted && rec === r) startRecognition(); }, wait);
+    setTimeout(() => { if (recWanted && !rec) startRecognition(); }, wait);
   };
   return r;
 }
 
-function startRecognition() {
-  if (!canBrowserASR || !recWanted || recRunning) return;
-  const r = newRecognition();
-  rec = r;
+async function startRecognition() {
+  if (!canBrowserASR || !recWanted || rec || recRunning || recStarting) return;
+  const generation = recGeneration;
+  recStarting = true;
   try {
-    r.start();
-  } catch {
-    // Sometimes the previous session has not folded up yet. Wait a little and come back.
-    recFails++;
-    setTimeout(() => { if (recWanted && rec === r) { rec = null; startRecognition(); } },
-               Math.min(8000, 250 * Math.pow(2, recFails - 1)));
+    if (!await beat('listening') || generation !== recGeneration || !recWanted || route === 'off' || rec) return;
+    const r = newRecognition(generation);
+    if (generation !== recGeneration || rec) return;
+    rec = r;
+    try {
+      r.start();
+    } catch {
+      if (rec === r) rec = null;
+      if (generation === recGeneration) recStarting = false;
+      // Sometimes the previous session has not folded up yet. Wait a little and come back.
+      recFails++;
+      setTimeout(() => { if (recWanted && !rec) startRecognition(); },
+                 Math.min(8000, 250 * Math.pow(2, recFails - 1)));
+    }
+  } finally {
+    if (generation === recGeneration && !rec) recStarting = false;
   }
 }
 
-function stopRecognition() {
-  recWanted = false;            // lower it before abort (stops the revival on end)
+function stopRecognition(keepWanted = false) {
+  recGeneration++;
+  if (!keepWanted) recWanted = false; // lower it before abort (stops the revival on end)
   const r = rec;
-  rec = null; recRunning = false; recFails = 0;
+  rec = null; recRunning = false; recStarting = false; recFails = 0;
   if (r) { try { r.abort(); } catch {} }
   el.stream.textContent = '';
 }
@@ -2708,13 +2726,28 @@ let sendChain = Promise.resolve();
 function sendUtterance(text) {
   text = (text || '').trim();
   if (!text) return;
+  if (!asrOwnsLease || asrConflict) {
+    if (asrConflict) el.hint.textContent = t('asrConflict');
+    return;
+  }
   if (dropNextLocal) { dropNextLocal = false; return; }   // an utterance that was cleared on screen
   lastVoiceAt = performance.now();
   sendChain = sendChain.then(async () => {
+    if (!asrOwnsLease || asrConflict) {
+      if (asrConflict) el.hint.textContent = t('asrConflict');
+      return;
+    }
     try {
-      const res = await post('/api/utterance', {text, lang: spokenLang()});
+      const res = await post('/api/utterance', {text, lang: spokenLang(), tab: tabId});
       // Browser recognition keeps no copy on this side. If it drops, all we can do is tell the person.
       if (res.status === 409) {
+        let data = {};
+        try { data = await res.json(); } catch {}
+        if (data.error === 'asr_owner_conflict') {
+          setAsrConflict(data.owner);
+          el.hint.textContent = t('asrConflict');
+          return;
+        }
         // The daemon is recognizing too. The screen has been left behind, so bring it back into line.
         el.hint.textContent = t('asrDoubled');
         loadEngines();
@@ -2733,17 +2766,56 @@ function sendUtterance(text) {
    listening. */
 const tabId = Math.random().toString(36).slice(2, 10);
 let asrDeniedFlag = false;
+let standingDown = false;
 
-function beat(state) {
-  navigator.sendBeacon
-    ? navigator.sendBeacon('/api/asr-heartbeat',
-        new Blob([JSON.stringify({tab: tabId, state})], {type: 'application/json'}))
-    : post('/api/asr-heartbeat', {tab: tabId, state}).catch(() => {});
+function setAsrConflict(owner) {
+  asrOwnsLease = false;
+  asrConflict = owner || {};
+  stopRecognition(true);
+  paintBrowserAsr();
+}
+
+async function beat(state) {
+  if (state === 'gone' && navigator.sendBeacon) {
+    try {
+      if (navigator.sendBeacon('/api/asr-heartbeat',
+        new Blob([JSON.stringify({tab: tabId, state})], {type: 'application/json'}))) {
+        asrOwnsLease = false;
+        asrConflict = null;
+        return true;
+      }
+    } catch {}
+  }
+  try {
+    const response = await post('/api/asr-heartbeat', {tab: tabId, state});
+    let data = {};
+    try { data = await response.json(); } catch {}
+    if (response.status === 409) {
+      setAsrConflict(data.owner);
+      return false;
+    }
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    asrOwnsLease = state !== 'gone' && data.owner?.tab === tabId;
+    asrConflict = null;
+    paintBrowserAsr();
+    return state === 'gone' || asrOwnsLease;
+  } catch {
+    asrOwnsLease = false;
+    if (state !== 'gone') {
+      stopRecognition(true);
+      el.hint.textContent = t('asrLeaseUnavailable');
+      paintBrowserAsr();
+    }
+    return false;
+  }
 }
 
 setInterval(() => {
-  if (!asrChosen) return;
-  beat(asrDeniedFlag ? 'denied' : (recRunning ? 'listening' : 'idle'));
+  if (!asrChosen || standingDown) return;
+  const state = asrDeniedFlag ? 'denied' : (asrConflict ? 'conflict' : (recRunning ? 'listening' : 'idle'));
+  beat(state).then(owned => {
+    if (owned && recWanted && !recRunning && !recStarting) startRecognition();
+  });
 }, 5000);
 
 // On close, say that we are gone (left behind, it still looks like someone is there)
@@ -3056,6 +3128,8 @@ function paintEnginePick() {
 
 function paintBrowserAsr() {
   el.browserAsrWarn.hidden = !asrChosen;
+  el.asrConflict.hidden = !asrChosen || !asrConflict;
+  el.asrConflict.textContent = t('asrConflict');
   el.browserMic.hidden = !asrChosen;
   el.asrLangField.hidden = !asrChosen;
   el.idleMuteField.hidden = !asrChosen;
@@ -3132,6 +3206,7 @@ el.enginePick.onchange = async () => {
       recWanted = false;
       asrPausedByRoute = false;
       stopRecognition();
+      beat('gone');
       syncVizCapture();
       engine = 'booting';
       startedAt = Date.now();
@@ -3217,14 +3292,18 @@ let soleChannel = null;
 try { soleChannel = new BroadcastChannel('voice-shell-viewer'); } catch {}
 
 function standDown() {
+  if (standingDown) return;
+  standingDown = true;
   el.taken.hidden = false;
   stopViz();
   if (typeof stopRecognition === 'function') stopRecognition();
   recWanted = false;
+  if (asrChosen) beat('gone');
   try { window.close(); } catch {}
 }
 
 function claimSole() {
+  standingDown = false;
   el.taken.hidden = true;
   if (soleChannel) soleChannel.postMessage({claim: soleId});
 }
