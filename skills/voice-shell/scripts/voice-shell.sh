@@ -95,7 +95,7 @@ APP="$HERE/voice_daemon.py"
 #   http_get <path>        body to stdout. returns 1 when nothing arrives
 #   port_open              only looks at whether the port is open
 http_get() {
-  "$PY" - "http://127.0.0.1:8090$1" <<'HTTPGET' 2>/dev/null
+  "$PY" - "$VIEWER_URL$1" <<'HTTPGET' 2>/dev/null
 import sys, urllib.request
 try:
     with urllib.request.urlopen(sys.argv[1], timeout=2) as r:
@@ -106,7 +106,7 @@ HTTPGET
 }
 
 http_post() {
-  "$PY" - "http://127.0.0.1:8090$1" "$2" <<'HTTPPOST' 2>/dev/null
+  "$PY" - "$VIEWER_URL$1" "$2" <<'HTTPPOST' 2>/dev/null
 import sys, urllib.request
 req = urllib.request.Request(sys.argv[1], data=sys.argv[2].encode("utf-8"),
                              headers={"content-type": "application/json"})
@@ -118,10 +118,10 @@ HTTPPOST
 }
 
 port_open() {
-  "$PY" - <<'PORT' 2>/dev/null
+  "$PY" - "$PORT" <<'PORT' 2>/dev/null
 import socket, sys
 s = socket.socket(); s.settimeout(0.6)
-sys.exit(0 if s.connect_ex(("127.0.0.1", 8090)) == 0 else 1)
+sys.exit(0 if s.connect_ex(("127.0.0.1", int(sys.argv[1]))) == 0 else 1)
 PORT
 }
 
@@ -144,6 +144,10 @@ if [[ -z "$PY" ]]; then
   echo "  To name one outright, write export VOICE_SHELL_PYTHON=/path/to/python" >&2
   exit 1
 fi
+if ! PORT="$("$PY" "$HERE/port_config.py")"; then
+  exit 2
+fi
+VIEWER_URL="http://127.0.0.1:$PORT"
 # Named after the recognition model once, so it was "qwen-voice". It now takes
 # the name of the tool, but so nothing already running breaks, the old one stays
 # in use when it is there and the new one is not (it moves once /tmp empties).
@@ -175,7 +179,7 @@ cmd="${1:-status}"; shift || true
 # when a person acts on it). Own window, and remember once opened. Every retype of
 # start or viewer popped a new one, and 10 really lined up. One window per viewer.
 open_gui() {
-  local url="http://127.0.0.1:8090"
+  local url="$VIEWER_URL"
   local flag="$STATE_DIR/gui_opened"
   [ -f "$flag" ] && return 0
   mkdir -p "$STATE_DIR"
@@ -368,7 +372,7 @@ case "$cmd" in
       if ! port_open; then
         echo "  The viewer is not running. Start it with voice-shell.sh viewer" >&2
       else
-        echo "  The viewer is at http://127.0.0.1:8090"
+        echo "  The viewer is at $VIEWER_URL"
         # Go as far as whether the screen is really listening. Without this,
         # not open or mic refused cannot be told from properly listening.
         http_get /api/asr-status \
@@ -556,17 +560,12 @@ NAMEIT
   viewer)
     # A viewer that only tails the log. No mic, so it lives alongside the daemon.
     [[ "${1:-}" == "--no-gui" ]] && { export VOICE_SHELL_NO_GUI=1; shift; }
-    # Where pgrep is missing (Windows/Git Bash and such), a reply on the port stands in.
     viewer_running() {
-      if have pgrep; then
-        pgrep -f "voice-shell/scripts/viewer\.p[y]" >/dev/null
-      else
-        port_open
-      fi
+      port_open
     }
     if viewer_running; then
       # Do not open a window here. One should be open already, and opening adds more.
-      echo "It is already running at http://127.0.0.1:8090"
+      echo "It is already running at $VIEWER_URL"
       exit 0
     fi
     mkdir -p "$STATE_DIR"
@@ -577,7 +576,7 @@ NAMEIT
       > "$STATE_DIR/viewer.out" 2>&1 &
     sleep 2
     if viewer_running; then
-      echo "The viewer started at http://127.0.0.1:8090"
+      echo "The viewer started at $VIEWER_URL"
       # Open in a window of its own (--no-gui means do not open)
       [[ "${VOICE_SHELL_NO_GUI:-0}" == "1" ]] || open_gui || true
     else

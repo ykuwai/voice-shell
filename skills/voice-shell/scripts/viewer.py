@@ -4,7 +4,7 @@
 It only tails the JSONL voice_daemon.py writes out and pushes it to the browser.
 It uses neither GPU nor mic, so it can run alongside voice mode.
 
-    python viewer.py            # → http://127.0.0.1:8090
+    python viewer.py            # → http://127.0.0.1:47865
 """
 import argparse
 import asyncio
@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 
 from aiohttp import web, WSCloseCode
+from port_config import configured_port, parse_port
 
 # For the same reason as voice_daemon.py (the "/tmp" mismatch on Windows),
 # a real path handed over by voice-shell.sh wins if there is one.
@@ -148,7 +149,11 @@ def parse_args():
     p.add_argument("--log-file", default=str(DEFAULT_LOG),
                    help="The JSONL to follow")
     p.add_argument("--host", default="127.0.0.1")
-    p.add_argument("--port", type=int, default=8090)
+    try:
+        default_port = configured_port()
+    except ValueError as error:
+        p.error(str(error))
+    p.add_argument("--port", type=parse_port, default=default_port)
     return p.parse_args()
 
 

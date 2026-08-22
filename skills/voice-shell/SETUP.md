@@ -143,7 +143,8 @@ ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh start
 ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh wait-ready
 ```
 
-Once `READY` shows up, have the user open http://127.0.0.1:8090 and talk.
+Once `READY` shows up, have the user open http://127.0.0.1:47865 and talk.
+Set `VOICE_SHELL_PORT` before starting it to use another port.
 
 ## When you get stuck
 

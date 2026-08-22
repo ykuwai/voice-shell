@@ -282,9 +282,11 @@ speaks to you again.
 
 ## The live viewer
 
-It comes up together with `start` (**http://127.0.0.1:8090**). Pass this URL
+It comes up together with `start` (**http://127.0.0.1:47865**). Pass this URL
 along when you tell the user it started. It only follows the log and does not
 use the microphone, so it can run alongside the resident process.
+
+Set `VOICE_SHELL_PORT` before starting it to use another port.
 
 What it can do is as follows.
 - Text still being recognized grows inside an "Unsent" card
@@ -400,7 +402,7 @@ It lives in `~/.config/voice-shell/tuning.json`. The daemon re-reads it every
 0.5 seconds.
 
 ```bash
-${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh viewer        # → http://127.0.0.1:8090
+${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh viewer        # → http://127.0.0.1:47865
 ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh viewer-stop
 ```
 

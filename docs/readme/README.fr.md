@@ -28,7 +28,7 @@ attendre.**
 Tapez `/voice-shell` dans Claude Code, ou dites « mode vocal ». Ensuite, vous n'avez
 qu'à parler. Dites « arrête le mode vocal » pour terminer.
 
-Une fenêtre à part s'ouvre sur http://127.0.0.1:8090 et les mots entendus s'y
+Une fenêtre à part s'ouvre sur http://127.0.0.1:47865 et les mots entendus s'y
 allongent au fil de la parole. Gardez-la au premier plan et vous pouvez la surveiller
 en travaillant sur autre chose.
 

@@ -26,7 +26,7 @@ Si tienes Chrome, con eso basta. **No hay modelo que descargar ni nada que esper
 Escribe `/voice-shell` en Claude Code o di «modo voz». A partir de ahí solo hablas.
 Di «salir del modo voz» para terminar.
 
-Se abre una ventana propia en http://127.0.0.1:8090 y las palabras que oye van
+Se abre una ventana propia en http://127.0.0.1:47865 y las palabras que oye van
 creciendo ahí mientras hablas. Déjala flotando encima y podrás mirarla mientras
 trabajas en otra cosa.
 

@@ -24,9 +24,12 @@ If you have Chrome, that is all it takes. **No model to download, nothing to wai
 Type `/voice-shell` in Claude Code, or say "voice mode". After that you just talk.
 Say "stop voice mode" to stop.
 
-A window of its own opens at http://127.0.0.1:8090 and the words it hears grow
+A window of its own opens at http://127.0.0.1:47865 and the words it hears grow
 there as you speak. Float it in front and you can watch it while you work on
 something else.
+
+Set `VOICE_SHELL_PORT` before starting it to choose another port. Setting
+`VOICE_SHELL_PORT=8090` keeps the previous address.
 
 | How it sends | What happens |
 |---|---|

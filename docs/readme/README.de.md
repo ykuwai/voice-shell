@@ -27,7 +27,7 @@ Wenn du Chrome hast, reicht das schon. **Kein Modell zum Herunterladen, kein War
 Tippe `/voice-shell` in Claude Code oder sag „Sprachmodus“. Danach sprichst du
 einfach. Zum Beenden sag „Sprachmodus beenden“.
 
-Ein eigenes Fenster öffnet sich unter http://127.0.0.1:8090, und die gehörten Wörter
+Ein eigenes Fenster öffnet sich unter http://127.0.0.1:47865, und die gehörten Wörter
 wachsen dort mit, während du sprichst. Lass es im Vordergrund schweben, dann behältst
 du es im Blick, während du an etwas anderem arbeitest.
 
