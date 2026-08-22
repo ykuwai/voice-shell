@@ -1,6 +1,6 @@
-# voice-shell
+# Voice Shell
 
-English · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [简体中文](README.zh.md) · [한국어](README.ko.md)
+English · [日本語](docs/readme/README.ja.md) · [Español](docs/readme/README.es.md) · [Français](docs/readme/README.fr.md) · [Deutsch](docs/readme/README.de.md) · [简体中文](docs/readme/README.zh.md) · [한국어](docs/readme/README.ko.md)
 
 An Agent Skill for giving Claude Code instructions with your voice. No keyboard.
 You talk and the instruction goes through.

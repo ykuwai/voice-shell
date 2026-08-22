@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 120" role="img" aria-labelledby="title description">
+  <title id="title">Voice Shell</title>
+  <desc id="description">Voice Shell wordmark beside five rounded audio bars mirrored around a horizontal center line.</desc>
+
+  <rect width="640" height="120" rx="20" fill="#080D18"/>
+
+  <g transform="translate(-30 0)">
+    <rect x="74" y="39" width="12" height="42" rx="6" fill="#18D5E8"/>
+    <rect x="96" y="27" width="12" height="66" rx="6" fill="#1498EE"/>
+    <rect x="118" y="44" width="12" height="32" rx="6" fill="#6477F2"/>
+    <rect x="140" y="32" width="12" height="56" rx="6" fill="#8055F1"/>
+    <rect x="162" y="40" width="12" height="40" rx="6" fill="#B449E7"/>
+  </g>
+
+  <text x="168" y="76" fill="#EEF3FB" font-family="SF Pro Display, Segoe UI, sans-serif" font-size="44" font-weight="500" letter-spacing="0">Voice Shell</text>
+</svg>

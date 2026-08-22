@@ -12,5 +12,5 @@ sample_*.flac
 # What swiftc puts out
 build/
 
-# Notes taken while working. Kept here, never pushed to GitHub
-docs/
+# Private development notes. Kept here, never pushed to GitHub
+docs/dev-notes/

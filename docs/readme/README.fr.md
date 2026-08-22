@@ -1,8 +1,8 @@
-# voice-shell
+# Voice Shell
 
-[English](README.md) · [日本語](README.ja.md) · [Español](README.es.md) · Français · [Deutsch](README.de.md) · [简体中文](README.zh.md) · [한국어](README.ko.md)
+[English](../../README.md) · [日本語](README.ja.md) · [Español](README.es.md) · Français · [Deutsch](README.de.md) · [简体中文](README.zh.md) · [한국어](README.ko.md)
 
-La version d'origine est [README.md](README.md), en anglais. En cas de désaccord,
+La version d'origine est [README.md](../../README.md), en anglais. En cas de désaccord,
 c'est l'anglais qui fait foi.
 
 Un Agent Skill pour donner des instructions à Claude Code à la voix. Sans clavier.
@@ -110,8 +110,8 @@ est déjà au-dessus.
 
 | À lire | Ce qu'on y trouve |
 |---|---|
-| [SETUP.md](skills/voice-shell/SETUP.md) | L'installation selon l'environnement, et quoi faire quand ça bloque |
-| [SKILL.md](skills/voice-shell/SKILL.md) | Les étapes que lit l'agent. Le comportement fin est là |
+| [SETUP.md](../../skills/voice-shell/SETUP.md) | L'installation selon l'environnement, et quoi faire quand ça bloque |
+| [SKILL.md](../../skills/voice-shell/SKILL.md) | Les étapes que lit l'agent. Le comportement fin est là |
 
 ## Références
 

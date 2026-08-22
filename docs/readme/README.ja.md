@@ -1,8 +1,8 @@
-# voice-shell
+# Voice Shell
 
-[English](README.md) · 日本語 · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [简体中文](README.zh.md) · [한국어](README.ko.md)
+[English](../../README.md) · 日本語 · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [简体中文](README.zh.md) · [한국어](README.ko.md)
 
-原文は [README.md](README.md)（英語）。内容が食い違ったら英語版が正しい。
+原文は [README.md](../../README.md)（英語）。内容が食い違ったら英語版が正しい。
 
 声で Claude Code に指示を出す Agent Skill。キーボードを使わずに、話しかけて指示を送る。
 
@@ -101,8 +101,8 @@ sudo apt install alsa-utils      # Linux
 
 | 読むもの | 中身 |
 |---|---|
-| [SETUP.md](skills/voice-shell/SETUP.md) | 環境ごとの入れ方と、つまずいたときの対処 |
-| [SKILL.md](skills/voice-shell/SKILL.md) | エージェントが読む手順。細かい振る舞いはここ |
+| [SETUP.md](../../skills/voice-shell/SETUP.md) | 環境ごとの入れ方と、つまずいたときの対処 |
+| [SKILL.md](../../skills/voice-shell/SKILL.md) | エージェントが読む手順。細かい振る舞いはここ |
 
 ## 参考
 

@@ -1,8 +1,8 @@
-# voice-shell
+# Voice Shell
 
-[English](README.md) · [日本語](README.ja.md) · Español · [Français](README.fr.md) · [Deutsch](README.de.md) · [简体中文](README.zh.md) · [한국어](README.ko.md)
+[English](../../README.md) · [日本語](README.ja.md) · Español · [Français](README.fr.md) · [Deutsch](README.de.md) · [简体中文](README.zh.md) · [한국어](README.ko.md)
 
-El original es [README.md](README.md), en inglés. Si algo no coincide, manda el inglés.
+El original es [README.md](../../README.md), en inglés. Si algo no coincide, manda el inglés.
 
 Un Agent Skill para darle instrucciones a Claude Code con la voz. Sin teclado.
 Hablas y la instrucción llega.
@@ -108,8 +108,8 @@ más arriba.
 
 | Qué leer | Qué contiene |
 |---|---|
-| [SETUP.md](skills/voice-shell/SETUP.md) | Cómo instalarlo según el entorno y qué hacer si te atascas |
-| [SKILL.md](skills/voice-shell/SKILL.md) | Los pasos que lee el agente. El comportamiento fino está aquí |
+| [SETUP.md](../../skills/voice-shell/SETUP.md) | Cómo instalarlo según el entorno y qué hacer si te atascas |
+| [SKILL.md](../../skills/voice-shell/SKILL.md) | Los pasos que lee el agente. El comportamiento fino está aquí |
 
 ## Referencias
 

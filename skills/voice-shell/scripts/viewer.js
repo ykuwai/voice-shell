@@ -735,7 +735,7 @@ function paint() {
       : t(off ? 'hintOff' : shown === 'hold' ? 'hintHold' : 'hintLive');
   }
   // While you are working elsewhere, the tab title is the only cue left
-  setTitle(t(off ? 'titleOff' : shown === 'hold' ? 'titleHold' : 'titleLive') + ' · voice-shell');
+  setTitle(t(off ? 'titleOff' : shown === 'hold' ? 'titleHold' : 'titleLive') + ' · Voice Shell');
 
   el.tray.classList.toggle('holding', route === 'hold');
   el.tray.classList.toggle('editing', oneShot);

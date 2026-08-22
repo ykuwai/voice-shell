@@ -1,8 +1,8 @@
-# voice-shell
+# Voice Shell
 
-[English](README.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · 简体中文 · [한국어](README.ko.md)
+[English](../../README.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · 简体中文 · [한국어](README.ko.md)
 
-原文是英文的 [README.md](README.md)。两边对不上时，以英文为准。
+原文是英文的 [README.md](../../README.md)。两边对不上时，以英文为准。
 
 用说话给 Claude Code 下指令的 Agent Skill。不用键盘，说出来指令就送到了。
 
@@ -101,8 +101,8 @@ sudo apt install alsa-utils      # Linux
 
 | 读什么 | 里面有什么 |
 |---|---|
-| [SETUP.md](skills/voice-shell/SETUP.md) | 各种环境下怎么装，卡住了怎么办 |
-| [SKILL.md](skills/voice-shell/SKILL.md) | 智能体读的步骤。细的行为都在这里 |
+| [SETUP.md](../../skills/voice-shell/SETUP.md) | 各种环境下怎么装，卡住了怎么办 |
+| [SKILL.md](../../skills/voice-shell/SKILL.md) | 智能体读的步骤。细的行为都在这里 |
 
 ## 参考
 
