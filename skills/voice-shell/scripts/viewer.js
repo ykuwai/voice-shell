@@ -1152,7 +1152,7 @@ function applyRouteSideEffects(next) {
    saying it is sending while you are actually paused. */
 function setTitle(text) {
   document.title = text;
-  const w = window.documentPictureInPicture?.window;
+  const w = floatingWindow();
   if (w) {
     try { w.document.title = text; } catch { /* on its way closed */ }
   }
@@ -1542,11 +1542,11 @@ el.power.onclick = async () => {
 let seeded = false;   // restores what had piled up, once, on reload
 let uiStamp = 0;      // the mtime of the screen file at the moment it was loaded
 
-// While it floats, close the small window first and reload in the original tab.
-// canFloat guards this because ?. only guards against a missing property.
-// In a browser without the identifier at all, it throws the moment you look.
 el.fresh.onclick = () => {
-  if (canFloat && documentPictureInPicture.window) documentPictureInPicture.window.close();
+  const w = floatingWindow();
+  if (w) {
+    try { w.close(); } catch { disableFloat(); }
+  }
   location.reload();
 };
 
@@ -3239,7 +3239,35 @@ el.asrLang.onchange = () => {
    So you never have to line browsers up side by side, it moves into a small
    window that always floats in front. It uses Chrome's Document
    Picture-in-Picture, so nothing extra has to be installed. */
-const canFloat = 'documentPictureInPicture' in window;
+function detectFloatingApi(target = window) {
+  try {
+    const api = target.documentPictureInPicture;
+    return target.isSecureContext === true && api && typeof api.requestWindow === 'function' ? api : null;
+  } catch {
+    return null;
+  }
+}
+
+const documentPip = detectFloatingApi();
+let canFloat = !!documentPip;
+
+function disableFloat() {
+  canFloat = false;
+  el.floatBtn.disabled = true;
+  el.floatBtn.hidden = true;
+  el.floatAsk.hidden = true;
+}
+
+function floatingWindow() {
+  if (!canFloat) return null;
+  try {
+    return documentPip.window || null;
+  } catch {
+    disableFloat();
+    return null;
+  }
+}
+
 el.floatBtn.hidden = !canFloat;
 // The small window is a separate document and inherits none of our styling.
 // Cloning the <style> nodes used to carry it over, but the sheet lives in its
@@ -3260,7 +3288,7 @@ paintFloatAsk();
 // Left on the same drawing, there is no reading whether a press floats it or
 // brings it back.
 function paintFloat(on) {
-  if (on === undefined) on = !!(canFloat && documentPictureInPicture.window);
+  if (on === undefined) on = !!floatingWindow();
   const name = on ? 'picture_in_picture_off' : 'picture_in_picture';
   el.floatBtn.dataset.icon = name;
   const svg = el.floatBtn.querySelector(':scope > svg');
@@ -3322,7 +3350,7 @@ claimSole();
    there, once. Once it has been used, it never shows again. */
 function paintFloatAsk() {
   el.floatAsk.hidden = !(canFloat
-                         && !documentPictureInPicture.window
+                         && !floatingWindow()
                          && !store.get('floated'));
 }
 el.floatAsk.onclick = () => { el.floatAsk.hidden = true; el.floatBtn.click(); };
@@ -3339,20 +3367,25 @@ el.floatBtn.onclick = async () => {
   // A toggle. Press it again while it floats and it goes back to the original
   // screen (the code that brings it back on 'pagehide' already exists. Calling
   // window.close() is what runs it).
-  if (documentPictureInPicture.window) {
-    documentPictureInPicture.window.close();
+  const currentWindow = floatingWindow();
+  if (currentWindow) {
+    try {
+      currentWindow.close();
+    } catch {
+      disableFloat();
+    }
     return;
   }
   floating = true;
   let win;
   try {
-    win = await documentPictureInPicture.requestWindow({width: 400, height: 720});
+    win = await documentPip.requestWindow({width: 400, height: 720});
   } catch {
-    floating = false;
-    el.hint.textContent = t('floatFailed');
+    disableFloat();
     return;
+  } finally {
+    floating = false;
   }
-  floating = false;
   // Carry the styles over as they are so it looks the same. This has to stay
   // after requestWindow, because an await before it would spend the user
   // gesture and the request to open would be refused.
