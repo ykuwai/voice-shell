@@ -136,12 +136,8 @@
     white-space:nowrap;
   }
   /* The wave in the logo. It moves a little with the level being picked up */
-  .mark { display:flex; align-items:center; gap:2px; height:18px; flex:none; }
-  .mark i {
-    display:block; width:2.5px; border-radius:2px; height:30%;
-    background:linear-gradient(180deg,var(--accent),var(--accent-2));
-    transition:height .12s ease-out;
-  }
+  .mark { display:flex; align-items:center; width:24px; height:18px; flex:none; }
+  .mark svg { display:block; width:24px; height:18px; overflow:visible; }
 
   /* The four ways through the screen. The same node is moved between the main
      screen's header and the two sheet headings, so margin-left:auto is here

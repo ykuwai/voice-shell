@@ -162,15 +162,11 @@ const format = raw => raw;
    real shape of your voice. It is a separate path from the daemon (ffmpeg), so
    if permission is refused we run on nothing but the level that comes over the
    WebSocket (level.txt). */
-const BARS = 48;
+const MARK_BASE_HEIGHTS = [23, 36, 18, 31, 20];
+const MARK_GAIN = 24;
 let audioCtx = null, analyser = null, micStream = null, freq = null;
 let daemonLevel = 0, daemonSpeaking = false;
 let vizFailed = false;
-let wave = null;
-// Like the mock, the bars stream the last little while from left to right.
-// A frequency picture tends to stand up only at the low end and leave the right
-// half lying flat, which never feels like talking.
-const bandFloor = new Array(BARS).fill(-60);   // dB
 
 const canvas = el.viz, cx = canvas.getContext('2d');
 let cw = 0, ch = 0;
@@ -236,54 +232,7 @@ const color = (hex, alpha) => {
 const DB_MIN = -85, DB_MAX = -25;
 const DB_SPAN = DB_MAX - DB_MIN;
 const toDb = byte => DB_MIN + (byte / 255) * DB_SPAN;
-
-// How many dB above the noise floor drawing begins, and how many dB pins it.
-// The noise floor of a quiet room wanders a few dB, so leave room for that.
 const GATE_DB = 7, RANGE_DB = 26;
-
-// Thin the bins roughly logarithmically, leaning toward the voice band. Split
-// them evenly and the high end becomes nothing but near-silent bands, and the
-// right half looks dead.
-function bandsFromFreq() {
-  const out = new Array(BARS);
-  const n = analyser.frequencyBinCount;
-  const top = Math.floor(n * 0.55);          // barely any voice rides up at the top
-  for (let i = 0; i < BARS; i++) {
-    const a = Math.floor(Math.pow(i / BARS, 1.7) * top);
-    const b = Math.max(a + 1, Math.floor(Math.pow((i + 1) / BARS, 1.7) * top));
-    let sum = 0;
-    for (let k = a; k < b && k < n; k++) sum += freq[k];
-    const db = toDb(sum / (b - a));
-
-    // Each band carries its own reference (dB) that drifts slowly toward what
-    // it reads when things are quiet. Without subtracting it, the low hum of
-    // air conditioning or a fan leaves the left side standing up for good.
-    bandFloor[i] = db < bandFloor[i] ? bandFloor[i] * 0.9 + db * 0.1
-                                     : bandFloor[i] * 0.999 + db * 0.001;
-
-    // Voice power leans toward the low end, so lift the higher bands to balance it
-    const tilt = 0.85 + 1.15 * Math.pow(i / BARS, 0.7);
-    const over = db - bandFloor[i] - GATE_DB;      // how many dB it came out above the noise floor
-    out[i] = Math.min(1, Math.max(0, over / RANGE_DB) * tilt);
-  }
-  return out;
-}
-
-// The stand-in for when the microphone cannot be used. There is only one level
-// to work with, so weight it into a hump and let the middle ride high.
-let fallbackPhase = 0;
-function bandsFromLevel() {
-  fallbackPhase += 0.08;
-  const amp = Math.min(1, daemonLevel * 22);
-  const out = new Array(BARS);
-  for (let i = 0; i < BARS; i++) {
-    const x = i / (BARS - 1);
-    const hump = Math.sin(Math.PI * x);
-    const ripple = 0.75 + 0.25 * Math.sin(fallbackPhase + x * 7);
-    out[i] = Math.max(0.02, amp * hump * ripple);
-  }
-  return out;
-}
 
 // The room's noise floor (dB). It drifts slowly toward what it reads when
 // things are quiet. With a fixed threshold, a quiet room reacts to the air
@@ -366,24 +315,6 @@ const levelToUnit = v => {
 // running on browser recognition alone.
 const amplitudeNow = () =>
   (engine === 'off' || asrActive()) ? amplitudeFallback() : levelToUnit(daemonLevel);
-
-// A sharp rise reads as flicker, so only the fall is eased
-const smooth = new Array(BARS).fill(0);
-function currentBands() {
-  // The shape comes from the browser's FFT, the size from the amount over the
-  // sensitivity. To pull the shape out on its own, divide by the loudest band
-  // so every frame carries the same hump.
-  const shape = (analyser && !vizFailed) ? bandsFromFreq() : bandsFromLevel();
-  const peak = Math.max(...shape, 0.001);
-  const amp = amplitudeNow();
-
-  for (let i = 0; i < BARS; i++) {
-    const raw = (shape[i] / peak) * amp;
-    smooth[i] = raw > smooth[i] ? smooth[i] * 0.4 + raw * 0.6
-                                : smooth[i] * 0.88 + raw * 0.12;
-  }
-  return smooth;
-}
 
 /* The fill inside the mic gets the same easing. The raw value only changes
    every 0.1 seconds (asr_mic.py measures 0.1 seconds at a time and viewer.py
@@ -498,12 +429,7 @@ function paintFrame(now) {
   cx.clearRect(0, 0, cw, ch);
 
   // The mic drawing shows being switched off through its shape too, so it keeps drawing
-  const dead = engine === 'off' && !asrActive();
   if (analyser && !vizFailed) analyser.getByteFrequencyData(freq);
-
-  // Nothing moves while paused. The look itself has to say nothing is being recorded.
-  if (dead) smooth.fill(0);
-  const bands = dead ? smooth : currentBands();
 
   stepMicLevel(now);
   drawMic(cx, cw, ch, cssVar('--accent'));
@@ -518,12 +444,15 @@ function paintFrame(now) {
     drawMic(m.cx, m.w, m.h, cssVar(shownMode === 'hold' ? '--accent-2' : '--accent'));
   }
 
-  // The wave in the logo runs on the same value (a cue for when it is shrunk down)
-  const src = bands;
-  const marks = el.logoMark.children;
+  // The five bars in the logo use the same voice signal as the main drawing.
+  // Sample across the spectrum so the mark keeps the balanced shape of the SVG
+  // instead of crowding all five bars into the high end.
+  const marks = el.logoMark.querySelectorAll('rect');
+  const markLevel = route === 'off' ? 0 : micLevel;
   for (let i = 0; i < marks.length; i++) {
-    const v = src[BARS - marks.length + i] ?? src[Math.floor((i + 0.5) / marks.length * BARS)] ?? 0;
-    marks[i].style.height = (25 + v * 75) + '%';
+    const h = Math.min(60, MARK_BASE_HEIGHTS[i] + markLevel * MARK_GAIN);
+    marks[i].setAttribute('y', ((66 - h) / 2).toFixed(2));
+    marks[i].setAttribute('height', h.toFixed(2));
   }
 }
 requestAnimationFrame(frame);
@@ -557,7 +486,6 @@ async function startViz(label) {
     analyser.minDecibels = -85;
     analyser.maxDecibels = -25;
     freq = new Uint8Array(analyser.frequencyBinCount);
-    wave = new Uint8Array(analyser.fftSize);
     audioCtx.createMediaStreamSource(micStream).connect(analyser);
     vizFailed = false;
   } catch {
