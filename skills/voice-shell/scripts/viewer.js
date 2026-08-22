@@ -163,7 +163,7 @@ const format = raw => raw;
    if permission is refused we run on nothing but the level that comes over the
    WebSocket (level.txt). */
 const MARK_BASE_HEIGHTS = [23, 36, 18, 31, 20];
-const MARK_MIN_HEIGHT = 8;
+const MARK_MIN_HEIGHT = 12;
 const MARK_GAIN = 24;
 let audioCtx = null, analyser = null, micStream = null, freq = null;
 let daemonLevel = 0, daemonSpeaking = false;
