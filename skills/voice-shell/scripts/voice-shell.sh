@@ -483,17 +483,19 @@ REG
     # Put tail in the background and wait on it. Left in the foreground,
     # SIGTERM kills only bash and tail is left an orphan (the registration is
     # gone yet utterances still come in, which slips past the double detection).
-    # Slot in the addressee filter. Drop a line that has "to" and is not for us
-    # (a line with no addressee named goes to everyone).
+    # Slot in the addressee filter. Drop a line that is not addressed to us,
+    # including one with no addressee at all (#73, not arriving beats arriving
+    # at the wrong desk).
     tail -F -n 0 "$LOG_FILE" | "$PY" -u "$HERE/listen_filter.py" "$reg_pid" &
     tail_pid=$!
 
-    # A registration missing while its process is still running turns into a
-    # broadcast the moment the daemon has to fall back to "everyone" (#62). The
-    # cause was never pinned down, so heal instead of chasing it further. Keep
-    # the exact bytes written above (not a fresh write) so "since" never moves
-    # and this session does not jump to the front of the destination order on
-    # every heartbeat.
+    # A registration missing while its process is still running used to turn
+    # into a broadcast the moment the daemon fell back to "everyone" (#62/#73,
+    # fixed on the daemon side too, but a healed registry is still the better
+    # outcome). The cause was never pinned down, so heal instead of chasing it
+    # further. Keep the exact bytes written above (not a fresh write) so
+    # "since" never moves and this session does not jump to the front of the
+    # destination order on every heartbeat.
     reg_bytes="$(cat "$reg" 2>/dev/null || true)"
     ( while kill -0 "$tail_pid" 2>/dev/null; do
         sleep 30

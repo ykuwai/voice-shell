@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Pass through only the utterance log lines addressed to me.
 
-voice-shell.sh listen slots this in behind tail. When a destination is picked
-in the viewer, the daemon tags every line with "to" (the PID it is for).
-A line with no tag is for everyone.
+voice-shell.sh listen slots this in behind tail. The daemon tags every
+utterance with "to" (the PID it is for). A line with no tag, or one addressed
+to somebody else, is dropped here (#73, not arriving beats arriving at the
+wrong desk). system_warning lines are the one exception, they carry no "to"
+on purpose and are meant for every session listening.
 
     tail -F utterances.jsonl | listen_filter.py <my PID>
 
@@ -136,9 +138,13 @@ def main():
         if not isinstance(rec, dict):
             print(line, flush=True)   # keep unreadable lines, never drop one silently
             continue
-        to = rec.get("to")
-        if to is not None and str(to) != me:
-            continue
+        # system_warning is a notice about the act of listening itself (two
+        # sessions listening at once, say), so every session sees it regardless
+        # of which one utterances are being routed to.
+        if "system_warning" not in rec:
+            to = rec.get("to")
+            if to is None or str(to) != me:
+                continue
         # Write the split pieces back to back. Monitor bundles lines emitted
         # close in time into one notification, and bundling only caps each
         # line, so no gap is needed. Landing in the same notification is

@@ -1864,9 +1864,10 @@ def _proc_started_at(pid):
 # The routing target. The viewer writes it, the daemon reads it every time.
 #   no file        … nothing chosen yet (goes to whichever started later)
 #   <PID>          … to that one
-# "everyone" cannot be chosen. Two sessions taking the same instruction and setting
-# off in different directions had no use, and picking it by mistake was only hard to
-# notice.
+# "everyone" cannot be chosen by hand. Two sessions taking the same instruction
+# and setting off in different directions had no use, and picking it by mistake
+# was only hard to notice. resolve_target() below never hands out "everyone"
+# either, for the same reason (#73).
 def route_file(log_path):
     return Path(log_path).parent / "route"
 
@@ -1884,11 +1885,14 @@ def write_atomic(path, text: str) -> None:
 
 
 def resolve_target(log_path):
-    """Decide where things go right now. None means everyone.
+    """Decide who this utterance is addressed to. None means nobody right now,
+    which leaves the line unaddressed and every listener drops it (#73, not
+    broadcasting beats guessing wrong).
 
-    The default is whichever started later, since starting another job alongside
-    naturally turns attention that way. Deciding it here is what makes it **work even
-    with no screen open** (this used to live only on the screen side, and with it
+    With any listener known at all, one gets named, the one that started
+    latest by default (starting another job alongside naturally turns
+    attention that way). Deciding it here is what makes it **work even with
+    no screen open** (this used to live only on the screen side, and with it
     closed everything arrived twice, to everyone).
     """
     try:
@@ -1904,11 +1908,10 @@ def resolve_target(log_path):
 
     # The registration file can go missing (a stray cleanup, a bug in whatever
     # else touches that folder) while the process behind it is still running.
-    # Falling straight through to "everyone" the moment that happens sends the
-    # next utterance to every other tail still piping on this machine, not just
-    # the one actually chosen. A live PID outweighs a missing file, so trust it
-    # before giving up on the chosen target (measured, #62: a wiped listeners/
-    # folder turned one utterance into a broadcast to four unrelated sessions).
+    # A live PID outweighs a missing file, so trust it before giving up on the
+    # chosen target (measured, #73: a wiped listeners/ folder turned one
+    # utterance into a broadcast to four unrelated sessions, back when nothing
+    # named meant everyone instead of nobody).
     if raw:
         try:
             os.kill(int(raw), 0)
@@ -1918,10 +1921,11 @@ def resolve_target(log_path):
 
     # Nothing chosen yet, or the chosen listener is truly gone. The default is
     # whichever just started, so the pick uses the re-registration time rather
-    # than the display order (first_seen). With only one listener there is no
-    # point writing a target.
+    # than the display order (first_seen). One listener is still named
+    # explicitly rather than left blank, so "nobody drops it" only ever means
+    # what it says.
     live = list_active_listeners(log_path)
-    if len(live) <= 1:
+    if not live:
         return None
     return str(max(live, key=lambda e: e.get("since", 0))["pid"])
 
@@ -2701,7 +2705,7 @@ def main():
 
                 # The line that reaches Claude carries the body alone. Time and
                 # language go unused, so they do not go in. The target is attached
-                # only when one is chosen (a line without it goes to everyone).
+                # only when one is known (a line without it reaches nobody, #73).
                 rec = {"text": text}
                 to = resolve_target(log_path)
                 if to:
