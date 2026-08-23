@@ -35,6 +35,8 @@ for line in sys.stdin:
     method = message.get("method")
     record(message)
     if method == "initialize":
+        if mode == "large-event":
+            emit({"method": "turn/started", "params": {"payload": "x" * 100_000}})
         emit({"id": message["id"], "result": {}})
     elif method == "thread/resume":
         emit({"id": message["id"], "result": {"thread": {"id": message["params"]["threadId"]}}})
@@ -121,6 +123,24 @@ class CodexForwardTest(unittest.TestCase):
             turns = [message["params"]["input"][0]["text"] for message in messages if message.get("method") == "turn/start"]
             self.assertEqual(turns, ["first", "second"])
             self.assertIn("Codex turn failed: declined", result.stderr)
+
+    def test_accepts_large_server_events(self):
+        with tempfile.TemporaryDirectory() as temp:
+            env, log = self.make_env(Path(temp), "large-event")
+            result = subprocess.run(
+                [sys.executable, str(FORWARD)],
+                input='{"text":"large event"}\n',
+                text=True,
+                capture_output=True,
+                env=env,
+                timeout=10,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            messages = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(
+                [message["method"] for message in messages if message.get("method") == "turn/start"],
+                ["turn/start"],
+            )
 
     def test_exits_when_server_disconnects_with_input_open(self):
         with tempfile.TemporaryDirectory() as temp:

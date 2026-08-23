@@ -17,6 +17,9 @@ class TurnError(AppServerError):
     pass
 
 
+APP_SERVER_STREAM_LIMIT = 16 * 1024 * 1024
+
+
 class AppServer:
     def __init__(self, command):
         self.command = command
@@ -37,6 +40,7 @@ class AppServer:
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                limit=APP_SERVER_STREAM_LIMIT,
             )
         except OSError as exc:
             raise AppServerError(f"Could not start Codex App Server: {exc}") from exc
