@@ -476,11 +476,6 @@ json.dump({"started": time.strftime("%Y-%m-%d %H:%M:%S"), "since": now,
            "first_seen": first_seen, "cwd": os.getcwd(),
            "agent": agent, "session": session, "name": name},
           open(reg, "w", encoding="utf-8"), ensure_ascii=False)
-if agent == "codex":
-    route = Path(reg).parent.parent / "route"
-    tmp = route.with_name(route.name + ".tmp")
-    tmp.write_text(Path(reg).name, encoding="utf-8")
-    os.replace(tmp, route)
 REG
     # With exec the trap is not carried over (process replacement makes bash
     # itself disappear), so the automatic cleanup on exit stops working.
@@ -492,7 +487,21 @@ REG
     # (a line with no addressee named goes to everyone).
     tail -F -n 0 "$LOG_FILE" | "$PY" -u "$HERE/listen_filter.py" "$reg_pid" &
     tail_pid=$!
-    trap 'rm -f "$reg"; kill "$tail_pid" 2>/dev/null || true' EXIT INT TERM HUP
+
+    # A registration missing while its process is still running turns into a
+    # broadcast the moment the daemon has to fall back to "everyone" (#62). The
+    # cause was never pinned down, so heal instead of chasing it further. Keep
+    # the exact bytes written above (not a fresh write) so "since" never moves
+    # and this session does not jump to the front of the destination order on
+    # every heartbeat.
+    reg_bytes="$(cat "$reg" 2>/dev/null || true)"
+    ( while kill -0 "$tail_pid" 2>/dev/null; do
+        sleep 30
+        [ -s "$reg" ] || printf '%s' "$reg_bytes" > "$reg" 2>/dev/null
+      done ) &
+    heal_pid=$!
+
+    trap 'rm -f "$reg"; kill "$tail_pid" "$heal_pid" 2>/dev/null || true' EXIT INT TERM HUP
     wait "$tail_pid"
     ;;
   name)

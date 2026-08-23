@@ -1896,15 +1896,30 @@ def resolve_target(log_path):
     except OSError:
         raw = ""
 
-    # The chosen listener is judged purely by whether its registration file exists.
+    # The chosen listener is judged first by whether its registration file exists.
     # The liveness sweep sometimes miscounts for a moment, and rerouting on every one
     # of those slips utterances to a listener nobody chose (not arriving is safer).
     if raw and (listeners_dir(log_path) / raw).exists():
         return raw
 
-    # Nothing chosen yet, or the chosen listener exited. The default is whichever
-    # just started, so the pick uses the re-registration time rather than the display
-    # order (first_seen). With only one listener there is no point writing a target.
+    # The registration file can go missing (a stray cleanup, a bug in whatever
+    # else touches that folder) while the process behind it is still running.
+    # Falling straight through to "everyone" the moment that happens sends the
+    # next utterance to every other tail still piping on this machine, not just
+    # the one actually chosen. A live PID outweighs a missing file, so trust it
+    # before giving up on the chosen target (measured, #62: a wiped listeners/
+    # folder turned one utterance into a broadcast to four unrelated sessions).
+    if raw:
+        try:
+            os.kill(int(raw), 0)
+            return raw
+        except (ValueError, ProcessLookupError, PermissionError, OSError):
+            pass
+
+    # Nothing chosen yet, or the chosen listener is truly gone. The default is
+    # whichever just started, so the pick uses the re-registration time rather
+    # than the display order (first_seen). With only one listener there is no
+    # point writing a target.
     live = list_active_listeners(log_path)
     if len(live) <= 1:
         return None
