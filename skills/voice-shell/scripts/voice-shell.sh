@@ -476,6 +476,11 @@ json.dump({"started": time.strftime("%Y-%m-%d %H:%M:%S"), "since": now,
            "first_seen": first_seen, "cwd": os.getcwd(),
            "agent": agent, "session": session, "name": name},
           open(reg, "w", encoding="utf-8"), ensure_ascii=False)
+if agent == "codex":
+    route = Path(reg).parent.parent / "route"
+    tmp = route.with_name(route.name + ".tmp")
+    tmp.write_text(Path(reg).name, encoding="utf-8")
+    os.replace(tmp, route)
 REG
     # With exec the trap is not carried over (process replacement makes bash
     # itself disappear), so the automatic cleanup on exit stops working.
