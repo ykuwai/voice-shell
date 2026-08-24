@@ -43,7 +43,7 @@
 
 ```bash
 npx skills add ykuwai/voice-shell
-pip install numpy aiohttp
+pip install numpy aiohttp "sounddevice>=0.5.6"
 ```
 
 Chrome만 있으면 이것으로 끝입니다.
@@ -89,21 +89,6 @@ voice-shell.sh engines
 | `engines` | 고를 수 있는 인식 방식 |
 
 설정한 것은 모두 `~/.config/voice-shell/`에 남아 다시 켜도 그대로입니다.
-
-## 잘 안 될 때
-
-Linux에서는 녹음에 `arecord`가 필요합니다.
-
-```bash
-sudo apt install alsa-utils      # Linux
-```
-
-| 이런 때 | 이렇게 |
-|---|---|
-| 말해도 아무것도 오지 않는다 | 반응하는 소리 크기가 너무 높습니다. 창의 마이크 아래에 있는 표시를, 말할 때 막대가 넘어가는 곳까지 내립니다 |
-| 소리만 나도 저절로 보내진다 | 반응하는 소리 크기가 너무 낮습니다. 같은 표시를, 자기 목소리만 넘어가는 곳까지 올립니다 |
-| `No Python it can run was found` | `export VOICE_SHELL_PYTHON=/path/to/.venv/bin/python` |
-| 시작할 때 `FAILED`가 나온다 | `voice-shell.sh status`를 보고 `daemon.out`의 끝부분을 읽습니다 |
 
 ## 조금 더
 

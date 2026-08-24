@@ -47,7 +47,7 @@ restent sur ce que vous étiez en train de faire.
 
 ```bash
 npx skills add ykuwai/voice-shell
-pip install numpy aiohttp
+pip install numpy aiohttp "sounddevice>=0.5.6"
 ```
 
 Si vous avez Chrome, il n'en faut pas plus.
@@ -97,21 +97,6 @@ voice-shell.sh engines
 
 Tous vos réglages restent dans `~/.config/voice-shell/` et survivent à un
 redémarrage.
-
-## Quand ça coince
-
-Sous Linux, pour enregistrer il faut `arecord`.
-
-```bash
-sudo apt install alsa-utils      # Linux
-```
-
-| Ce que vous voyez | Quoi faire |
-|---|---|
-| Vous parlez et rien n'arrive | Le seuil de déclenchement est trop haut. Baissez le repère sous le micro dans la fenêtre jusqu'à ce que la barre le dépasse quand vous parlez |
-| Les bruits envoient tout seuls | Le seuil de déclenchement est trop bas. Remontez ce même repère jusqu'à ce que seule votre voix le dépasse |
-| `No Python it can run was found` | `export VOICE_SHELL_PYTHON=/path/to/.venv/bin/python` |
-| Le démarrage affiche `FAILED` | Lancez `voice-shell.sh status` et lisez la fin de `daemon.out` |
 
 ## Pour aller plus loin
 

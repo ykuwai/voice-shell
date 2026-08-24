@@ -45,7 +45,7 @@ manos donde ya las tenías.
 
 ```bash
 npx skills add ykuwai/voice-shell
-pip install numpy aiohttp
+pip install numpy aiohttp "sounddevice>=0.5.6"
 ```
 
 Si tienes Chrome, con eso basta.
@@ -91,21 +91,6 @@ voice-shell.sh engines
 | `engines` | Las formas que tiene de reconocer la voz |
 
 Todo lo que configures se queda en `~/.config/voice-shell/` y sobrevive a un reinicio.
-
-## Cuando algo va mal
-
-En Linux, para grabar hace falta `arecord`.
-
-```bash
-sudo apt install alsa-utils      # Linux
-```
-
-| Lo que ves | Qué hacer |
-|---|---|
-| Hablas y no llega nada | El nivel de activación está demasiado alto. Baja la marca que hay bajo el micrófono en la ventana hasta que la barra la pase cuando hablas |
-| Los ruidos envían cosas solos | El nivel de activación está demasiado bajo. Sube esa misma marca hasta que solo tu voz la pase |
-| `No Python it can run was found` | `export VOICE_SHELL_PYTHON=/path/to/.venv/bin/python` |
-| El arranque dice `FAILED` | Ejecuta `voice-shell.sh status` y mira el final de `daemon.out` |
 
 ## Un poco más
 

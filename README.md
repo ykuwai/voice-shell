@@ -41,7 +41,7 @@ whatever you were doing.
 
 ```bash
 npx skills add ykuwai/voice-shell
-pip install numpy aiohttp
+pip install numpy aiohttp "sounddevice>=0.5.6"
 ```
 
 If you have Chrome, that is all it takes.
@@ -86,21 +86,6 @@ voice-shell.sh engines
 | `engines` | The ways it can recognize speech |
 
 Everything you set stays in `~/.config/voice-shell/` and survives a restart.
-
-## When something goes wrong
-
-Recording on Linux needs `arecord`.
-
-```bash
-sudo apt install alsa-utils      # Linux
-```
-
-| What you see | What to do |
-|---|---|
-| You talk and nothing arrives | The trigger level is too high. Lower the mark under the mic in the window until the bar crosses it when you speak |
-| Noises send things on their own | The trigger level is too low. Raise that same mark until only your voice gets past it |
-| `No Python it can run was found` | `export VOICE_SHELL_PYTHON=/path/to/.venv/bin/python` |
-| Startup says `FAILED` | Run `voice-shell.sh status` and read the tail of `daemon.out` |
 
 ## A little more
 

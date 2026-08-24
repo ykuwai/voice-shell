@@ -46,7 +46,7 @@ hört, all das per Stimme, während deine Hände bei der eigentlichen Arbeit ble
 
 ```bash
 npx skills add ykuwai/voice-shell
-pip install numpy aiohttp
+pip install numpy aiohttp "sounddevice>=0.5.6"
 ```
 
 Wenn du Chrome hast, reicht das schon.
@@ -93,21 +93,6 @@ voice-shell.sh engines
 | `engines` | Die Arten, wie Sprache erkannt werden kann |
 
 Alle Einstellungen bleiben in `~/.config/voice-shell/` und überstehen einen Neustart.
-
-## Wenn etwas schiefgeht
-
-Unter Linux braucht es zum Aufnehmen `arecord`.
-
-```bash
-sudo apt install alsa-utils      # Linux
-```
-
-| Was du siehst | Was zu tun ist |
-|---|---|
-| Du sprichst und nichts kommt an | Die Auslöseschwelle ist zu hoch. Zieh die Marke unter dem Mikrofon im Fenster so weit herunter, bis der Balken sie beim Sprechen überschreitet |
-| Geräusche senden von allein | Die Auslöseschwelle ist zu niedrig. Zieh dieselbe Marke so weit herauf, bis nur noch deine Stimme darüber kommt |
-| `No Python it can run was found` | `export VOICE_SHELL_PYTHON=/path/to/.venv/bin/python` |
-| Der Start meldet `FAILED` | Führe `voice-shell.sh status` aus und lies das Ende von `daemon.out` |
 
 ## Noch etwas mehr
 

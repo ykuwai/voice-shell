@@ -42,7 +42,7 @@
 
 ```bash
 npx skills add ykuwai/voice-shell
-pip install numpy aiohttp
+pip install numpy aiohttp "sounddevice>=0.5.6"
 ```
 
 Chromeがあれば、これだけで動く。
@@ -85,21 +85,6 @@ voice-shell.sh engines
 | `engines` | 選べる認識のやり方 |
 
 設定はすべて `~/.config/voice-shell/` に残り、再起動をまたいで消えない。
-
-## うまくいかないとき
-
-Linux では録音に `arecord` が要る。
-
-```bash
-sudo apt install alsa-utils      # Linux
-```
-
-| 出ていること | どうするか |
-|---|---|
-| 話しても何も届かない | 反応する音の大きさが高すぎる。画面のマイクの下にある印を、話したときに棒が越えるところまで下げる |
-| 物音で勝手に送られる | 反応する音の大きさが低すぎる。同じ印を、自分の声だけが越えるところまで上げる |
-| `No Python it can run was found` | `export VOICE_SHELL_PYTHON=/path/to/.venv/bin/python` |
-| 起動が `FAILED` になる | `voice-shell.sh status` を見て、`daemon.out` の末尾を読む |
 
 ## もう少し詳しく
 

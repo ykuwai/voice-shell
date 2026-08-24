@@ -39,7 +39,7 @@
 
 ```bash
 npx skills add ykuwai/voice-shell
-pip install numpy aiohttp
+pip install numpy aiohttp "sounddevice>=0.5.6"
 ```
 
 有 Chrome 的话，这样就够了。
@@ -82,21 +82,6 @@ voice-shell.sh engines
 | `engines` | 能选的识别方式 |
 
 设置的东西全都留在 `~/.config/voice-shell/`，重启也不会没。
-
-## 出问题的时候
-
-在 Linux 上录音需要 `arecord`。
-
-```bash
-sudo apt install alsa-utils      # Linux
-```
-
-| 看到的情况 | 怎么办 |
-|---|---|
-| 说了话但什么都没送到 | 触发的音量定得太高。把窗口里麦克风下面那个记号往下拉，拉到说话时横条能越过去为止 |
-| 有点响动就自己送出去 | 触发的音量定得太低。把同一个记号往上拉，拉到只有自己的声音能越过去为止 |
-| `No Python it can run was found` | `export VOICE_SHELL_PYTHON=/path/to/.venv/bin/python` |
-| 启动显示 `FAILED` | 跑一下 `voice-shell.sh status`，再看 `daemon.out` 的末尾 |
 
 ## 再详细一点
 
