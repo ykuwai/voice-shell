@@ -88,6 +88,11 @@ function applyI18n(root = uiDoc()) {
   }
   // Wording that changes with the state cannot ride on data-i18n, so it gets repainted here
   if (typeof paintPower === 'function' && el.powerLabel) paintPower();
+  // silenceNote is the same story: which of the two wordings belongs there
+  // depends on asrChosen, so a plain data-i18n sweep would undo the swap and
+  // leave the note claiming the setting works again while the slider stays
+  // disabled.
+  if (typeof paintBrowserAsr === 'function' && el.silenceNote) paintBrowserAsr();
 }
 
 const $ = id => document.getElementById(id);
@@ -100,7 +105,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'editOnce','dropOne','sendOne','draftMark',
                   'hint','note','log','none','count','fresh','floatAsk','taken','takeBack',
                   'mic','recogLang','recogLangField','thresh','threshVal','gaugeFill','gaugeMark',
-                  'silence','silenceVal','minChars','minCharsVal','clean',
+                  'silence','silenceVal','silenceNote','minChars','minCharsVal','clean',
                   'engineGroup','enginePick','engineNote','whisperModel','whisperModelField','whisperModelNote',
                   'browserAsrWarn','asrConflict','browserMic','micSettingsLink','asrLang','asrLangField',
                   'idleMute','idleMuteVal','idleMuteField','idleMinsField','idleMuteOn','idleMuteNote',
@@ -3143,6 +3148,12 @@ function paintBrowserAsr() {
   el.idleMuteNote.hidden = !asrChosen;
   el.browserGestureField.hidden = !asrChosen;
   paintIdleMute();
+  // Browser recognition decides for itself when an utterance ends (the
+  // browser's own isFinal), so "Pause to send" has nothing to act on there.
+  // Leaving the slider live would say otherwise.
+  el.silence.disabled = asrChosen;
+  el.silenceVal.disabled = asrChosen;
+  el.silenceNote.textContent = t(asrChosen ? 'silenceNoteBrowser' : 'silenceNote');
   el.engineNote.textContent = t(asrChosen ? 'browserAsrNote' : 'localAsrNote');
   // For turning listening on and off, paintPower() decides both whether it
   // shows and what it says (it changes with more than the engine, it changes
