@@ -41,7 +41,7 @@ whatever you were doing.
 
 ```bash
 npx skills add ykuwai/voice-shell
-pip install numpy aiohttp "sounddevice>=0.5.6"
+pip install numpy aiohttp
 ```
 
 If you have Chrome, that is all it takes.

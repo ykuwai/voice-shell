@@ -46,7 +46,7 @@ hört, all das per Stimme, während deine Hände bei der eigentlichen Arbeit ble
 
 ```bash
 npx skills add ykuwai/voice-shell
-pip install numpy aiohttp "sounddevice>=0.5.6"
+pip install numpy aiohttp
 ```
 
 Wenn du Chrome hast, reicht das schon.
