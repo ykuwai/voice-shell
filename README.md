@@ -2,13 +2,40 @@
 
 English · [日本語](docs/readme/README.ja.md) · [Español](docs/readme/README.es.md) · [Français](docs/readme/README.fr.md) · [Deutsch](docs/readme/README.de.md) · [简体中文](docs/readme/README.zh.md) · [한국어](docs/readme/README.ko.md)
 
-An Agent Skill for giving Claude Code instructions with your voice. No keyboard.
-You talk and the instruction goes through.
+<p align="center">
+  <img src="https://img.shields.io/github/license/ykuwai/voice-shell" alt="License">
+  <img src="https://img.shields.io/github/last-commit/ykuwai/voice-shell" alt="Last commit">
+</p>
 
-> mic → speech recognition → one line of JSONL → Monitor → Claude Code
+**Talk to Claude Code. No keyboard.**
 
-Say whatever comes to mind while you work and it arrives without you pressing Enter.
-It works with Claude Code and with other agents such as Codex.
+You think out loud while you work, and the sentence lands as a prompt, no
+Enter key involved. Not dictation bolted onto a text box: mute, review, undo,
+and pick which session hears you, all by voice, while your hands stay on
+whatever you were doing.
+
+<p align="center">
+  <img src="docs/readme/images/viewer.png" alt="The Voice Shell viewer: a floating window showing live transcription, session routing, and send mode" width="360">
+</p>
+
+## Why
+
+- **Nothing to press to send it.** Most voice tools fill a text box and wait
+  for you to hit send. Here the sentence goes straight through the moment
+  it's heard, no button, no confirmation step, no window to click into.
+- **Nothing to install to try it.** The default recognizer is your browser.
+  No model download, no wait. When you want it fully private, switch to
+  on-device recognition (Apple, or Whisper) with one setting, no re-learning
+  anything.
+- **A full voice UI, not a microphone icon.** "Mute", "hold", "live",
+  "cancel that", "session 2" — said at the end of a sentence, all of it works
+  hands-free. The floating window shows exactly what it heard as you say it.
+- **Run it for more than one thing at once.** Keep voice mode on in several
+  Claude Code sessions and choose which one gets your words, from the window
+  or by voice.
+- **Misheard names fix themselves.** Teach it once ("cloud code → Claude
+  Code") and the correction applies from then on, even to text still being
+  recognized.
 
 ## Install
 
@@ -17,43 +44,17 @@ npx skills add ykuwai/voice-shell
 pip install numpy aiohttp "sounddevice>=0.5.6"
 ```
 
-If you have Chrome, that is all it takes. **No model to download, nothing to wait for.**
+If you have Chrome, that is all it takes.
 
-## Use
-
-Type `/voice-shell` in Claude Code, or say "voice mode". After that you just talk.
-Say "stop voice mode" to stop.
-
-A window of its own opens at http://127.0.0.1:47865 and the words it hears grow
-there as you speak. Float it in front and you can watch it while you work on
-something else.
-
-Set `VOICE_SHELL_PORT` before starting it to choose another port. Setting
-`VOICE_SHELL_PORT=8090` keeps the previous address.
-
-| How it sends | What happens |
-|---|---|
-| Live | What you say goes straight through |
-| Hold | It piles up, so you can fix it before sending |
-| Paused | Nothing you say while paused is kept anywhere |
-
-Even with your hands full, **you can switch by voice alone.** "Mute" and "unmute"
-turn the mic off and on, "hold" and "live" change how it sends. End a sentence with
-"cancel that" and that one utterance is dropped instead of sent. (Only with browser
-recognition, muting lets go of the audio itself, so turn the mic back on from the
-window.)
-
-You can leave a voice mode running for each piece of work and **pick which one
-gets your words from the window.** Your voice picks too ("session 2").
-
-Proper nouns that get misheard can go in a dictionary (`cloud code → Claude Code`).
-Replacements you register also hit the words while they are still being recognized.
+Type `/voice-shell` in Claude Code, or say "voice mode", to start. The steps
+an agent follows from there are in [SKILL.md](skills/voice-shell/SKILL.md).
 
 ## Where your voice goes
 
-**The default is browser recognition, so the audio is sent to Google's servers.**
-When you want it to stay on your machine, pick another way from the settings in
-the window. The same warning is written there on the spot.
+> [!NOTE]
+> The default is browser recognition, so the audio is sent to Google's servers.
+> When you want it to stay on your machine, pick another way from the settings
+> in the window. The same warning is written there on the spot.
 
 | Way | What it needs | Where the audio goes |
 |---|---|---|

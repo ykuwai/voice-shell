@@ -2,16 +2,46 @@
 
 [English](../../README.md) · [日本語](README.ja.md) · [Español](README.es.md) · Français · [Deutsch](README.de.md) · [简体中文](README.zh.md) · [한국어](README.ko.md)
 
+<p align="center">
+  <img src="https://img.shields.io/github/license/ykuwai/voice-shell" alt="Licence">
+  <img src="https://img.shields.io/github/last-commit/ykuwai/voice-shell" alt="Dernier commit">
+</p>
+
 La version d'origine est [README.md](../../README.md), en anglais. En cas de désaccord,
 c'est l'anglais qui fait foi.
 
-Un Agent Skill pour donner des instructions à Claude Code à la voix. Sans clavier.
-Vous parlez et l'instruction part.
+**Parlez à Claude Code. Sans clavier.**
 
-> micro → reconnaissance vocale → une ligne de JSONL → Monitor → Claude Code
+Vous pensez tout haut en travaillant, et la phrase arrive telle quelle comme
+instruction, sans toucher à la touche Entrée. Ce n'est pas de la dictée collée
+sur un champ de texte : couper le micro, se relire, annuler, choisir quelle
+session vous écoute, tout cela se fait à la voix, pendant que vos mains
+restent sur ce que vous étiez en train de faire.
 
-Dites ce qui vous vient pendant que vous travaillez, ça arrive sans appuyer sur
-Entrée. Fonctionne avec Claude Code et avec d'autres agents comme Codex.
+<p align="center">
+  <img src="images/viewer.png" alt="La fenêtre de Voice Shell : une fenêtre flottante affichant la transcription en direct, le choix de la session et le mode d'envoi" width="360">
+</p>
+
+## Points forts
+
+- **Rien à cliquer pour l'envoyer.** La plupart des outils vocaux remplissent
+  un champ de texte et attendent que vous cliquiez sur envoyer. Ici, la
+  phrase passe directement au moment où elle est entendue, sans bouton, sans
+  étape de confirmation, sans fenêtre où cliquer.
+- **Rien à installer pour essayer.** La reconnaissance par défaut se fait dans
+  le navigateur. Aucun modèle à télécharger, aucune attente. Le jour où vous
+  voulez que tout reste privé, un seul réglage suffit pour passer à la
+  reconnaissance sur l'appareil (Apple, ou Whisper), sans rien réapprendre.
+- **Une véritable interface vocale, pas une icône de micro.** « Coupe le
+  micro », « relecture », « direct », « annule ça », « session 2 » — dits en
+  fin de phrase, tout fonctionne mains libres. La fenêtre flottante affiche
+  exactement ce qu'elle entend, au fil de la parole.
+- **Utilisable sur plusieurs chantiers à la fois.** Gardez le mode vocal actif
+  dans plusieurs sessions Claude Code et choisissez laquelle reçoit vos mots,
+  depuis la fenêtre ou à la voix.
+- **Les noms mal entendus se corrigent tout seuls.** Enregistrez-le une fois
+  dans le dictionnaire (« cloud code → Claude Code ») et la correction
+  s'applique dès lors, même au texte encore en cours de reconnaissance.
 
 ## Installation
 
@@ -20,42 +50,19 @@ npx skills add ykuwai/voice-shell
 pip install numpy aiohttp "sounddevice>=0.5.6"
 ```
 
-Si vous avez Chrome, il n'en faut pas plus. **Aucun modèle à télécharger, rien à
-attendre.**
+Si vous avez Chrome, il n'en faut pas plus.
 
-## Utilisation
-
-Tapez `/voice-shell` dans Claude Code, ou dites « mode vocal ». Ensuite, vous n'avez
-qu'à parler. Dites « arrête le mode vocal » pour terminer.
-
-Une fenêtre à part s'ouvre sur http://127.0.0.1:47865 et les mots entendus s'y
-allongent au fil de la parole. Gardez-la au premier plan et vous pouvez la surveiller
-en travaillant sur autre chose.
-
-| Façon d'envoyer | Ce qui se passe |
-|---|---|
-| Direct | Ce que vous dites part tel quel |
-| Relecture | Ça s'accumule, vous corrigez avant d'envoyer |
-| En pause | Rien de ce que vous dites en pause n'est conservé où que ce soit |
-
-Même les mains prises, **vous pouvez basculer à la voix seule** : « couper le micro »
-et « réactiver le micro » l'éteignent et le rallument, « relecture » et « direct »
-changent la façon d'envoyer. Terminez une phrase par « annule ça » et cette phrase-là
-est jetée au lieu d'être envoyée. (Avec la reconnaissance du navigateur seulement,
-couper le micro libère l'audio lui-même, donc rallumez-le depuis la fenêtre.)
-
-Vous pouvez laisser un mode vocal ouvert par chantier et **choisir depuis la fenêtre
-celui qui reçoit vos mots.** La voix choisit aussi (« session 2 »).
-
-Les noms propres mal entendus peuvent aller dans un dictionnaire
-(`cloud code → Claude Code`). Les remplacements enregistrés touchent aussi les mots
-pendant qu'ils sont encore en cours de reconnaissance.
+Tapez `/voice-shell` dans Claude Code, ou dites « mode vocal », pour démarrer.
+Les étapes que suit l'agent à partir de là sont dans
+[SKILL.md](../../skills/voice-shell/SKILL.md).
 
 ## Où va votre voix
 
-**Par défaut c'est le navigateur qui reconnaît, donc l'audio part vers les serveurs
-de Google.** Si vous voulez qu'il reste sur votre machine, choisissez une autre façon
-dans les réglages de la fenêtre. Le même avertissement y figure sur place.
+> [!NOTE]
+> Par défaut c'est le navigateur qui reconnaît, donc l'audio part vers les
+> serveurs de Google. Si vous voulez qu'il reste sur votre machine, choisissez
+> une autre façon dans les réglages de la fenêtre. Le même avertissement y
+> figure sur place.
 
 | Façon | Ce qu'il faut | Où va l'audio |
 |---|---|---|
@@ -63,12 +70,14 @@ dans les réglages de la fenêtre. Le même avertissement y figure sur place.
 | Apple sur l'appareil | macOS 26 ou plus récent. Rien à installer en plus | Reste sur la machine |
 | Whisper | `faster-whisper`. Solide sur les noms propres | Reste sur la machine |
 
-La façon choisie est retenue, donc au démarrage suivant c'est la même. Les deux
-façons qui gardent tout en local sont dans [SETUP.md](skills/voice-shell/SETUP.md).
+La façon choisie est retenue, donc au démarrage suivant c'est la même. Les
+deux façons qui gardent tout en local sont dans
+[SETUP.md](../../skills/voice-shell/SETUP.md).
 
-Les langues reconnues dépendent de la façon choisie. Le navigateur propose celles que
-Chrome embarque, Apple les locales installées dans le système, Whisper celles que
-couvre le modèle. La fenêtre elle-même existe en sept langues.
+Les langues reconnues dépendent de la façon choisie. Le navigateur propose
+celles que Chrome embarque, Apple les locales installées dans le système,
+Whisper celles que couvre le modèle. La fenêtre elle-même existe en sept
+langues.
 
 ## Commandes
 
@@ -86,7 +95,8 @@ voice-shell.sh engines
 | `status` | Ce qui tourne, et quelle session écoute |
 | `engines` | Les façons de reconnaître la parole |
 
-Tous vos réglages restent dans `~/.config/voice-shell/` et survivent à un redémarrage.
+Tous vos réglages restent dans `~/.config/voice-shell/` et survivent à un
+redémarrage.
 
 ## Quand ça coince
 
@@ -105,8 +115,8 @@ sudo apt install alsa-utils      # Linux
 
 ## Pour aller plus loin
 
-Les deux ci-dessous sont en anglais uniquement. L'essentiel pour la plupart des gens
-est déjà au-dessus.
+Les deux ci-dessous sont en anglais uniquement. L'essentiel pour la plupart
+des gens est déjà au-dessus.
 
 | À lire | Ce qu'on y trouve |
 |---|---|

@@ -2,15 +2,44 @@
 
 [English](../../README.md) · [日本語](README.ja.md) · Español · [Français](README.fr.md) · [Deutsch](README.de.md) · [简体中文](README.zh.md) · [한국어](README.ko.md)
 
+<p align="center">
+  <img src="https://img.shields.io/github/license/ykuwai/voice-shell" alt="Licencia">
+  <img src="https://img.shields.io/github/last-commit/ykuwai/voice-shell" alt="Último commit">
+</p>
+
 El original es [README.md](../../README.md), en inglés. Si algo no coincide, manda el inglés.
 
-Un Agent Skill para darle instrucciones a Claude Code con la voz. Sin teclado.
-Hablas y la instrucción llega.
+**Habla con Claude Code. Sin teclado.**
 
-> micrófono → reconocimiento de voz → una línea de JSONL → Monitor → Claude Code
+Piensas en voz alta mientras trabajas, y la frase llega como instrucción, sin
+tocar Enter. No es dictado pegado a un cuadro de texto: silenciar, revisar,
+deshacer y elegir a qué sesión le llega lo que dices, todo con la voz, con las
+manos donde ya las tenías.
 
-Di lo que se te ocurra mientras trabajas y llega sin que pulses Enter. Funciona con
-Claude Code y también con otros agentes como Codex.
+<p align="center">
+  <img src="images/viewer.png" alt="La ventana de Voice Shell: transcripción en vivo, selección de sesión y forma de envío, todo en una ventana flotante" width="360">
+</p>
+
+## Por qué
+
+- **No hay nada que pulsar para enviarlo.** La mayoría de las herramientas de
+  voz llenan un cuadro de texto y esperan a que le des a enviar. Aquí la frase
+  pasa directamente en el momento en que se oye, sin botón, sin paso de
+  confirmación, sin ventana en la que hacer clic.
+- **No hay que instalar nada para probarlo.** El reconocimiento por defecto lo
+  hace el navegador. Sin descargar modelos ni esperas. Cuando quieras que todo
+  quede en tu máquina, cambia a reconocimiento en el dispositivo (Apple o
+  Whisper) con un solo ajuste, sin tener que aprender nada nuevo.
+- **Una interfaz de voz completa, no un icono de micrófono.** «Silenciar»,
+  «revisar», «directo», «cancela eso», «sesión 2»: dicho al final de una
+  frase, todo funciona sin usar las manos. La ventana flotante muestra
+  exactamente lo que va oyendo, según lo dices.
+- **Úsalo en más de una cosa a la vez.** Deja el modo voz activo en varias
+  sesiones de Claude Code y elige a cuál le llega lo que dices, desde la
+  ventana o con la voz.
+- **Los nombres que se oyen mal se corrigen solos.** Enséñaselo una vez
+  («cloud code → Claude Code») y la corrección se aplica desde ese momento,
+  incluso al texto que todavía se está reconociendo.
 
 ## Instalación
 
@@ -19,41 +48,18 @@ npx skills add ykuwai/voice-shell
 pip install numpy aiohttp "sounddevice>=0.5.6"
 ```
 
-Si tienes Chrome, con eso basta. **No hay modelo que descargar ni nada que esperar.**
+Si tienes Chrome, con eso basta.
 
-## Uso
-
-Escribe `/voice-shell` en Claude Code o di «modo voz». A partir de ahí solo hablas.
-Di «salir del modo voz» para terminar.
-
-Se abre una ventana propia en http://127.0.0.1:47865 y las palabras que oye van
-creciendo ahí mientras hablas. Déjala flotando encima y podrás mirarla mientras
-trabajas en otra cosa.
-
-| Cómo envía | Qué pasa |
-|---|---|
-| Directo | Lo que dices sale tal cual |
-| Revisar | Se va acumulando, así puedes corregirlo antes de enviarlo |
-| En pausa | Nada de lo que digas en pausa se guarda en ningún sitio |
-
-Aunque tengas las manos ocupadas, **puedes cambiar solo con la voz**: «silenciar» y
-«quitar silencio» apagan y encienden el micrófono, «revisar» y «directo» cambian la
-forma de enviar. Termina una frase con «cancela eso» y esa frase se descarta en vez
-de enviarse. (Solo con el reconocimiento del navegador, silenciar suelta el audio en
-sí, así que vuelve a encender el micrófono desde la ventana.)
-
-Puedes dejar un modo voz abierto para cada tarea y **elegir desde la ventana a cuál
-le llega lo que dices.** También se elige con la voz («sesión 2»).
-
-Los nombres propios que se oyen mal pueden ir en un diccionario
-(`cloud code → Claude Code`). Las sustituciones que registres también alcanzan a las
-palabras mientras se están reconociendo.
+Escribe `/voice-shell` en Claude Code, o di «modo voz», para empezar. Los
+pasos que sigue el agente a partir de ahí están en
+[SKILL.md](../../skills/voice-shell/SKILL.md).
 
 ## A dónde va tu voz
 
-**Por defecto reconoce el navegador, así que el audio se envía a los servidores de
-Google.** Cuando quieras que no salga de tu máquina, elige otra forma en los ajustes
-de la ventana. Allí mismo aparece este mismo aviso.
+> [!NOTE]
+> Por defecto reconoce el navegador, así que el audio se envía a los
+> servidores de Google. Cuando quieras que no salga de tu máquina, elige otra
+> forma en los ajustes de la ventana. Allí mismo aparece este mismo aviso.
 
 | Forma | Qué necesita | A dónde va el audio |
 |---|---|---|
@@ -62,7 +68,7 @@ de la ventana. Allí mismo aparece este mismo aviso.
 | Whisper | `faster-whisper`. Fuerte con los nombres propios | Se queda en la máquina |
 
 Recuerda la forma que elegiste, así que la próxima vez arranca igual. Las dos formas
-que dejan todo en local están en [SETUP.md](skills/voice-shell/SETUP.md).
+que dejan todo en local están en [SETUP.md](../../skills/voice-shell/SETUP.md).
 
 Qué idiomas puede reconocer lo decide la forma que elijas. El navegador ofrece los
 que trae Chrome, Apple los locales instalados en el sistema, Whisper los que cubra el
