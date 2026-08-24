@@ -443,38 +443,11 @@ from pathlib import Path
 reg, agent, session, name = sys.argv[1:5]
 now = time.time()
 
-# The order on screen comes from when that conversation first started listening.
-# Ordering by re-registration time pushes the number back on every voice restart.
-first_seen = now
-if session:
-    conf = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "voice-shell"
-    conf.mkdir(parents=True, exist_ok=True)
-    f = conf / "sessions.json"
-    try:
-        seen = json.loads(f.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        seen = {}
-    first_seen = seen.get(session)
-    if first_seen is None:
-        # A conversation not remembered yet. If a live registration holds the
-        # same conversation, take its time over (this keeps something registered
-        # by an older build from looking brand new and jumping to the end).
-        for other in Path(reg).parent.glob("*"):
-            try:
-                info = json.loads(other.read_text(encoding="utf-8"))
-            except Exception:
-                continue
-            if info.get("session") == session:
-                first_seen = info.get("first_seen") or info.get("since")
-                break
-        first_seen = first_seen or now
-        seen[session] = first_seen
-        f.write_text(json.dumps(seen, ensure_ascii=False, indent=2) + "\n",
-                     encoding="utf-8")
-
+# The order on screen comes from this moment, when the skill started listening
+# just now. A session that sat quiet for days does not keep a claim on an
+# early spot from back then (#74).
 json.dump({"started": time.strftime("%Y-%m-%d %H:%M:%S"), "since": now,
-           "first_seen": first_seen, "cwd": os.getcwd(),
-           "agent": agent, "session": session, "name": name},
+           "cwd": os.getcwd(), "agent": agent, "session": session, "name": name},
           open(reg, "w", encoding="utf-8"), ensure_ascii=False)
 REG
     # With exec the trap is not carried over (process replacement makes bash

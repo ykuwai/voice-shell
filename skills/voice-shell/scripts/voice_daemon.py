@@ -1920,8 +1920,8 @@ def resolve_target(log_path):
             pass
 
     # Nothing chosen yet, or the chosen listener is truly gone. The default is
-    # whichever just started, so the pick uses the re-registration time rather
-    # than the display order (first_seen). One listener is still named
+    # whichever just started, which is also the last chip in the display order
+    # now that both are the same "since" moment. One listener is still named
     # explicitly rather than left blank, so "nobody drops it" only ever means
     # what it says.
     live = list_active_listeners(log_path)
@@ -2056,15 +2056,13 @@ def label_listeners(entries):
     """Decide the display names. When the same name lines up more than once, the
     duplicates get (2), (3) and so on, counted in order of earliness.
 
-    The order is when that conversation first started listening. Order by the
-    re-registration time and the numbers shift every time voice mode goes off and on,
-    which makes the number you say out loud unreliable.
+    The order is when that listener registered just now. A session that went quiet
+    for a while and comes back does not keep a claim on wherever it used to sit,
+    it lines up as of this moment instead (#74).
     """
     # When the times tie, the PID decides. Leave this undecided and the numbers swap
     # around with the order the registration files get read (left to the OS).
-    entries = sorted(entries,
-                     key=lambda e: (e.get("first_seen") or e.get("since", 0),
-                                    e.get("pid", 0)))
+    entries = sorted(entries, key=lambda e: (e.get("since", 0), e.get("pid", 0)))
     seen = {}
     for e in entries:
         hand = custom_name(e)
