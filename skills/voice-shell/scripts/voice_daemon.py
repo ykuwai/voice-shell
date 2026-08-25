@@ -1335,10 +1335,14 @@ NUMBER_WORDS = {
            "zehn": 10},
     "zh": {"零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
            "六": 6, "七": 7, "八": 8, "九": 9, "十": 10},
-    # Korean readings (일 이 삼 and so on) are not listed. 「이번」 is an everyday
-    # word meaning "this time", so reading it as number 2 would turn ordinary talk
-    # into a routing switch. Only digits get picked up (「2번」 goes through
-    # ROUTE_PARTS below).
+    # 이번 (2번 written with the native reading instead of a digit) is also the
+    # everyday word for "this time", so this does turn that word into a routing
+    # switch. What holds it back is the same guard every routing phrase has,
+    # nothing fires unless the whole utterance is only this and unless two or
+    # more sessions are listening, so a bare 「이번」 caught mid-sentence, or with
+    # only one listener, is never read as a command in the first place.
+    "ko": {"영": 0, "공": 0, "일": 1, "이": 2, "삼": 3, "사": 4, "오": 5,
+           "육": 6, "칠": 7, "팔": 8, "구": 9, "십": 10},
 }
 # Native Japanese readings that stand only in front of the 「ひとつ目」 shape. Words
 # put here read as a number only when 「つ目」 follows. Mixed into the table above,
@@ -1393,9 +1397,8 @@ ROUTE_PARTS = {
         "tail": ["个", "号", "会话", "吧"],
     },
     "ko": {
-        # 「2번」 「세션 2」 「2번으로 보내」. There are no number readings, so a number
-        # goes through only when it arrives as Arabic digits (see the Korean column
-        # in NUMBER_WORDS).
+        # 「2번」 「세션 2」 「2번으로 보내」, and 「이번」 too now (see the Korean
+        # column in NUMBER_WORDS for why that one is safe to read as a number).
         "prefix": ["세션", "대상", "목적지", "번호"],
         "counter": ["번", "번째"],
         "tail": ["으로", "로", "으로보내", "로보내", "으로보내줘", "로보내줘",
