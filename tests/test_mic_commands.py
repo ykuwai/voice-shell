@@ -21,8 +21,9 @@ class MuteTailTest(unittest.TestCase):
         self.assertEqual(mic_command_shape("はいミュート", False), "mute")
 
     def test_ordinary_sentence_is_not_swallowed(self):
-        # "body" here is well past the noise ceiling, so this stays a prompt.
-        self.assertIsNone(mic_command_shape("今日の会議はこれでミュートにします", False))
+        # Ends with a real MUTE_TAIL wording, but the clause ahead of it is well
+        # past the noise ceiling, so this stays a prompt, not a command.
+        self.assertIsNone(mic_command_shape("今からこの通話を静かにするためミュート", False))
 
     def test_already_muted_does_nothing(self):
         self.assertIsNone(mic_command_shape("ミュート", True))
