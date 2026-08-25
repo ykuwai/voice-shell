@@ -1247,25 +1247,25 @@ function withDict(text) {
 // preview and the confirmation read as the same signal a beat apart.
 const TAIL_PREVIEW_CLASS = {cancel_tail: 'warn', hold_tail: 'hold', mute: 'warn'};
 
-/* Held back the same stretch paintSendCue holds the ring back (SEND_CUE_DEAD),
-   so the word does not go red the instant it is heard mid-sentence. A word
-   only lights up once it has sat at the tail through a real pause, the same
-   moment the ring would actually start moving for it, not the moment it was
-   merely recognized. */
+/* Started equal to SEND_CUE_DEAD (the ring's own hold-back), but that read as
+   flickery, cancel is often still settling on its own tail right after being
+   said, as the recognizer keeps revising. Held longer on purpose, a slower,
+   calmer signal than the ring's fill, not tied to it. */
+const TAIL_MARK_DELAY = 800;
 let tailMarkTimer = null, tailMarkKey = null, tailMarkPending = null;
 
 /* Draws the live partial, lighting up the trigger word once it has held the
-   tail for SEND_CUE_DEAD. Called from both places text arrives, the
+   tail for TAIL_MARK_DELAY. Called from both places text arrives, the
    local-engine partial and the browser SpeechRecognition interim result, so
    the two read identically. */
 function paintStream(s) {
   const match = s ? matchingTailWord(s) : null;
-  const key = match ? match.id + ' ' + match.word : null;
+  const key = match ? match.id + ' ' + match.word : null;
   tailMarkPending = {s, match};
   if (key !== tailMarkKey) {
     tailMarkKey = key;
     clearTimeout(tailMarkTimer);
-    tailMarkTimer = match ? setTimeout(showTailMark, SEND_CUE_DEAD) : null;
+    tailMarkTimer = match ? setTimeout(showTailMark, TAIL_MARK_DELAY) : null;
   }
   if (match && !tailMarkTimer) { renderTailMark(s, match); return; }
   el.stream.textContent = s;
@@ -1273,8 +1273,8 @@ function paintStream(s) {
 
 function showTailMark() {
   tailMarkTimer = null;
-  // The match this fires for might have moved on by the time SEND_CUE_DEAD is
-  // up (someone kept talking past it), tailMarkPending always holds the latest.
+  // The match this fires for might have moved on by the time the delay is up
+  // (someone kept talking past it), tailMarkPending always holds the latest.
   if (tailMarkPending && tailMarkPending.match)
     renderTailMark(tailMarkPending.s, tailMarkPending.match);
 }
