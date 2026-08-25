@@ -809,6 +809,14 @@
   .stream mark.cmd.hold { color:var(--accent-2); background:color-mix(in srgb, var(--accent-2) 18%, transparent); }
   .stream mark.cmd.warn { color:var(--danger);   background:color-mix(in srgb, var(--danger) 18%, transparent); }
   @keyframes cmdFade { 0%,65% { opacity:1; } 100% { opacity:0; } }
+  /* The word itself lighting up mid-sentence, before the command has actually
+     fired (paintStream in viewer.js). Same colors as the confirmation above,
+     inline rather than block since it sits inside text still growing. */
+  .stream mark.tailcmd {
+    padding:.05rem .3rem; border-radius:6px; font-weight:600;
+  }
+  .stream mark.tailcmd.hold { color:var(--accent-2); background:color-mix(in srgb, var(--accent-2) 18%, transparent); }
+  .stream mark.tailcmd.warn { color:var(--danger);   background:color-mix(in srgb, var(--danger) 18%, transparent); }
   #stream:empty::after { content:attr(data-quiet); color:var(--faint); font-size:.8rem; }
   .caret {
     display:inline-block; width:1.5px; height:1em; background:var(--accent);

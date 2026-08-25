@@ -872,13 +872,20 @@ function isBackchannel(text, words) {
    out of them (USER_COMMAND_KINDS leaves these two out), so they cannot go stale
    while the screen is up. What the user switched off is another matter and does
    move, so it is held apart in cmdOff and refreshed on every save. */
-const TAIL_IDS = ['cancel_tail', 'hold_tail'];
-let tailWords = {cancel_tail: new Set(), hold_tail: new Set()};
+/* mute rides along here too (#76 follow-up), so the drawing can show the same
+   "about to happen" preview for it that cancel_tail/hold_tail already get. Unlike
+   those two, mute only counts with a short noise prefix ahead of the word, not a
+   whole clause ahead of it, so TAIL_NOISE_MAX below keeps that ceiling in step
+   with MUTE_TAIL_NOISE_MAX in voice_daemon.py. unmute is left out, nothing is on
+   screen to highlight while the mic is off. */
+const TAIL_IDS = ['cancel_tail', 'hold_tail', 'mute'];
+let tailWords = {cancel_tail: new Set(), hold_tail: new Set(), mute: new Set()};
+const TAIL_NOISE_MAX = {mute: 7};
 async function loadTailWords() {
   try {
     const all = await Promise.all(UI_LANGS.map(
       ([code]) => fetch('/api/commands?lang=' + code).then(r => r.json())));
-    const out = {cancel_tail: new Set(), hold_tail: new Set()};
+    const out = {cancel_tail: new Set(), hold_tail: new Set(), mute: new Set()};
     for (const d of all) {
       for (const g of d.groups || [])
         if (out[g.id])
@@ -919,15 +926,32 @@ function takeCmdOff(d) {
    wording that is going to be sent after all, which is the promise this drawing
    exists to keep. */
 const TAIL_TRIM = /[ \t　。、．，・！？!?.,]+$/;
-function endsWithTailCmd(text) {
+
+/* The longest wording that matches at the tail, and which kind it belongs to,
+   or null. Longest first across every id together, the same reason
+   voice_daemon.py sorts MUTE_TAIL by length, a long phrasing must not be eaten
+   by a short one that sits inside it. mute's ceiling (TAIL_NOISE_MAX) is
+   checked here too, so a sentence that only happens to end in the word after a
+   real clause is not read as "about to fire" when the daemon would not read it
+   that way either. */
+function matchingTailWord(text) {
   const body = text.trim().replace(TAIL_TRIM, '').toLowerCase();
-  if (!body) return false;
+  if (!body) return null;
+  let best = null;
   for (const id of TAIL_IDS) {
     if (cmdOff.kinds.has(id)) continue;
     const off = cmdOff.words[id] || new Set();
-    for (const w of tailWords[id]) if (!off.has(w) && body.endsWith(w)) return true;
+    const ceiling = TAIL_NOISE_MAX[id];
+    for (const w of tailWords[id]) {
+      if (off.has(w) || !body.endsWith(w)) continue;
+      if (ceiling !== undefined && body.length - w.length > ceiling) continue;
+      if (!best || w.length > best.word.length) best = {id, word: w};
+    }
   }
-  return false;
+  return best;
+}
+function endsWithTailCmd(text) {
+  return matchingTailWord(text) !== null;
 }
 
 /* Whether what has been heard so far is something the daemon would send on its
@@ -1218,6 +1242,28 @@ function withDict(text) {
   return text;
 }
 
+// The color a fired command flashes in (flashCommand below), reused here so the
+// preview and the confirmation read as the same signal a beat apart.
+const TAIL_PREVIEW_CLASS = {cancel_tail: 'warn', hold_tail: 'hold', mute: 'warn'};
+
+/* Draws the live partial, lighting up the trigger word the instant the text
+   ends in one, the same moment paintSendCue starts filling the ring for it
+   (both run off worthSending/matchingTailWord, so there is nothing to keep in
+   sync by hand). Called from both places text arrives, the local-engine
+   partial and the browser SpeechRecognition interim result, so the two read
+   identically. */
+function paintStream(s) {
+  const match = s ? matchingTailWord(s) : null;
+  if (!match) { el.stream.textContent = s; return; }
+  const trimmed = s.replace(TAIL_TRIM, '');
+  const cut = trimmed.length - match.word.length;
+  const mark = document.createElement('mark');
+  mark.className = 'tailcmd ' + (TAIL_PREVIEW_CLASS[match.id] || 'warn');
+  mark.textContent = s.slice(cut, trimmed.length);
+  el.stream.replaceChildren(document.createTextNode(s.slice(0, cut)), mark,
+    document.createTextNode(s.slice(trimmed.length)));
+}
+
 // The live transcript has a cap on its height. Talk long enough and it flows
 // upward, so scroll down far enough to keep the tail you are speaking in view.
 function streamTail() {
@@ -1428,7 +1474,7 @@ async function handleWsMessage({ev, message, number, discardInProgress: wasDisca
       // here would let the drawing and the daemon disagree over the same words.
       livePartial = m.partial.trim();
       const s = withDict(livePartial);
-      el.stream.textContent = s;
+      paintStream(s);
       el.tray.classList.toggle('idle', !s);
       streamTail();
       paintTinyButtons();
@@ -2594,7 +2640,7 @@ function newRecognition(generation) {
       if (res.isFinal) sendUtterance(res[0].transcript);
       else interim += res[0].transcript;
     }
-    el.stream.textContent = withDict(interim);
+    paintStream(withDict(interim));
     el.tray.classList.toggle('idle', !interim);
     streamTail();
     paintTinyButtons();
