@@ -921,6 +921,21 @@ MUTE_TAIL = tuple(sorted(set(builtin_words("mute")), key=len, reverse=True))
 # clause. "はい"/"えーと"/"あの" fit comfortably here, a sentence does not.
 MUTE_TAIL_NOISE_MAX = 7
 
+# Same idea for unmute, added after the mute fix proved out (#76 follow-up). Held
+# to a narrower wordlist than MUTE_TAIL, everyday bare words like 「解除」/「かいじょ」
+# ("release", said about a lock, a hold, anything) are left out here even though
+# they still work as an exact match through UNMUTE_WORDS, only wordings that name
+# the mic or mute plainly are matched against the tail.
+_UNMUTE_TAIL_EXCLUDE = {"解除", "かいじょ", "解除して", "かいじょして"}
+UNMUTE_TAIL = tuple(sorted(
+    (w for w in builtin_words("unmute") if w not in _UNMUTE_TAIL_EXCLUDE),
+    key=len, reverse=True,
+))
+# Tighter than mute's: a false unmute costs the whole stretch the speaker thought
+# was off, not one utterance, so only a single short word ahead of the trigger
+# counts as noise here, not a whole clause.
+UNMUTE_TAIL_NOISE_MAX = 3
+
 
 # ── Phrasings the user adds ────────────────────
 #
@@ -1250,11 +1265,12 @@ def mic_command_shape(text: str, muted: bool):
     while already off and 「ミュート解除」 while already on both do nothing. Half as
     many words to check means half as many false hits.
 
-    Mute alone also matches with a short noise prefix ahead of the word
-    (MUTE_TAIL, #76), so a bit of the room picked up in front of it does not
-    make the whole utterance fail both this and the length gate and go
-    nowhere. Unmute stays exact only, a false hit there costs the whole
-    stretch the speaker thought was off, not one utterance.
+    Both sides also match with a short noise prefix ahead of the word
+    (MUTE_TAIL / UNMUTE_TAIL, #76), so a bit of the room picked up in front of it
+    does not make the whole utterance fail both this and the length gate and go
+    nowhere. Unmute's ceiling is tighter and its wordlist narrower
+    (UNMUTE_TAIL_NOISE_MAX), a false hit there costs the whole stretch the
+    speaker thought was off, not one utterance.
     """
     key = command_key(text)
     if key:
@@ -1264,7 +1280,11 @@ def mic_command_shape(text: str, muted: bool):
                 return "unmute"
         elif key in MUTE_WORDS or key in load_commands()["mute"]:
             return "mute"
-    if not muted:
+    if muted:
+        body = take_tail(text, UNMUTE_TAIL)
+        if body is not None and len(body) <= UNMUTE_TAIL_NOISE_MAX:
+            return "unmute"
+    else:
         body = take_tail(text, MUTE_TAIL)
         if body is not None and len(body) <= MUTE_TAIL_NOISE_MAX:
             return "mute"
