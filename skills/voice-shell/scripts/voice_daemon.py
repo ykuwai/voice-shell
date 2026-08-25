@@ -933,6 +933,19 @@ UNMUTE_TAIL = tuple(sorted(
 # counts as noise here, not a whole clause.
 UNMUTE_TAIL_NOISE_MAX = 3
 
+# Same idea again for switching into hold mode (mode_command_shape below), the
+# same class of bug MUTE_TAIL fixes for mute (#76 follow-up, a bare 「手直し」
+# preceded by a bit of noise the room picked up used to fail the exact match and
+# go nowhere). Named apart from HOLD_TAIL above, that one is the different,
+# already-tail-aware 「〜して、手直し」 signal at the end of an ordinary instruction.
+# This one is the whole-utterance mode switch. Held generous, like mute's, not
+# tight like unmute's, a false switch into hold only parks one utterance for
+# review, nothing is lost and live undoes it. Switching the other way, back to
+# live, stays exact only, that is the direction a false hit actually costs
+# something (speech during a call going straight through again).
+HOLD_MODE_TAIL = tuple(sorted(set(builtin_words("hold")), key=len, reverse=True))
+HOLD_MODE_TAIL_NOISE_MAX = 7
+
 
 # ── Phrasings the user adds ────────────────────
 #
@@ -1515,15 +1528,21 @@ def _route_rx(key: str):
 def mode_command_shape(text: str):
     """Return "live" / "hold" when the utterance has that shape. Switched off or not.
 
-    Same split as mic_command_shape, and for the same reason.
+    Same split as mic_command_shape, and for the same reason. Hold also matches
+    with a short noise prefix ahead of the word (HOLD_MODE_TAIL, #76 follow-up),
+    live stays exact only, the same asymmetry mic_command_shape draws between
+    mute and unmute.
     """
     key = command_key(text)
-    if not key:
-        return None
-    user = load_commands()
-    if key in LIVE_WORDS or key in user["live"]:
-        return "live"
-    return "hold" if key in HOLD_WORDS or key in user["hold"] else None
+    if key:
+        if key in LIVE_WORDS or key in load_commands()["live"]:
+            return "live"
+        if key in HOLD_WORDS or key in load_commands()["hold"]:
+            return "hold"
+    body = take_tail(text, HOLD_MODE_TAIL)
+    if body is not None and len(body) <= HOLD_MODE_TAIL_NOISE_MAX:
+        return "hold"
+    return None
 
 
 def mode_command(text: str):

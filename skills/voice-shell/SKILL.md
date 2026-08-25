@@ -206,6 +206,15 @@ things to watch for are as follows.
   with "shall I go ahead with ..." before deleting, pushing, deploying and so on.
 - **An event is the user speaking, but it is not a demand for an answer.** When
   one arrives mid-task, it is fine to finish what you are doing first.
+- **A single line that reads as plainly unrelated to the current work is not
+  automatically carried out.** A stray remark, one side of a phone call, a
+  reply meant for someone else standing there, these arrive as ordinary text
+  the same as everything else. Acting on that one line immediately is the same
+  mistake the holding section below exists to catch, just one line too early
+  to see the pattern yet. Hold off on it instead. If the next line keeps going
+  in the same unrelated direction, that confirms it and holding below takes
+  over. If the next line returns to the task, the odd one was only an aside,
+  and nothing was lost by not acting on it.
 
 ## It may be used by several pieces of work at once
 
@@ -304,12 +313,14 @@ What it can do is as follows.
   **Every language the screen can show has wordings of its own, and they can all
   be read from the lightbulb on screen.** The phrases above are the English ones.
   It only counts when **that phrase alone** is spoken (saying it inside a
-  sentence does nothing). **Mute and unmute are the exception**, a short burst
-  of noise picked up ahead of the word ("はいミュート", "えーとミュート解除")
-  still counts, so it does not go missing when what the room picked up lands
-  in front of it. Unmute's allowance is tighter, at most a couple of
-  characters, not a whole clause, a false hit there costs the whole stretch
-  the speaker thought was off, not one utterance. The different ways a number
+  sentence does nothing). **Mute, unmute, and draft/hold mode are the
+  exception**, a short burst of noise picked up ahead of the word
+  ("はいミュート", "えーとミュート解除", "はい手直し") still counts, so it does
+  not go missing when what the room picked up lands in front of it. Unmute's
+  allowance is tighter, at most a couple of characters, not a whole clause, a
+  false hit there costs the whole stretch the speaker thought was off, not one
+  utterance. Switching back to instant stays exact only, for the same reason.
+  The different ways a number
   gets read out loud are absorbed. A short sound plays when it switches.
   Users can add wording of their own
   (`~/.config/voice-shell/commands.json`). Only phrases said as a whole utterance
