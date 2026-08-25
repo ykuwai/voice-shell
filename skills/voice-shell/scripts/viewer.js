@@ -839,6 +839,7 @@ const sendCountdownOn = () =>
 function clearSendCountdown() {
   voiceSeen = false; silentAt = 0; livePartial = '';
   cueRun = 0; cueShown = 0; cueFull = false;
+  clearTimeout(tailMarkTimer); tailMarkTimer = null; tailMarkKey = null; tailMarkPending = null;
 }
 
 /* The same test voice_daemon.py runs (is_noise and is_allowed_short). Compare
@@ -1246,15 +1247,39 @@ function withDict(text) {
 // preview and the confirmation read as the same signal a beat apart.
 const TAIL_PREVIEW_CLASS = {cancel_tail: 'warn', hold_tail: 'hold', mute: 'warn'};
 
-/* Draws the live partial, lighting up the trigger word the instant the text
-   ends in one, the same moment paintSendCue starts filling the ring for it
-   (both run off worthSending/matchingTailWord, so there is nothing to keep in
-   sync by hand). Called from both places text arrives, the local-engine
-   partial and the browser SpeechRecognition interim result, so the two read
-   identically. */
+/* Held back the same stretch paintSendCue holds the ring back (SEND_CUE_DEAD),
+   so the word does not go red the instant it is heard mid-sentence. A word
+   only lights up once it has sat at the tail through a real pause, the same
+   moment the ring would actually start moving for it, not the moment it was
+   merely recognized. */
+let tailMarkTimer = null, tailMarkKey = null, tailMarkPending = null;
+
+/* Draws the live partial, lighting up the trigger word once it has held the
+   tail for SEND_CUE_DEAD. Called from both places text arrives, the
+   local-engine partial and the browser SpeechRecognition interim result, so
+   the two read identically. */
 function paintStream(s) {
   const match = s ? matchingTailWord(s) : null;
-  if (!match) { el.stream.textContent = s; return; }
+  const key = match ? match.id + ' ' + match.word : null;
+  tailMarkPending = {s, match};
+  if (key !== tailMarkKey) {
+    tailMarkKey = key;
+    clearTimeout(tailMarkTimer);
+    tailMarkTimer = match ? setTimeout(showTailMark, SEND_CUE_DEAD) : null;
+  }
+  if (match && !tailMarkTimer) { renderTailMark(s, match); return; }
+  el.stream.textContent = s;
+}
+
+function showTailMark() {
+  tailMarkTimer = null;
+  // The match this fires for might have moved on by the time SEND_CUE_DEAD is
+  // up (someone kept talking past it), tailMarkPending always holds the latest.
+  if (tailMarkPending && tailMarkPending.match)
+    renderTailMark(tailMarkPending.s, tailMarkPending.match);
+}
+
+function renderTailMark(s, match) {
   const trimmed = s.replace(TAIL_TRIM, '');
   const cut = trimmed.length - match.word.length;
   const mark = document.createElement('mark');
@@ -1273,6 +1298,10 @@ function streamTail() {
 
 function flashCommand(text, kind) {
   if (!text) return;
+  // A held-back preview mark (paintStream) might still be waiting out its
+  // SEND_CUE_DEAD timer, and firing after this would overwrite the confirmed
+  // flash with a stale preview.
+  clearTimeout(tailMarkTimer); tailMarkTimer = null; tailMarkKey = null; tailMarkPending = null;
   const mark = document.createElement('mark');
   mark.className = 'cmd ' + (kind || 'live');
   mark.textContent = text;
