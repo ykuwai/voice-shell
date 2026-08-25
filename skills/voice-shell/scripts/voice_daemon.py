@@ -911,6 +911,16 @@ HOLD_WORDS = {command_key(w) for w in builtin_words("hold")}
 CANCEL_TAIL = tuple(builtin_words("cancel_tail"))
 HOLD_TAIL = tuple(builtin_words("hold_tail"))
 
+# A short burst of noise ahead of the trigger word ("はいミュート", something the
+# room picked up landing in front of the real word) used to fail the exact match
+# above and then fail the length gate too, so it went nowhere, neither a command
+# nor a prompt. Matched against the tail instead, longest wording first so a long
+# phrasing is not eaten by a short one that sits inside it (#76).
+MUTE_TAIL = tuple(sorted(set(builtin_words("mute")), key=len, reverse=True))
+# How much can sit ahead of the word and still count as noise rather than a real
+# clause. "はい"/"えーと"/"あの" fit comfortably here, a sentence does not.
+MUTE_TAIL_NOISE_MAX = 7
+
 
 # ── Phrasings the user adds ────────────────────
 #
@@ -1239,14 +1249,26 @@ def mic_command_shape(text: str, muted: bool):
     Only the side that means something in the current state is checked. 「ミュート」
     while already off and 「ミュート解除」 while already on both do nothing. Half as
     many words to check means half as many false hits.
+
+    Mute alone also matches with a short noise prefix ahead of the word
+    (MUTE_TAIL, #76), so a bit of the room picked up in front of it does not
+    make the whole utterance fail both this and the length gate and go
+    nowhere. Unmute stays exact only, a false hit there costs the whole
+    stretch the speaker thought was off, not one utterance.
     """
     key = command_key(text)
-    if not key:
-        return None
-    if muted:
-        # Added unmute phrasings are not checked (they cannot be added anyway)
-        return "unmute" if key in UNMUTE_WORDS else None
-    return "mute" if key in MUTE_WORDS or key in load_commands()["mute"] else None
+    if key:
+        if muted:
+            # Added unmute phrasings are not checked (they cannot be added anyway)
+            if key in UNMUTE_WORDS:
+                return "unmute"
+        elif key in MUTE_WORDS or key in load_commands()["mute"]:
+            return "mute"
+    if not muted:
+        body = take_tail(text, MUTE_TAIL)
+        if body is not None and len(body) <= MUTE_TAIL_NOISE_MAX:
+            return "mute"
+    return None
 
 
 def voice_command(text: str, muted: bool):
