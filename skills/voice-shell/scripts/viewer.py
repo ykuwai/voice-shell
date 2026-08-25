@@ -93,6 +93,42 @@ def _write_json(path: Path, value) -> None:
     os.replace(temp, path)
 
 
+def _secure_dir(path: Path) -> None:
+    """Create this directory if needed, and make sure it is really this
+    account's alone.
+
+    The state directory sits under /tmp by default, and the config one under
+    a home directory that is not always private either, both places another
+    local account can get to first. mkdir(exist_ok=True) alone would happily
+    keep writing into whatever is already sitting there under that name, a
+    real directory left behind by another account or, on a plain /tmp, even
+    a symlink planted ahead of time to point the whole transcript of what
+    gets said out loud somewhere else entirely. Refuse rather than trust it,
+    and once it really is this account's, close it to 700 so a shared
+    machine cannot simply read it either (mkdir alone leaves it however the
+    umask says, typically world-readable).
+
+    POSIX only. A Windows user directory is already private by account, and
+    Windows has no chmod/getuid to check any of this with regardless.
+    """
+    path.mkdir(parents=True, exist_ok=True)
+    if sys.platform.startswith("win"):
+        return
+    try:
+        st = path.lstat()
+    except OSError:
+        return
+    import stat
+    if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
+        sys.exit(f"{path} already exists and is not a private directory of "
+                 "yours. Remove it, or point VOICE_SHELL_STATE_DIR / "
+                 "XDG_CONFIG_HOME somewhere else, and try again.")
+    try:
+        os.chmod(path, 0o700)
+    except OSError:
+        pass
+
+
 @contextmanager
 def _asr_lease_lock(owner_path: Path):
     lock = None
@@ -535,6 +571,68 @@ class Tail:
             await asyncio.sleep(0.25)
 
 
+def _allowed_hostports(host: str, port: int) -> set:
+    """host:port pairs a legitimate request can carry, in Host and in Origin alike.
+
+    Always the loopback names, whatever --host actually is. "0.0.0.0" is a
+    bind address, never something a browser's Host or Origin header can say,
+    so it is dropped rather than allowed outright (a person who really wants
+    this reachable from another machine can bind the specific interface
+    address instead, and that address is added here too).
+    """
+    hosts = {"127.0.0.1", "localhost", "::1", "[::1]"}
+    if host and host != "0.0.0.0":
+        hosts.add(host)
+    return {f"{h}:{port}" for h in hosts}
+
+
+def make_origin_guard(host: str, port: int):
+    """Refuse any request that does not plainly belong to this page.
+
+    Two headers are checked, because each closes a different gap the other
+    leaves open.
+
+    **Origin** covers the ordinary CSRF shape, a page on some other site
+    quietly *sending* a request here and letting the side effect land
+    unread, the way an old-fashioned form post does. aiohttp already sends
+    back none of the headers that would let such a page *read* the reply, but
+    it does nothing to stop the send. A browser attaches Origin itself and a
+    page cannot override it, so checking it is enough to tell a request this
+    server's own page made apart from one a page on some other site made. It
+    is not sent on every request though (a plain same-origin GET carries none
+    at all), and it is not sent on a WebSocket handshake either, so it cannot
+    be the only check.
+
+    **Host** is what closes the gap Origin leaves. After DNS rebinding, the
+    attacker's page is served from a hostname the browser now resolves to
+    127.0.0.1, so from the browser's own point of view a request back to that
+    hostname is same-origin and carries no Origin header at all, yet it still
+    reaches this server. Host, unlike Origin, goes out on every request
+    (including the WebSocket handshake), and it still names the hostname the
+    request was addressed to rather than the address it happened to land on,
+    so a rebound request is caught here even where Origin says nothing.
+
+    A request with no Origin is let through as far as that check goes (a
+    plain HTTP client, the very thing voice-shell.sh's own urllib calls are,
+    sends none), but Host is required on every request regardless, since
+    voice-shell.sh always addresses this server as 127.0.0.1 and so always
+    carries a Host this server recognizes.
+    """
+    allowed = _allowed_hostports(host, port)
+    allowed_origins = {f"http://{hp}" for hp in allowed}
+
+    @web.middleware
+    async def origin_guard(request, handler):
+        if request.host not in allowed:
+            return web.json_response({"error": "cross_origin_blocked"}, status=403)
+        origin = request.headers.get("Origin")
+        if origin and origin not in allowed_origins:
+            return web.json_response({"error": "cross_origin_blocked"}, status=403)
+        return await handler(request)
+
+    return origin_guard
+
+
 async def main_async(args):
     page = Path(__file__).with_name("viewer.html")
     # The page is a skeleton and the rest of it lives beside it. They are named
@@ -551,6 +649,9 @@ async def main_async(args):
     for f in [page, *assets.values()]:
         if not f.exists():
             sys.exit(f"{f} was not found")
+
+    _secure_dir(Path(args.log_file).parent)
+    _secure_dir(_CONFIG)
 
     tail = Tail(Path(args.log_file))
     tail.read_existing()
@@ -1113,7 +1214,7 @@ async def main_async(args):
         hold_file.write_text("", encoding="utf-8")
         return web.json_response({"ok": True})
 
-    app = web.Application()
+    app = web.Application(middlewares=[make_origin_guard(args.host, args.port)])
     app.router.add_get("/", handle_index)
     for url, ctype in ASSETS.items():
         app.router.add_get(url, make_asset_handler(assets[url], ctype))

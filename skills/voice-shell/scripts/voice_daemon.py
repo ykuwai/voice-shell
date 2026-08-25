@@ -96,6 +96,45 @@ MIC_FILE = STATE_DIR / "mic"
 # Whisper on auto-detect settles it per utterance), so the daemon writes it down.
 LANG_FILE = STATE_DIR / "asr_lang"
 
+
+def _secure_dir(path: Path) -> None:
+    """Create this directory if needed, and make sure it is really this
+    account's alone.
+
+    STATE_DIR sits under /tmp by default, and CONFIG_DIR under a home
+    directory that is not always private either, both places another local
+    account can get to first. mkdir(exist_ok=True) alone would happily keep
+    writing into whatever is already sitting there under that name, a real
+    directory left behind by another account or, on a plain /tmp, even a
+    symlink planted ahead of time to point the whole transcript of what gets
+    said out loud somewhere else entirely. Refuse rather than trust it, and
+    once it really is this account's, close it to 700 so a shared machine
+    cannot simply read it either (mkdir alone leaves it however the umask
+    says, typically world-readable). viewer.py carries the same function,
+    for the same reason it keeps its own copy of the state-dir resolution
+    just above rather than importing this module for it.
+
+    POSIX only. A Windows user directory is already private by account, and
+    Windows has no chmod/getuid to check any of this with regardless.
+    """
+    path.mkdir(parents=True, exist_ok=True)
+    if sys.platform.startswith("win"):
+        return
+    try:
+        st = path.lstat()
+    except OSError:
+        return
+    import stat
+    if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
+        sys.exit(f"{path} already exists and is not a private directory of "
+                 "yours. Remove it, or point VOICE_SHELL_STATE_DIR / "
+                 "XDG_CONFIG_HOME somewhere else, and try again.")
+    try:
+        os.chmod(path, 0o700)
+    except OSError:
+        pass
+
+
 # The languages the backchannel and filler lists are written for. Speech in any
 # other language falls back to English, the way the voice signals do (#4).
 NOISE_LANGS = ("ja", "en", "es", "fr", "de", "zh", "ko")
@@ -2254,6 +2293,13 @@ def set_display_name(log_path, pid, name):
 
 def main():
     args = parse_args()
+
+    # Locked down before any of the branches below touch either directory
+    # (several of the flags below, --remember-engine included, are quick
+    # one-shot calls voice-shell.sh makes on every start, well before the
+    # daemon proper mkdir's STATE_DIR further down).
+    _secure_dir(STATE_DIR)
+    _secure_dir(CONFIG_DIR)
 
     if args.remember_engine is not None:
         write_config(engine=args.remember_engine)
