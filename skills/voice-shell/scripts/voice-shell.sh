@@ -441,6 +441,34 @@ case "$cmd" in
     elif [[ -n "${CODEX_SESSION_ID:-}" ]]; then
       agent="codex"; session="$CODEX_SESSION_ID"
     fi
+
+    # One conversation, one listener. Compacting is the usual way a second one
+    # shows up (#81): the conversation survives with the same session id, but
+    # whatever was watching the old `listen` forgets it is already there and
+    # starts a fresh one, doubling the same session in the chip row and
+    # leaving an orphaned pipe still running behind it. A session id never
+    # legitimately runs two of these at once, so any other registration
+    # carrying this same one is always a leftover, safe to retire outright
+    # rather than merely warn about.
+    if [[ -n "$session" && -d "$STATE_DIR/listeners" ]]; then
+      for f in "$STATE_DIR/listeners"/*; do
+        [[ -f "$f" ]] || continue
+        other_pid="$(basename "$f")"
+        [[ "$other_pid" == "$reg_pid" ]] && continue
+        other_session="$("$PY" -c '
+import json, sys
+try:
+    print(json.load(open(sys.argv[1])).get("session", ""))
+except Exception:
+    pass
+' "$f" 2>/dev/null || true)"
+        if [[ -n "$other_session" && "$other_session" == "$session" ]]; then
+          kill "$other_pid" 2>/dev/null || true
+          rm -f "$f"
+        fi
+      done
+    fi
+
     # An escape hatch so any tool can name itself. VOICE_SHELL_NAME wins outright.
     "$PY" - "$reg" "$agent" "$session" "${VOICE_SHELL_NAME:-}" <<'REG' || true
 import json, os, sys, time
