@@ -1811,9 +1811,7 @@ def apply_voice_command(text: str, log_path, muted: bool, user_dict=None):
         live = list_active_listeners(log_path)
         if len(live) > 1:
             if 1 <= n <= len(live):
-                target_pid = str(live[n - 1]["pid"])
-                write_atomic(route_file(log_path), target_pid)
-                note_route_change(log_path, target_pid)
+                write_atomic(route_file(log_path), str(live[n - 1]["pid"]))
                 note_voice_cmd(log_path, "route",
                                f"{n}. {live[n - 1]['label']}", text)
                 return "route"
@@ -1842,35 +1840,6 @@ def note_voice_cmd(log_path, kind: str, label: str = "", said: str = "") -> None
                         "label": label, "said": said[:60]},
                        ensure_ascii=False), encoding="utf-8")
     except (OSError, ValueError):
-        pass
-
-
-def note_route_change(log_path, to_pid: str) -> None:
-    """Tell every session listening that speech just got repointed.
-
-    voice_cmd.json (above) only reaches whichever viewer happens to have a tab
-    open to poll it. A session with no tab open, running only through Monitor,
-    heard nothing when a chip got clicked or "N番" got said elsewhere and the
-    destination moved away from it (#78, traced to exactly this: the switch
-    made no sound on the losing end, so it read as a dropped message rather
-    than a redirect). Broadcasting into the log itself, the way the
-    multiple-listeners warning already does, reaches Monitor too.
-    """
-    if not to_pid:
-        return
-    try:
-        label = next((l.get("label", to_pid) for l in list_active_listeners(log_path)
-                      if str(l.get("pid")) == str(to_pid)), to_pid)
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps({
-                "system_warning":
-                    f'Voice input is now routed to "{label}" (a chip was clicked, '
-                    "or a destination number was spoken, in some session's "
-                    "viewer). If this session was expecting to keep receiving "
-                    "it, tell the user their next words may land elsewhere "
-                    "until they pick this session's chip again."
-            }, ensure_ascii=False) + "\n")
-    except OSError:
         pass
 
 
