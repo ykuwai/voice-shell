@@ -886,10 +886,24 @@
   }
   .taken p { margin:0; max-width:22rem; }
 
-  /* Putting it on top needs a person to press, so we offer it once */
+  /* Putting it on top needs a person to press, so we offer it once, as a
+     bubble pointing straight up at the button that does it. top/right are
+     set from viewer.js (positionFloatAsk), off the button's own measured
+     position, not guessed here, the row above it is not fixed width (the
+     name tag beside the logo can push it, a language can widen a label). */
   .fresh.ask {
+    /* A plain fallback for the one paint before positionFloatAsk can measure
+       anything (or if it never gets the chance to run at all), close enough
+       under the header not to look adrift. JS overwrites both the instant it
+       has something real to measure. */
+    top:4rem; right:1rem; left:auto; bottom:auto; transform:none;
     background:var(--accent-2); color:var(--panel);
     box-shadow:0 4px 18px color-mix(in srgb, var(--accent-2) 45%, transparent);
+  }
+  .fresh.ask::before {
+    content:""; position:absolute; top:-6px; right:14px;
+    width:12px; height:12px; background:var(--accent-2);
+    clip-path:polygon(50% 0, 0 100%, 100% 100%);
   }
 
   /* ── Settings panel ───────────────────── */

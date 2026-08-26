@@ -184,24 +184,29 @@ open_gui() {
   [ -f "$flag" ] && return 0
   mkdir -p "$STATE_DIR"
   : > "$flag"
-  local args=(--app="$url" --window-size=420,780)
+  # An ordinary tab, indistinguishable from any other, not Chrome's --app mode
+  # (a window with no tabs and no address bar). Opening straight into that
+  # shape has been mistaken for phishing in the wild (a window with nowhere
+  # to check what site it really is), and it skipped past the one press
+  # floatAsk exists to ask for. A plain URL argument is enough, Chrome routes
+  # it to a tab in whatever window is already open, or a new one if none is.
   case "$(uname)" in
     Darwin)
       for app in "Google Chrome" "Chromium" "Microsoft Edge"; do
         if [[ -d "/Applications/$app.app" ]]; then
-          open -na "$app" --args "${args[@]}" 2>/dev/null && return 0
+          open -na "$app" --args "$url" 2>/dev/null && return 0
         fi
       done
       ;;
     *)
       for c in google-chrome chromium chromium-browser microsoft-edge; do
         if command -v "$c" >/dev/null; then
-          nohup "$c" "${args[@]}" >/dev/null 2>&1 & return 0
+          nohup "$c" "$url" >/dev/null 2>&1 & return 0
         fi
       done
       # Windows(Git Bash)
       if command -v cmd.exe >/dev/null; then
-        cmd.exe /c start chrome --app="$url" --window-size=420,780 >/dev/null 2>&1 && return 0
+        cmd.exe /c start chrome "$url" >/dev/null 2>&1 && return 0
       fi
       ;;
   esac

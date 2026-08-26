@@ -3592,13 +3592,34 @@ claimSole();
 /* A window of its own can be opened automatically, but pinning it on top
    cannot start unless a person presses (a browser rule). That leaves it half
    done, a window that never comes forward, so we put something pressable right
-   there, once. Once it has been used, it never shows again. */
+   there, once. Once it has been used, it never shows again.
+
+   It now opens in an ordinary tab (voice-shell.sh's open_gui, #75), rather
+   than straight into Chrome's --app mode, so this bubble is the one place
+   that still says "float it" out loud, where the shape of the window used
+   to say it on its own. */
 function paintFloatAsk() {
   el.floatAsk.hidden = !(canFloat
                          && !floatingWindow()
                          && !store.get('floated'));
+  positionFloatAsk();
 }
 el.floatAsk.onclick = () => { el.floatAsk.hidden = true; el.floatBtn.click(); };
+
+/* Sits under floatBtn with an arrow pointing back up at it, read off the
+   button's own live position rather than a guessed offset (the row it sits
+   in is not fixed width, a display name beside the logo, or a longer word in
+   another language, can push it either way). Run again on resize while it is
+   showing, the same reason fitCanvas re-measures on its own ResizeObserver
+   rather than trusting a size taken once. */
+function positionFloatAsk() {
+  if (el.floatAsk.hidden) return;
+  const r = el.floatBtn.getBoundingClientRect();
+  if (!r.width) return;         // hidden or not yet laid out, nothing to measure against
+  el.floatAsk.style.top = Math.round(r.bottom + 10) + 'px';
+  el.floatAsk.style.right = Math.max(8, Math.round(window.innerWidth - r.right)) + 'px';
+}
+addEventListener('resize', positionFloatAsk);
 
 // On browser recognition, with the screen not yet touched. It is shown as off,
 // but the mute on the server side has not been touched (that only goes on the

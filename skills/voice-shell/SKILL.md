@@ -94,17 +94,17 @@ picked last time (`~/.config/voice-shell/config.json`), and the first time it is
    can go on in the meantime). If `FAILED` comes back, tell the user the error
    that was shown.
 
-3. `start` **opens the viewer automatically in its own window** (a window with
-   no tabs and no URL bar). There is no need to open it again yourself. Add
-   `--no-gui` only when the user says they do not want it.
+3. `start` **opens the viewer automatically, in an ordinary tab.** There is no
+   need to open it again yourself. Add `--no-gui` only when the user says they
+   do not want it.
 
    **With browser recognition nothing arrives at all until the viewer is open.**
    When it could not be opened automatically (`Could not open a browser for you`
    is printed), point the user at the URL.
 
-   To keep it **always on top**, ask the user to press "Float on top" in the
-   header of the window that opened (a browser rule, it cannot be opened unless
-   a person acts).
+   To keep it **always on top**, press "Float on top" in the header (a browser
+   rule, it cannot be opened unless a person acts, so the screen itself asks
+   for that one press the first time).
 
 4. Watch the utterance log with Monitor. **Always set `persistent: true`**
    (voice mode goes on for the whole session). Do not use `tail` directly,
