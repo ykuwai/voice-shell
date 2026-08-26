@@ -576,6 +576,13 @@
      the same 8px in padding and border, so the group is the 106px it always
      was and the narrow window lays out as before. */
   .tiny.send { margin-left:.5rem; }
+  /* That reserved seat is what leaves cancelOnce sitting away from the card's
+     own right edge while nothing is sendable yet, reading as a stray gap
+     rather than a border. The pair it used to guard against sliding are
+     gone from this row already (this state hides them outright), so there
+     is nothing left for the reserved seat to protect here, and collapsing
+     it lets cancelOnce sit flush at the corner instead. */
+  .draft-card.editing .tiny.send:not(.on) { display:none; }
   .tiny {
     display:grid; place-items:center; width:30px; height:30px;
     border-radius:50%; color:var(--faint);
