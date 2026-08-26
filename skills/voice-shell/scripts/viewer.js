@@ -619,89 +619,80 @@ function addEntry(rec) {
     new Date().toLocaleTimeString(timeLocale(), {hour12:false});
   gutter.append(mark, stamp);
 
-  // Only rows that carry a destination show one. With a single session
-  // listening no destination is attached, so working alone adds nothing.
-  if (rec.to) {
-    row.dataset.to = String(rec.to);
-    const to = document.createElement('span');
-    to.className = 'to';
-    // Put it in right here. relabelEntries only looks at rows already in
-    // el.log, so leaving it to the repaint would make this one row a nameless
-    // chip until the next update.
-    // A terminal, not the paper plane it used to carry. The plane is already on
-    // the button that sends and on the mark that says something was sent, and a
-    // third one here made a note about where it landed read as one more thing
-    // about sending, or as something you could press. What sits at the other
-    // end is a shell session, so the terminal names it outright.
-    to.append(iconSvg('terminal', 11),
-              document.createTextNode(routeNames.get(row.dataset.to) || `#${rec.to}`));
-    gutter.append(to);
-  }
-
-  // Sits right beside the destination it would change, not off at the
-  // row's own far edge, so the two read as one unit rather than as two
-  // unrelated controls that happen to share a row.
-  // What went out once cannot be pulled back, so this is not an undo. It is
-  // the same words said again, this time at a session picked by hand
-  // (#78/#79: the first send went somewhere nobody chose, and short of
-  // repeating the whole thing out loud there was no way back from that).
-  const resend = document.createElement('button');
-  resend.className = 'resend';
-  resend.append(iconSvg('arrow_right_alt', 13));
-  resend.title = t('resendTitle');
-  resend.hidden = knownListeners.length < 2;
-  resend.onclick = () => openResendPick(gutter, resend, rec.text);
-  gutter.append(resend);
-
+  row.dataset.to = rec.to ? String(rec.to) : '';
   const text = document.createElement('div');
   text.className = 'text';
   text.dataset.raw = rec.text;
   text.textContent = format(rec.text);
+  gutter.append(buildToControl(row.dataset.to));
 
   row.append(gutter, text);
   el.log.prepend(row);          // newest on top (same order as the mock)
   retally();
 }
 
-/* The picker is built fresh on every press rather than kept hidden in the row
-   the whole time. Sessions come and go while a card sits in the log, and a
-   list built once at send time would drift from who is actually there to
-   resend to by the time anyone presses it. */
-function openResendPick(gutter, button, text) {
-  if (gutter.querySelector('.resend-pick')) return;   // already open
+/* The destination chip doubles as the resend control, rather than a second,
+   separate arrow sitting off at the row's own edge (an earlier build did
+   that, and it read as two unrelated controls that happened to share a
+   row). Picking a different name from the same chip that already names
+   where it went is what "resend elsewhere" reads as one motion instead of
+   two (#79).
+
+   Rebuilt from scratch on every call rather than patched in place, off
+   both addEntry and relabelEntries's five second poll, since who is
+   listening drifts the whole time a card sits in the log and a list built
+   once at send time would go stale. */
+function buildToControl(to) {
+  const wrap = document.createElement('span');
+  wrap.className = 'to';
+  // Only one (or nobody) listening right now, so there is nothing to switch
+  // between. Say where it went, same as always, and stop there. With no
+  // destination on record either (working alone the whole time), there is
+  // nothing worth a chip over at all.
+  if (knownListeners.length < 2) {
+    if (!to) return wrap;
+    wrap.append(iconSvg('terminal', 11), document.createTextNode(routeNames.get(to) || `#${to}`));
+    return wrap;
+  }
   const pick = document.createElement('select');
-  pick.className = 'resend-pick';
-  const blank = document.createElement('option');
-  blank.value = '';
-  blank.textContent = t('resendPick');
-  blank.disabled = true;
-  blank.selected = true;
-  pick.append(blank, ...knownListeners.map((l, i) => {
+  pick.title = t('resendTitle');
+  if (!to) {
+    const blank = document.createElement('option');
+    blank.value = ''; blank.textContent = t('resendPick');
+    blank.disabled = true; blank.selected = true;
+    pick.append(blank);
+  }
+  // The one it actually went to, numbered the same way "2番" would be said
+  // out loud, in case that PID is not (or no longer) among knownListeners.
+  if (to && !knownListeners.some(l => String(l.pid) === to)) {
+    const gone = document.createElement('option');
+    gone.value = to; gone.textContent = routeNames.get(to) || `#${to}`;
+    gone.selected = true;
+    pick.append(gone);
+  }
+  knownListeners.forEach((l, i) => {
     const o = document.createElement('option');
     o.value = String(l.pid);
     o.textContent = `${i + 1}. ${l.label}`;
-    return o;
-  }));
-  // Idempotent on purpose. Picking an option fires change and then, once
-  // replaceWith takes the focused node out of the document, some browsers
-  // turn that removal itself into a blur on the node just removed. Both
-  // handlers call close(), and without the isConnected guard the second
-  // call finds pick already gone and throws (Chrome: "The node to be
-  // removed is no longer a child of this node"), which was aborting the
-  // resend before the fetch on the change path ever ran.
-  const close = () => { if (pick.isConnected) pick.replaceWith(button); };
+    if (String(l.pid) === to) o.selected = true;
+    pick.append(o);
+  });
   pick.onchange = async () => {
-    const to = pick.value;
-    close();
-    if (!to) return;
-    try { await post('/api/resend', {text, to}); } catch {}
+    const chosen = pick.value;
+    if (!chosen || chosen === to) return;
+    const row = pick.closest('.entry');
+    row.dataset.to = chosen;
+    try { await post('/api/resend', {text: row.querySelector('.text').dataset.raw, to: chosen}); } catch {}
   };
-  pick.onblur = close;
-  button.replaceWith(pick);
-  pick.focus();
-  // A <select> opens its own dropdown on the click that focuses it in some
-  // browsers and not others. Asking outright leaves nobody guessing which.
-  if (typeof pick.showPicker === 'function') { try { pick.showPicker(); } catch {} }
+  // appearance:none (in the stylesheet) strips the native select's own box
+  // along with its dropdown arrow, so the chip reads as plain text with
+  // nothing marking it as choosable. Put a small one back by hand.
+  const caret = document.createElement('span');
+  caret.className = 'to-caret';
+  caret.textContent = '▾';
+  caret.setAttribute('aria-hidden', 'true');
+  wrap.append(iconSvg('terminal', 11), pick, caret);
+  return wrap;
 }
 
 /* Look up a name from the destination PID. Names of finished sessions are kept
@@ -711,22 +702,12 @@ const routeNames = new Map();
 
 function relabelEntries() {
   for (const row of el.log.children) {
-    const to = row.dataset.to;
-    if (to) {
-      const node = row.querySelector('.to');
-      // Keep the icon and swap only the name
-      if (node) {
-        const label = node.lastChild;
-        if (label) label.textContent = routeNames.get(to) || `#${to}`;
-      }
-    }
-    // Nowhere else to resend to with only one (or zero) other sessions
-    // around, and nobody around at all right after a send with nothing
-    // else running. Left as it was mid-pick (the button is not there, the
-    // dropdown is), so an open picker never gets yanked out from under
-    // whoever is about to choose from it.
-    const btn = row.querySelector('.resend');
-    if (btn) btn.hidden = knownListeners.length < 2;
+    const node = row.querySelector('.to');
+    // Left alone rather than rebuilt while its own dropdown is open (focus
+    // sitting inside it), so nobody mid-pick has the list swapped out from
+    // under them by this same five second poll.
+    if (node && node.contains(document.activeElement)) continue;
+    node?.replaceWith(buildToControl(row.dataset.to || ''));
   }
 }
 
