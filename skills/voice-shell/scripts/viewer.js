@@ -685,7 +685,14 @@ function openResendPick(gutter, button, text) {
     o.textContent = `${i + 1}. ${l.label}`;
     return o;
   }));
-  const close = () => pick.replaceWith(button);
+  // Idempotent on purpose. Picking an option fires change and then, once
+  // replaceWith takes the focused node out of the document, some browsers
+  // turn that removal itself into a blur on the node just removed. Both
+  // handlers call close(), and without the isConnected guard the second
+  // call finds pick already gone and throws (Chrome: "The node to be
+  // removed is no longer a child of this node"), which was aborting the
+  // resend before the fetch on the change path ever ran.
+  const close = () => { if (pick.isConnected) pick.replaceWith(button); };
   pick.onchange = async () => {
     const to = pick.value;
     close();
