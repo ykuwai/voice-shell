@@ -1045,6 +1045,12 @@ async def main_async(args):
         tmp = route_path.with_suffix(".tmp")
         tmp.write_text(to, encoding="utf-8")
         os.replace(tmp, route_path)
+        # Only a chip pinning it to somebody, not the internal reset to ''
+        # that runs when the old target vanished (loadListeners already says
+        # so on screen there, and broadcasting that clear as if it were a
+        # fresh redirect would be noise for every other session).
+        if to:
+            vd.note_route_change(args.log_file, to)
         return web.json_response({"route": to})
 
     async def handle_utterance(req):
