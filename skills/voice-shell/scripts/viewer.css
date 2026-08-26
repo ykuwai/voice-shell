@@ -516,6 +516,9 @@
   /* The ground is itself the meaning, so leave it faint and give only the text its own ink */
   .entry .mark.sent   { color:var(--ok-ink);       background:color-mix(in srgb, var(--ok) 14%, transparent); }
   .entry .mark.edited { color:var(--accent-2-ink); background:color-mix(in srgb, var(--accent-2) 14%, transparent); }
+  /* Neither a fresh utterance nor a touch-up, so it takes neither of their
+     colors. The same quiet outline the destination chip next to it uses. */
+  .entry .mark.resent { color:var(--dim); background:var(--raise); box-shadow:inset 0 0 0 1px var(--line); }
   /* Which session it went to. With several jobs going at once, this keeps you
      from staring at the log wondering which one you said it to. */
   .entry .to {
@@ -539,6 +542,21 @@
      drawing. */
   .entry .to svg .solid { display:inline; }
   .entry .to svg .line { display:none; }
+  .entry .gutter .spacer { flex:1; }
+  /* Sits at the row's own right edge (the spacer ahead of it takes up
+     whatever room the mark, stamp and destination chip leave). Sized to the
+     gutter it lives in, not the 30px round buttons the tray below uses,
+     those are sized for a thumb and this row is not. */
+  .entry .resend {
+    display:inline-flex; align-items:center; justify-content:center;
+    width:1.2rem; height:1.2rem; border-radius:5px; color:var(--faint);
+    transition:color .14s, background .14s;
+  }
+  .entry .resend:hover { color:var(--accent-2); background:var(--raise); }
+  .entry .resend-pick {
+    font-size:.64rem; max-width:9.5rem; padding:.05rem .3rem; border-radius:5px;
+    border:1px solid var(--line); background:var(--raise); color:var(--text);
+  }
   .entry .text { font-size:.88rem; line-height:1.65; word-break:break-word; }
 
   /* The draft card. The live transcript shows up here too (prime spot) */

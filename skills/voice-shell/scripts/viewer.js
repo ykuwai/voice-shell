@@ -593,13 +593,13 @@ function retally() {
 function addEntry(rec) {
   const row = document.createElement('div');
   row.className = 'entry';
-  row.dataset.kind = rec.edited ? 'edited' : 'sent';
+  row.dataset.kind = rec.resent ? 'resent' : rec.edited ? 'edited' : 'sent';
 
   const gutter = document.createElement('div');
   gutter.className = 'gutter';
   const mark = document.createElement('span');
   mark.className = 'mark ' + row.dataset.kind;
-  const markWord = rec.edited ? t('edited') : t('sent');
+  const markWord = rec.resent ? t('resent') : rec.edited ? t('edited') : t('sent');
   // Carried here too, so a narrow window that hides the word (below) still
   // says it on hover/to a screen reader, the checkmark alone means nothing
   // read out loud.
@@ -638,6 +638,24 @@ function addEntry(rec) {
     gutter.append(to);
   }
 
+  // Pushes the resend control to the row's own right edge, clear of the mark,
+  // the stamp and the destination chip rather than crowding up against them.
+  const spacer = document.createElement('span');
+  spacer.className = 'spacer';
+  gutter.append(spacer);
+
+  // What went out once cannot be pulled back, so this is not an undo. It is
+  // the same words said again, this time at a session picked by hand
+  // (#78/#79: the first send went somewhere nobody chose, and short of
+  // repeating the whole thing out loud there was no way back from that).
+  const resend = document.createElement('button');
+  resend.className = 'resend';
+  resend.append(iconSvg('arrow_right_alt', 13));
+  resend.title = t('resendTitle');
+  resend.hidden = knownListeners.length < 2;
+  resend.onclick = () => openResendPick(gutter, resend, rec.text);
+  gutter.append(resend);
+
   const text = document.createElement('div');
   text.className = 'text';
   text.dataset.raw = rec.text;
@@ -648,6 +666,40 @@ function addEntry(rec) {
   retally();
 }
 
+/* The picker is built fresh on every press rather than kept hidden in the row
+   the whole time. Sessions come and go while a card sits in the log, and a
+   list built once at send time would drift from who is actually there to
+   resend to by the time anyone presses it. */
+function openResendPick(gutter, button, text) {
+  if (gutter.querySelector('.resend-pick')) return;   // already open
+  const pick = document.createElement('select');
+  pick.className = 'resend-pick';
+  const blank = document.createElement('option');
+  blank.value = '';
+  blank.textContent = t('resendPick');
+  blank.disabled = true;
+  blank.selected = true;
+  pick.append(blank, ...knownListeners.map((l, i) => {
+    const o = document.createElement('option');
+    o.value = String(l.pid);
+    o.textContent = `${i + 1}. ${l.label}`;
+    return o;
+  }));
+  const close = () => pick.replaceWith(button);
+  pick.onchange = async () => {
+    const to = pick.value;
+    close();
+    if (!to) return;
+    try { await post('/api/resend', {text, to}); } catch {}
+  };
+  pick.onblur = close;
+  button.replaceWith(pick);
+  pick.focus();
+  // A <select> opens its own dropdown on the click that focuses it in some
+  // browsers and not others. Asking outright leaves nobody guessing which.
+  if (typeof pick.showPicker === 'function') { try { pick.showPicker(); } catch {} }
+}
+
 /* Look up a name from the destination PID. Names of finished sessions are kept
    as well. If the entry survives but the destination alone turns into #42101,
    you still cannot tell which one it was. */
@@ -656,12 +708,21 @@ const routeNames = new Map();
 function relabelEntries() {
   for (const row of el.log.children) {
     const to = row.dataset.to;
-    if (!to) continue;
-    const node = row.querySelector('.to');
-    if (!node) continue;
-    // Keep the icon and swap only the name
-    const label = node.lastChild;
-    if (label) label.textContent = routeNames.get(to) || `#${to}`;
+    if (to) {
+      const node = row.querySelector('.to');
+      // Keep the icon and swap only the name
+      if (node) {
+        const label = node.lastChild;
+        if (label) label.textContent = routeNames.get(to) || `#${to}`;
+      }
+    }
+    // Nowhere else to resend to with only one (or zero) other sessions
+    // around, and nobody around at all right after a send with nothing
+    // else running. Left as it was mid-pick (the button is not there, the
+    // dropdown is), so an open picker never gets yanked out from under
+    // whoever is about to choose from it.
+    const btn = row.querySelector('.resend');
+    if (btn) btn.hidden = knownListeners.length < 2;
   }
 }
 

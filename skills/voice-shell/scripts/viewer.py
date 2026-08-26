@@ -898,6 +898,26 @@ async def main_async(args):
         hold_file.write_text("", encoding="utf-8")     # sent, so empty the held list
         return web.json_response(rec)
 
+    async def handle_resend(req):
+        """Send an already-sent line again, at a destination picked by hand.
+
+        What went out once cannot be pulled back (#78/#79: it was pointed at
+        the wrong session, or the recipient's own history said so), so this
+        is not an undo. It is a second, identical utterance, this time to
+        the session actually asked for. The new line rides the same tail
+        every other utterance does, so nothing else here has to know it was
+        a resend rather than a fresh one.
+        """
+        body = await req.json()
+        text = (body.get("text") or "").strip()
+        to = str(body.get("to") or "").strip()
+        if not text or not to:
+            return web.json_response({"error": "bad_request"}, status=400)
+        rec_out = {"text": text, "to": to, "resent": True}
+        with open(args.log_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec_out, ensure_ascii=False) + "\n")
+        return web.json_response({"ok": True})
+
     # Liveness check for browser recognition. An open page reports regularly
     # that it is listening right now. Without it, wait-ready answering READY
     # cannot be told apart from nobody actually listening (the page never
@@ -1467,6 +1487,7 @@ async def main_async(args):
     app.router.add_post("/api/mute", handle_mute)
     app.router.add_post("/api/pause", handle_pause)
     app.router.add_post("/api/send", handle_send)
+    app.router.add_post("/api/resend", handle_resend)
     app.router.add_post("/api/utterance", handle_utterance)
     app.router.add_post("/api/asr-heartbeat", handle_heartbeat)
     app.router.add_get("/api/asr-status", handle_asr_status)
