@@ -766,9 +766,18 @@ function paintTinyButtons() {
   // nothing happens, because there is simply nothing being said right now.
   // Raising and sinking it is worse to live with, since you then have to check
   // every time whether it can be pressed when you want to press it.
+  // Review mode is the same situation as a one-shot edit, standing rather
+  // than momentary: the box below is already open, so the pencil can only
+  // ever show disabled — it opens what you are inside — and the trash reads
+  // as a second copy of the discard sitting right under it. Two bins on one
+  // card and neither says which one you want. Both step aside.
+  const editingHere = oneShot || route === 'hold';
   el.editOnce.disabled = route !== 'live' || oneShot;
-  el.editOnce.hidden = oneShot;
-  el.dropOne.hidden = oneShot;
+  el.editOnce.hidden = editingHere;
+  el.dropOne.hidden = editingHere;
+  // The way out belongs to the momentary case only. Review mode is not
+  // something you back out of from here — it is a setting, and the control
+  // that turns it off is the one that turned it on.
   el.cancelOnce.hidden = !oneShot;
 }
 
@@ -3568,7 +3577,7 @@ paintFloatAsk();
 // brings it back.
 function paintFloat(on) {
   if (on === undefined) on = !!floatingWindow();
-  const name = on ? 'picture_in_picture_off' : 'picture_in_picture';
+  const name = on ? 'picture_in_picture_off' : 'pip_exit';
   el.floatBtn.dataset.icon = name;
   const svg = el.floatBtn.querySelector(':scope > svg');
   if (svg) {
