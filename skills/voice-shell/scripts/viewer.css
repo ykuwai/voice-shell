@@ -476,6 +476,11 @@
     display:inline-flex; align-items:center; gap:.25rem;
     padding:.05rem .4rem; border-radius:5px; font-size:.64rem; font-weight:600;
   }
+  /* Flex items shrink to their content's min width by default, and CJK text
+     wraps with no space needed, so with nothing said here the word folded
+     down to one character per line the moment the row ran out of room for
+     it, rather than the row simply running short. */
+  .entry .mark-label { white-space:nowrap; }
   .entry .mark::before { content:"✓"; font-size:.7em; }
   /* The ground is itself the meaning, so leave it faint and give only the text its own ink */
   .entry .mark.sent   { color:var(--ok-ink);       background:color-mix(in srgb, var(--ok) 14%, transparent); }
@@ -1264,6 +1269,16 @@
      last width that holds it. */
   @media (max-width: 251px) {
     .sheet-head .icon.back { display:none; }
+  }
+  /* Not measured against a real overflow point the way the others on this
+     list are, the log is always on screen rather than behind a sheet, so
+     what shares the row with it (a destination chip, none, one, several
+     sessions) varies too much to pin one exact width to test against. Picked
+     as a round number ahead of where things start getting tight generally.
+     The word stays reachable on hover/aria (mark.title in viewer.js), only
+     the always-shown copy goes. */
+  @media (max-width: 300px) {
+    .entry .mark-label { display:none; }
   }
   /* Measured in a window 200px wide. The heading is left 183px of it. The row
      of four is 144 and the padding on its right is 8.8, which leaves 30.2, and

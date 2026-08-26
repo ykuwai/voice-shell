@@ -599,7 +599,20 @@ function addEntry(rec) {
   gutter.className = 'gutter';
   const mark = document.createElement('span');
   mark.className = 'mark ' + row.dataset.kind;
-  mark.textContent = rec.edited ? t('edited') : t('sent');
+  const markWord = rec.edited ? t('edited') : t('sent');
+  // Carried here too, so a narrow window that hides the word (below) still
+  // says it on hover/to a screen reader, the checkmark alone means nothing
+  // read out loud.
+  mark.title = markWord;
+  // The word sits in its own span so a narrow window can hide just this and
+  // keep the checkmark (mark::before in the stylesheet), rather than the
+  // whole label being left to wrap the way CJK text does with no spaces to
+  // break on, one character deep per line, inside a row that has no room
+  // to spare for it.
+  const markLabel = document.createElement('span');
+  markLabel.className = 'mark-label';
+  markLabel.textContent = markWord;
+  mark.append(markLabel);
   const stamp = document.createElement('span');
   // The log carries no timestamp, so we show the time it arrived
   stamp.textContent = rec.time ||
