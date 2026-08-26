@@ -654,45 +654,85 @@ function buildToControl(to) {
     wrap.append(iconSvg('terminal', 11), document.createTextNode(routeNames.get(to) || `#${to}`));
     return wrap;
   }
-  const pick = document.createElement('select');
-  pick.title = t('resendTitle');
-  if (!to) {
-    const blank = document.createElement('option');
-    blank.value = ''; blank.textContent = t('resendPick');
-    blank.disabled = true; blank.selected = true;
-    pick.append(blank);
-  }
-  // The one it actually went to, numbered the same way "2番" would be said
-  // out loud, in case that PID is not (or no longer) among knownListeners.
-  if (to && !knownListeners.some(l => String(l.pid) === to)) {
-    const gone = document.createElement('option');
-    gone.value = to; gone.textContent = routeNames.get(to) || `#${to}`;
-    gone.selected = true;
-    pick.append(gone);
-  }
-  knownListeners.forEach((l, i) => {
-    const o = document.createElement('option');
-    o.value = String(l.pid);
-    o.textContent = `${i + 1}. ${l.label}`;
-    if (String(l.pid) === to) o.selected = true;
-    pick.append(o);
-  });
-  pick.onchange = async () => {
-    const chosen = pick.value;
-    if (!chosen || chosen === to) return;
-    const row = pick.closest('.entry');
-    row.dataset.to = chosen;
-    try { await post('/api/resend', {text: row.querySelector('.text').dataset.raw, to: chosen}); } catch {}
-  };
-  // appearance:none (in the stylesheet) strips the native select's own box
-  // along with its dropdown arrow, so the chip reads as plain text with
-  // nothing marking it as choosable. Put a small one back by hand.
+  const knownIdx = knownListeners.findIndex(l => String(l.pid) === to);
+  const label = knownIdx >= 0 ? `${knownIdx + 1}. ${knownListeners[knownIdx].label}`
+              : to ? (routeNames.get(to) || `#${to}`)
+              : t('resendPick');
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'to-btn';
+  btn.title = t('resendTitle');
+  const labelSpan = document.createElement('span');
+  labelSpan.className = 'to-label';
+  labelSpan.textContent = label;
   const caret = document.createElement('span');
   caret.className = 'to-caret';
   caret.textContent = '▾';
   caret.setAttribute('aria-hidden', 'true');
-  wrap.append(iconSvg('terminal', 11), pick, caret);
+  btn.append(labelSpan, caret);
+  btn.onclick = () => openToMenu(btn, to);
+  wrap.append(iconSvg('terminal', 11), btn);
   return wrap;
+}
+
+// Only one open at a time, and relabelEntries (the five second poll) checks
+// this to leave that one row alone rather than rebuild the chip out from
+// under whoever has it open.
+let openToMenuBtn = null;
+let closeToMenu = null;
+
+/* A plain <select> was tried first, styled down to look like the chip. The
+   closed-state box takes CSS fine, but the opened list is the browser's own
+   native popup regardless, on its own theme rather than this page's dark
+   one (#79 feedback: "not the native dropdown as it is, a hand-built one").
+   Built by hand instead, in the same vein as the destination bubble's own
+   floating panel elsewhere on this page. */
+function openToMenu(btn, to) {
+  if (closeToMenu) closeToMenu();
+  const menu = document.createElement('div');
+  menu.className = 'to-menu';
+  menu.setAttribute('role', 'listbox');
+  knownListeners.forEach((l, i) => {
+    const pid = String(l.pid);
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'to-menu-item' + (pid === to ? ' on' : '');
+    item.textContent = `${i + 1}. ${l.label}`;
+    item.onclick = async () => {
+      close();
+      if (pid === to) return;
+      const row = btn.closest('.entry');
+      row.dataset.to = pid;
+      try { await post('/api/resend', {text: row.querySelector('.text').dataset.raw, to: pid}); } catch {}
+    };
+    menu.append(item);
+  });
+  document.body.append(menu);
+  // Placed off the button's own live position (same reasoning as
+  // positionFloatAsk), then nudged left if that would run the panel off
+  // the right edge of a narrow window.
+  const r = btn.getBoundingClientRect();
+  menu.style.top = Math.round(r.bottom + 4) + 'px';
+  menu.style.left = Math.round(r.left) + 'px';
+  const overflowRight = menu.getBoundingClientRect().right - (innerWidth - 8);
+  if (overflowRight > 0) menu.style.left = Math.round(r.left - overflowRight) + 'px';
+
+  function close() {
+    menu.remove();
+    document.removeEventListener('click', onDocClick, true);
+    document.removeEventListener('keydown', onKey);
+    if (closeToMenu === close) { closeToMenu = null; openToMenuBtn = null; }
+  }
+  function onDocClick(e) {
+    if (!menu.contains(e.target) && e.target !== btn) close();
+  }
+  function onKey(e) { if (e.key === 'Escape') close(); }
+  // Deferred so the very click that opened this menu, still bubbling up to
+  // document, does not also count as the outside click that shuts it.
+  setTimeout(() => document.addEventListener('click', onDocClick, true), 0);
+  document.addEventListener('keydown', onKey);
+  closeToMenu = close;
+  openToMenuBtn = btn;
 }
 
 /* Look up a name from the destination PID. Names of finished sessions are kept
@@ -703,10 +743,10 @@ const routeNames = new Map();
 function relabelEntries() {
   for (const row of el.log.children) {
     const node = row.querySelector('.to');
-    // Left alone rather than rebuilt while its own dropdown is open (focus
-    // sitting inside it), so nobody mid-pick has the list swapped out from
-    // under them by this same five second poll.
-    if (node && node.contains(document.activeElement)) continue;
+    // Left alone rather than rebuilt while its own menu is open, so nobody
+    // mid-pick has the chip (and the button the open menu is anchored to)
+    // swapped out from under them by this same five second poll.
+    if (node && node.contains(openToMenuBtn)) continue;
     node?.replaceWith(buildToControl(row.dataset.to || ''));
   }
 }
