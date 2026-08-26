@@ -563,8 +563,28 @@ NAMEIT
     # exits, so on the same line stopping the daemon takes the viewer down too.
     detach "$PY" "$HERE/viewer.py" "$@" \
       > "$STATE_DIR/viewer.out" 2>&1 &
-    sleep 2
-    if viewer_running; then
+    # A flat 2 seconds here used to read as "It failed to start." on a first
+    # run where a local engine's own setup (the Swift build behind `apple`,
+    # for one) is compiling at the same moment and eats the CPU this needs to
+    # so much as get its own interpreter up. The viewer does none of that
+    # work itself, it was only ever caught waiting behind it.
+    #
+    # Polled on viewer_running alone, nothing smarter. viewer.py prints
+    # exactly one line, and only once the port is already open, so there is
+    # no line in this log that means "still starting, but fine" to tell apart
+    # from "already failed". A first attempt at reading the log for an early
+    # failure (Traceback, "Error:") missed the plainer sys.exit(str) messages
+    # viewer.py itself raises (no traceback, no such prefix), which would
+    # have sat there the same 2 seconds as before, this time misread as an
+    # early real failure instead of a slow real success, the exact mistake
+    # this fix exists to undo. A genuine failure still gets reported, at
+    # worst 15 seconds later than a keyword match might have caught it.
+    ok=0
+    for _ in $(seq 1 30); do          # up to 15 seconds
+      if viewer_running; then ok=1; break; fi
+      sleep 0.5
+    done
+    if [[ "$ok" == 1 ]]; then
       echo "The viewer started at $VIEWER_URL"
       # Open in a window of its own (--no-gui means do not open)
       [[ "${VOICE_SHELL_NO_GUI:-0}" == "1" ]] || open_gui || true
