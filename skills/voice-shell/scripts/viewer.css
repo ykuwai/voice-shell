@@ -542,11 +542,10 @@
      drawing. */
   .entry .to svg .solid { display:inline; }
   .entry .to svg .line { display:none; }
-  .entry .gutter .spacer { flex:1; }
-  /* Sits at the row's own right edge (the spacer ahead of it takes up
-     whatever room the mark, stamp and destination chip leave). Sized to the
-     gutter it lives in, not the 30px round buttons the tray below uses,
-     those are sized for a thumb and this row is not. */
+  /* Sits right beside the destination chip, not pushed off to the row's own
+     far edge, so the two read as one unit. Sized to the gutter it lives in,
+     not the 30px round buttons the tray below uses, those are sized for a
+     thumb and this row is not. */
   .entry .resend {
     display:inline-flex; align-items:center; justify-content:center;
     width:1.2rem; height:1.2rem; border-radius:5px; color:var(--faint);

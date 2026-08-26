@@ -638,12 +638,9 @@ function addEntry(rec) {
     gutter.append(to);
   }
 
-  // Pushes the resend control to the row's own right edge, clear of the mark,
-  // the stamp and the destination chip rather than crowding up against them.
-  const spacer = document.createElement('span');
-  spacer.className = 'spacer';
-  gutter.append(spacer);
-
+  // Sits right beside the destination it would change, not off at the
+  // row's own far edge, so the two read as one unit rather than as two
+  // unrelated controls that happen to share a row.
   // What went out once cannot be pulled back, so this is not an undo. It is
   // the same words said again, this time at a session picked by hand
   // (#78/#79: the first send went somewhere nobody chose, and short of
