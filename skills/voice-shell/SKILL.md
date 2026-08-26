@@ -402,7 +402,7 @@ Moving a control takes effect right then. No daemon restart is needed.
 |---|---|---|
 | Microphone | Which input device to use | The system default |
 | Trigger level | 0 to 100. Lower picks up fainter sounds | macOS 41 / Linux 74 |
-| Pause to send | Being quiet this long marks the end of a chunk | 1.5 seconds |
+| Pause to send | Being quiet this long marks the end of a chunk (with browser recognition, that end is already decided elsewhere, so this is the wait before an already-recognized one goes out) | 1.5 seconds |
 | Min length | Recognition results shorter than this are dropped | 15 characters |
 | Strip filler words | Drops the connecting words before sending (**this affects what is sent too**) | Off |
 | Theme / Language | Looks | Automatic |

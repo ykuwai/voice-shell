@@ -325,6 +325,30 @@ const levelToUnit = v => {
 const amplitudeNow = () =>
   (engine === 'off' || asrActive()) ? amplitudeFallback() : levelToUnit(daemonLevel);
 
+/* A second reading off the same analyser, kept apart from browserLevel() on
+   purpose. browserLevel() is a self-calibrating fill (it tracks its own
+   floor and answers "how far above the room's own quiet"), which is right
+   for the glow inside the mic but cannot be compared against the trigger
+   mark, a fixed number the room's floor keeps drifting under. What the
+   trigger mark and the meter bar need is the same physical quantity
+   silence_threshold already is, plain RMS of the raw waveform, the same sum
+   asr_mic.py takes (block.dot(block) / block.size, square-rooted) so a
+   position on this bar means the same amplitude a position on the daemon's
+   own bar would. Time domain, not the frequency-domain bytes browserLevel()
+   reads, an FFT bucket average is not a waveform amplitude. */
+let timeDomainBuf = null;
+function computeBrowserRms() {
+  if (!analyser || vizFailed) return 0;
+  if (!timeDomainBuf || timeDomainBuf.length !== analyser.fftSize) {
+    timeDomainBuf = new Float32Array(analyser.fftSize);
+  }
+  analyser.getFloatTimeDomainData(timeDomainBuf);
+  let sum = 0;
+  for (let i = 0; i < timeDomainBuf.length; i++) { const v = timeDomainBuf[i]; sum += v * v; }
+  return Math.sqrt(sum / timeDomainBuf.length);
+}
+let browserRmsNow = 0;
+
 /* The fill inside the mic gets the same easing. The raw value only changes
    every 0.1 seconds (asr_mic.py measures 0.1 seconds at a time and viewer.py
    pushes every 0.1 seconds) while we draw every frame, so one value sits for 6
@@ -1796,6 +1820,11 @@ async function discardCurrentNow({announce = true} = {}) {
       el.stream.textContent = '';
       clearSendCountdown();
       el.tray.classList.add('idle');
+      // Whatever was already finalized and sitting in the queue, waiting out
+      // its own quiet stretch, is exactly what "discard the current one" means
+      // too. Left in place it would still go out once the room fell quiet
+      // enough, after the person had already asked for it to be thrown away.
+      pendingBrowserSends = [];
       // Clearing the screen alone brings it right back. Recognition keeps
       // putting out everything up to that point as an interim result, so we fold
       // up the whole current session and empty what has piled up.
@@ -2362,13 +2391,27 @@ function paintTuning() {
 
 // Show the measured level and the threshold side by side. With nothing but a number there is no way to settle on a value.
 function paintGauge() {
+  // Under browser recognition there is no daemon pushing a level at all
+  // (asr_mic.py never runs, so level.txt never exists), and daemonLevel sits
+  // at its startup value of 0 forever. The bar read that literally and stayed
+  // flat no matter how loud the room was, right under a mic icon that (on a
+  // different measurement) was lighting up fine. Read this machine's own
+  // microphone instead whenever the daemon is not the one actually listening
+  // (same split amplitudeNow() draws, for the same reason).
+  const usingBrowser = engine === 'off' || asrActive();
+  const rawLevel = usingBrowser ? browserRmsNow : daemonLevel;
+  const speaking = usingBrowser ? rawLevel >= tuning.silence_threshold : daemonSpeaking;
   // The meter runs on the same scale as the slider. If these did not line up,
   // you could not compare the mark against the level you are actually making.
-  const lvl = Math.min(100, threshToPos(daemonLevel) / 10);
+  const lvl = Math.min(100, threshToPos(rawLevel) / 10);
   const mark = Math.min(100, threshToPos(tuning.silence_threshold) / 10);
   el.gaugeFill.style.width = lvl + '%';
-  el.gaugeFill.classList.toggle('on', daemonSpeaking);
+  el.gaugeFill.classList.toggle('on', speaking);
   el.gaugeMark.style.left = mark + '%';
+  // The WS 'level' handler already does this for the daemon path (its own
+  // push carries m.speaking straight from the source). Repeating it here too
+  // is what gets it under browser recognition, which has no such push to ride.
+  el.meterFill.classList.toggle('on', speaking);
   // The thin meter on the main screen gets the same scale
   el.meterFill.style.width = lvl + '%';
   el.meterMark.style.left = mark + '%';
@@ -2666,11 +2709,18 @@ function newRecognition(generation) {
     let interim = '';
     for (let i = ev.resultIndex; i < ev.results.length; i++) {
       const res = ev.results[i];
-      if (res.isFinal) sendUtterance(res[0].transcript);
+      if (res.isFinal) queueOrSendFinal(res[0].transcript);
       else interim += res[0].transcript;
     }
-    paintStream(withDict(interim));
-    el.tray.classList.toggle('idle', !interim);
+    // A clause waiting out its quiet stretch keeps its own text on screen
+    // (paintPendingBrowserSends), the interim display beneath it stays out of
+    // the way rather than overwriting it with what is usually nothing anyway.
+    if (pendingBrowserSends.length) {
+      paintPendingBrowserSends();
+    } else {
+      paintStream(withDict(interim));
+      el.tray.classList.toggle('idle', !interim);
+    }
     streamTail();
     paintTinyButtons();
     if (interim.trim()) lastVoiceAt = performance.now();
@@ -2801,6 +2851,96 @@ setInterval(() => {
     say(t('idleMuted', {n: mins}), 30);
   });
 }, 5000);
+
+/* Browser recognition decides on its own when a clause is grammatically
+   finished (isFinal), but nothing about the pause that comes after belongs
+   to it, that call settles the words, not when they go out. Sent the instant
+   isFinal fired, "pause to send" had nothing left to act on under this
+   engine, which is why the setting sat disabled the whole time (see
+   paintBrowserAsr). Held here for a stretch of measured quiet instead, the
+   same number governs both engines again, browser or daemon.
+
+   A shared clock rather than one timer per clause: what actually needs
+   watching is "how long has the room been quiet", and every clause waiting
+   to go out watches the same answer, so lastLoudAt is the only state, not a
+   timer per entry. Ticked by setInterval, not the paint loop. A minimized or
+   otherwise occluded tab throttles requestAnimationFrame; a send must not
+   quietly stop working right when the person stepped away expecting it to
+   go out on its own. */
+const BROWSER_SEND_GATE_MS = 100;
+let lastLoudAt = 0;
+let pendingBrowserSends = [];   // [{text, queuedAt}], oldest first
+
+function browserGateTick() {
+  browserRmsNow = computeBrowserRms();
+  if (engine === 'off' || asrActive()) paintGauge();
+  if (!pendingBrowserSends.length) return;
+  const now = performance.now();
+  if (browserRmsNow >= tuning.silence_threshold) lastLoudAt = now;
+  const quietFor = now - lastLoudAt;
+  const waitMs = Math.max(0, (Number(tuning.silence_duration) || 0) * 1000);
+  const ready = [], stillWaiting = [];
+  for (const item of pendingBrowserSends) {
+    // A cap against a rising noise floor. Some machines' getUserMedia runs
+    // automatic gain control that climbs through a real pause and never
+    // dips back under a fixed mark on its own, and a wait with no ceiling
+    // then never ends, the exact "neither a command nor a prompt, gone
+    // nowhere" shape #76 exists to rule out, just reached from the sending
+    // side instead of the recognizing side this time.
+    const cap = Math.max(waitMs * 2, waitMs + 3000);
+    (quietFor >= waitMs || now - item.queuedAt >= cap ? ready : stillWaiting).push(item);
+  }
+  pendingBrowserSends = stillWaiting;
+  for (const item of ready) sendUtterance(item.text);
+  paintPendingBrowserSends();
+}
+setInterval(browserGateTick, BROWSER_SEND_GATE_MS);
+
+function flushPendingBrowserSends() {
+  const items = pendingBrowserSends;
+  pendingBrowserSends = [];
+  for (const item of items) sendUtterance(item.text);
+  paintPendingBrowserSends();
+}
+
+// Nothing is drawn once the queue empties, the interim painting in onresult
+// owns the display from that point on (see the `pendingBrowserSends.length`
+// branch there).
+function paintPendingBrowserSends() {
+  if (!pendingBrowserSends.length) return;
+  el.stream.textContent = pendingBrowserSends.map(p => p.text).join(' ');
+  el.tray.classList.remove('idle');
+  streamTail();
+}
+
+/* Where a finalized clause actually goes, either straight to sendUtterance or
+   parked in pendingBrowserSends to wait out a quiet stretch first. Called
+   from onresult in place of calling sendUtterance directly. */
+function queueOrSendFinal(text) {
+  text = (text || '').trim();
+  if (!text) return;
+  // The one straggler discardCurrentNow warns about, stale content the newly
+  // restarted session can still carry right after an abort. Caught here, at
+  // the point of queuing, since sendUtterance's own copy of this same check
+  // never gets a turn to run until whatever the queue eventually flushes.
+  if (dropNextLocal) { dropNextLocal = false; return; }
+  // No analyser to measure quiet with (armViz never got its gesture, or the
+  // visualization failed outright), so there is nothing to gate on. Sending
+  // right away, the way this always worked, beats a wait that could never end.
+  if (!analyser || vizFailed) { sendUtterance(text); return; }
+  // A closing mute must not sit behind whatever else is already waiting for
+  // quiet, or the room stays live for however long that wait runs, exactly
+  // the cost #76 exists to avoid. Send everything already finalized ahead of
+  // it first (those were always going regardless), then let mute through
+  // this instant, ungated.
+  if (matchingTailWord(text)?.id === 'mute') {
+    flushPendingBrowserSends();
+    sendUtterance(text);
+    return;
+  }
+  pendingBrowserSends.push({text, queuedAt: performance.now()});
+  paintPendingBrowserSends();
+}
 
 /* Settled utterances go to the server. The dictionary, the ignored words, the
    min length and the hold decision all run through the same path the daemon
@@ -3223,11 +3363,10 @@ function paintBrowserAsr() {
   el.idleMuteNote.hidden = !asrChosen;
   el.browserGestureField.hidden = !asrChosen;
   paintIdleMute();
-  // Browser recognition decides for itself when an utterance ends (the
-  // browser's own isFinal), so "Pause to send" has nothing to act on there.
-  // Leaving the slider live would say otherwise.
-  el.silence.disabled = asrChosen;
-  el.silenceVal.disabled = asrChosen;
+  // Browser recognition decides for itself when a clause is grammatically
+  // done, isFinal is not something this setting can move. What it still
+  // governs, on both engines now, is how long it waits after that before
+  // actually sending it (queueOrSendFinal), so the slider stays live here too.
   el.silenceNote.textContent = t(asrChosen ? 'silenceNoteBrowser' : 'silenceNote');
   el.engineNote.textContent = t(asrChosen ? 'browserAsrNote' : 'localAsrNote');
   // For turning listening on and off, paintPower() decides both whether it
