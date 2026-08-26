@@ -653,6 +653,16 @@ async def main_async(args):
     _secure_dir(Path(args.log_file).parent)
     _secure_dir(_CONFIG)
 
+    # voice_daemon.py's own main() calls this too, but that daemon never starts
+    # at all under the default browser engine (there is no local recognizer to
+    # run), so on that path this was the only place left that ever would. Without
+    # it dictionary.json never gets written, and the built-in entries (never
+    # having been saved anywhere) simply do not show up on the editing screen,
+    # even though replacement itself still worked in the background the whole
+    # time off the in-memory default (load_dictionary()'s fallback).
+    import voice_daemon as vd
+    vd.save_default_dictionary()
+
     tail = Tail(Path(args.log_file))
     tail.read_existing()
 
