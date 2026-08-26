@@ -126,6 +126,16 @@
                 data-i18n-title="editOnce"></button>
         <button class="tiny warn" id="dropOne" data-icon="delete" data-icon-size="16"
                 data-i18n-title="dropOne"></button>
+        <!-- Stands in for the pair above once editing just this one utterance is
+             under way. With both of those still on screen there, one of them
+             (the trash) reads as a second copy of the discard sitting right
+             below in the edit box, and the other (the pencil) can only ever
+             show disabled, since you are already inside what it opens. Neither
+             earns its seat once you are in here, so this takes it instead, the
+             one thing that seat is missing: a plain way back out that does not
+             also mean discarding what you typed. -->
+        <button class="tiny cancel" id="cancelOnce" data-icon="close" data-icon-size="16"
+                data-i18n-title="cancelOnce" hidden></button>
         <!-- Send this one now. The drawing carries what is about to happen to
              the utterance as well as the way past it. Going out paints the
              inside across from the left. Being thrown away drains the ring

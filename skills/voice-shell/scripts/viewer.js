@@ -102,7 +102,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'miniMic','miniViz','navRow','pageHead','sheetHead','helpHead','openDict','sheetTitle',
                   'routes','routeChips','routePick','viz','meter','meterHit','meterFill','meterMark','logoMark',
                   'tray','stream','draft','draftTime','draftActions','send','discard',
-                  'editOnce','dropOne','sendOne','draftMark',
+                  'editOnce','dropOne','sendOne','cancelOnce','draftMark',
                   'hint','note','log','none','count','fresh','floatAsk','taken','takeBack',
                   'mic','recogLang','recogLangField','thresh','threshVal','gaugeFill','gaugeMark',
                   'silence','silenceVal','silenceNote','minChars','minCharsVal','clean',
@@ -750,17 +750,26 @@ function paint() {
   paintDraft();
 }
 
-/* Edit, discard and send stay put at all times, and only whether they can be
-   pressed changes. Showing and hiding them moves the target, and in a hurry you
-   hit the one next to it. Send is settled every frame in paintSendCue instead,
-   because what it turns on goes empty on its own once an utterance settles and
-   nothing calls back here to say so. */
+/* Edit, discard and send stay put at all times outside of editing just this
+   one, and only whether they can be pressed changes. Showing and hiding them
+   moves the target, and in a hurry you hit the one next to it. Send is
+   settled every frame in paintSendCue instead, because what it turns on goes
+   empty on its own once an utterance settles and nothing calls back here to
+   say so.
+   Editing just this one is the one exception. The pencil can only ever show
+   disabled there, since you are already inside what it opens, and the trash
+   next to it reads as a second copy of the discard already sitting in the
+   edit box below. Neither is doing a job worth the seat, so the two of them
+   swap for cancelOnce, the one thing missing: a plain way back out. */
 function paintTinyButtons() {
   // Discard can always be pressed. Press it with nothing to discard and
   // nothing happens, because there is simply nothing being said right now.
   // Raising and sinking it is worse to live with, since you then have to check
   // every time whether it can be pressed when you want to press it.
   el.editOnce.disabled = route !== 'live' || oneShot;
+  el.editOnce.hidden = oneShot;
+  el.dropOne.hidden = oneShot;
+  el.cancelOnce.hidden = !oneShot;
 }
 
 /* The setting for using several machines. It changes what it takes for a
@@ -1150,7 +1159,14 @@ async function changeRoute(next, prev, revision, syncServer) {
       if (revision !== routeRevision) return;
     }
     if (syncServer) {
-      await post('/api/pause', {paused: w.paused});
+      // ROUTE.off carries paused:false as a fixed shape for the table, not as
+      // the daemon's real hold/live state. Posting that verbatim on mute would
+      // reset the daemon to live under it, and its own echo of that value is
+      // what the 'paused' handler above reads lastMode back from while muted,
+      // so hold silently became live by the time you unmuted. Muting from hold
+      // has to leave the daemon holding, so unmute lands where it left off.
+      const paused = next === 'off' ? ROUTE[lastMode].paused : w.paused;
+      await post('/api/pause', {paused});
       if (revision !== routeRevision) return;
       await post('/api/mute', {muted: w.muted});
     }
@@ -1922,6 +1938,10 @@ async function endOneShot() {
   oneShot = false;
   await setRoute('live');
 }
+// cancelOnce is this same door, just opened by hand instead of by sending or
+// discarding. Whatever is sitting in the edit box is left exactly as it was,
+// so nothing spoken is lost, only the "editing just this one" framing is.
+el.cancelOnce.onclick = endOneShot;
 
 /* After going into review, pressing outside with nothing there counts as
    backing out. Bracing yourself while empty is the real use for this, so we
@@ -3087,8 +3107,15 @@ function paintRoutes() {
     if (knownListeners.some(l => String(l.pid) === renaming.pid)) return;
     renaming = null;     // that session ended while the box was open
   }
-  // With only one listening there is nothing to choose
-  if (knownListeners.length < 2) { el.routes.hidden = true; return; }
+  // With nothing listening there is nothing to show at all. One listener
+  // still gets its own chip, numbered 1, rather than staying hidden until a
+  // second one shows up. The number popping into existence only once you
+  // happen to run two sessions is a worse first look at it than just always
+  // being there, one chip deep, even though there is nothing yet to choose
+  // between. Saying 「2番に切り替え」 still only does anything once a second
+  // one is actually listening, that gate lives on the daemon side and is
+  // untouched here.
+  if (knownListeners.length < 1) { el.routes.hidden = true; return; }
   el.routes.hidden = false;
   // Show the numbers. This is the number you use when you say 「2番に切り替え」
   // out loud. The daemon counts in the same order (earliest registered first),
@@ -3599,19 +3626,32 @@ claimSole();
 /* A window of its own can be opened automatically, but pinning it on top
    cannot start unless a person presses (a browser rule). That leaves it half
    done, a window that never comes forward, so we put something pressable right
-   there, once. Once it has been used, it never shows again.
+   there.
 
    It now opens in an ordinary tab (voice-shell.sh's open_gui, #75), rather
    than straight into Chrome's --app mode, so this bubble is the one place
    that still says "float it" out loud, where the shape of the window used
-   to say it on its own. */
+   to say it on its own. It used to show only the first time and remember
+   that forever, on the reasoning that once used, the button itself was
+   enough of a reminder. In practice a button off in the header is exactly
+   what goes unnoticed, so this asks again every time you are back on the
+   ordinary tab with nothing floating, rather than banking on one look ever
+   sticking. */
 function paintFloatAsk() {
-  el.floatAsk.hidden = !(canFloat
-                         && !floatingWindow()
-                         && !store.get('floated'));
+  el.floatAsk.hidden = !(canFloat && !floatingWindow());
   positionFloatAsk();
 }
 el.floatAsk.onclick = () => { el.floatAsk.hidden = true; el.floatBtn.click(); };
+// A click anywhere outside it counts as having seen it, so it does not sit
+// there through the rest of the visit once it has been noticed. It comes
+// back on the next load regardless (paintFloatAsk carries no memory of this),
+// which is the point: noticed-and-dismissed is not the same as never
+// showing it again.
+document.addEventListener('click', e => {
+  if (el.floatAsk.hidden) return;
+  if (e.target.closest('#floatAsk, #floatBtn')) return;
+  el.floatAsk.hidden = true;
+});
 
 /* Sits under floatBtn with an arrow pointing back up at it, read off the
    button's own live position rather than a guessed offset (the row it sits
@@ -3652,6 +3692,11 @@ el.floatBtn.onclick = async () => {
   floating = true;
   let win;
   try {
+    // Where it opens is the browser's own call, on purpose (a page is not
+    // allowed to place a window that stays in front of everything else
+    // wherever it likes, and moveTo on it is silently ignored). Chrome does
+    // remember on its own though, so dragging it to the right edge once is
+    // enough. It reopens there from then on without anything asked for here.
     win = await documentPip.requestWindow({width: 400, height: 720});
   } catch {
     disableFloat();
@@ -3690,7 +3735,6 @@ el.floatBtn.onclick = async () => {
   paintNav();
   fitCanvas();
   paintFloat(true);
-  store.set('floated', '1');
   paintFloatAsk();
   paint();                    // put the same title on the small window too
   win.addEventListener('pagehide', () => {
