@@ -1197,6 +1197,11 @@
   /* Back to full weight while you are typing in it. Faded text you are editing is
      unreadable, and the fields here still work whatever the switch says. */
   .group.off:focus-within > *:not(h3) { opacity:1; }
+  /* Not switched off, dead for a different reason (this browser's own
+     recognition cuts the mic while muted, so the word can never reach it).
+     The switch can be saved on underneath this, ready for whenever an engine
+     that can hear it is running, so the fade cannot lean on .off alone. */
+  .group.unavailable > *:not(h3) { opacity:.5; }
   /* The list of what the keyboard can do. Like the spoken wordings (.say), it
      is there to be read, so it never takes a pressable shape. Making it look
      like a keycap keeps it from being read as ordinary letters in the sentence. */

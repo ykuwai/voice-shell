@@ -1241,6 +1241,13 @@ function say(text, sec = 6) {
   hintHoldUntil = performance.now() + sec * 1000;
 }
 
+// "Say X to come back" is only true where saying it can still be heard. This
+// browser's own recognition cuts the mic the instant it mutes (unlike the
+// daemon, which keeps listening for the word on purpose), so under it the
+// one true way back is the button, not the word the other engines can still
+// hear.
+const muteHint = () => t(asrChosen ? 'voiceMutedBrowser' : 'voiceMuted');
+
 /* Show the word taken as a signal in the live transcript box, lit up as it is.
    Watching the very word you said take on color tells you what happened at a
    glance, better than a sentence explaining that it was handled as a signal. */
@@ -1490,7 +1497,7 @@ async function handleWsMessage({ev, message, number, discardInProgress: wasDisca
       // itself full is going to get.
       clearSendCountdown();
       if (c.kind === 'mute') {
-        chime('down'); say(t('voiceMuted'));       flashCommand(c.said, 'warn');
+        chime('down'); say(muteHint());             flashCommand(c.said, 'warn');
       } else if (c.kind === 'unmute') {
         chime('up');   say(t('voiceUnmuted'));     flashCommand(c.said, 'live');
       } else if (c.kind === 'route') {
@@ -2155,7 +2162,7 @@ function onKey(e) {
     e.preventDefault();
     el.segOff.click();
     chime(back ? 'up' : 'down');
-    say(t(back ? 'voiceUnmuted' : 'voiceMuted'));
+    say(back ? t('voiceUnmuted') : muteHint());
     return;
   }
   if (keyIs(e, 'L')) {                    // send it straight through
@@ -2367,8 +2374,8 @@ el.whisperModel.onblur = saveWhisperModel;   // for the paths where change never
    All three take effect on the daemon the moment they are saved (it re-reads
    every 0.5 seconds). */
 let silenceMin = 0.3, silenceMax = 30;      // the range the server allows (overwritten on load)
-let tuning = {idle_mute_min: 5, silence_threshold: 0.015, silence_duration: 1.5,
-              min_chars: 15, strip_fillers: false, browser_unmute_gesture: true,
+let tuning = {idle_mute_min: 5, silence_threshold: 0.015, silence_duration: 3.0,
+              min_chars: 15, strip_fillers: false, browser_unmute_gesture: false,
               browser_unmute_peaks: 3, browser_unmute_window: 2,
               browser_unmute_threshold: 0.82};
 
@@ -4132,6 +4139,16 @@ function cmdGroupEl(g, mine, off, offWords) {
   use.append(useBox, track);
   head.append(use);
 
+  // This browser's own recognition cuts the mic the instant it mutes, so the
+  // word can never be heard here to begin with, unlike the daemon's mute
+  // (mic_command_shape keeps listening for it on purpose). Not the same
+  // thing as switched off, that is a choice made here and undone here. This
+  // is a fact of the engine currently running, so the switch itself is held
+  // still (whatever it was set to keeps its place for the next time an
+  // engine that can hear it is running) and only the line under it changes.
+  const deadHere = g.id === 'unmute' && asrChosen;
+  if (deadHere) useBox.disabled = true;
+
   const what = document.createElement('p');
   what.className = 'dict-label';
   box.append(what);
@@ -4140,8 +4157,10 @@ function cmdGroupEl(g, mine, off, offWords) {
      on, and left with the old sentence above them they would read as still working.
      One line carries it. Nothing new is put up for it. */
   const paintUse = () => {
-    what.textContent = useBox.checked ? t(base + 'What') : t('cmdOff');
+    what.textContent = deadHere ? t('cmdUnmuteBrowserOff')
+                       : useBox.checked ? t(base + 'What') : t('cmdOff');
     box.classList.toggle('off', !useBox.checked);
+    box.classList.toggle('unavailable', deadHere);
   };
   paintUse();
   useBox.onchange = () => {

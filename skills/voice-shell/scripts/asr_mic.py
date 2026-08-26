@@ -135,7 +135,7 @@ def add_common_args(p):
     p.add_argument("--silence-threshold", type=float, default=DEFAULT_SILENCE_THRESHOLD,
                    help="Below this RMS counts as silence. Match it to the noise "
                         "floor of the mic")
-    p.add_argument("--silence-duration", type=float, default=1.5,
+    p.add_argument("--silence-duration", type=float, default=3.0,
                    help="Silence this many seconds long settles the utterance")
     return p
 
