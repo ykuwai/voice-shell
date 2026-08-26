@@ -688,6 +688,8 @@ let closeToMenu = null;
    Built by hand instead, in the same vein as the destination bubble's own
    floating panel elsewhere on this page. */
 function openToMenu(btn, to) {
+  // A second press on the same chip is a close, not a rebuild-and-reopen.
+  if (openToMenuBtn === btn) { closeToMenu(); return; }
   if (closeToMenu) closeToMenu();
   const menu = document.createElement('div');
   menu.className = 'to-menu';
