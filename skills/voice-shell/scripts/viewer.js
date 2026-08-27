@@ -100,7 +100,7 @@ const el = {};
 for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'power','powerLabel','powerRow','powerNote','openSettings','sheet','closeSettings','floatBtn','page',
                   'miniMic','miniViz','navRow','pageHead','sheetHead','helpHead','openDict','sheetTitle',
-                  'routes','routeChips','routePick','viz','meter','meterHit','meterFill','meterMark','logoMark',
+                  'routes','routeChips','routePick','routePickLabel','viz','meter','meterHit','meterFill','meterMark','logoMark',
                   'tray','stream','draft','draftTime','draftActions','send','discard',
                   'editOnce','dropOne','sendOne','cancelOnce','draftMark',
                   'hint','note','log','none','count','fresh','floatAsk','taken','takeBack',
@@ -686,55 +686,80 @@ let closeToMenu = null;
    native popup regardless, on its own theme rather than this page's dark
    one (#79 feedback: "not the native dropdown as it is, a hand-built one").
    Built by hand instead, in the same vein as the destination bubble's own
-   floating panel elsewhere on this page. */
-function openToMenu(btn, to) {
-  // A second press on the same chip is a close, not a rebuild-and-reopen.
-  if (openToMenuBtn === btn) { closeToMenu(); return; }
+   floating panel elsewhere on this page.
+
+   Both places that pick a destination come through here: the chip on a sent
+   card (resend it somewhere else) and the roll-up picker above the draft card
+   (where the next thing you say lands). Those two looked alike while closed
+   and came apart the moment either one opened, which is the single thing a
+   picker cannot afford to do.
+
+   `items` is [{key, label}]. onPick runs only for a key that is not the one
+   already chosen, so neither caller has to guard against re-picking. */
+function openPickMenu(anchor, items, currentKey, onPick) {
+  // A second press on the same anchor is a close, not a rebuild-and-reopen.
+  if (openToMenuBtn === anchor) { closeToMenu(); return; }
   if (closeToMenu) closeToMenu();
-  const menu = document.createElement('div');
+  // While it floats in front, the screen has been moved into the small
+  // window's own document. A panel appended to this one would be built into
+  // a window nobody is looking at, and measured against the wrong width.
+  const doc = anchor.ownerDocument;
+  const win = doc.defaultView;
+  const menu = doc.createElement('div');
   menu.className = 'to-menu';
   menu.setAttribute('role', 'listbox');
-  knownListeners.forEach((l, i) => {
-    const pid = String(l.pid);
-    const item = document.createElement('button');
+  for (const it of items) {
+    const item = doc.createElement('button');
     item.type = 'button';
-    item.className = 'to-menu-item' + (pid === to ? ' on' : '');
-    item.textContent = `${i + 1}. ${l.label}`;
-    item.onclick = async () => {
+    item.className = 'to-menu-item' + (it.key === currentKey ? ' on' : '');
+    item.textContent = it.label;
+    item.onclick = () => {
       close();
-      if (pid === to) return;
-      const row = btn.closest('.entry');
-      row.dataset.to = pid;
-      try { await post('/api/resend', {text: row.querySelector('.text').dataset.raw, to: pid}); } catch {}
+      if (it.key === currentKey) return;
+      onPick(it.key);
     };
     menu.append(item);
-  });
-  document.body.append(menu);
-  // Placed off the button's own live position (same reasoning as
+  }
+  doc.body.append(menu);
+  // Placed off the anchor's own live position (same reasoning as
   // positionFloatAsk), then nudged left if that would run the panel off
   // the right edge of a narrow window.
-  const r = btn.getBoundingClientRect();
+  const r = anchor.getBoundingClientRect();
   menu.style.top = Math.round(r.bottom + 4) + 'px';
   menu.style.left = Math.round(r.left) + 'px';
-  const overflowRight = menu.getBoundingClientRect().right - (innerWidth - 8);
+  const overflowRight = menu.getBoundingClientRect().right - (win.innerWidth - 8);
   if (overflowRight > 0) menu.style.left = Math.round(r.left - overflowRight) + 'px';
 
   function close() {
     menu.remove();
-    document.removeEventListener('click', onDocClick, true);
-    document.removeEventListener('keydown', onKey);
+    doc.removeEventListener('click', onDocClick, true);
+    doc.removeEventListener('keydown', onKey);
     if (closeToMenu === close) { closeToMenu = null; openToMenuBtn = null; }
   }
   function onDocClick(e) {
-    if (!menu.contains(e.target) && e.target !== btn) close();
+    if (!menu.contains(e.target) && !anchor.contains(e.target)) close();
   }
   function onKey(e) { if (e.key === 'Escape') close(); }
   // Deferred so the very click that opened this menu, still bubbling up to
   // document, does not also count as the outside click that shuts it.
-  setTimeout(() => document.addEventListener('click', onDocClick, true), 0);
-  document.addEventListener('keydown', onKey);
+  setTimeout(() => doc.addEventListener('click', onDocClick, true), 0);
+  doc.addEventListener('keydown', onKey);
   closeToMenu = close;
-  openToMenuBtn = btn;
+  openToMenuBtn = anchor;
+}
+
+/* The numbers are the ones said out loud (「2番に切り替え」). The chips, the
+   chip menu and the roll-up picker all have to count them the same way. */
+const listenerItems = () =>
+  knownListeners.map((l, i) => ({key: String(l.pid), label: `${i + 1}. ${l.label}`}));
+
+// The chip on a sent card. Picking another name sends the same text there.
+function openToMenu(btn, to) {
+  openPickMenu(btn, listenerItems(), to, async pid => {
+    const row = btn.closest('.entry');
+    row.dataset.to = pid;
+    try { await post('/api/resend', {text: row.querySelector('.text').dataset.raw, to: pid}); } catch {}
+  });
 }
 
 /* Look up a name from the destination PID. Names of finished sessions are kept
@@ -3224,14 +3249,9 @@ function paintRoutes() {
   const items = knownListeners.map((l, i) => ({...l, no: i + 1}));
   const pick = l => routeTo ? String(l.pid) === routeTo : String(l.pid) === effectiveTo;
 
-  // This is what comes up in a short window. Same numbers and same names as the chips.
-  el.routePick.replaceChildren(...items.map(l => {
-    const o = document.createElement('option');
-    o.value = String(l.pid);
-    o.textContent = `${l.no}. ${l.label}`;
-    o.selected = pick(l);
-    return o;
-  }));
+  // This is what comes up in a short window. Same numbers and same names as
+  // the chips, and the same hand-built menu the chip on a sent card opens.
+  paintRoutePick();
 
   el.routeChips.replaceChildren(...items.map(l => {
     // Light up where it actually lands. With nothing chosen the server settles
@@ -3318,7 +3338,7 @@ function paintRoutes() {
 function markChosen() {
   const on = pid => routeTo ? pid === routeTo : pid === effectiveTo;
   for (const b of el.routeChips.children) b.classList.toggle('on', on(b.dataset.pid || ''));
-  for (const o of el.routePick.options) o.selected = on(o.value);
+  paintRoutePick();
 }
 
 /* Change a destination's name right where it stands.
@@ -3405,7 +3425,19 @@ function openRename(l, node) {
   inp.onblur = () => finish(true);
 }
 
-el.routePick.onchange = () => setRoute2(el.routePick.value);
+/* The roll-up picker, shown instead of the chips once the window is too short
+   for a row of them (each chip takes a line of its own down there). It names
+   where your voice lands right now, and opens the same menu the chip on a sent
+   card does. */
+function paintRoutePick() {
+  const cur = routeTo || effectiveTo;
+  const items = listenerItems();
+  const chosen = items.find(i => i.key === cur) || items[0];
+  el.routePickLabel.textContent = chosen ? chosen.label : '';
+}
+
+el.routePick.onclick = () =>
+  openPickMenu(el.routePick, listenerItems(), routeTo || effectiveTo, setRoute2);
 
 async function setRoute2(to) {
   routeTo = to;
