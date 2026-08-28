@@ -268,9 +268,12 @@ case "$cmd" in
       # Same as daemon startup. Leave it and last time's utterances line up again.
       : > "$LOG_FILE"
       # Here the screen itself does the recognizing, so speak up once it is up.
-      # Drop the output. The screen opens the URL itself, so there is nobody to
-      # read it out to, and only when that fails does viewer print to stderr.
-      "$0" viewer >/dev/null
+      # Its own line ("The viewer started at ..." / "It is already running at
+      # ...") carries the URL through to whoever is reading this output, since
+      # opening a window here is not something to count on (closed by hand
+      # since the last time, or nothing installed that this script knows how
+      # to open) and that URL is the fallback either way.
+      "$0" viewer
       # Print only whether it started and what to do next.
       # The log path and the list of other listening sessions both come from status.
       echo "Listening has started."
