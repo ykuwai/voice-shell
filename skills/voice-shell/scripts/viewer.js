@@ -3808,7 +3808,15 @@ function disableFloat() {
   el.floatBtn.disabled = true;
   el.floatBtn.hidden = true;
   el.floatAsk.hidden = true;
-  el.floatStand.hidden = true;
+  // floatStand is left alone on purpose. Hiding it here assumed this only
+  // ever fires while not actually floating, but floatingWindow()'s own catch
+  // calls this too, and that one can fire mid-float (documentPip.window
+  // throwing). floatParts never comes back to this document in that case
+  // (there is no document to move it back from, canFloat is now false so
+  // nothing here can reach in and ask), so hiding the one thing left pointing
+  // at where it went would strand the tab it moved out of with no way back
+  // and no sign one ever existed. Left showing, its own button still tries
+  // the same close path floatBtn itself would.
 }
 
 function floatingWindow() {
@@ -3880,6 +3888,16 @@ function standDown() {
   if (typeof stopRecognition === 'function') stopRecognition();
   recWanted = false;
   if (asrChosen) beat('gone');
+  // #taken lives inside .page, which travels wholesale into the small window
+  // while floating (floatParts). Unhidden above but left floating, it shows
+  // there, in a window nobody is looking at any more, while this document
+  // still shows floatStand's own "bring it back", now quietly wrong (there
+  // is nothing healthy left to bring back). Closing the small window first
+  // runs its own pagehide handler, which moves floatParts (this node
+  // included, already unhidden by the line above) back to this document, so
+  // #taken lands where it will actually be seen.
+  const fw = floatingWindow();
+  if (fw) { try { fw.close(); } catch {} }
   try { window.close(); } catch {}
 }
 

@@ -181,9 +181,13 @@ cmd="${1:-status}"; shift || true
 open_gui() {
   local url="$VIEWER_URL"
   local flag="$STATE_DIR/gui_opened"
-  [ -f "$flag" ] && return 0
   mkdir -p "$STATE_DIR"
-  : > "$flag"
+  # mkdir is one atomic filesystem call (POSIX guarantees only one caller can
+  # be the one to actually create a given directory), unlike the old
+  # test-for-a-file-then-create-it pair, which let two near-simultaneous
+  # callers (start racing viewer's own reopen-if-nobody-is-looking check,
+  # say) both see nothing there yet and both go on to open a window.
+  mkdir "$flag" 2>/dev/null || return 0
   # An ordinary tab, indistinguishable from any other, not Chrome's --app mode
   # (a window with no tabs and no address bar). Opening straight into that
   # shape has been mistaken for phishing in the wild (a window with nowhere
@@ -623,14 +627,14 @@ except Exception:
     print(0)
 ' 2>/dev/null || true)"
       if [[ "${viewers:-0}" == "0" ]]; then
-        rm -f "$STATE_DIR/gui_opened"
+        rm -rf "$STATE_DIR/gui_opened"
         [[ "${VOICE_SHELL_NO_GUI:-0}" == "1" ]] || open_gui || true
       fi
       echo "It is already running at $VIEWER_URL"
       exit 0
     fi
     mkdir -p "$STATE_DIR"
-    rm -f "$STATE_DIR/gui_opened"      # started fresh, so open one window too
+    rm -rf "$STATE_DIR/gui_opened"      # started fresh, so open one window too
     # Detach with setsid. The daemon kills every one of its children when it
     # exits, so on the same line stopping the daemon takes the viewer down too.
     detach "$PY" "$HERE/viewer.py" "$@" \
@@ -666,7 +670,7 @@ except Exception:
     ;;
   viewer-stop)
     if have pkill; then
-      rm -f "$STATE_DIR/gui_opened"
+      rm -rf "$STATE_DIR/gui_opened"
       pkill -f "voice-shell/scripts/viewer\.p[y]" && echo "The viewer stopped" \
         || echo "It is not running"
     else

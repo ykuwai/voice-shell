@@ -1184,9 +1184,15 @@ def _fold_off(kind: str, words) -> frozenset:
     return frozenset(command_key(w) for w in words)
 
 
-_NO_COMMANDS = {"mute": frozenset(), "live": frozenset(), "hold": frozenset(),
-                "cancel_tail": frozenset(), "hold_tail": frozenset(),
-                "route": (), OFF_KEY: frozenset(), OFF_WORDS_KEY: {}}
+# Derived off USER_COMMAND_KINDS rather than hand-listed, so a kind added or
+# removed there cannot leave this the one spot still holding the old set (it
+# already happened once, when cancel_tail/hold_tail joined that tuple and
+# this dict needed its own separate edit to keep up). Shape matches what
+# load_commands() itself builds for an empty file: route alone is a tuple of
+# compiled patterns, everything else here a frozenset of keys.
+_NO_COMMANDS = {kind: (() if kind == "route" else frozenset()) for kind in USER_COMMAND_KINDS}
+_NO_COMMANDS[OFF_KEY] = frozenset()
+_NO_COMMANDS[OFF_WORDS_KEY] = {}
 _cmd_cache = (None, None)   # (mtime, contents)
 
 

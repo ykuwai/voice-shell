@@ -373,8 +373,11 @@ machine and works with no daemon running. To keep everything local, switch to
 Apple or Whisper. Anything not installed does not appear as a choice.
 
 **But the audio goes to Google's servers.** Do not recommend it to anyone who
-has raised wanting everything to stay local. The same warning is shown on the
-screen.
+has raised wanting everything to stay local. The screen carries a caution of
+its own next to this setting, worded around "uses the browser's built-in
+speech recognition" rather than naming Google outright (the README does name
+it, for whoever reads that first). Know it either way before recommending
+this one.
 
 When Whisper is picked, the model can be named as well. Both a Hugging Face name
 and the path of a folder on this machine are accepted. What is given is
