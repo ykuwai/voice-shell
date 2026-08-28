@@ -3282,11 +3282,23 @@ let knownListeners = [];
    box away along with everything typed into it. */
 let renaming = null;     // {pid} while the rename box is open
 
+// Same idea, for the × on a chip asking "sure?". Without this, the plain
+// five second poll (setInterval(loadListeners, 5000) below) lands at a
+// random offset from the click and can wipe the ask back to the ordinary
+// chip well before its own four second patience runs out, reading as the
+// confirm reverting the moment you let go of it rather than as a poll that
+// happened to fire early.
+let disconnectAsking = null;   // pid while a chip's × is asking to confirm
+
 function paintRoutes() {
   if (renaming) {
     // Still there. Leave the row exactly as it is until the box is done with.
     if (knownListeners.some(l => String(l.pid) === renaming.pid)) return;
     renaming = null;     // that session ended while the box was open
+  }
+  if (disconnectAsking) {
+    if (knownListeners.some(l => String(l.pid) === disconnectAsking)) return;
+    disconnectAsking = null;   // that session ended while it was asking
   }
   // With nothing listening there is nothing to show at all. One listener
   // still gets its own chip, numbered 1, rather than staying hidden until a
@@ -3358,6 +3370,12 @@ function paintRoutes() {
 
     b.onclick = () => {
       if (longFired) { longFired = false; return; }   // the long press already opened it
+      // While asking, the whole chip confirms the disconnect, same as
+      // pressing × again. Confirming only landed on the ×'s own 15px circle
+      // before this, which the label swapping in for the name (below) can
+      // shove sideways out from under wherever the mouse still is, reading
+      // as the confirm not responding at all.
+      if (b.classList.contains('asking')) { confirmDisconnect(); return; }
       setRoute2(String(l.pid));
     };
     b.ondblclick = ev => {
@@ -3372,17 +3390,24 @@ function paintRoutes() {
     x.className = 'x';
     x.textContent = '×';
     x.title = t('disconnectTitle', {name: l.label});
-    x.onclick = async ev => {
-      ev.stopPropagation();
-      if (!b.classList.contains('asking')) {
-        b.classList.add('asking');
-        nm.textContent = t('disconnectAsk');
-        setTimeout(() => { if (b.classList.contains('asking')) loadListeners(); }, 4000);
-        return;
-      }
+    const askToConfirm = () => {
+      b.classList.add('asking');
+      nm.textContent = t('disconnectAsk');
+      disconnectAsking = String(l.pid);
+      setTimeout(() => {
+        if (b.classList.contains('asking')) { disconnectAsking = null; loadListeners(); }
+      }, 4000);
+    };
+    const confirmDisconnect = async () => {
+      disconnectAsking = null;
       try { await post('/api/listeners/disconnect', {pid: String(l.pid)}); } catch {}
       say(t('disconnected', {name: l.label}), 5);
       setTimeout(loadListeners, 400);
+    };
+    x.onclick = ev => {
+      ev.stopPropagation();
+      if (!b.classList.contains('asking')) { askToConfirm(); return; }
+      confirmDisconnect();
     };
     b.append(x);
     return b;
