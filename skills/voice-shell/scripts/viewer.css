@@ -255,12 +255,15 @@
      pushing the arrow off the edge. */
   .route-pick-label { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   /* The arrow is ours, at the same right padding as the × on a chip. It uses
-     the text color, so it follows both the theme and any fill. */
+     the text color, so it follows both the theme and any fill. A solid
+     triangle rather than a thin rotated corner, which at this size read as
+     a faint dot rather than an arrow. */
   .route-pick-wrap::after {
-    content:""; position:absolute; right:.79rem; top:50%;
-    width:6px; height:6px; margin-top:-4.5px;
-    border-right:1.6px solid currentColor; border-bottom:1.6px solid currentColor;
-    transform:rotate(45deg); pointer-events:none; opacity:.45;
+    content:""; position:absolute; right:.85rem; top:50%;
+    width:0; height:0; margin-top:-2px;
+    border-left:4px solid transparent; border-right:4px solid transparent;
+    border-top:5px solid currentColor;
+    pointer-events:none; opacity:.7;
   }
   .route-chip {
     flex:0 1 auto; min-width:0; max-width:100%;
