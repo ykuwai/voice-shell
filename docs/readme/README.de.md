@@ -55,6 +55,22 @@ Tippe `/voice-shell` in Claude Code, oder sag „Sprachmodus", um zu starten. Di
 Schritte, denen ein Agent von da an folgt, stehen in
 [SKILL.md](../../skills/voice-shell/SKILL.md).
 
+Aus einem Agenten heraus, oder aus einem Skript, `-y` dazuschreiben, dann hält
+es nicht an, um nach dem Zielagenten zu fragen.
+
+```bash
+npx skills add ykuwai/voice-shell -y
+```
+
+## Aktualisieren
+
+```bash
+npx skills update voice-shell -y
+```
+
+Ohne `-y` fragt es zuerst. Ohne den Namen aktualisiert es alle installierten
+Skills, diesen eingeschlossen.
+
 ## Wohin deine Stimme geht
 
 > [!NOTE]

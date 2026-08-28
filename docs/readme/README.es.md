@@ -54,6 +54,22 @@ Escribe `/voice-shell` en Claude Code, o di «modo voz», para empezar. Los
 pasos que sigue el agente a partir de ahí están en
 [SKILL.md](../../skills/voice-shell/SKILL.md).
 
+Si lo ejecutas desde un agente, o desde un script, añade `-y` para que no se
+detenga a preguntar para qué agente instalarlo.
+
+```bash
+npx skills add ykuwai/voice-shell -y
+```
+
+## Actualizar
+
+```bash
+npx skills update voice-shell -y
+```
+
+Sin `-y` pregunta antes. Sin el nombre, actualiza todas las skills que
+tengas instaladas, esta incluida.
+
 ## A dónde va tu voz
 
 > [!NOTE]

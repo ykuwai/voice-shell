@@ -49,6 +49,22 @@ If you have Chrome, that is all it takes.
 Type `/voice-shell` in Claude Code, or say "voice mode", to start. The steps
 an agent follows from there are in [SKILL.md](skills/voice-shell/SKILL.md).
 
+Running that from an agent, or from a script, add `-y` so it does not stop
+to ask you which agent to install it for.
+
+```bash
+npx skills add ykuwai/voice-shell -y
+```
+
+## Update
+
+```bash
+npx skills update voice-shell -y
+```
+
+Leave off `-y` and it asks first. Drop the name and it updates every skill
+you have installed, this one included.
+
 ## Where your voice goes
 
 > [!NOTE]

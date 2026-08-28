@@ -52,6 +52,22 @@ Claude Code에서 `/voice-shell`이라고 치거나 "음성 모드"라고 말하
 그다음부터 에이전트가 따르는 절차는 [SKILL.md](../../skills/voice-shell/SKILL.md)에
 있습니다.
 
+에이전트에서 실행하거나 스크립트에서 실행할 때는 `-y`를 붙이면 어느 에이전트에
+설치할지 묻지 않고 바로 진행됩니다.
+
+```bash
+npx skills add ykuwai/voice-shell -y
+```
+
+## 업데이트
+
+```bash
+npx skills update voice-shell -y
+```
+
+`-y`를 빼면 먼저 묻습니다. 이름을 빼면 이 스킬을 포함해서 설치된 스킬을 전부
+한꺼번에 업데이트합니다.
+
 ## 목소리가 어디로 가나
 
 > [!NOTE]
