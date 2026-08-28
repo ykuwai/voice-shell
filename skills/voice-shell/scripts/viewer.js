@@ -1365,6 +1365,15 @@ async function changeRoute(next, prev, revision, syncServer) {
     }
     route = prev;
     if (prev !== 'off') lastMode = prev;
+    // editThisOne sets this before this call ever starts, and nothing else
+    // clears it once the attempt it was guarding never actually landed. Left
+    // set, route reads 'live' again but oneShot still reads true, and every
+    // check gating on both together (el.tray.onclick, editOnce.disabled) goes
+    // on refusing a retry until a manual press of live/hold happens to clear
+    // it by coincidence, which reads as "it only works after switching by
+    // hand once" (a failed one-shot attempt right as the engine was still
+    // booting is the case this was caught from).
+    oneShot = false;
     paint();
     applyRouteSideEffects(prev);
     const message = rollbackError ? `${err.message} (${rollbackError.message})` : err.message;
