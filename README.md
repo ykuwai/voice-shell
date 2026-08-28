@@ -49,11 +49,11 @@ If you have Chrome, that is all it takes.
 Type `/voice-shell` in Claude Code, or say "voice mode", to start. The steps
 an agent follows from there are in [SKILL.md](skills/voice-shell/SKILL.md).
 
-Running that from an agent, or from a script, add `-y` so it does not stop
-to ask you which agent to install it for.
+Running that from an agent, or from a script, name Claude Code instead of
+leaving it to detect on its own, and add `-y` to skip the confirmation.
 
 ```bash
-npx skills add ykuwai/voice-shell -y
+npx skills add ykuwai/voice-shell -a claude-code -y
 ```
 
 ## Update

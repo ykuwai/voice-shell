@@ -52,11 +52,11 @@ Claude Code에서 `/voice-shell`이라고 치거나 "음성 모드"라고 말하
 그다음부터 에이전트가 따르는 절차는 [SKILL.md](../../skills/voice-shell/SKILL.md)에
 있습니다.
 
-에이전트에서 실행하거나 스크립트에서 실행할 때는 `-y`를 붙이면 어느 에이전트에
-설치할지 묻지 않고 바로 진행됩니다.
+에이전트에서 실행하거나 스크립트에서 실행할 때는 자동 감지에 맡기지 말고
+Claude Code를 직접 지정하고, `-y`로 확인도 건너뛰세요.
 
 ```bash
-npx skills add ykuwai/voice-shell -y
+npx skills add ykuwai/voice-shell -a claude-code -y
 ```
 
 ## 업데이트

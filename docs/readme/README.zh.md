@@ -47,10 +47,11 @@ pip install numpy aiohttp "sounddevice>=0.5.6"
 在 Claude Code 里输入 `/voice-shell`，或者说「进入语音模式」，就会开始。之后
 的步骤写在 [SKILL.md](../../skills/voice-shell/SKILL.md) 里。
 
-从agent里跑，或者从脚本里跑的话，加上 `-y`，这样就不会停下来问要装到哪个agent。
+从agent里跑，或者从脚本里跑的话，不要交给它自动判断，直接指名Claude Code，
+再加上 `-y` 跳过确认。
 
 ```bash
-npx skills add ykuwai/voice-shell -y
+npx skills add ykuwai/voice-shell -a claude-code -y
 ```
 
 ## 更新

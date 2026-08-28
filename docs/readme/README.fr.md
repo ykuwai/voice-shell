@@ -56,11 +56,11 @@ Tapez `/voice-shell` dans Claude Code, ou dites « mode vocal », pour démarrer
 Les étapes que suit l'agent à partir de là sont dans
 [SKILL.md](../../skills/voice-shell/SKILL.md).
 
-Depuis un agent, ou depuis un script, ajoutez `-y` pour qu'il ne s'arrête pas
-pour demander pour quel agent l'installer.
+Depuis un agent, ou depuis un script, nommez Claude Code plutôt que de le
+laisser le détecter tout seul, et ajoutez `-y` pour sauter la confirmation.
 
 ```bash
-npx skills add ykuwai/voice-shell -y
+npx skills add ykuwai/voice-shell -a claude-code -y
 ```
 
 ## Mettre à jour

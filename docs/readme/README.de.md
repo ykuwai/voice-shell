@@ -55,11 +55,12 @@ Tippe `/voice-shell` in Claude Code, oder sag „Sprachmodus", um zu starten. Di
 Schritte, denen ein Agent von da an folgt, stehen in
 [SKILL.md](../../skills/voice-shell/SKILL.md).
 
-Aus einem Agenten heraus, oder aus einem Skript, `-y` dazuschreiben, dann hält
-es nicht an, um nach dem Zielagenten zu fragen.
+Aus einem Agenten heraus, oder aus einem Skript, Claude Code namentlich
+angeben statt es selbst erkennen zu lassen, und `-y` dazuschreiben, um die
+Bestätigung zu überspringen.
 
 ```bash
-npx skills add ykuwai/voice-shell -y
+npx skills add ykuwai/voice-shell -a claude-code -y
 ```
 
 ## Aktualisieren

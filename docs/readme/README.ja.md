@@ -50,11 +50,11 @@ Chromeがあれば、これだけで動く。
 Claude Codeで `/voice-shell` と打つか、「音声モードにして」と言えば始まる。
 そこから先の手順は [SKILL.md](../../skills/voice-shell/SKILL.md) にある。
 
-エージェントから動かすときやスクリプトから動かすときは、どのエージェント向けに
-入れるか聞いてこないよう `-y` を付ける。
+エージェントから動かすときやスクリプトから動かすときは、自動判定に任せず
+Claude Codeと名指しして、確認も飛ばす。
 
 ```bash
-npx skills add ykuwai/voice-shell -y
+npx skills add ykuwai/voice-shell -a claude-code -y
 ```
 
 ## アップデート
