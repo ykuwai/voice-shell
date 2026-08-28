@@ -3699,8 +3699,15 @@ el.enginePick.onchange = async () => {
       if (engineOnish()) {
         engine = 'stopping';
         paintPower();
-        await post('/api/engine', {running: false});
       }
+      // Sent either way, even with nothing local running to stop, so the pick
+      // is written to the server's own config (resolve_engine) rather than
+      // just this tab's memory of it. Left out, the next loadEngines poll (up
+      // to 5s later) reads the old engine straight off there, snaps the
+      // picker back to it, and takes the browser recognition that had just
+      // started down with it (was && !asrChosen in loadEngines), leaving
+      // neither engine actually listening.
+      await post('/api/engine', {running: false, engine: BROWSER_ENGINE});
       if (recWanted) startRecognition();
     } else {
       asrChosen = false;
