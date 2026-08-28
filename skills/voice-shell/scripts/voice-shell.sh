@@ -210,7 +210,41 @@ open_gui() {
       done
       # Windows(Git Bash)
       if command -v cmd.exe >/dev/null; then
-        cmd.exe /c start chrome "$url" >/dev/null 2>&1 && return 0
+        # "start chrome" only works if Chrome happens to be registered
+        # under that exact name (an installer is supposed to set an App
+        # Paths registry key for this, but not every install path does),
+        # and cmd.exe's own start returns success either way regardless of
+        # whether anything it tried to open actually exists. A silent
+        # failure here read on screen as "listening has started" with no
+        # window ever opening and no line telling anyone to open the URL
+        # by hand instead (measured on a real Windows machine).
+        #
+        # Look for the real executable directly in the places an installer
+        # puts it instead (per-machine, then the per-user one a no-admin
+        # install uses), so success or failure is judged by whether the
+        # file is actually there, not by what a loosely defined shell
+        # built-in happens to return. The empty "" ahead of the path is
+        # start's own way of saying "that quoted thing is the target, not
+        # a window title", needed the moment the path itself contains a
+        # space, which Program Files always does.
+        win_local_appdata=""
+        if [[ -n "${LOCALAPPDATA:-}" ]] && command -v cygpath >/dev/null 2>&1; then
+          win_local_appdata="$(cygpath -u "$LOCALAPPDATA" 2>/dev/null || true)"
+        fi
+        for exe in \
+          "/c/Program Files/Google/Chrome/Application/chrome.exe" \
+          "/c/Program Files (x86)/Google/Chrome/Application/chrome.exe" \
+          "${win_local_appdata:+$win_local_appdata/Google/Chrome/Application/chrome.exe}" \
+          "/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" \
+          "/c/Program Files/Microsoft/Edge/Application/msedge.exe"
+        do
+          [[ -n "$exe" && -f "$exe" ]] || continue
+          cmd.exe /c start "" "$(cygpath -w "$exe")" "$url" >/dev/null 2>&1 && return 0
+        done
+        # None of the usual install paths panned out. Try the name-based
+        # form as a last resort, in case Chrome is registered under it by
+        # some other means (the Microsoft Store build, for one).
+        cmd.exe /c start "" chrome "$url" >/dev/null 2>&1 && return 0
       fi
       ;;
   esac
