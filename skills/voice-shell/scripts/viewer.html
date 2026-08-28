@@ -482,6 +482,16 @@
   </div>
  </div>
 </section>
+
+<!-- Sits outside .page/#sheet/#helpSheet on purpose. Floating moves those
+     three into the small window's own document (viewer.js, floatParts), and
+     without this the tab they moved out of just sits there empty. -->
+<div class="taken" id="floatStand" hidden>
+  <p data-i18n="floatStandNote">Showing in a window of its own.</p>
+  <button class="btn go" id="floatStandBack" data-icon="picture_in_picture_off"
+          data-icon-size="17" data-i18n="floatStandBack">Bring it back</button>
+</div>
+
 <!-- Plain scripts on purpose. A module would give each file its own scope,
      and the names these three share would stop resolving. Wording and icons
      are pure data and load first so viewer.js finds them already there. -->

@@ -119,7 +119,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'dictNote','dictExport','dictImport','dictFile',
                   'paneBasic','paneDict',
                   'openHelp','helpSheet','closeHelp','helpMini','helpMiniViz',
-                  'cmdGroups','cmdNote'])
+                  'cmdGroups','cmdNote','floatStand','floatStandBack'])
   el[id] = $(id);
 
 const post = (path, body) =>
@@ -3748,6 +3748,7 @@ function disableFloat() {
   el.floatBtn.disabled = true;
   el.floatBtn.hidden = true;
   el.floatAsk.hidden = true;
+  el.floatStand.hidden = true;
 }
 
 function floatingWindow() {
@@ -3970,6 +3971,10 @@ el.floatBtn.onclick = async () => {
   applyTheme(store.get('theme', 'auto'));
   // Move the elements themselves. The references stay live, so no JS has to change.
   win.document.body.append(...floatParts);
+  // floatStand lives outside floatParts on purpose, so it is what is left
+  // once they are gone. Otherwise the tab they moved out of just sits there
+  // empty until someone happens to remember where it went.
+  el.floatStand.hidden = false;
   // The small window is a new document every time. The key listener is
   // reattached here (closing it takes the whole document with it, so nothing
   // has to be detached).
@@ -3992,12 +3997,17 @@ el.floatBtn.onclick = async () => {
     // a document that is about to disappear.
     pipDoc = null;
     document.body.append(...floatParts);
+    el.floatStand.hidden = true;
     paintFloat(false);          // mid-close the window is still around
     paintFloatAsk();
     fitCanvas();
     fitMini();                  // it can come back with a sheet left open from the small window
   });
 };
+
+// Same toggle a second press of floatBtn itself would run (closes the small
+// window if one is open, which is always true while this button shows).
+el.floatStandBack.onclick = () => el.floatBtn.onclick();
 
 /* A page cannot open chrome://, so pressing it only copies. */
 el.micSettingsLink.onclick = async () => {
