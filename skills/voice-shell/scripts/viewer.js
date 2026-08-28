@@ -100,7 +100,7 @@ const el = {};
 for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'power','powerLabel','powerRow','powerNote','openSettings','sheet','closeSettings','floatBtn','page',
                   'miniMic','miniViz','navRow','pageHead','sheetHead','helpHead','openDict','sheetTitle',
-                  'routes','routeChips','routePick','viz','meter','meterHit','meterFill','meterMark','logoMark',
+                  'routes','routeChips','routePick','routePickLabel','viz','meter','meterHit','meterFill','meterMark','logoMark',
                   'tray','stream','draft','draftTime','draftActions','send','discard',
                   'editOnce','dropOne','sendOne','cancelOnce','draftMark',
                   'hint','note','log','none','count','fresh','floatAsk','taken','takeBack',
@@ -619,89 +619,206 @@ function addEntry(rec) {
     new Date().toLocaleTimeString(timeLocale(), {hour12:false});
   gutter.append(mark, stamp);
 
-  // Only rows that carry a destination show one. With a single session
-  // listening no destination is attached, so working alone adds nothing.
-  if (rec.to) {
-    row.dataset.to = String(rec.to);
-    const to = document.createElement('span');
-    to.className = 'to';
-    // Put it in right here. relabelEntries only looks at rows already in
-    // el.log, so leaving it to the repaint would make this one row a nameless
-    // chip until the next update.
-    // A terminal, not the paper plane it used to carry. The plane is already on
-    // the button that sends and on the mark that says something was sent, and a
-    // third one here made a note about where it landed read as one more thing
-    // about sending, or as something you could press. What sits at the other
-    // end is a shell session, so the terminal names it outright.
-    to.append(iconSvg('terminal', 11),
-              document.createTextNode(routeNames.get(row.dataset.to) || `#${rec.to}`));
-    gutter.append(to);
-  }
-
-  // Sits right beside the destination it would change, not off at the
-  // row's own far edge, so the two read as one unit rather than as two
-  // unrelated controls that happen to share a row.
-  // What went out once cannot be pulled back, so this is not an undo. It is
-  // the same words said again, this time at a session picked by hand
-  // (#78/#79: the first send went somewhere nobody chose, and short of
-  // repeating the whole thing out loud there was no way back from that).
-  const resend = document.createElement('button');
-  resend.className = 'resend';
-  resend.append(iconSvg('arrow_right_alt', 13));
-  resend.title = t('resendTitle');
-  resend.hidden = knownListeners.length < 2;
-  resend.onclick = () => openResendPick(gutter, resend, rec.text);
-  gutter.append(resend);
-
+  row.dataset.to = rec.to ? String(rec.to) : '';
   const text = document.createElement('div');
   text.className = 'text';
   text.dataset.raw = rec.text;
   text.textContent = format(rec.text);
+  gutter.append(buildToControl(row.dataset.to));
 
   row.append(gutter, text);
   el.log.prepend(row);          // newest on top (same order as the mock)
   retally();
 }
 
-/* The picker is built fresh on every press rather than kept hidden in the row
-   the whole time. Sessions come and go while a card sits in the log, and a
-   list built once at send time would drift from who is actually there to
-   resend to by the time anyone presses it. */
-function openResendPick(gutter, button, text) {
-  if (gutter.querySelector('.resend-pick')) return;   // already open
-  const pick = document.createElement('select');
-  pick.className = 'resend-pick';
-  const blank = document.createElement('option');
-  blank.value = '';
-  blank.textContent = t('resendPick');
-  blank.disabled = true;
-  blank.selected = true;
-  pick.append(blank, ...knownListeners.map((l, i) => {
-    const o = document.createElement('option');
-    o.value = String(l.pid);
-    o.textContent = `${i + 1}. ${l.label}`;
-    return o;
-  }));
-  // Idempotent on purpose. Picking an option fires change and then, once
-  // replaceWith takes the focused node out of the document, some browsers
-  // turn that removal itself into a blur on the node just removed. Both
-  // handlers call close(), and without the isConnected guard the second
-  // call finds pick already gone and throws (Chrome: "The node to be
-  // removed is no longer a child of this node"), which was aborting the
-  // resend before the fetch on the change path ever ran.
-  const close = () => { if (pick.isConnected) pick.replaceWith(button); };
-  pick.onchange = async () => {
-    const to = pick.value;
-    close();
-    if (!to) return;
-    try { await post('/api/resend', {text, to}); } catch {}
-  };
-  pick.onblur = close;
-  button.replaceWith(pick);
-  pick.focus();
-  // A <select> opens its own dropdown on the click that focuses it in some
-  // browsers and not others. Asking outright leaves nobody guessing which.
-  if (typeof pick.showPicker === 'function') { try { pick.showPicker(); } catch {} }
+/* The destination chip doubles as the resend control, rather than a second,
+   separate arrow sitting off at the row's own edge (an earlier build did
+   that, and it read as two unrelated controls that happened to share a
+   row). Picking a different name from the same chip that already names
+   where it went is what "resend elsewhere" reads as one motion instead of
+   two (#79).
+
+   Rebuilt from scratch on every call rather than patched in place, off
+   both addEntry and relabelEntries's five second poll, since who is
+   listening drifts the whole time a card sits in the log and a list built
+   once at send time would go stale. */
+function buildToControl(to) {
+  const wrap = document.createElement('span');
+  wrap.className = 'to';
+  // Only one (or nobody) listening right now, so there is nothing to switch
+  // between. Say where it went, same as always, and stop there. With no
+  // destination on record either (working alone the whole time), there is
+  // nothing worth a chip over at all.
+  if (knownListeners.length < 2) {
+    if (!to) return wrap;
+    wrap.append(iconSvg('terminal', 11), document.createTextNode(routeNames.get(to) || `#${to}`));
+    return wrap;
+  }
+  const knownIdx = knownListeners.findIndex(l => String(l.pid) === to);
+  const label = knownIdx >= 0 ? `${knownIdx + 1}. ${knownListeners[knownIdx].label}`
+              : to ? (routeNames.get(to) || `#${to}`)
+              : t('resendPick');
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'to-btn';
+  btn.title = t('resendTitle');
+  const labelSpan = document.createElement('span');
+  labelSpan.className = 'to-label';
+  labelSpan.textContent = label;
+  const caret = document.createElement('span');
+  caret.className = 'to-caret';
+  caret.textContent = '▾';
+  caret.setAttribute('aria-hidden', 'true');
+  btn.append(labelSpan, caret);
+  btn.onclick = () => openToMenu(btn, to);
+  wrap.append(iconSvg('terminal', 11), btn);
+  return wrap;
+}
+
+// Only one open at a time, and relabelEntries (the five second poll) checks
+// this to leave that one row alone rather than rebuild the chip out from
+// under whoever has it open.
+let openToMenuBtn = null;
+let closeToMenu = null;
+
+/* A plain <select> was tried first, styled down to look like the chip. The
+   closed-state box takes CSS fine, but the opened list is the browser's own
+   native popup regardless, on its own theme rather than this page's dark
+   one (#79 feedback: "not the native dropdown as it is, a hand-built one").
+   Built by hand instead, in the same vein as the destination bubble's own
+   floating panel elsewhere on this page.
+
+   Both places that pick a destination come through here: the chip on a sent
+   card (resend it somewhere else) and the roll-up picker above the draft card
+   (where the next thing you say lands). Those two looked alike while closed
+   and came apart the moment either one opened, which is the single thing a
+   picker cannot afford to do.
+
+   `items` is [{key, label}]. onPick runs only for a key that is not the one
+   already chosen, so neither caller has to guard against re-picking. A
+   `heading` line, when given, sits above the list as a plain caption (not a
+   pickable row) rather than living on the chip itself the whole time, in
+   the way, whether it was ever going to be opened or not (#79 feedback:
+   said outright once opened is enough, said every time it sits closed is
+   noise). */
+function openPickMenu(anchor, items, currentKey, onPick, heading) {
+  // A second press on the same anchor is a close, not a rebuild-and-reopen.
+  if (openToMenuBtn === anchor) { closeToMenu(); return; }
+  if (closeToMenu) closeToMenu();
+  // While it floats in front, the screen has been moved into the small
+  // window's own document. A panel appended to this one would be built into
+  // a window nobody is looking at, and measured against the wrong width.
+  const doc = anchor.ownerDocument;
+  const win = doc.defaultView;
+  // The nearest ancestor that actually clips its own content (the history
+  // list scrolls inside one of these; the roll-up picker above the draft
+  // card is not inside one at all). Used below to close the panel once its
+  // anchor scrolls out of that container's own visible area, rather than
+  // letting a position:fixed panel go on floating over whatever sits
+  // above or below that container (#79 feedback: it was reaching up over
+  // the unsent card and the mic button once scrolled).
+  let clip = anchor.parentElement;
+  while (clip && clip !== doc.body) {
+    if (/(auto|scroll)/.test(win.getComputedStyle(clip).overflowY)) break;
+    clip = clip.parentElement;
+  }
+  if (clip === doc.body) clip = null;
+  const menu = doc.createElement('div');
+  menu.className = 'to-menu';
+  menu.setAttribute('role', 'listbox');
+  if (heading) {
+    const h = doc.createElement('div');
+    h.className = 'to-menu-heading';
+    h.textContent = heading;
+    menu.append(h);
+  }
+  for (const it of items) {
+    const item = doc.createElement('button');
+    item.type = 'button';
+    item.className = 'to-menu-item' + (it.key === currentKey ? ' on' : '');
+    item.textContent = it.label;
+    item.onclick = () => {
+      close();
+      if (it.key === currentKey) return;
+      onPick(it.key);
+    };
+    menu.append(item);
+  }
+  doc.body.append(menu);
+  // Placed off the anchor's own live position (same reasoning as
+  // positionFloatAsk), then nudged left if that would run the panel off
+  // the right edge of a narrow window. Re-run on scroll (the history list
+  // this chip sits in scrolls on its own, position:fixed does not follow
+  // that by itself) and on resize, the same two triggers positionFloatAsk
+  // already re-measures on.
+  function place() {
+    const r = anchor.getBoundingClientRect();
+    // The roll-up picker collapses to nothing the moment the last listener
+    // drops (paintRoutes hides el.routes entirely). Nothing left to anchor
+    // against, so close rather than pin the panel at a stale 0x0 corner.
+    if (!r.width) { close(); return; }
+    // Scrolled out of the list's own visible band. Reaching for a position
+    // here would mean floating the panel over the fixed controls above or
+    // below that list instead of over the row it belongs to, so close
+    // instead of chasing it somewhere that no longer makes sense.
+    if (clip) {
+      const cr = clip.getBoundingClientRect();
+      if (r.bottom < cr.top || r.top > cr.bottom) { close(); return; }
+    }
+    menu.style.top = Math.round(r.bottom + 4) + 'px';
+    menu.style.left = Math.round(r.left) + 'px';
+    const overflowRight = menu.getBoundingClientRect().right - (win.innerWidth - 8);
+    if (overflowRight > 0) menu.style.left = Math.round(r.left - overflowRight) + 'px';
+  }
+  place();
+
+  function close() {
+    menu.remove();
+    doc.removeEventListener('click', onDocClick, true);
+    doc.removeEventListener('keydown', onKey);
+    doc.removeEventListener('scroll', place, true);
+    win.removeEventListener('resize', place);
+    if (closeToMenu === close) { closeToMenu = null; openToMenuBtn = null; }
+  }
+  function onDocClick(e) {
+    if (!menu.contains(e.target) && !anchor.contains(e.target)) close();
+  }
+  function onKey(e) { if (e.key === 'Escape') close(); }
+  // Deferred so the very click that opened this menu, still bubbling up to
+  // document, does not also count as the outside click that shuts it.
+  setTimeout(() => doc.addEventListener('click', onDocClick, true), 0);
+  doc.addEventListener('keydown', onKey);
+  // capture:true so a scroll on the history list (or any other nested
+  // scroller) is caught too, not only a scroll of the document itself.
+  doc.addEventListener('scroll', place, true);
+  win.addEventListener('resize', place);
+  closeToMenu = close;
+  openToMenuBtn = anchor;
+}
+
+/* The numbers are the ones said out loud (「2番に切り替え」). The chips, the
+   chip menu and the roll-up picker all have to count them the same way. */
+const listenerItems = () =>
+  knownListeners.map((l, i) => ({key: String(l.pid), label: `${i + 1}. ${l.label}`}));
+
+// The chip on a sent card. Picking another name sends the same text there.
+// The chip is rebuilt right away rather than left for the five second poll,
+// since its own onclick closes over `to` at build time (buildToControl) and
+// a stale one reads the wrong destination as "already selected" until then.
+function openToMenu(btn, to) {
+  openPickMenu(btn, listenerItems(), to, async pid => {
+    const row = btn.closest('.entry');
+    const prevTo = row.dataset.to;
+    row.dataset.to = pid;
+    row.querySelector('.to')?.replaceWith(buildToControl(pid));
+    try {
+      await post('/api/resend', {text: row.querySelector('.text').dataset.raw, to: pid});
+    } catch (err) {
+      row.dataset.to = prevTo;
+      row.querySelector('.to')?.replaceWith(buildToControl(prevTo));
+      el.hint.textContent = t('resendFailed', {err: err.message});
+    }
+  }, t('resendLabel'));
 }
 
 /* Look up a name from the destination PID. Names of finished sessions are kept
@@ -711,22 +828,12 @@ const routeNames = new Map();
 
 function relabelEntries() {
   for (const row of el.log.children) {
-    const to = row.dataset.to;
-    if (to) {
-      const node = row.querySelector('.to');
-      // Keep the icon and swap only the name
-      if (node) {
-        const label = node.lastChild;
-        if (label) label.textContent = routeNames.get(to) || `#${to}`;
-      }
-    }
-    // Nowhere else to resend to with only one (or zero) other sessions
-    // around, and nobody around at all right after a send with nothing
-    // else running. Left as it was mid-pick (the button is not there, the
-    // dropdown is), so an open picker never gets yanked out from under
-    // whoever is about to choose from it.
-    const btn = row.querySelector('.resend');
-    if (btn) btn.hidden = knownListeners.length < 2;
+    const node = row.querySelector('.to');
+    // Left alone rather than rebuilt while its own menu is open, so nobody
+    // mid-pick has the chip (and the button the open menu is anchored to)
+    // swapped out from under them by this same five second poll.
+    if (node && node.contains(openToMenuBtn)) continue;
+    node?.replaceWith(buildToControl(row.dataset.to || ''));
   }
 }
 
@@ -3175,11 +3282,23 @@ let knownListeners = [];
    box away along with everything typed into it. */
 let renaming = null;     // {pid} while the rename box is open
 
+// Same idea, for the × on a chip asking "sure?". Without this, the plain
+// five second poll (setInterval(loadListeners, 5000) below) lands at a
+// random offset from the click and can wipe the ask back to the ordinary
+// chip well before its own four second patience runs out, reading as the
+// confirm reverting the moment you let go of it rather than as a poll that
+// happened to fire early.
+let disconnectAsking = null;   // pid while a chip's × is asking to confirm
+
 function paintRoutes() {
   if (renaming) {
     // Still there. Leave the row exactly as it is until the box is done with.
     if (knownListeners.some(l => String(l.pid) === renaming.pid)) return;
     renaming = null;     // that session ended while the box was open
+  }
+  if (disconnectAsking) {
+    if (knownListeners.some(l => String(l.pid) === disconnectAsking)) return;
+    disconnectAsking = null;   // that session ended while it was asking
   }
   // With nothing listening there is nothing to show at all. One listener
   // still gets its own chip, numbered 1, rather than staying hidden until a
@@ -3201,14 +3320,9 @@ function paintRoutes() {
   const items = knownListeners.map((l, i) => ({...l, no: i + 1}));
   const pick = l => routeTo ? String(l.pid) === routeTo : String(l.pid) === effectiveTo;
 
-  // This is what comes up in a short window. Same numbers and same names as the chips.
-  el.routePick.replaceChildren(...items.map(l => {
-    const o = document.createElement('option');
-    o.value = String(l.pid);
-    o.textContent = `${l.no}. ${l.label}`;
-    o.selected = pick(l);
-    return o;
-  }));
+  // This is what comes up in a short window. Same numbers and same names as
+  // the chips, and the same hand-built menu the chip on a sent card opens.
+  paintRoutePick();
 
   el.routeChips.replaceChildren(...items.map(l => {
     // Light up where it actually lands. With nothing chosen the server settles
@@ -3256,6 +3370,12 @@ function paintRoutes() {
 
     b.onclick = () => {
       if (longFired) { longFired = false; return; }   // the long press already opened it
+      // While asking, the whole chip confirms the disconnect, same as
+      // pressing × again. Confirming only landed on the ×'s own 15px circle
+      // before this, which the label swapping in for the name (below) can
+      // shove sideways out from under wherever the mouse still is, reading
+      // as the confirm not responding at all.
+      if (b.classList.contains('asking')) { confirmDisconnect(); return; }
       setRoute2(String(l.pid));
     };
     b.ondblclick = ev => {
@@ -3270,17 +3390,24 @@ function paintRoutes() {
     x.className = 'x';
     x.textContent = '×';
     x.title = t('disconnectTitle', {name: l.label});
-    x.onclick = async ev => {
-      ev.stopPropagation();
-      if (!b.classList.contains('asking')) {
-        b.classList.add('asking');
-        nm.textContent = t('disconnectAsk');
-        setTimeout(() => { if (b.classList.contains('asking')) loadListeners(); }, 4000);
-        return;
-      }
+    const askToConfirm = () => {
+      b.classList.add('asking');
+      nm.textContent = t('disconnectAsk');
+      disconnectAsking = String(l.pid);
+      setTimeout(() => {
+        if (b.classList.contains('asking')) { disconnectAsking = null; loadListeners(); }
+      }, 4000);
+    };
+    const confirmDisconnect = async () => {
+      disconnectAsking = null;
       try { await post('/api/listeners/disconnect', {pid: String(l.pid)}); } catch {}
       say(t('disconnected', {name: l.label}), 5);
       setTimeout(loadListeners, 400);
+    };
+    x.onclick = ev => {
+      ev.stopPropagation();
+      if (!b.classList.contains('asking')) { askToConfirm(); return; }
+      confirmDisconnect();
     };
     b.append(x);
     return b;
@@ -3295,7 +3422,7 @@ function paintRoutes() {
 function markChosen() {
   const on = pid => routeTo ? pid === routeTo : pid === effectiveTo;
   for (const b of el.routeChips.children) b.classList.toggle('on', on(b.dataset.pid || ''));
-  for (const o of el.routePick.options) o.selected = on(o.value);
+  paintRoutePick();
 }
 
 /* Change a destination's name right where it stands.
@@ -3382,7 +3509,19 @@ function openRename(l, node) {
   inp.onblur = () => finish(true);
 }
 
-el.routePick.onchange = () => setRoute2(el.routePick.value);
+/* The roll-up picker, shown instead of the chips once the window is too short
+   for a row of them (each chip takes a line of its own down there). It names
+   where your voice lands right now, and opens the same menu the chip on a sent
+   card does. */
+function paintRoutePick() {
+  const cur = routeTo || effectiveTo;
+  const items = listenerItems();
+  const chosen = items.find(i => i.key === cur) || items[0];
+  el.routePickLabel.textContent = chosen ? chosen.label : '';
+}
+
+el.routePick.onclick = () =>
+  openPickMenu(el.routePick, listenerItems(), routeTo || effectiveTo, setRoute2);
 
 async function setRoute2(to) {
   routeTo = to;
@@ -3737,10 +3876,46 @@ function positionFloatAsk() {
   if (el.floatAsk.hidden) return;
   const r = el.floatBtn.getBoundingClientRect();
   if (!r.width) return;         // hidden or not yet laid out, nothing to measure against
-  el.floatAsk.style.top = Math.round(r.bottom + 10) + 'px';
-  el.floatAsk.style.right = Math.max(8, Math.round(window.innerWidth - r.right)) + 'px';
+  el.floatAsk.style.top = Math.round(r.bottom + 6) + 'px';
+  // The bubble's own body sits flush against the right edge of the page
+  // column itself, not wherever floatBtn happens to be within it. floatBtn
+  // is the first of the header's icons (settings stays last on purpose,
+  // that seat does not move), so anchoring the whole bubble to floatBtn's
+  // edge the way this used to work left it sitting well short of the
+  // column's own right edge instead of at it.
+  //
+  // The page is a centered, width-capped column (.page, max-width:460px),
+  // not the full browser window. window.innerWidth is the window's own
+  // edge, out past the column entirely on any screen wider than that cap,
+  // and pinning the bubble there sent it drifting off past the actual UI.
+  // Only the arrow still needs to point at floatBtn, so it is placed
+  // independently of the body, off a CSS variable the stylesheet's
+  // ::before reads.
+  const margin = 8;
+  const pageRight = el.page.getBoundingClientRect().right;
+  el.floatAsk.style.right = Math.max(margin, Math.round(window.innerWidth - pageRight + margin)) + 'px';
+  const bubbleRight = pageRight - margin;
+  const bubbleWidth = el.floatAsk.getBoundingClientRect().width;
+  const arrowCenter = r.left + r.width / 2;
+  const arrowHalf = 6;   // half the 12px triangle in the stylesheet
+  const arrowRight = Math.round(bubbleRight - arrowCenter - arrowHalf);
+  // Kept inside the bubble's own rounded ends, or the triangle draws off
+  // the edge (or past the opposite one) instead of onto the pill itself.
+  const clamped = Math.min(Math.max(arrowRight, 16), Math.max(16, bubbleWidth - 26));
+  el.floatAsk.style.setProperty('--arrow-right', clamped + 'px');
 }
 addEventListener('resize', positionFloatAsk);
+// The very first measurement, taken the instant `hidden` comes off, can land
+// before the browser has actually settled the bubble into its real size (its
+// text was just swapped in by paintFloatAsk, and a layout mid-transition
+// from 0 width reads back a width that is not the final one). That stale
+// width fed the arrow's offset and sent it drifting toward whichever icon
+// the wrong number happened to land near (#79 feedback, traced to floatBtn
+// reading as pointed at openDict instead). A ResizeObserver fires once on
+// its own right after observation starts, once the box has actually
+// settled, on top of catching any later resize the window event alone
+// would miss (a language swap changing the bubble's text width, say).
+new ResizeObserver(positionFloatAsk).observe(el.floatAsk);
 
 // On browser recognition, with the screen not yet touched. It is shown as off,
 // but the mute on the server side has not been touched (that only goes on the

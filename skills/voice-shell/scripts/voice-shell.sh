@@ -502,10 +502,21 @@ REG
     # further. Keep the exact bytes written above (not a fresh write) so
     # "since" never moves and this session does not jump to the front of the
     # destination order on every heartbeat.
+    #
+    # The touch after it is a second, separate job: a heartbeat. A forceful
+    # kill (TaskStop on Windows, #82) can take out this loop's own listen
+    # process without the EXIT trap below ever running, so the registration
+    # is left behind with nothing to remove it. The daemon side now treats a
+    # registration whose mtime has gone quiet for three of these in a row as
+    # gone, whatever the PID itself still answers to (voice_daemon.py,
+    # HEARTBEAT_STALE). Reading "since" out of this file's own content rather
+    # than off its mtime is what keeps that from fighting the healing above,
+    # both touch the same file for different reasons now.
     reg_bytes="$(cat "$reg" 2>/dev/null || true)"
     ( while kill -0 "$tail_pid" 2>/dev/null; do
         sleep 30
         [ -s "$reg" ] || printf '%s' "$reg_bytes" > "$reg" 2>/dev/null
+        touch "$reg" 2>/dev/null
       done ) &
     heal_pid=$!
 

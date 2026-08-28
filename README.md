@@ -40,14 +40,32 @@ whatever you were doing.
 ## Install
 
 ```bash
-npx skills add ykuwai/voice-shell
+npx skills add ykuwai/voice-shell -g
 pip install numpy aiohttp "sounddevice>=0.5.6"
 ```
 
-If you have Chrome, that is all it takes.
+If you have Chrome, that is all it takes. `-g` puts it in `~/.claude/skills/`,
+so it is there for every project. Only want to try it out inside one project?
+Drop the `-g` and it lands in `.claude/skills/` for that project alone.
 
 Type `/voice-shell` in Claude Code, or say "voice mode", to start. The steps
 an agent follows from there are in [SKILL.md](skills/voice-shell/SKILL.md).
+
+Running that from an agent, or from a script, name Claude Code instead of
+leaving it to detect on its own, and add `-y` to skip the confirmation.
+
+```bash
+npx skills add ykuwai/voice-shell -g -a claude-code -y
+```
+
+## Update
+
+```bash
+npx skills update voice-shell -y
+```
+
+Leave off `-y` and it asks first. Drop the name and it updates every skill
+you have installed, this one included.
 
 ## Where your voice goes
 
