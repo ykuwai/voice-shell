@@ -3836,7 +3836,7 @@ function positionFloatAsk() {
   if (el.floatAsk.hidden) return;
   const r = el.floatBtn.getBoundingClientRect();
   if (!r.width) return;         // hidden or not yet laid out, nothing to measure against
-  el.floatAsk.style.top = Math.round(r.bottom + 10) + 'px';
+  el.floatAsk.style.top = Math.round(r.bottom + 6) + 'px';
   // The bubble's own body sits flush against the right edge of the page
   // column itself, not wherever floatBtn happens to be within it. floatBtn
   // is the first of the header's icons (settings stays last on purpose,
