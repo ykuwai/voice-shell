@@ -38,11 +38,12 @@
 ## 安装
 
 ```bash
-npx skills add ykuwai/voice-shell
+npx skills add ykuwai/voice-shell -g
 pip install numpy aiohttp "sounddevice>=0.5.6"
 ```
 
-有 Chrome 的话，这样就够了。
+有 Chrome 的话，这样就够了。加上 `-g` 会装到 `~/.claude/skills/`，所有项目都能用。
+只想在一个项目里试试的话，去掉 `-g`，就只装到那个项目自己的 `.claude/skills/` 里。
 
 在 Claude Code 里输入 `/voice-shell`，或者说「进入语音模式」，就会开始。之后
 的步骤写在 [SKILL.md](../../skills/voice-shell/SKILL.md) 里。
@@ -51,7 +52,7 @@ pip install numpy aiohttp "sounddevice>=0.5.6"
 再加上 `-y` 跳过确认。
 
 ```bash
-npx skills add ykuwai/voice-shell -a claude-code -y
+npx skills add ykuwai/voice-shell -g -a claude-code -y
 ```
 
 ## 更新

@@ -46,11 +46,14 @@ restent sur ce que vous étiez en train de faire.
 ## Installation
 
 ```bash
-npx skills add ykuwai/voice-shell
+npx skills add ykuwai/voice-shell -g
 pip install numpy aiohttp "sounddevice>=0.5.6"
 ```
 
-Si vous avez Chrome, il n'en faut pas plus.
+Si vous avez Chrome, il n'en faut pas plus. `-g` le met dans
+`~/.claude/skills/`, disponible depuis tous vos projets. Juste envie de
+l'essayer dans un seul projet ? Enlevez `-g` et il reste dans le
+`.claude/skills/` de ce projet-là.
 
 Tapez `/voice-shell` dans Claude Code, ou dites « mode vocal », pour démarrer.
 Les étapes que suit l'agent à partir de là sont dans
@@ -60,7 +63,7 @@ Depuis un agent, ou depuis un script, nommez Claude Code plutôt que de le
 laisser le détecter tout seul, et ajoutez `-y` pour sauter la confirmation.
 
 ```bash
-npx skills add ykuwai/voice-shell -a claude-code -y
+npx skills add ykuwai/voice-shell -g -a claude-code -y
 ```
 
 ## Mettre à jour

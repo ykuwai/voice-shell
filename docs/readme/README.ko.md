@@ -42,11 +42,13 @@
 ## 설치
 
 ```bash
-npx skills add ykuwai/voice-shell
+npx skills add ykuwai/voice-shell -g
 pip install numpy aiohttp "sounddevice>=0.5.6"
 ```
 
-Chrome만 있으면 이것으로 끝입니다.
+Chrome만 있으면 이것으로 끝입니다. `-g`를 붙이면 `~/.claude/skills/`에 들어가서
+어느 프로젝트에서든 쓸 수 있습니다. 프로젝트 하나에서만 써보고 싶다면 `-g`를
+빼면 그 프로젝트의 `.claude/skills/`에만 들어갑니다.
 
 Claude Code에서 `/voice-shell`이라고 치거나 "음성 모드"라고 말하면 시작됩니다.
 그다음부터 에이전트가 따르는 절차는 [SKILL.md](../../skills/voice-shell/SKILL.md)에
@@ -56,7 +58,7 @@ Claude Code에서 `/voice-shell`이라고 치거나 "음성 모드"라고 말하
 Claude Code를 직접 지정하고, `-y`로 확인도 건너뛰세요.
 
 ```bash
-npx skills add ykuwai/voice-shell -a claude-code -y
+npx skills add ykuwai/voice-shell -g -a claude-code -y
 ```
 
 ## 업데이트

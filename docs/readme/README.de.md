@@ -45,11 +45,14 @@ hört, all das per Stimme, während deine Hände bei der eigentlichen Arbeit ble
 ## Installation
 
 ```bash
-npx skills add ykuwai/voice-shell
+npx skills add ykuwai/voice-shell -g
 pip install numpy aiohttp "sounddevice>=0.5.6"
 ```
 
-Wenn du Chrome hast, reicht das schon.
+Wenn du Chrome hast, reicht das schon. `-g` legt es in `~/.claude/skills/` ab,
+damit steht es in jedem Projekt zur Verfügung. Nur in einem Projekt
+ausprobieren? `-g` weglassen, dann landet es nur im `.claude/skills/` dieses
+Projekts.
 
 Tippe `/voice-shell` in Claude Code, oder sag „Sprachmodus", um zu starten. Die
 Schritte, denen ein Agent von da an folgt, stehen in
@@ -60,7 +63,7 @@ angeben statt es selbst erkennen zu lassen, und `-y` dazuschreiben, um die
 Bestätigung zu überspringen.
 
 ```bash
-npx skills add ykuwai/voice-shell -a claude-code -y
+npx skills add ykuwai/voice-shell -g -a claude-code -y
 ```
 
 ## Aktualisieren
