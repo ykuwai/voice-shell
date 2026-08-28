@@ -77,8 +77,16 @@ assert.equal(shouldKeepVizCapture({route:'on', asrChosen:true, gestureEnabled:tr
         text = VIEWER_JS.read_text(encoding="utf-8")
         load_engines = text[text.index("async function loadEngines()"):text.index("el.enginePick.onchange")]
         engine_pick = text[text.index("el.enginePick.onchange"):text.index("el.asrLang.onchange")]
-        self.assertIn("syncVizCapture();", load_engines)
-        self.assertEqual(engine_pick.count("syncVizCapture();"), 2)
+        # Forced exactly when asrChosen actually flips (another tab or a voice
+        # command switched engines), not on every 5s poll: a capture already
+        # open keeps measuring whichever device it was opened for otherwise,
+        # which is the wrong one the moment asrChosen (and so vizDeviceLabel's
+        # answer) has changed underneath it.
+        self.assertIn("syncVizCapture(was !== asrChosen);", load_engines)
+        # Both branches of a manual switch force it too, same reasoning: the
+        # local branch changes the device it should be measuring, the browser
+        # branch stops naming one.
+        self.assertEqual(engine_pick.count("syncVizCapture(true);"), 2)
 
     def test_viz_capture_cancels_stale_requests_and_mic_changes_resync(self):
         text = VIEWER_JS.read_text(encoding="utf-8")

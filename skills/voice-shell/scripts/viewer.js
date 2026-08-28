@@ -503,6 +503,18 @@ async function matchDeviceId(label) {
   } catch { return null; }
 }
 
+// The mic dropdown picks which device asr_mic.py (the daemon) opens, not
+// which one Chrome's own recognition listens through (browserMicNote says as
+// much: Chrome always uses its own default there, the dropdown does nothing
+// under browser recognition). This analyser exists to gate "pause to send"
+// on real quiet, and asking it to open whatever device the dropdown names
+// measures a different microphone than the one actually hearing you the
+// moment that device is not Chrome's default, so the gate reads quiet no
+// matter what you say and sends the instant a clause finalizes regardless of
+// silence_duration. Naming no device at all here, under browser recognition,
+// is what keeps the two listening to the same one.
+const vizDeviceLabel = () => asrChosen ? '' : (el.mic.value || '');
+
 async function startViz(label) {
   const generation = ++vizGeneration;
   vizStarting = true;
@@ -1417,7 +1429,7 @@ function applyRouteSideEffects(next) {
     // again within the next 5-second check, sometimes just seconds after the
     // person turned it back on.
     lastVoiceAt = performance.now();
-    if (vizArmed) startViz(el.mic.value || '');
+    if (vizArmed) startViz(vizDeviceLabel());
     if (asrPausedByRoute) {
       asrPausedByRoute = false; recWanted = true; startRecognition();
     }
@@ -2851,7 +2863,7 @@ function syncVizCapture(force = false) {
     route, asrChosen: asrActive(), gestureEnabled: tuning.browser_unmute_gesture, vizArmed,
   })) {
     if (force) stopViz();
-    if ((!micStream || !analyser) && !vizStarting) startViz(el.mic.value || '');
+    if ((!micStream || !analyser) && !vizStarting) startViz(vizDeviceLabel());
   } else {
     stopViz();
   }
@@ -3678,7 +3690,13 @@ async function loadEngines() {
   } else if (asrChosen && !recWanted) {
     stopRecognition();
   }
-  syncVizCapture();
+  // Forced exactly when asrChosen just flipped (another tab, or a voice
+  // command, switched engines), the same case the picker's own change
+  // handler further down forces on too. vizDeviceLabel() reads off asrChosen,
+  // so a capture already open for the wrong side of that flip would
+  // otherwise sit there unrebuilt, measuring a device nothing is actually
+  // listening through (see vizDeviceLabel's own comment).
+  syncVizCapture(was !== asrChosen);
   paintEnginePick();
   paintBrowserAsr();
 }
@@ -3694,7 +3712,14 @@ el.enginePick.onchange = async () => {
       asrPausedByRoute = route === 'off';
       recWanted = !asrPausedByRoute;
       lastVoiceAt = performance.now();
-      syncVizCapture();
+      // Forced: a capture already open from the local engine's own device
+      // pick (asr_mic.py's, read off el.mic) has to be rebuilt without one,
+      // now that vizDeviceLabel() reads asrChosen as true. Left standing,
+      // "pause to send" gates on a microphone Chrome's own recognition was
+      // never actually listening through, reads it as quiet no matter what
+      // is said, and sends the instant a clause finalizes regardless of the
+      // silence_duration setting.
+      syncVizCapture(true);
       // Take the model side down first. Connect before it is down and whatever is said in between arrives twice.
       if (engineOnish()) {
         engine = 'stopping';
@@ -3715,7 +3740,11 @@ el.enginePick.onchange = async () => {
       asrPausedByRoute = false;
       stopRecognition();
       beat('gone');
-      syncVizCapture();
+      // Forced for the same reason as the browser branch above, mirrored:
+      // vizDeviceLabel() now reads asrChosen as false, so a capture left
+      // over from browser recognition (opened with no device named on
+      // purpose) has to be rebuilt against el.mic's own pick instead.
+      syncVizCapture(true);
       engine = 'booting';
       startedAt = Date.now();
       paintPower();
