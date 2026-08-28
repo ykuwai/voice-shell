@@ -2173,6 +2173,13 @@ def listeners_dir(log_path):
     return Path(log_path).parent / "listeners"
 
 
+# voice-shell.sh's heal loop touches a registration file's mtime every 30s
+# (#82). Three misses in a row is well past any timer jitter or a slow
+# machine's own scheduling delay, and still catches a lingering registration
+# within a minute and a half of it actually going quiet.
+HEARTBEAT_STALE = 90
+
+
 def list_active_listeners(log_path):
     """List the sessions listening to the utterance log.
 
@@ -2199,16 +2206,43 @@ def list_active_listeners(log_path):
             info = {}
         # A process that started after the registration file is somebody else who
         # merely got the recycled PID. Without this check, warnings keep getting
-        # written about a session that is not there.
+        # written about a session that is not there. Measured against "since" in
+        # the file's own content, not the file's mtime (the heartbeat touch below
+        # moves mtime on its own now, and reading that here instead would make
+        # every long-lived, genuinely-still-that-pid session register as stale
+        # the moment its own heartbeat had run even once).
         stale = False
         age = _proc_started_at(pid)
         if age is not None:
             try:
-                registered_ago = time.time() - f.stat().st_mtime
+                registered_ago = time.time() - float(info.get("since", f.stat().st_mtime))
                 stale = age < registered_ago - 5      # 5 seconds of measurement slack
-            except OSError:
+            except (OSError, TypeError, ValueError):
                 stale = False
-        if _pid_alive(pid) and not stale:
+        # #82: TaskStop's forceful kill on Windows can leave the process tree
+        # only partly cleared, so a registration outlives the trap that would
+        # otherwise remove it, sometimes with the PID still technically valid
+        # (a lingering child, not this listener). The heal loop's heartbeat
+        # (voice-shell.sh, every 30s) keeps this file's mtime moving as long as
+        # it is still really the one listening. Silence past a few misses
+        # means whatever last touched this file is not doing that anymore,
+        # whether or not the PID itself still answers.
+        #
+        # Windows only, on purpose (measured: turning this on generally
+        # purged every registration a `listen` still running from before
+        # this shipped, macOS included, the moment it crossed 90s, since an
+        # older process's heal loop has no heartbeat line to run yet and
+        # its mtime just sits at whenever it first registered). os.kill's
+        # signal-0 probe on POSIX already tells a truly-dead PID apart from
+        # a live one with no help needed, so there is nothing for this
+        # heuristic to add there, only regressions like that one to cause.
+        heartbeat_stale = False
+        if sys.platform.startswith("win"):
+            try:
+                heartbeat_stale = time.time() - f.stat().st_mtime > HEARTBEAT_STALE
+            except OSError:
+                pass
+        if _pid_alive(pid) and not stale and not heartbeat_stale:
             info["pid"] = pid
             info.setdefault("cwd", "unknown")
             info.setdefault("started", "unknown")
