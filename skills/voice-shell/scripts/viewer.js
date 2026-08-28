@@ -723,17 +723,25 @@ function openPickMenu(anchor, items, currentKey, onPick) {
   doc.body.append(menu);
   // Placed off the anchor's own live position (same reasoning as
   // positionFloatAsk), then nudged left if that would run the panel off
-  // the right edge of a narrow window.
-  const r = anchor.getBoundingClientRect();
-  menu.style.top = Math.round(r.bottom + 4) + 'px';
-  menu.style.left = Math.round(r.left) + 'px';
-  const overflowRight = menu.getBoundingClientRect().right - (win.innerWidth - 8);
-  if (overflowRight > 0) menu.style.left = Math.round(r.left - overflowRight) + 'px';
+  // the right edge of a narrow window. Re-run on scroll (the history list
+  // this chip sits in scrolls on its own, position:fixed does not follow
+  // that by itself) and on resize, the same two triggers positionFloatAsk
+  // already re-measures on.
+  function place() {
+    const r = anchor.getBoundingClientRect();
+    menu.style.top = Math.round(r.bottom + 4) + 'px';
+    menu.style.left = Math.round(r.left) + 'px';
+    const overflowRight = menu.getBoundingClientRect().right - (win.innerWidth - 8);
+    if (overflowRight > 0) menu.style.left = Math.round(r.left - overflowRight) + 'px';
+  }
+  place();
 
   function close() {
     menu.remove();
     doc.removeEventListener('click', onDocClick, true);
     doc.removeEventListener('keydown', onKey);
+    doc.removeEventListener('scroll', place, true);
+    win.removeEventListener('resize', place);
     if (closeToMenu === close) { closeToMenu = null; openToMenuBtn = null; }
   }
   function onDocClick(e) {
@@ -744,6 +752,10 @@ function openPickMenu(anchor, items, currentKey, onPick) {
   // document, does not also count as the outside click that shuts it.
   setTimeout(() => doc.addEventListener('click', onDocClick, true), 0);
   doc.addEventListener('keydown', onKey);
+  // capture:true so a scroll on the history list (or any other nested
+  // scroller) is caught too, not only a scroll of the document itself.
+  doc.addEventListener('scroll', place, true);
+  win.addEventListener('resize', place);
   closeToMenu = close;
   openToMenuBtn = anchor;
 }
