@@ -600,7 +600,20 @@ NAMEIT
       port_open
     }
     if viewer_running; then
-      # Do not open a window here. One should be open already, and opening adds more.
+      # Whether to open a window here turns on whether one is actually still
+      # open, not on whether one was opened at some point (closed by hand
+      # since the last start, or the whole machine rebooted under a daemon
+      # that survived it, and neither leaves anything to reopen). /api/state's
+      # "viewers" count comes off the live WebSocket connections a real open
+      # tab holds (handle_ws in viewer.py), so it says so accurately. Only
+      # when it is 0 does opening one add rather than duplicate (the very
+      # thing the old flat skip here existed to avoid, back when every retry
+      # popped a fresh window regardless).
+      viewers="$(http_get /api/state | grep -o '"viewers": *[0-9]*' | grep -o '[0-9]*$')"
+      if [[ "${viewers:-0}" == "0" ]]; then
+        rm -f "$STATE_DIR/gui_opened"
+        [[ "${VOICE_SHELL_NO_GUI:-0}" == "1" ]] || open_gui || true
+      fi
       echo "It is already running at $VIEWER_URL"
       exit 0
     fi
