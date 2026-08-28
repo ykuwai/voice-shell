@@ -264,7 +264,10 @@
       <span class="val" id="minCharsVal"></span>
     </div>
     <p class="range-note" data-i18n="minCharsNote"></p>
-    <label class="toggle"><input type="checkbox" id="clean"><span data-i18n="stripFillers">Strip filler words</span></label>
+    <div class="field">
+      <span data-i18n="stripFillers">Strip filler words</span>
+      <label class="switch"><input type="checkbox" id="clean"><span class="track"><span class="knob"></span></span></label>
+    </div>
   </div>
 
   <!-- How recognition is done -->
@@ -294,9 +297,10 @@
       <span data-i18n="browserMicNote"></span>
       <button class="link" id="micSettingsLink">chrome://settings/content/microphone</button>
     </p>
-    <label class="toggle" id="idleMuteField" style="margin-top:.7rem" hidden>
-      <input type="checkbox" id="idleMuteOn"><span data-i18n="idleMute">Turn off when idle</span>
-    </label>
+    <div class="field" id="idleMuteField" style="margin-top:.7rem" hidden>
+      <span data-i18n="idleMute">Turn off when idle</span>
+      <label class="switch"><input type="checkbox" id="idleMuteOn"><span class="track"><span class="knob"></span></span></label>
+    </div>
     <div class="field" id="idleMinsField" style="margin-top:.6rem" hidden>
       <label for="idleMute" data-icon="timer" data-icon-size="17" data-i18n="idleAfter">Silence before it turns off</label>
       <input type="range" id="idleMute" min="1" max="30" step="1">
@@ -304,9 +308,10 @@
     </div>
     <p class="range-note" id="idleMuteNote" data-i18n="idleMuteNote" hidden></p>
     <div id="browserGestureField" hidden>
-      <label class="toggle" style="margin-top:.7rem">
-        <input type="checkbox" id="browserGestureOn"><span data-i18n="browserGesture">Unmute with loud sounds</span>
-      </label>
+      <div class="field" style="margin-top:.7rem">
+        <span data-i18n="browserGesture">Unmute with loud sounds</span>
+        <label class="switch"><input type="checkbox" id="browserGestureOn"><span class="track"><span class="knob"></span></span></label>
+      </div>
       <div class="field" style="margin-top:.6rem">
         <label for="browserGesturePeaks" data-icon="graphic_eq" data-icon-size="17" data-i18n="browserGesturePeaks">Loud sounds</label>
         <input type="range" id="browserGesturePeaks" min="1" max="6" step="1">
@@ -436,9 +441,10 @@
        point at). -->
   <div class="group">
     <h3 data-icon="swap_horiz" data-icon-size="16" data-i18n="grpMulti">Several machines</h3>
-    <label class="toggle" style="margin-bottom:.5rem">
-      <input type="checkbox" id="multiOn"><span data-i18n="multiOn">Require this machine's name</span>
-    </label>
+    <div class="field" style="margin-bottom:.5rem">
+      <span data-i18n="multiOn">Require this machine's name</span>
+      <label class="switch"><input type="checkbox" id="multiOn"><span class="track"><span class="knob"></span></span></label>
+    </div>
     <div class="field" id="machineNameField" hidden>
       <label for="machineName" data-icon="short_text" data-icon-size="17" data-i18n="machineName">This machine</label>
       <input class="filter" id="machineName" data-i18n-ph="machineNamePh" style="margin:0">

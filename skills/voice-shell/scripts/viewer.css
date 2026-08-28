@@ -1128,26 +1128,6 @@
   }
   .seg-row button.on { background:var(--raise); color:var(--text); }
 
-  .toggle { display:flex; align-items:center; gap:.55rem; font-size:.875rem; color:var(--text); }
-  /* A track-and-thumb switch drawn on the checkbox itself (appearance:none plus
-     a ::before for the thumb), rather than a second element next to it, so
-     every existing .toggle in the markup picks this up with no markup change. */
-  .toggle input[type="checkbox"] {
-    appearance:none; -webkit-appearance:none; margin:0; flex:none;
-    width:34px; height:20px; border-radius:var(--pill);
-    background:var(--track); position:relative; cursor:pointer;
-    transition:background .15s;
-  }
-  .toggle input[type="checkbox"]::before {
-    content:''; position:absolute; top:2px; left:2px;
-    width:16px; height:16px; border-radius:50%; background:var(--panel);
-    box-shadow:0 1px 2px color-mix(in srgb, #000 35%, transparent);
-    transition:transform .15s;
-  }
-  .toggle input[type="checkbox"]:checked { background:var(--accent); }
-  .toggle input[type="checkbox"]:checked::before { transform:translateX(14px); }
-  .toggle input[type="checkbox"]:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
-
   /* Three tiers. Filled is the action you want settled on that screen, tinted
      is support, outlined is everything else. Only one filled button per section. */
   .btn {

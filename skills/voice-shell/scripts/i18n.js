@@ -303,7 +303,7 @@ const I18N = {
     cmdLiveWhat:'喋り終わった分から、そのまま Claude Code に届きます。',
     cmdHold:'手直しに回す',
     cmdHoldWhat:'喋った分は下の欄に溜まり、そのままでは出ていきません。',
-    cmdRoute:'送信先を選ぶ',
+    cmdRoute:'セッションの送信先を選ぶ',
     cmdRouteWhat:'聞いているセッションを、上から数えた番号で選びます。',
     cmdRouteWhen:'聞き手が2つ以上のときだけ効きます。1つのときは選ぶ相手がいないので、番号は普通の発話のまま扱います。',
     cmdCancelTail:'いま言った分を捨てる',
