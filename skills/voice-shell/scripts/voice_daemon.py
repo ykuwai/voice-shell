@@ -250,6 +250,7 @@ DEFAULT_DICT = {
         # Tools and services
         "ギットハブ": "GitHub",
         "ギットいーぶ": "GitHub",
+        "プルリクエスト": "pull request",
         "ヴイエスコード": "VS Code",
         "ブイエスコード": "VS Code",
         "パイソン": "Python",
@@ -257,6 +258,7 @@ DEFAULT_DICT = {
         "ノードジェイエス": "Node.js",
         "タイプスクリプト": "TypeScript",
         "ジャバスクリプト": "JavaScript",
+        "ウィンドウズ": "Windows",
         # This project
         "ボイスシェル": "voice-shell",
     },
