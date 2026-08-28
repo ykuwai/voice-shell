@@ -362,19 +362,6 @@
     </div>
   </div>
 
-  <!-- Several machines -->
-  <div class="group">
-    <h3 data-icon="swap_horiz" data-icon-size="16" data-i18n="grpMulti">Several machines</h3>
-    <label class="toggle" style="margin-bottom:.5rem">
-      <input type="checkbox" id="multiOn"><span data-i18n="multiOn">Require this machine's name</span>
-    </label>
-    <div class="field" id="machineNameField" hidden>
-      <label for="machineName" data-icon="short_text" data-icon-size="17" data-i18n="machineName">This machine</label>
-      <input class="filter" id="machineName" data-i18n-ph="machineNamePh" style="margin:0">
-    </div>
-    <p class="range-note" data-i18n="multiNote"></p>
-  </div>
-
   </div><!-- /paneBasic -->
 
   <div id="paneDict" hidden>
@@ -442,6 +429,22 @@
   </div>
   <div id="cmdGroups"></div>
   <p class="dict-note" id="cmdNote"></p>
+
+  <!-- Several machines. Lives here rather than in settings, since what it
+       changes is which of the phrases above get heard at all (buried under a
+       gear icon, "why did muting not do anything" has nowhere near this to
+       point at). -->
+  <div class="group">
+    <h3 data-icon="swap_horiz" data-icon-size="16" data-i18n="grpMulti">Several machines</h3>
+    <label class="toggle" style="margin-bottom:.5rem">
+      <input type="checkbox" id="multiOn"><span data-i18n="multiOn">Require this machine's name</span>
+    </label>
+    <div class="field" id="machineNameField" hidden>
+      <label for="machineName" data-icon="short_text" data-icon-size="17" data-i18n="machineName">This machine</label>
+      <input class="filter" id="machineName" data-i18n-ph="machineNamePh" style="margin:0">
+    </div>
+    <p class="range-note" data-i18n="multiNote"></p>
+  </div>
 
   <!-- What the keyboard can do. It goes in the same place as what you can say
        out loud. Split the place to look in two and you end up having to
