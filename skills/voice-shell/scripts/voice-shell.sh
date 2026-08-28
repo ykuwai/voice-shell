@@ -275,12 +275,12 @@ case "$cmd" in
       # The log path and the list of other listening sessions both come from status.
       echo "Listening has started."
       echo "Open the screen in Chrome and allow the microphone, and it starts arriving."
-      # On a first run only, name where the audio goes and the stand-in this
+      # On a first run only, name how this is recognizing and the stand-in this
       # machine can use. General wording stalls at "so which do I pick", so go
       # all the way to the name. Never after that. It only gets in the way.
       if [[ "$first_run" == 1 ]]; then
         echo
-        echo "Note. The audio is sent to Google's servers to be recognized."
+        echo "Note. This uses the browser's built-in speech recognition feature to transcribe your voice."
         alt="$("$PY" "$APP" --list-engines | sed -n '2p' | awk '{print $1}')"
         if [[ -n "$alt" ]]; then
           echo "   To keep it all on this machine, this one can be used here too."

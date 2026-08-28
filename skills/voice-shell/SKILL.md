@@ -60,11 +60,11 @@ picked last time (`~/.config/voice-shell/config.json`), and the first time it is
    ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh start --engine auto
    ```
 
-   **Say where the audio goes once, the first time only.** The first time
-   `start` runs on that machine, and only then, `start` itself prints
-   `The audio is sent to Google's servers to be recognized` along with the name
-   of a local way that machine can use. Pass that line straight through to the
-   user.
+   **Say how it is being recognized, once, the first time only.** The first
+   time `start` runs on that machine, and only then, `start` itself prints
+   `This uses the browser's built-in speech recognition feature to transcribe
+   your voice.` along with the name of a local way that machine can use. Pass
+   that line straight through to the user.
    **Do not say it again after that.** Repeating it every time does not change
    the choice, it only adds more to read.
 
