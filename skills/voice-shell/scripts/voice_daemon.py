@@ -250,6 +250,8 @@ DEFAULT_DICT = {
         # Tools and services
         "ギットハブ": "GitHub",
         "ギットいーぶ": "GitHub",
+        "プルリクエスト": "pull request",
+        "異臭": "Issue",
         "ヴイエスコード": "VS Code",
         "ブイエスコード": "VS Code",
         "パイソン": "Python",
@@ -257,6 +259,7 @@ DEFAULT_DICT = {
         "ノードジェイエス": "Node.js",
         "タイプスクリプト": "TypeScript",
         "ジャバスクリプト": "JavaScript",
+        "ウィンドウズ": "Windows",
         # This project
         "ボイスシェル": "voice-shell",
     },
@@ -995,18 +998,18 @@ HOLD_MODE_TAIL_NOISE_MAX = 7
 # longer tell whether that line was a rewrite or an added command.
 COMMANDS_FILE = CONFIG_DIR / "commands.json"
 
-# What can be added is limited to commands that work when that phrase alone is said.
+# unmute is the one kind left out. The mic is usually off because of a call, so if
+# a sentence meant for the other person opens the mic, the whole conversation after
+# it flows out as instructions. What is lost is not one utterance but the whole
+# stretch you thought was muted, and the cost of a false hit does not balance.
 #
-# unmute is left out because the cost of a false hit does not balance. The mic is
-# usually off because of a call, so if a sentence meant for the other person opens
-# the mic, the whole conversation after it flows out as instructions. What is lost is
-# not one utterance but the whole stretch you thought was muted.
-#
-# Commands that attach to the end of a sentence (cancel_tail / hold_tail) are left
-# out too. Those match the **end** of an ordinary sentence, so adding a common
-# phrasing makes instructions you never meant to lose disappear. Same reason the
-# built-in words are kept few.
-USER_COMMAND_KINDS = ("mute", "live", "hold", "route")
+# cancel_tail and hold_tail used to be left out on the same reasoning as unmute
+# (matching the **end** of an ordinary sentence, a common phrasing added there could
+# eat instructions you never meant to lose), but picking your own last words is a
+# call each person is better placed to make than this table is, and the built-in
+# words already carry the same risk in kind, just not in number. Left to the
+# person adding one, same as mute/live/hold/route already are.
+USER_COMMAND_KINDS = ("mute", "live", "hold", "route", "cancel_tail", "hold_tail")
 ROUTE_SLOT = "{n}"           # Where the number goes in a routing phrase
 _USER_PHRASE_MAX = 24        # Matches the length route_command looks at
 _USER_PHRASE_MIN = 2         # One character cannot be told apart from ordinary speech
@@ -1022,6 +1025,16 @@ def clean_user_phrase(kind: str, phrase) -> str:
     """
     if kind not in USER_COMMAND_KINDS or not isinstance(phrase, str):
         return ""
+    if kind in TAIL_KINDS:
+        # active_tail hands these straight to take_tail, which matches the
+        # raw tail of an utterance (trimmed and lowercased, see _TAIL_TRIM),
+        # never through command_key the way mute/live/hold/route are. Folding
+        # a multi-word addition through command_key here, as the fallthrough
+        # below does, would drop its internal spaces ("forget this one" ->
+        # "forgetthisone"), a shape nothing actually said aloud ever ends in,
+        # so the phrase would sit in the list looking saved and never fire.
+        key = phrase.strip().rstrip(_TAIL_TRIM).lower()
+        return key if _USER_PHRASE_MIN <= len(key) <= _USER_PHRASE_MAX else ""
     key = command_key(phrase)
     slots = key.count(ROUTE_SLOT)
     if kind == "route":
@@ -1171,8 +1184,15 @@ def _fold_off(kind: str, words) -> frozenset:
     return frozenset(command_key(w) for w in words)
 
 
-_NO_COMMANDS = {"mute": frozenset(), "live": frozenset(), "hold": frozenset(),
-                "route": (), OFF_KEY: frozenset(), OFF_WORDS_KEY: {}}
+# Derived off USER_COMMAND_KINDS rather than hand-listed, so a kind added or
+# removed there cannot leave this the one spot still holding the old set (it
+# already happened once, when cancel_tail/hold_tail joined that tuple and
+# this dict needed its own separate edit to keep up). Shape matches what
+# load_commands() itself builds for an empty file: route alone is a tuple of
+# compiled patterns, everything else here a frozenset of keys.
+_NO_COMMANDS = {kind: (() if kind == "route" else frozenset()) for kind in USER_COMMAND_KINDS}
+_NO_COMMANDS[OFF_KEY] = frozenset()
+_NO_COMMANDS[OFF_WORDS_KEY] = {}
 _cmd_cache = (None, None)   # (mtime, contents)
 
 
@@ -1259,15 +1279,18 @@ def active_tail(kind: str) -> tuple:
 
     Wordings struck one at a time drop out here, in written order, because take_tail
     takes the first that matches and that order is what decides which of two
-    overlapping tails wins.
+    overlapping tails wins. Added ones come after the built-ins, longest first among
+    themselves so one that happens to end in another does not swallow the longer,
+    more specific one first.
     """
     if not command_enabled(kind):
         return ()
     table = CANCEL_TAIL if kind == "cancel_tail" else HOLD_TAIL
     off = load_commands()[OFF_WORDS_KEY].get(kind)
-    if not off:
-        return table
-    return tuple(w for w in table if w.lower() not in off)
+    if off:
+        table = tuple(w for w in table if w.lower() not in off)
+    mine = sorted(load_commands().get(kind) or (), key=len, reverse=True)
+    return table + tuple(mine) if mine else table
 
 
 def clean_user_commands(data) -> dict:

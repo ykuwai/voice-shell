@@ -4,10 +4,10 @@ The procedure Claude Code follows when it walks someone through this. Look at th
 environment first and **ask the user which way to go before running anything**
 (do not install everything on your own).
 
-**Most of the time there is nothing to install.** The default is Chrome's Web Speech
-API, and `pip install numpy aiohttp` is enough to run it. No model to load, nothing
-to wait for. The catch is that **the audio is sent to Google's servers to be
-recognized**.
+**Most of the time there is nothing to install.** The default uses **the
+browser's own built-in speech recognition** (Chrome's Web Speech API), and
+`pip install numpy aiohttp` is enough to run it. No model to load, nothing to
+wait for.
 
 What follows is for when you want everything to stay on your machine, or when you
 want to use it without opening the window.

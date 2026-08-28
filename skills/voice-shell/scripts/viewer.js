@@ -119,7 +119,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'dictNote','dictExport','dictImport','dictFile',
                   'paneBasic','paneDict',
                   'openHelp','helpSheet','closeHelp','helpMini','helpMiniViz',
-                  'cmdGroups','cmdNote'])
+                  'cmdGroups','cmdNote','floatStand','floatStandBack'])
   el[id] = $(id);
 
 const post = (path, body) =>
@@ -502,6 +502,18 @@ async function matchDeviceId(label) {
     return hit ? hit.deviceId : null;
   } catch { return null; }
 }
+
+// The mic dropdown picks which device asr_mic.py (the daemon) opens, not
+// which one Chrome's own recognition listens through (browserMicNote says as
+// much: Chrome always uses its own default there, the dropdown does nothing
+// under browser recognition). This analyser exists to gate "pause to send"
+// on real quiet, and asking it to open whatever device the dropdown names
+// measures a different microphone than the one actually hearing you the
+// moment that device is not Chrome's default, so the gate reads quiet no
+// matter what you say and sends the instant a clause finalizes regardless of
+// silence_duration. Naming no device at all here, under browser recognition,
+// is what keeps the two listening to the same one.
+const vizDeviceLabel = () => asrChosen ? '' : (el.mic.value || '');
 
 async function startViz(label) {
   const generation = ++vizGeneration;
@@ -1096,10 +1108,10 @@ function isBackchannel(text, words) {
    says why at the head of COMMAND_WORDS), so every screen language is asked and
    the answers are joined.
 
-   The tables themselves are read once. Nothing is ever added to them or taken
-   out of them (USER_COMMAND_KINDS leaves these two out), so they cannot go stale
-   while the screen is up. What the user switched off is another matter and does
-   move, so it is held apart in cmdOff and refreshed on every save. */
+   The built-in table is read once and never changes while the screen is up.
+   Wordings added by hand can, from any tab, so loadTailWords is called again
+   after every save (saveCmds), the same refresh cmdOff already got. What the
+   user switched off is held apart in cmdOff for the same reason. */
 /* mute rides along here too (#76 follow-up), so the drawing can show the same
    "about to happen" preview for it that cancel_tail/hold_tail already get. Unlike
    those two, mute only counts with a short noise prefix ahead of the word, not a
@@ -1120,6 +1132,12 @@ async function loadTailWords() {
           // An empty wording would end every sentence and leave the drawing
           // permanently dark, so it is dropped rather than trusted.
           for (const w of g.phrases || []) if (w) out[g.id].add(w.toLowerCase());
+      // Wordings added by hand, not just the built-in table. The same list
+      // regardless of which language this pass is for (what you typed is not
+      // translated), so adding it again on every pass through this loop only
+      // repeats work, it does not double anything up (a Set).
+      for (const id of TAIL_IDS)
+        for (const w of (d.user || {})[id] || []) if (w) out[id].add(w.toLowerCase());
       takeCmdOff(d);
     }
     tailWords = out;
@@ -1365,6 +1383,24 @@ async function changeRoute(next, prev, revision, syncServer) {
     }
     route = prev;
     if (prev !== 'off') lastMode = prev;
+    // editThisOne sets this before this call ever starts (always a live ->
+    // hold attempt, its own guard rules out any other prev), and nothing else
+    // clears it once the attempt it was guarding never actually landed. Left
+    // set, route reads 'live' again but oneShot still reads true, and every
+    // check gating on both together (el.tray.onclick, editOnce.disabled) goes
+    // on refusing a retry until a manual press of live/hold happens to clear
+    // it by coincidence, which reads as "it only works after switching by
+    // hand once" (a failed one-shot attempt right as the engine was still
+    // booting is the case this was caught from).
+    //
+    // Narrowed to that exact shape (prev live, next hold) so a *different*
+    // rollback does not clear it out from under a one-shot edit already in
+    // progress. Muting (segOff) does not pass through live/hold's own
+    // oneShot=false first the way segLive/segHold do, so pressing mute while
+    // mid-edit and having that specific request fail would otherwise erase
+    // oneShot too, even though route rolls back to the 'hold' the edit was
+    // still legitimately sitting in.
+    if (prev === 'live' && next === 'hold') oneShot = false;
     paint();
     applyRouteSideEffects(prev);
     const message = rollbackError ? `${err.message} (${rollbackError.message})` : err.message;
@@ -1408,7 +1444,7 @@ function applyRouteSideEffects(next) {
     // again within the next 5-second check, sometimes just seconds after the
     // person turned it back on.
     lastVoiceAt = performance.now();
-    if (vizArmed) startViz(el.mic.value || '');
+    if (vizArmed) startViz(vizDeviceLabel());
     if (asrPausedByRoute) {
       asrPausedByRoute = false; recWanted = true; startRecognition();
     }
@@ -2842,7 +2878,7 @@ function syncVizCapture(force = false) {
     route, asrChosen: asrActive(), gestureEnabled: tuning.browser_unmute_gesture, vizArmed,
   })) {
     if (force) stopViz();
-    if ((!micStream || !analyser) && !vizStarting) startViz(el.mic.value || '');
+    if ((!micStream || !analyser) && !vizStarting) startViz(vizDeviceLabel());
   } else {
     stopViz();
   }
@@ -3669,7 +3705,13 @@ async function loadEngines() {
   } else if (asrChosen && !recWanted) {
     stopRecognition();
   }
-  syncVizCapture();
+  // Forced exactly when asrChosen just flipped (another tab, or a voice
+  // command, switched engines), the same case the picker's own change
+  // handler further down forces on too. vizDeviceLabel() reads off asrChosen,
+  // so a capture already open for the wrong side of that flip would
+  // otherwise sit there unrebuilt, measuring a device nothing is actually
+  // listening through (see vizDeviceLabel's own comment).
+  syncVizCapture(was !== asrChosen);
   paintEnginePick();
   paintBrowserAsr();
 }
@@ -3685,13 +3727,27 @@ el.enginePick.onchange = async () => {
       asrPausedByRoute = route === 'off';
       recWanted = !asrPausedByRoute;
       lastVoiceAt = performance.now();
-      syncVizCapture();
+      // Forced: a capture already open from the local engine's own device
+      // pick (asr_mic.py's, read off el.mic) has to be rebuilt without one,
+      // now that vizDeviceLabel() reads asrChosen as true. Left standing,
+      // "pause to send" gates on a microphone Chrome's own recognition was
+      // never actually listening through, reads it as quiet no matter what
+      // is said, and sends the instant a clause finalizes regardless of the
+      // silence_duration setting.
+      syncVizCapture(true);
       // Take the model side down first. Connect before it is down and whatever is said in between arrives twice.
       if (engineOnish()) {
         engine = 'stopping';
         paintPower();
-        await post('/api/engine', {running: false});
       }
+      // Sent either way, even with nothing local running to stop, so the pick
+      // is written to the server's own config (resolve_engine) rather than
+      // just this tab's memory of it. Left out, the next loadEngines poll (up
+      // to 5s later) reads the old engine straight off there, snaps the
+      // picker back to it, and takes the browser recognition that had just
+      // started down with it (was && !asrChosen in loadEngines), leaving
+      // neither engine actually listening.
+      await post('/api/engine', {running: false, engine: BROWSER_ENGINE});
       if (recWanted) startRecognition();
     } else {
       asrChosen = false;
@@ -3699,7 +3755,11 @@ el.enginePick.onchange = async () => {
       asrPausedByRoute = false;
       stopRecognition();
       beat('gone');
-      syncVizCapture();
+      // Forced for the same reason as the browser branch above, mirrored:
+      // vizDeviceLabel() now reads asrChosen as false, so a capture left
+      // over from browser recognition (opened with no device named on
+      // purpose) has to be rebuilt against el.mic's own pick instead.
+      syncVizCapture(true);
       engine = 'booting';
       startedAt = Date.now();
       paintPower();
@@ -3748,6 +3808,15 @@ function disableFloat() {
   el.floatBtn.disabled = true;
   el.floatBtn.hidden = true;
   el.floatAsk.hidden = true;
+  // floatStand is left alone on purpose. Hiding it here assumed this only
+  // ever fires while not actually floating, but floatingWindow()'s own catch
+  // calls this too, and that one can fire mid-float (documentPip.window
+  // throwing). floatParts never comes back to this document in that case
+  // (there is no document to move it back from, canFloat is now false so
+  // nothing here can reach in and ask), so hiding the one thing left pointing
+  // at where it went would strand the tab it moved out of with no way back
+  // and no sign one ever existed. Left showing, its own button still tries
+  // the same close path floatBtn itself would.
 }
 
 function floatingWindow() {
@@ -3819,6 +3888,16 @@ function standDown() {
   if (typeof stopRecognition === 'function') stopRecognition();
   recWanted = false;
   if (asrChosen) beat('gone');
+  // #taken lives inside .page, which travels wholesale into the small window
+  // while floating (floatParts). Unhidden above but left floating, it shows
+  // there, in a window nobody is looking at any more, while this document
+  // still shows floatStand's own "bring it back", now quietly wrong (there
+  // is nothing healthy left to bring back). Closing the small window first
+  // runs its own pagehide handler, which moves floatParts (this node
+  // included, already unhidden by the line above) back to this document, so
+  // #taken lands where it will actually be seen.
+  const fw = floatingWindow();
+  if (fw) { try { fw.close(); } catch {} }
   try { window.close(); } catch {}
 }
 
@@ -3970,6 +4049,10 @@ el.floatBtn.onclick = async () => {
   applyTheme(store.get('theme', 'auto'));
   // Move the elements themselves. The references stay live, so no JS has to change.
   win.document.body.append(...floatParts);
+  // floatStand lives outside floatParts on purpose, so it is what is left
+  // once they are gone. Otherwise the tab they moved out of just sits there
+  // empty until someone happens to remember where it went.
+  el.floatStand.hidden = false;
   // The small window is a new document every time. The key listener is
   // reattached here (closing it takes the whole document with it, so nothing
   // has to be detached).
@@ -3992,12 +4075,17 @@ el.floatBtn.onclick = async () => {
     // a document that is about to disappear.
     pipDoc = null;
     document.body.append(...floatParts);
+    el.floatStand.hidden = true;
     paintFloat(false);          // mid-close the window is still around
     paintFloatAsk();
     fitCanvas();
     fitMini();                  // it can come back with a sheet left open from the small window
   });
 };
+
+// Same toggle a second press of floatBtn itself would run (closes the small
+// window if one is open, which is always true while this button shows).
+el.floatStandBack.onclick = () => el.floatBtn.onclick();
 
 /* A page cannot open chrome://, so pressing it only copies. */
 el.micSettingsLink.onclick = async () => {
@@ -4755,6 +4843,11 @@ async function saveCmds(quiet = false) {
   // filling for a wording just struck. It carries the ones this screen could not
   // draw as well, which is the only way those reach the drawing at all.
   if (res.data) takeCmdOff(res.data);
+  // The send drawing's own "about to be canceled/held" preview (tailWords)
+  // reads added cancel_tail/hold_tail/mute wordings too, and otherwise sits
+  // on whatever loadTailWords saw at the one call to it on page load, stale
+  // for a wording just added or struck until the next reload.
+  loadTailWords();
   if (!quiet) flashCmdNote(t('dictSaved'), 1600);
 }
 

@@ -799,6 +799,13 @@ async def main_async(args):
                                   "engine": engine_running(),
                                   "loading": engine_loading(),
                                   "ui": ui, "held": held,
+                                  # How many tabs currently have this page open, counted
+                                  # off the live WebSocket connections (handle_ws), not
+                                  # off "a window was opened at some point". Lets a
+                                  # caller like open_gui in voice-shell.sh tell "closed
+                                  # by hand since last time" apart from "still open
+                                  # somewhere" before deciding to open another one.
+                                  "viewers": len(tail.clients),
                                   "note": note_file.read_text(encoding="utf-8")
                                           if note_file.exists() else ""})
 

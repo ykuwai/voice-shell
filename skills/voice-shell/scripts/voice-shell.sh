@@ -181,9 +181,13 @@ cmd="${1:-status}"; shift || true
 open_gui() {
   local url="$VIEWER_URL"
   local flag="$STATE_DIR/gui_opened"
-  [ -f "$flag" ] && return 0
   mkdir -p "$STATE_DIR"
-  : > "$flag"
+  # mkdir is one atomic filesystem call (POSIX guarantees only one caller can
+  # be the one to actually create a given directory), unlike the old
+  # test-for-a-file-then-create-it pair, which let two near-simultaneous
+  # callers (start racing viewer's own reopen-if-nobody-is-looking check,
+  # say) both see nothing there yet and both go on to open a window.
+  mkdir "$flag" 2>/dev/null || return 0
   # An ordinary tab, indistinguishable from any other, not Chrome's --app mode
   # (a window with no tabs and no address bar). Opening straight into that
   # shape has been mistaken for phishing in the wild (a window with nowhere
@@ -268,19 +272,22 @@ case "$cmd" in
       # Same as daemon startup. Leave it and last time's utterances line up again.
       : > "$LOG_FILE"
       # Here the screen itself does the recognizing, so speak up once it is up.
-      # Drop the output. The screen opens the URL itself, so there is nobody to
-      # read it out to, and only when that fails does viewer print to stderr.
-      "$0" viewer >/dev/null
+      # Its own line ("The viewer started at ..." / "It is already running at
+      # ...") carries the URL through to whoever is reading this output, since
+      # opening a window here is not something to count on (closed by hand
+      # since the last time, or nothing installed that this script knows how
+      # to open) and that URL is the fallback either way.
+      "$0" viewer
       # Print only whether it started and what to do next.
       # The log path and the list of other listening sessions both come from status.
       echo "Listening has started."
       echo "Open the screen in Chrome and allow the microphone, and it starts arriving."
-      # On a first run only, name where the audio goes and the stand-in this
+      # On a first run only, name how this is recognizing and the stand-in this
       # machine can use. General wording stalls at "so which do I pick", so go
       # all the way to the name. Never after that. It only gets in the way.
       if [[ "$first_run" == 1 ]]; then
         echo
-        echo "Note. The audio is sent to Google's servers to be recognized."
+        echo "Note. This uses the browser's built-in speech recognition feature to transcribe your voice."
         alt="$("$PY" "$APP" --list-engines | sed -n '2p' | awk '{print $1}')"
         if [[ -n "$alt" ]]; then
           echo "   To keep it all on this machine, this one can be used here too."
@@ -597,12 +604,37 @@ NAMEIT
       port_open
     }
     if viewer_running; then
-      # Do not open a window here. One should be open already, and opening adds more.
+      # Whether to open a window here turns on whether one is actually still
+      # open, not on whether one was opened at some point (closed by hand
+      # since the last start, or the whole machine rebooted under a daemon
+      # that survived it, and neither leaves anything to reopen). /api/state's
+      # "viewers" count comes off the live WebSocket connections a real open
+      # tab holds (handle_ws in viewer.py), so it says so accurately. Only
+      # when it is 0 does opening one add rather than duplicate (the very
+      # thing the old flat skip here existed to avoid, back when every retry
+      # popped a fresh window regardless).
+      # Python, not grep, so a server old enough to answer with no "viewers"
+      # key at all (or nothing, or something broken) reads as 0 rather than
+      # taking the whole script down. grep -o found nothing to match in
+      # exactly that case and exited 1, and set -euo pipefail up top turned
+      # that into start dying here in total silence, no line printed at all,
+      # whenever the viewer already running belonged to an older version.
+      viewers="$(http_get /api/state | "$PY" -c '
+import json, sys
+try:
+    print(json.loads(sys.stdin.read()).get("viewers", 0))
+except Exception:
+    print(0)
+' 2>/dev/null || true)"
+      if [[ "${viewers:-0}" == "0" ]]; then
+        rm -rf "$STATE_DIR/gui_opened"
+        [[ "${VOICE_SHELL_NO_GUI:-0}" == "1" ]] || open_gui || true
+      fi
       echo "It is already running at $VIEWER_URL"
       exit 0
     fi
     mkdir -p "$STATE_DIR"
-    rm -f "$STATE_DIR/gui_opened"      # started fresh, so open one window too
+    rm -rf "$STATE_DIR/gui_opened"      # started fresh, so open one window too
     # Detach with setsid. The daemon kills every one of its children when it
     # exits, so on the same line stopping the daemon takes the viewer down too.
     detach "$PY" "$HERE/viewer.py" "$@" \
@@ -638,7 +670,7 @@ NAMEIT
     ;;
   viewer-stop)
     if have pkill; then
-      rm -f "$STATE_DIR/gui_opened"
+      rm -rf "$STATE_DIR/gui_opened"
       pkill -f "voice-shell/scripts/viewer\.p[y]" && echo "The viewer stopped" \
         || echo "It is not running"
     else
