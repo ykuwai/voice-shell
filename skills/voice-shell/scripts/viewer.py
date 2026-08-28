@@ -52,6 +52,18 @@ else:
         _state = _base / "qwen-voice"
     DEFAULT_LOG = _state / "utterances.jsonl"
 
+# Document Picture-in-Picture opens the small window fine under Wayland, but
+# keeping it on top from then on is the window manager's own call, not
+# anything a browser can ask for the way X11's _NET_WM_STATE_ABOVE let it.
+# GNOME's Wayland session in particular holds that line even for the small
+# window, so "Float on top" quietly does not do the one thing its name
+# promises (#88, confirmed on Ubuntu GNOME). Nothing here can fix that, only
+# say so, so the manual right-click "Always on Top" workaround (itself a
+# GNOME feature, not a browser one) can be pointed at instead of the button
+# being pressed over and over for no visible effect.
+WAYLAND = bool(os.environ.get("WAYLAND_DISPLAY")
+               or os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland")
+
 # The user dictionary. Read and written in the same place as voice_daemon.py.
 _CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "voice-shell"
 DICT_FILE = _CONFIG / "dictionary.json"
@@ -806,6 +818,7 @@ async def main_async(args):
                                   # by hand since last time" apart from "still open
                                   # somewhere" before deciding to open another one.
                                   "viewers": len(tail.clients),
+                                  "wayland": WAYLAND,
                                   "note": note_file.read_text(encoding="utf-8")
                                           if note_file.exists() else ""})
 
