@@ -658,6 +658,12 @@ function buildToControl(to) {
   const label = knownIdx >= 0 ? `${knownIdx + 1}. ${knownListeners[knownIdx].label}`
               : to ? (routeNames.get(to) || `#${to}`)
               : t('resendPick');
+  // Named outright rather than left as a bare number and a name, which read
+  // as only a note about where it already went, with nothing marking it as
+  // a control at all (#79 feedback: a chip alone did not say "pick again").
+  const caption = document.createElement('span');
+  caption.className = 'to-caption';
+  caption.textContent = t('resendLabel');
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'to-btn';
@@ -671,7 +677,7 @@ function buildToControl(to) {
   caret.setAttribute('aria-hidden', 'true');
   btn.append(labelSpan, caret);
   btn.onclick = () => openToMenu(btn, to);
-  wrap.append(iconSvg('terminal', 11), btn);
+  wrap.append(iconSvg('terminal', 11), caption, btn);
   return wrap;
 }
 
