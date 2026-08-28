@@ -3865,6 +3865,17 @@ function positionFloatAsk() {
   el.floatAsk.style.setProperty('--arrow-right', clamped + 'px');
 }
 addEventListener('resize', positionFloatAsk);
+// The very first measurement, taken the instant `hidden` comes off, can land
+// before the browser has actually settled the bubble into its real size (its
+// text was just swapped in by paintFloatAsk, and a layout mid-transition
+// from 0 width reads back a width that is not the final one). That stale
+// width fed the arrow's offset and sent it drifting toward whichever icon
+// the wrong number happened to land near (#79 feedback, traced to floatBtn
+// reading as pointed at openDict instead). A ResizeObserver fires once on
+// its own right after observation starts, once the box has actually
+// settled, on top of catching any later resize the window event alone
+// would miss (a language swap changing the bubble's text width, say).
+new ResizeObserver(positionFloatAsk).observe(el.floatAsk);
 
 // On browser recognition, with the screen not yet touched. It is shown as off,
 // but the mute on the server side has not been touched (that only goes on the
