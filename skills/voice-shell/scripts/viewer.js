@@ -3837,7 +3837,25 @@ function positionFloatAsk() {
   const r = el.floatBtn.getBoundingClientRect();
   if (!r.width) return;         // hidden or not yet laid out, nothing to measure against
   el.floatAsk.style.top = Math.round(r.bottom + 10) + 'px';
-  el.floatAsk.style.right = Math.max(8, Math.round(window.innerWidth - r.right)) + 'px';
+  // The bubble's own body sits flush against the window's right edge now,
+  // not wherever floatBtn happens to be. floatBtn is the first of the
+  // header's icons (settings stays last on purpose, that seat does not
+  // move), so anchoring the whole bubble to floatBtn's edge the way this
+  // used to work left it sitting well short of the right edge instead of
+  // at it. Only the arrow still needs to point at floatBtn, so it is
+  // placed independently of the body, off a CSS variable the stylesheet's
+  // ::before reads.
+  const margin = 8;
+  el.floatAsk.style.right = margin + 'px';
+  const bubbleRight = window.innerWidth - margin;
+  const bubbleWidth = el.floatAsk.getBoundingClientRect().width;
+  const arrowCenter = r.left + r.width / 2;
+  const arrowHalf = 6;   // half the 12px triangle in the stylesheet
+  const arrowRight = Math.round(bubbleRight - arrowCenter - arrowHalf);
+  // Kept inside the bubble's own rounded ends, or the triangle draws off
+  // the edge (or past the opposite one) instead of onto the pill itself.
+  const clamped = Math.min(Math.max(arrowRight, 16), Math.max(16, bubbleWidth - 26));
+  el.floatAsk.style.setProperty('--arrow-right', clamped + 'px');
 }
 addEventListener('resize', positionFloatAsk);
 
