@@ -94,13 +94,20 @@ picked last time (`~/.config/voice-shell/config.json`), and the first time it is
    can go on in the meantime). If `FAILED` comes back, tell the user the error
    that was shown.
 
-3. `start` **opens the viewer automatically, in an ordinary tab.** There is no
-   need to open it again yourself. Add `--no-gui` only when the user says they
-   do not want it.
+3. `start` **tries to open the viewer automatically, in an ordinary tab.**
+   There is no need to open it again yourself. Add `--no-gui` only when the
+   user says they do not want it.
 
-   **With browser recognition nothing arrives at all until the viewer is open.**
-   When it could not be opened automatically (`Could not open a browser for you`
-   is printed), point the user at the URL.
+   **With browser recognition nothing arrives at all until the viewer is
+   open, and the attempt to open it for them is not always trustworthy.**
+   `start`'s own output always carries the line `The viewer started at
+   http://127.0.0.1:...` (or `already running at`, on a second start).
+   **Read that URL out to the user every time, not only when `Could not open
+   a browser for you` is printed.** A Windows machine has been seen to print
+   neither that failure line nor open anything (`cmd.exe`'s own way of
+   launching a browser can report success without one actually opening), so
+   waiting for an explicit failure line before saying anything left the user
+   talking to a screen that was never going to arrive.
 
    To keep it **always on top**, press "Float on top" in the header (a browser
    rule, it cannot be opened unless a person acts, so the screen itself asks
