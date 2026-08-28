@@ -3837,17 +3837,24 @@ function positionFloatAsk() {
   const r = el.floatBtn.getBoundingClientRect();
   if (!r.width) return;         // hidden or not yet laid out, nothing to measure against
   el.floatAsk.style.top = Math.round(r.bottom + 10) + 'px';
-  // The bubble's own body sits flush against the window's right edge now,
-  // not wherever floatBtn happens to be. floatBtn is the first of the
-  // header's icons (settings stays last on purpose, that seat does not
-  // move), so anchoring the whole bubble to floatBtn's edge the way this
-  // used to work left it sitting well short of the right edge instead of
-  // at it. Only the arrow still needs to point at floatBtn, so it is
-  // placed independently of the body, off a CSS variable the stylesheet's
+  // The bubble's own body sits flush against the right edge of the page
+  // column itself, not wherever floatBtn happens to be within it. floatBtn
+  // is the first of the header's icons (settings stays last on purpose,
+  // that seat does not move), so anchoring the whole bubble to floatBtn's
+  // edge the way this used to work left it sitting well short of the
+  // column's own right edge instead of at it.
+  //
+  // The page is a centered, width-capped column (.page, max-width:460px),
+  // not the full browser window. window.innerWidth is the window's own
+  // edge, out past the column entirely on any screen wider than that cap,
+  // and pinning the bubble there sent it drifting off past the actual UI.
+  // Only the arrow still needs to point at floatBtn, so it is placed
+  // independently of the body, off a CSS variable the stylesheet's
   // ::before reads.
   const margin = 8;
-  el.floatAsk.style.right = margin + 'px';
-  const bubbleRight = window.innerWidth - margin;
+  const pageRight = el.page.getBoundingClientRect().right;
+  el.floatAsk.style.right = Math.max(margin, Math.round(window.innerWidth - pageRight + margin)) + 'px';
+  const bubbleRight = pageRight - margin;
   const bubbleWidth = el.floatAsk.getBoundingClientRect().width;
   const arrowCenter = r.left + r.width / 2;
   const arrowHalf = 6;   // half the 12px triangle in the stylesheet
