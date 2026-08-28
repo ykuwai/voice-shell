@@ -1025,6 +1025,16 @@ def clean_user_phrase(kind: str, phrase) -> str:
     """
     if kind not in USER_COMMAND_KINDS or not isinstance(phrase, str):
         return ""
+    if kind in TAIL_KINDS:
+        # active_tail hands these straight to take_tail, which matches the
+        # raw tail of an utterance (trimmed and lowercased, see _TAIL_TRIM),
+        # never through command_key the way mute/live/hold/route are. Folding
+        # a multi-word addition through command_key here, as the fallthrough
+        # below does, would drop its internal spaces ("forget this one" ->
+        # "forgetthisone"), a shape nothing actually said aloud ever ends in,
+        # so the phrase would sit in the list looking saved and never fire.
+        key = phrase.strip().rstrip(_TAIL_TRIM).lower()
+        return key if _USER_PHRASE_MIN <= len(key) <= _USER_PHRASE_MAX else ""
     key = command_key(phrase)
     slots = key.count(ROUTE_SLOT)
     if kind == "route":

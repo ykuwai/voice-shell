@@ -1108,10 +1108,10 @@ function isBackchannel(text, words) {
    says why at the head of COMMAND_WORDS), so every screen language is asked and
    the answers are joined.
 
-   The tables themselves are read once. Nothing is ever added to them or taken
-   out of them (USER_COMMAND_KINDS leaves these two out), so they cannot go stale
-   while the screen is up. What the user switched off is another matter and does
-   move, so it is held apart in cmdOff and refreshed on every save. */
+   The built-in table is read once and never changes while the screen is up.
+   Wordings added by hand can, from any tab, so loadTailWords is called again
+   after every save (saveCmds), the same refresh cmdOff already got. What the
+   user switched off is held apart in cmdOff for the same reason. */
 /* mute rides along here too (#76 follow-up), so the drawing can show the same
    "about to happen" preview for it that cancel_tail/hold_tail already get. Unlike
    those two, mute only counts with a short noise prefix ahead of the word, not a
@@ -1132,6 +1132,12 @@ async function loadTailWords() {
           // An empty wording would end every sentence and leave the drawing
           // permanently dark, so it is dropped rather than trusted.
           for (const w of g.phrases || []) if (w) out[g.id].add(w.toLowerCase());
+      // Wordings added by hand, not just the built-in table. The same list
+      // regardless of which language this pass is for (what you typed is not
+      // translated), so adding it again on every pass through this loop only
+      // repeats work, it does not double anything up (a Set).
+      for (const id of TAIL_IDS)
+        for (const w of (d.user || {})[id] || []) if (w) out[id].add(w.toLowerCase());
       takeCmdOff(d);
     }
     tailWords = out;
@@ -1377,7 +1383,8 @@ async function changeRoute(next, prev, revision, syncServer) {
     }
     route = prev;
     if (prev !== 'off') lastMode = prev;
-    // editThisOne sets this before this call ever starts, and nothing else
+    // editThisOne sets this before this call ever starts (always a live ->
+    // hold attempt, its own guard rules out any other prev), and nothing else
     // clears it once the attempt it was guarding never actually landed. Left
     // set, route reads 'live' again but oneShot still reads true, and every
     // check gating on both together (el.tray.onclick, editOnce.disabled) goes
@@ -1385,7 +1392,15 @@ async function changeRoute(next, prev, revision, syncServer) {
     // it by coincidence, which reads as "it only works after switching by
     // hand once" (a failed one-shot attempt right as the engine was still
     // booting is the case this was caught from).
-    oneShot = false;
+    //
+    // Narrowed to that exact shape (prev live, next hold) so a *different*
+    // rollback does not clear it out from under a one-shot edit already in
+    // progress. Muting (segOff) does not pass through live/hold's own
+    // oneShot=false first the way segLive/segHold do, so pressing mute while
+    // mid-edit and having that specific request fail would otherwise erase
+    // oneShot too, even though route rolls back to the 'hold' the edit was
+    // still legitimately sitting in.
+    if (prev === 'live' && next === 'hold') oneShot = false;
     paint();
     applyRouteSideEffects(prev);
     const message = rollbackError ? `${err.message} (${rollbackError.message})` : err.message;
@@ -4810,6 +4825,11 @@ async function saveCmds(quiet = false) {
   // filling for a wording just struck. It carries the ones this screen could not
   // draw as well, which is the only way those reach the drawing at all.
   if (res.data) takeCmdOff(res.data);
+  // The send drawing's own "about to be canceled/held" preview (tailWords)
+  // reads added cancel_tail/hold_tail/mute wordings too, and otherwise sits
+  // on whatever loadTailWords saw at the one call to it on page load, stale
+  // for a wording just added or struck until the next reload.
+  loadTailWords();
   if (!quiet) flashCmdNote(t('dictSaved'), 1600);
 }
 

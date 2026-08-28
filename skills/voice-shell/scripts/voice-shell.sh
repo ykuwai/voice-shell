@@ -609,7 +609,19 @@ NAMEIT
       # when it is 0 does opening one add rather than duplicate (the very
       # thing the old flat skip here existed to avoid, back when every retry
       # popped a fresh window regardless).
-      viewers="$(http_get /api/state | grep -o '"viewers": *[0-9]*' | grep -o '[0-9]*$')"
+      # Python, not grep, so a server old enough to answer with no "viewers"
+      # key at all (or nothing, or something broken) reads as 0 rather than
+      # taking the whole script down. grep -o found nothing to match in
+      # exactly that case and exited 1, and set -euo pipefail up top turned
+      # that into start dying here in total silence, no line printed at all,
+      # whenever the viewer already running belonged to an older version.
+      viewers="$(http_get /api/state | "$PY" -c '
+import json, sys
+try:
+    print(json.loads(sys.stdin.read()).get("viewers", 0))
+except Exception:
+    print(0)
+' 2>/dev/null || true)"
       if [[ "${viewers:-0}" == "0" ]]; then
         rm -f "$STATE_DIR/gui_opened"
         [[ "${VOICE_SHELL_NO_GUI:-0}" == "1" ]] || open_gui || true
