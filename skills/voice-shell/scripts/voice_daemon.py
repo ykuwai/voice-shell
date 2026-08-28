@@ -251,6 +251,10 @@ DEFAULT_DICT = {
         "ギットハブ": "GitHub",
         "ギットいーぶ": "GitHub",
         "プルリクエスト": "pull request",
+        # 「異臭」(a bad smell) is a real word, but this tool talks about GitHub
+        # issues far more than it talks about smells, and recognition keeps
+        # landing on the real word over the loanword.
+        "異臭": "Issue",
         "ヴイエスコード": "VS Code",
         "ブイエスコード": "VS Code",
         "パイソン": "Python",
