@@ -658,12 +658,6 @@ function buildToControl(to) {
   const label = knownIdx >= 0 ? `${knownIdx + 1}. ${knownListeners[knownIdx].label}`
               : to ? (routeNames.get(to) || `#${to}`)
               : t('resendPick');
-  // Named outright rather than left as a bare number and a name, which read
-  // as only a note about where it already went, with nothing marking it as
-  // a control at all (#79 feedback: a chip alone did not say "pick again").
-  const caption = document.createElement('span');
-  caption.className = 'to-caption';
-  caption.textContent = t('resendLabel');
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'to-btn';
@@ -677,7 +671,7 @@ function buildToControl(to) {
   caret.setAttribute('aria-hidden', 'true');
   btn.append(labelSpan, caret);
   btn.onclick = () => openToMenu(btn, to);
-  wrap.append(iconSvg('terminal', 11), caption, btn);
+  wrap.append(iconSvg('terminal', 11), btn);
   return wrap;
 }
 
@@ -701,8 +695,13 @@ let closeToMenu = null;
    picker cannot afford to do.
 
    `items` is [{key, label}]. onPick runs only for a key that is not the one
-   already chosen, so neither caller has to guard against re-picking. */
-function openPickMenu(anchor, items, currentKey, onPick) {
+   already chosen, so neither caller has to guard against re-picking. A
+   `heading` line, when given, sits above the list as a plain caption (not a
+   pickable row) rather than living on the chip itself the whole time, in
+   the way, whether it was ever going to be opened or not (#79 feedback:
+   said outright once opened is enough, said every time it sits closed is
+   noise). */
+function openPickMenu(anchor, items, currentKey, onPick, heading) {
   // A second press on the same anchor is a close, not a rebuild-and-reopen.
   if (openToMenuBtn === anchor) { closeToMenu(); return; }
   if (closeToMenu) closeToMenu();
@@ -711,9 +710,28 @@ function openPickMenu(anchor, items, currentKey, onPick) {
   // a window nobody is looking at, and measured against the wrong width.
   const doc = anchor.ownerDocument;
   const win = doc.defaultView;
+  // The nearest ancestor that actually clips its own content (the history
+  // list scrolls inside one of these; the roll-up picker above the draft
+  // card is not inside one at all). Used below to close the panel once its
+  // anchor scrolls out of that container's own visible area, rather than
+  // letting a position:fixed panel go on floating over whatever sits
+  // above or below that container (#79 feedback: it was reaching up over
+  // the unsent card and the mic button once scrolled).
+  let clip = anchor.parentElement;
+  while (clip && clip !== doc.body) {
+    if (/(auto|scroll)/.test(win.getComputedStyle(clip).overflowY)) break;
+    clip = clip.parentElement;
+  }
+  if (clip === doc.body) clip = null;
   const menu = doc.createElement('div');
   menu.className = 'to-menu';
   menu.setAttribute('role', 'listbox');
+  if (heading) {
+    const h = doc.createElement('div');
+    h.className = 'to-menu-heading';
+    h.textContent = heading;
+    menu.append(h);
+  }
   for (const it of items) {
     const item = doc.createElement('button');
     item.type = 'button';
@@ -735,6 +753,14 @@ function openPickMenu(anchor, items, currentKey, onPick) {
   // already re-measures on.
   function place() {
     const r = anchor.getBoundingClientRect();
+    // Scrolled out of the list's own visible band. Reaching for a position
+    // here would mean floating the panel over the fixed controls above or
+    // below that list instead of over the row it belongs to, so close
+    // instead of chasing it somewhere that no longer makes sense.
+    if (clip) {
+      const cr = clip.getBoundingClientRect();
+      if (r.bottom < cr.top || r.top > cr.bottom) { close(); return; }
+    }
     menu.style.top = Math.round(r.bottom + 4) + 'px';
     menu.style.left = Math.round(r.left) + 'px';
     const overflowRight = menu.getBoundingClientRect().right - (win.innerWidth - 8);
@@ -777,7 +803,7 @@ function openToMenu(btn, to) {
     const row = btn.closest('.entry');
     row.dataset.to = pid;
     try { await post('/api/resend', {text: row.querySelector('.text').dataset.raw, to: pid}); } catch {}
-  });
+  }, t('resendLabel'));
 }
 
 /* Look up a name from the destination PID. Names of finished sessions are kept
