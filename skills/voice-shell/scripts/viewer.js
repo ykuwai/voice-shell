@@ -753,6 +753,10 @@ function openPickMenu(anchor, items, currentKey, onPick, heading) {
   // already re-measures on.
   function place() {
     const r = anchor.getBoundingClientRect();
+    // The roll-up picker collapses to nothing the moment the last listener
+    // drops (paintRoutes hides el.routes entirely). Nothing left to anchor
+    // against, so close rather than pin the panel at a stale 0x0 corner.
+    if (!r.width) { close(); return; }
     // Scrolled out of the list's own visible band. Reaching for a position
     // here would mean floating the panel over the fixed controls above or
     // below that list instead of over the row it belongs to, so close
@@ -798,11 +802,22 @@ const listenerItems = () =>
   knownListeners.map((l, i) => ({key: String(l.pid), label: `${i + 1}. ${l.label}`}));
 
 // The chip on a sent card. Picking another name sends the same text there.
+// The chip is rebuilt right away rather than left for the five second poll,
+// since its own onclick closes over `to` at build time (buildToControl) and
+// a stale one reads the wrong destination as "already selected" until then.
 function openToMenu(btn, to) {
   openPickMenu(btn, listenerItems(), to, async pid => {
     const row = btn.closest('.entry');
+    const prevTo = row.dataset.to;
     row.dataset.to = pid;
-    try { await post('/api/resend', {text: row.querySelector('.text').dataset.raw, to: pid}); } catch {}
+    row.querySelector('.to')?.replaceWith(buildToControl(pid));
+    try {
+      await post('/api/resend', {text: row.querySelector('.text').dataset.raw, to: pid});
+    } catch (err) {
+      row.dataset.to = prevTo;
+      row.querySelector('.to')?.replaceWith(buildToControl(prevTo));
+      el.hint.textContent = t('resendFailed', {err: err.message});
+    }
   }, t('resendLabel'));
 }
 

@@ -2005,9 +2005,9 @@ def resolve_target(log_path):
     # named meant everyone instead of nobody).
     if raw:
         try:
-            os.kill(int(raw), 0)
-            return raw
-        except (ValueError, ProcessLookupError, PermissionError, OSError):
+            if _pid_alive(int(raw)):
+                return raw
+        except ValueError:
             pass
 
     # Nothing chosen yet, or the chosen listener is truly gone. The default is
@@ -2174,10 +2174,13 @@ def listeners_dir(log_path):
 
 
 # voice-shell.sh's heal loop touches a registration file's mtime every 30s
-# (#82). Three misses in a row is well past any timer jitter or a slow
-# machine's own scheduling delay, and still catches a lingering registration
-# within a minute and a half of it actually going quiet.
-HEARTBEAT_STALE = 90
+# (#82). Set well past a laptop's lid-close/wake gap or a slow machine's own
+# scheduling delay, since either one is only a cosmetic flicker anyway
+# (resolve_target's own live-PID fallback keeps routing to a listener whose
+# registration this purges by mistake, and the heal loop resurrects the file
+# within 30s regardless). Still catches a lingering registration well inside
+# the span of one sitting at the keyboard.
+HEARTBEAT_STALE = 300
 
 
 def list_active_listeners(log_path):
@@ -2202,6 +2205,8 @@ def list_active_listeners(log_path):
             raw = ""
         try:
             info = json.loads(raw)
+            if not isinstance(info, dict):
+                info = {}
         except ValueError:
             info = {}
         # A process that started after the registration file is somebody else who
