@@ -74,9 +74,9 @@ tenga instaladas, esta incluida.
 
 ## 🔒 A dónde va su voz
 
-Dos de las tres formas nunca envían su voz a ningún sitio fuera de esta
-máquina, y cambiar a una de ellas es solo un ajuste. Qué forma está activa
-siempre se ve en la ventana.
+La forma más rápida de empezar es también la única que deja salir su voz
+de esta máquina. Las otras dos lo dejan todo en local, y cambiar a una de
+ellas es solo un ajuste. La ventana siempre muestra cuál está escuchando.
 
 > [!NOTE]
 > Por defecto reconoce el navegador, así que el audio se envía a los
@@ -92,19 +92,18 @@ siempre se ve en la ventana.
 Recuerda la forma que eligió, así que la próxima vez arranca igual. Las dos formas
 que dejan todo en local están en [SETUP.md](../../skills/voice-shell/SETUP.md).
 
-Qué idiomas puede reconocer lo decide la forma que elija. El navegador ofrece los
+La forma que elija decide qué idiomas puede reconocer. El navegador ofrece los
 que trae Chrome, Apple los locales instalados en el sistema, Whisper los que cubra el
 modelo. La ventana en sí viene en siete idiomas.
 
 ## 🗣️ Lo que puede decir
 
-Diga una de estas frases sola, sin nada más en la oración, y se aplica al
-momento.
+Diga una de estas frases sola y se aplica al momento.
 
 | Diga esto | Qué pasa |
 |---|---|
 | «silenciar» | El micrófono se apaga |
-| «quitar silencio» | El micrófono vuelve (solo mientras escucha un modelo de esta máquina, no el navegador) |
+| «quitar silencio» | El micrófono vuelve (las formas en el dispositivo siguen escuchando esto, el navegador no) |
 | «revisar» o «borrador» | Lo que dice desde aquí se acumula en vez de salir, así puede corregirlo antes de enviarlo |
 | «directo» | Vuelve a salir todo seguido |
 | «sesión 2» o «número dos» | Elige a qué sesión le llega lo que dice, cuando escuchan dos o más |

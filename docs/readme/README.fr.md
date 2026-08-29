@@ -77,9 +77,10 @@ installées, celle-ci comprise.
 
 ## 🔒 Où va votre voix
 
-Deux des trois façons n'envoient jamais votre voix hors de cette machine, et
-passer à l'une d'elles ne prend qu'un seul réglage. La façon active est
-toujours visible dans la fenêtre.
+La façon la plus rapide pour commencer est aussi la seule à laisser votre
+voix quitter la machine. Les deux autres gardent tout en local, et passer
+à l'une d'elles ne prend qu'un seul réglage. La fenêtre montre toujours
+laquelle écoute.
 
 > [!NOTE]
 > Par défaut c'est le navigateur qui reconnaît, donc l'audio part vers les
@@ -104,13 +105,12 @@ langues.
 
 ## 🗣️ Ce que vous pouvez dire
 
-Dites l'une de ces phrases seule, sans rien d'autre dans la phrase, et ça
-s'applique tout de suite.
+Dites l'une de ces phrases seule et ça s'applique tout de suite.
 
 | Dites ceci | Ce qui se passe |
 |---|---|
 | « couper le micro » | Le micro s'éteint |
-| « réactiver le micro » | Le micro revient (seulement pendant qu'un modèle sur cette machine écoute, pas le navigateur) |
+| « réactiver le micro » | Le micro revient (les façons sur l'appareil restent à l'écoute pour ça, pas le navigateur) |
 | « relecture » ou « brouillon » | Ce que vous dites s'accumule au lieu de partir, pour pouvoir le corriger avant l'envoi |
 | « direct » | Retour à l'envoi direct |
 | « session 2 » ou « numéro deux » | Choisit quelle session reçoit vos mots, quand plus d'une session écoute |

@@ -69,9 +69,9 @@ you have installed, this one included.
 
 ## 🔒 Where your voice goes
 
-Two of the three ways never send your voice anywhere outside this machine,
-and switching to one takes a single setting. Which way is picked is always
-visible in the window.
+The fastest way to start is also the only one that lets your voice leave
+the machine. The other two keep everything local, and either is one
+setting away. The window always shows which one is listening.
 
 > [!NOTE]
 > The default is browser recognition, so the audio is sent to Google's servers.
@@ -87,19 +87,18 @@ visible in the window.
 It remembers the way you picked, so next time it starts the same way. The two ways
 that keep everything local are in [SETUP.md](skills/voice-shell/SETUP.md).
 
-Which languages it can recognize is decided by the way you picked. The browser
+The way you pick decides which languages it can recognize. The browser
 offers what Chrome carries, Apple offers the locales installed in the OS, Whisper
 offers what the model covers. The window itself comes in seven languages.
 
 ## 🗣️ What you can say
 
-Say one of these on its own, with nothing else in the sentence, and it
-happens right away.
+Say one of these by itself and it happens right away.
 
 | Say this | What happens |
 |---|---|
 | "mute" | Microphone off |
-| "unmute" | Microphone back on (only while a model on this machine is listening, not the browser) |
+| "unmute" | Microphone back on (the on-device ways keep one ear open for this, the browser does not) |
 | "hold" or "draft" | What you say from here piles up instead of going out, so you can fix it before it sends |
 | "live" or "instant" | Back to going straight through |
 | "session 2" or "switch to 2" | Picks which listening session your words go to, when more than one is listening |

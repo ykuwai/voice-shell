@@ -75,9 +75,10 @@ Skills, diesen eingeschlossen.
 
 ## 🔒 Wohin Ihre Stimme geht
 
-Zwei der drei Arten schicken Ihre Stimme nie irgendwohin außerhalb dieses
-Rechners, und der Wechsel zu einer davon ist nur eine Einstellung entfernt.
-Welche Art gerade aktiv ist, sehen Sie immer im Fenster.
+Der schnellste Weg zum Start ist zugleich der einzige, bei dem Ihre Stimme
+den Rechner verlässt. Die anderen beiden halten alles lokal, und der
+Wechsel zu einer davon ist nur eine Einstellung entfernt. Welche Art
+gerade aktiv ist, sehen Sie immer im Fenster.
 
 > [!NOTE]
 > Voreingestellt ist die Erkennung im Browser, das Audio geht also an Googles
@@ -95,19 +96,18 @@ Die gewählte Art wird gemerkt, beim nächsten Mal startet es also genauso. Die 
 Arten, die alles lokal halten, stehen in
 [SETUP.md](../../skills/voice-shell/SETUP.md).
 
-Welche Sprachen erkannt werden, entscheidet die gewählte Art. Der Browser bietet, was
+Die gewählte Art entscheidet, welche Sprachen erkannt werden. Der Browser bietet, was
 Chrome mitbringt, Apple die im System installierten Locales, Whisper das, was das
 Modell abdeckt. Das Fenster selbst gibt es in sieben Sprachen.
 
 ## 🗣️ Was Sie sagen können
 
-Sagen Sie eines dieser Worte allein, ohne sonst etwas im Satz, und es wirkt
-sofort.
+Sagen Sie eines dieser Worte für sich allein, und es wirkt sofort.
 
 | Sagen Sie das | Was passiert |
 |---|---|
 | „Stummschalten" oder „Mikro aus" | Das Mikrofon geht aus |
-| „Stummschaltung aufheben" | Das Mikrofon kommt zurück (nur solange ein Modell auf diesem Rechner zuhört, nicht im Browser) |
+| „Stummschaltung aufheben" | Das Mikrofon kommt zurück (die Erkennung auf dem Gerät hört dafür weiter zu, der Browser nicht) |
 | „Entwurf" oder „Entwurfsmodus" | Was Sie ab hier sagen, sammelt sich, statt rauszugehen, sodass Sie es vor dem Senden korrigieren können |
 | „Sofortmodus" | Zurück zum direkten Senden |
 | „Sitzung 2" oder „Nummer zwei" | Legt fest, welche Sitzung Ihre Worte bekommt, wenn mehr als eine zuhört |
