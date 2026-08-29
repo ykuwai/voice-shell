@@ -62,7 +62,7 @@ Tapez `/voice-shell` dans Claude Code, ou dites « mode vocal », pour démarrer
 Les étapes que suit l'agent à partir de là sont dans
 [SKILL.md](../../skills/voice-shell/SKILL.md).
 
-## 🔄 Mettre à jour Voice Shell
+### 🔄 Mettre à jour
 
 ```bash
 npx skills update voice-shell -y

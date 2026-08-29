@@ -60,7 +60,7 @@ Tippen Sie `/voice-shell` in Claude Code, oder sagen Sie „Sprachmodus", um zu
 starten. Die Schritte, denen ein Agent von da an folgt, stehen in
 [SKILL.md](../../skills/voice-shell/SKILL.md).
 
-## 🔄 Voice Shell aktualisieren
+### 🔄 Aktualisieren
 
 ```bash
 npx skills update voice-shell -y

@@ -57,7 +57,7 @@ Claude Code에서 `/voice-shell`이라고 치거나 "음성 모드"라고 말하
 그다음부터 에이전트가 따르는 절차는 [SKILL.md](../../skills/voice-shell/SKILL.md)에
 있습니다.
 
-## 🔄 Voice Shell 업데이트하기
+### 🔄 업데이트
 
 ```bash
 npx skills update voice-shell -y

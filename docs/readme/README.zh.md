@@ -51,7 +51,7 @@ npx skills add ykuwai/voice-shell -g -a claude-code -y
 在 Claude Code 里输入 `/voice-shell`，或者说「进入语音模式」，就会开始。之后
 的步骤写在 [SKILL.md](../../skills/voice-shell/SKILL.md) 里。
 
-## 🔄 更新 Voice Shell
+### 🔄 更新
 
 ```bash
 npx skills update voice-shell -y

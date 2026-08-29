@@ -54,7 +54,7 @@ and `-y` skips the confirmation it would otherwise ask for.
 Type `/voice-shell` in Claude Code, or say "voice mode", to start. The steps
 an agent follows from there are in [SKILL.md](skills/voice-shell/SKILL.md).
 
-## 🔄 Updating Voice Shell
+### 🔄 Updating it
 
 ```bash
 npx skills update voice-shell -y

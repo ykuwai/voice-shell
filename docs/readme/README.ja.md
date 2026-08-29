@@ -55,7 +55,7 @@ Claude Codeで `/voice-shell` と打つか、「音声モードにして」と�
 始まります。そこから先の手順は
 [SKILL.md](../../skills/voice-shell/SKILL.md) にあります。
 
-## 🔄 Voice Shellをアップデート
+### 🔄 アップデート
 
 ```bash
 npx skills update voice-shell -y
