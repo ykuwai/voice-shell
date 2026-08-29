@@ -19,7 +19,7 @@
   <img src="images/viewer.png" alt="Voice Shell 的悬浮查看窗口，显示正在识别的文字、会话选择和发送方式" width="360">
 </p>
 
-## 特点
+## 💡 特点
 
 - **不用按任何东西来发送。** 大多数语音工具是把内容填进文本框，然后等您去点
   发送。这里是一听到就直接发出去，没有按钮，没有确认步骤，也不用点开某个
@@ -36,7 +36,7 @@
 - **听错的名字自己就改过来了。** 教它一次（「cloud code → Claude Code」），
   之后就一直会自动改，连正在识别中的文字也会跟着改。
 
-## 安装
+## 📦 安装 Voice Shell
 
 ```bash
 pip install numpy aiohttp "sounddevice>=0.5.6"
@@ -51,7 +51,7 @@ npx skills add ykuwai/voice-shell -g -a claude-code -y
 在 Claude Code 里输入 `/voice-shell`，或者说「进入语音模式」，就会开始。之后
 的步骤写在 [SKILL.md](../../skills/voice-shell/SKILL.md) 里。
 
-## 更新
+## 🔄 更新 Voice Shell
 
 ```bash
 npx skills update voice-shell -y
@@ -59,7 +59,10 @@ npx skills update voice-shell -y
 
 不加 `-y` 会先问一下。不写名字的话，会把装的所有技能一起更新，这个也包括在内。
 
-## 您的声音去了哪里
+## 🔒 您的声音去了哪里
+
+三种方式里有两种从不把您的声音送到这台机器以外的任何地方，切换只需要改
+一个设置。当前用的是哪一种，窗口里始终能看到。
 
 > [!NOTE]
 > 默认是用浏览器识别的，所以音频会送到 Google 的服务器。想让它留在本地
@@ -77,7 +80,7 @@ npx skills update voice-shell -y
 能识别哪些语言，由选的方式决定。浏览器给的是 Chrome 自带的那些，Apple 给的是
 系统里装了的区域设置，Whisper 给的是模型覆盖的范围。窗口本身有七种语言。
 
-## 说话能做到的事
+## 🗣️ 说话能做到的事
 
 单独说出下面这句话，不加别的内容，就会立刻生效。
 
@@ -99,7 +102,7 @@ npx skills update voice-shell -y
 以上每一种说法都能在设置里关掉，也能教它您自己的说法，都在窗口的设置里。
 窗口支持的全部七种语言的完整列表，在屏幕上的灯泡图标里。
 
-## 再详细一点
+## 📖 延伸阅读
 
 下面这两份只有英文。大多数人需要的，上面都写了。
 
@@ -108,11 +111,11 @@ npx skills update voice-shell -y
 | [SETUP.md](../../skills/voice-shell/SETUP.md) | 各种环境下怎么装，卡住了怎么办 |
 | [SKILL.md](../../skills/voice-shell/SKILL.md) | 智能体读的步骤。细的行为都在这里 |
 
-## 参考
+## 🔗 参考链接
 
 - [Web Speech API (MDN)](https://developer.mozilla.org/docs/Web/API/SpeechRecognition)
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
 
-## 许可
+## 📄 许可证
 
 MIT

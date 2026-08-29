@@ -19,7 +19,7 @@
   <img src="images/viewer.png" alt="Voice Shellのビューア。認識中の文字と、送信先の選択、送り方が並ぶウィンドウ" width="360">
 </p>
 
-## 特徴
+## 💡 特徴
 
 - **送るのに何も押す必要がありません。** たいていの音声入力ツールは、
   テキスト欄に文字を溜めて送信を押すのを待ちます。ここでは聞き取った瞬間に
@@ -38,7 +38,7 @@
   （「クロードコード → Claude Code」）、以降はずっと直ります。認識している
   最中の文字にも反映されます。
 
-## インストール
+## 📦 Voice Shellをインストール
 
 ```bash
 pip install numpy aiohttp "sounddevice>=0.5.6"
@@ -55,7 +55,7 @@ Claude Codeで `/voice-shell` と打つか、「音声モードにして」と�
 始まります。そこから先の手順は
 [SKILL.md](../../skills/voice-shell/SKILL.md) にあります。
 
-## アップデート
+## 🔄 Voice Shellをアップデート
 
 ```bash
 npx skills update voice-shell -y
@@ -64,7 +64,10 @@ npx skills update voice-shell -y
 `-y` を外すと、先に確認が入ります。名前を外すと、入れているスキルを
 すべてまとめて更新します。このスキルも含みます。
 
-## 音声がどこへ行くか
+## 🔒 音声がどこへ行くか
+
+3つのうち2つのやり方は、音声をこの機械の外へ一切送りません。切り替えは
+設定ひとつで済みます。どのやり方が動いているかは、常に画面に表示されます。
 
 > [!NOTE]
 > 既定はブラウザの認識なので、音声はGoogleのサーバへ送られます。
@@ -85,7 +88,7 @@ npx skills update voice-shell -y
 持つ一覧、AppleはOSに入っているロケール、Whisperはモデルの対応言語です。
 画面の表示は7言語あります。
 
-## 声でできること
+## 🗣️ 声でできること
 
 何も付け加えず、この一言だけを言うと、すぐに切り替わります。
 
@@ -108,7 +111,7 @@ npx skills update voice-shell -y
 教えることもできます。すべて画面の設定からです。7言語すべての
 完全な一覧は、画面の電球アイコンの中にあります。
 
-## もう少し詳しく
+## 📖 もっと詳しい資料
 
 下の2つは英語だけです。ほとんどの人に必要なことは、ここまでに
 書いてあります。
@@ -118,12 +121,12 @@ npx skills update voice-shell -y
 | [SETUP.md](../../skills/voice-shell/SETUP.md) | 環境ごとの入れ方と、つまずいたときの対処 |
 | [SKILL.md](../../skills/voice-shell/SKILL.md) | エージェントが読む手順。細かい振る舞いはここにあります |
 
-## 参考
+## 🔗 参考リンク
 
 - [Web Speech API (MDN)](https://developer.mozilla.org/docs/Web/API/SpeechRecognition)
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
 
-## ライセンス
+## 📄 ライセンス
 
 MIT
 

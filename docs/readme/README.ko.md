@@ -20,7 +20,7 @@
   <img src="images/viewer.png" alt="Voice Shell 뷰어 창. 실시간으로 인식되는 문자와 세션 선택, 전송 방식이 함께 나타난다" width="360">
 </p>
 
-## 특징
+## 💡 특징
 
 - **보낼 때 누를 것이 없습니다.** 대부분의 음성 도구는 텍스트 상자를 채우고
   전송을 누르길 기다립니다. 여기서는 듣는 순간 그대로 전달됩니다. 버튼도,
@@ -40,7 +40,7 @@
   한 번 등록해 두면 그다음부터는 계속 고쳐지고, 아직 인식 중인 글자에도
   바로 반영됩니다.
 
-## 설치
+## 📦 Voice Shell 설치하기
 
 ```bash
 pip install numpy aiohttp "sounddevice>=0.5.6"
@@ -57,7 +57,7 @@ Claude Code에서 `/voice-shell`이라고 치거나 "음성 모드"라고 말하
 그다음부터 에이전트가 따르는 절차는 [SKILL.md](../../skills/voice-shell/SKILL.md)에
 있습니다.
 
-## 업데이트
+## 🔄 Voice Shell 업데이트하기
 
 ```bash
 npx skills update voice-shell -y
@@ -66,7 +66,10 @@ npx skills update voice-shell -y
 `-y`를 빼면 먼저 묻습니다. 이름을 빼면 이 스킬을 포함해서 설치된 스킬을 전부
 한꺼번에 업데이트합니다.
 
-## 목소리가 어디로 가나
+## 🔒 목소리가 어디로 가나
+
+세 가지 방식 중 두 가지는 목소리를 이 컴퓨터 밖으로 전혀 보내지 않으며,
+전환도 설정 하나면 됩니다. 어떤 방식이 켜져 있는지는 항상 창에 표시됩니다.
 
 > [!NOTE]
 > 기본은 브라우저 인식이라서 소리가 Google 서버로 보내집니다. 내 컴퓨터
@@ -86,7 +89,7 @@ npx skills update voice-shell -y
 가진 목록, Apple은 OS에 설치된 로케일, Whisper는 모델이 다루는 범위입니다.
 창 자체는 일곱 가지 언어로 나옵니다.
 
-## 말로 할 수 있는 것
+## 🗣️ 말로 할 수 있는 것
 
 다른 말 없이 이 한마디만 하면 바로 적용됩니다.
 
@@ -109,7 +112,7 @@ npx skills update voice-shell -y
 있습니다. 전부 창의 설정에서 할 수 있습니다. 창이 지원하는 일곱 언어 전체
 목록은 화면의 전구 아이콘 안에 있습니다.
 
-## 조금 더
+## 📖 더 읽어볼 것들
 
 아래 두 가지는 영어로만 있습니다. 대부분에게 필요한 것은 위에 이미 적혀 있습니다.
 
@@ -118,11 +121,11 @@ npx skills update voice-shell -y
 | [SETUP.md](../../skills/voice-shell/SETUP.md) | 환경별 설치 방법과, 막혔을 때 할 일 |
 | [SKILL.md](../../skills/voice-shell/SKILL.md) | 에이전트가 읽는 절차. 세세한 동작은 여기에 |
 
-## 참고
+## 🔗 참고 자료
 
 - [Web Speech API (MDN)](https://developer.mozilla.org/docs/Web/API/SpeechRecognition)
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
 
-## 라이선스
+## 📄 라이선스
 
 MIT

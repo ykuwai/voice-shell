@@ -22,7 +22,7 @@ mains restent sur ce que vous étiez en train de faire.
   <img src="images/viewer.png" alt="La fenêtre de Voice Shell, une fenêtre flottante affichant la transcription en direct, le choix de la session et le mode d'envoi" width="360">
 </p>
 
-## Points forts
+## 💡 Points forts
 
 - **Rien à cliquer pour l'envoyer.** La plupart des outils vocaux remplissent
   un champ de texte et attendent que vous cliquiez sur envoyer. Ici, la
@@ -44,7 +44,7 @@ mains restent sur ce que vous étiez en train de faire.
   dans le dictionnaire (« cloud code → Claude Code ») et la correction
   s'applique dès lors, même au texte encore en cours de reconnaissance.
 
-## Installation
+## 📦 Installer Voice Shell
 
 ```bash
 pip install numpy aiohttp "sounddevice>=0.5.6"
@@ -62,7 +62,7 @@ Tapez `/voice-shell` dans Claude Code, ou dites « mode vocal », pour démarrer
 Les étapes que suit l'agent à partir de là sont dans
 [SKILL.md](../../skills/voice-shell/SKILL.md).
 
-## Mettre à jour
+## 🔄 Mettre à jour Voice Shell
 
 ```bash
 npx skills update voice-shell -y
@@ -71,7 +71,11 @@ npx skills update voice-shell -y
 Sans `-y`, il demande d'abord. Sans le nom, il met à jour toutes les skills
 installées, celle-ci comprise.
 
-## Où va votre voix
+## 🔒 Où va votre voix
+
+Deux des trois façons n'envoient jamais votre voix hors de cette machine, et
+passer à l'une d'elles ne prend qu'un seul réglage. La façon active est
+toujours visible dans la fenêtre.
 
 > [!NOTE]
 > Par défaut c'est le navigateur qui reconnaît, donc l'audio part vers les
@@ -94,7 +98,7 @@ celles que Chrome embarque, Apple les locales installées dans le système,
 Whisper celles que couvre le modèle. La fenêtre elle-même existe en sept
 langues.
 
-## Ce que vous pouvez dire
+## 🗣️ Ce que vous pouvez dire
 
 Dites l'une de ces phrases seule, sans rien d'autre dans la phrase, et ça
 s'applique tout de suite.
@@ -120,7 +124,7 @@ y enseigner votre propre formulation, le tout depuis la fenêtre. La liste
 complète, dans les sept langues de la fenêtre, se trouve derrière l'icône de
 l'ampoule à l'écran.
 
-## Pour aller plus loin
+## 📖 Pour aller plus loin
 
 Les deux ci-dessous sont en anglais uniquement. L'essentiel pour la plupart
 des gens est déjà au-dessus.
@@ -130,11 +134,11 @@ des gens est déjà au-dessus.
 | [SETUP.md](../../skills/voice-shell/SETUP.md) | L'installation selon l'environnement, et quoi faire quand ça bloque |
 | [SKILL.md](../../skills/voice-shell/SKILL.md) | Les étapes que lit l'agent. Le comportement fin est là |
 
-## Références
+## 🔗 Références
 
 - [Web Speech API (MDN)](https://developer.mozilla.org/docs/Web/API/SpeechRecognition)
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
 
-## Licence
+## 📄 Licence
 
 MIT
