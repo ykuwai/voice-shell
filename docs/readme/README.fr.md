@@ -32,10 +32,11 @@ mains restent sur ce que vous étiez en train de faire.
   un champ de texte et attendent que vous cliquiez sur envoyer. Ici, la
   phrase passe directement au moment où elle est entendue, sans bouton, sans
   étape de confirmation, sans fenêtre où cliquer.
-- **Rien à installer pour essayer.** La reconnaissance par défaut se fait dans
-  le navigateur. Aucun modèle à télécharger, aucune attente. Le jour où vous
-  voulez que tout reste privé, un seul réglage suffit pour passer à la
-  reconnaissance sur l'appareil (Apple, ou Whisper), sans rien réapprendre.
+- **Gratuit à essayer, rien de plus à installer.** La reconnaissance par
+  défaut se fait dans le navigateur. Aucun modèle à télécharger, aucune
+  attente, aucune clé API. Le jour où vous voulez que tout reste privé,
+  un seul réglage suffit pour passer à la reconnaissance sur l'appareil
+  (Apple, ou Whisper), sans rien réapprendre.
 - **Une véritable interface vocale, pas une icône de micro.** Couper le
   micro, passer de direct à relecture, annuler ce que vous venez de dire,
   choisir quelle session vous écoute, tout cela fonctionne aussi à la voix.
@@ -77,9 +78,10 @@ installées, celle-ci comprise.
 
 ## 🔒 Où va votre voix
 
-La façon la plus rapide pour commencer est aussi la seule à laisser votre
-voix quitter la machine. Les deux autres gardent tout en local, et passer
-à l'une d'elles ne prend qu'un seul réglage. La fenêtre montre toujours
+Par défaut, c'est la Web Speech API du navigateur, la façon la plus
+rapide de commencer, et la seule à laisser votre voix quitter la
+machine. Les deux autres gardent tout en local, et passer à l'une
+d'elles ne prend qu'un seul réglage. La fenêtre montre toujours
 laquelle écoute.
 
 > [!NOTE]

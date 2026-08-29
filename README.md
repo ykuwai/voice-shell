@@ -27,10 +27,10 @@ whatever you were doing.
 - **Nothing to press to send it.** Most voice tools fill a text box and wait
   for you to hit send. Here the sentence goes straight through the moment
   it's heard, no button, no confirmation step, no window to click into.
-- **Nothing to install to try it.** The default recognizer is your browser.
-  No model download, no wait. When you want it fully private, switch to
-  on-device recognition (Apple, or Whisper) with one setting, no re-learning
-  anything.
+- **Free to try, nothing extra to install.** The default recognizer is your
+  browser. No model download, no wait, no API key. When you want it fully
+  private, switch to on-device recognition (Apple, or Whisper) with one
+  setting, no re-learning anything.
 - **A full voice UI, not a microphone icon.** Muting, switching between live
   and hold, undoing what you just said, picking which session hears you, all
   of it works hands-free too. See "What you can say" below. The floating
@@ -69,9 +69,10 @@ you have installed, this one included.
 
 ## 🔒 Where your voice goes
 
-The fastest way to start is also the only one that lets your voice leave
-the machine. The other two keep everything local, and either is one
-setting away. The window always shows which one is listening.
+The default is the browser's own Web Speech API, the fastest way to
+start, and the only one that lets your voice leave the machine. The
+other two keep everything local, and either is one setting away. The
+window always shows which one is listening.
 
 > [!NOTE]
 > The default is browser recognition, so the audio is sent to Google's servers.

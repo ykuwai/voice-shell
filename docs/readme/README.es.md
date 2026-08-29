@@ -30,10 +30,11 @@ manos donde ya las tenía.
   voz llenan un cuadro de texto y esperan a que dé a enviar. Aquí la frase
   pasa directamente en el momento en que se oye, sin botón, sin paso de
   confirmación, sin ventana en la que hacer clic.
-- **No hay que instalar nada para probarlo.** El reconocimiento por defecto lo
-  hace el navegador. Sin descargar modelos ni esperas. Cuando quiera que todo
-  quede en su máquina, cambie a reconocimiento en el dispositivo (Apple o
-  Whisper) con un solo ajuste, sin tener que aprender nada nuevo.
+- **Gratis para probarlo, sin nada más que instalar.** El reconocimiento por
+  defecto lo hace el navegador. Sin descargar modelos, sin esperas, sin
+  clave de API. Cuando quiera que todo quede en su máquina, cambie a
+  reconocimiento en el dispositivo (Apple o Whisper) con un solo ajuste,
+  sin tener que aprender nada nuevo.
 - **Una interfaz de voz completa, no un icono de micrófono.** Silenciar,
   pasar de revisar a directo, deshacer lo que acaba de decir, elegir a qué
   sesión escucha, todo esto también funciona con la voz. Vea «Lo que puede
@@ -74,9 +75,10 @@ tenga instaladas, esta incluida.
 
 ## 🔒 A dónde va su voz
 
-La forma más rápida de empezar es también la única que deja salir su voz
-de esta máquina. Las otras dos lo dejan todo en local, y cambiar a una de
-ellas es solo un ajuste. La ventana siempre muestra cuál está escuchando.
+Por defecto se usa la Web Speech API del navegador, la forma más rápida
+de empezar y la única que deja salir su voz de esta máquina. Las otras
+dos lo dejan todo en local, y cambiar a una de ellas es solo un ajuste.
+La ventana siempre muestra cuál está escuchando.
 
 > [!NOTE]
 > Por defecto reconoce el navegador, así que el audio se envía a los

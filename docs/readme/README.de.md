@@ -31,10 +31,11 @@ hört, all das per Stimme, während Ihre Hände bei der eigentlichen Arbeit blei
   ein Textfeld und warten, bis Sie auf Senden klicken. Hier geht der Satz direkt
   durch, sobald er erkannt ist, kein Knopf, kein Bestätigungsschritt, kein
   Fenster zum Anklicken.
-- **Zum Ausprobieren müssen Sie nichts installieren.** Die Spracherkennung läuft
-  standardmäßig im Browser. Kein Modell zum Herunterladen, kein Warten. Wollen
-  Sie es später ganz privat, wechseln Sie mit einer einzigen Einstellung zur
-  Erkennung auf dem Gerät (Apple oder Whisper), ohne etwas neu lernen zu müssen.
+- **Kostenlos ausprobieren, nichts zusätzlich zu installieren.** Die
+  Spracherkennung läuft standardmäßig im Browser. Kein Modell zum
+  Herunterladen, kein Warten, kein API-Schlüssel. Wollen Sie es später
+  ganz privat, wechseln Sie mit einer einzigen Einstellung zur Erkennung
+  auf dem Gerät (Apple oder Whisper), ohne etwas neu lernen zu müssen.
 - **Eine vollständige Sprachbedienung, nicht nur ein Mikrofon-Symbol.**
   Stummschalten, zwischen Entwurf und Sofortmodus wechseln, das gerade Gesagte
   rückgängig machen, wählen, welche Sitzung zuhört, all das funktioniert auch
@@ -75,10 +76,11 @@ Skills, diesen eingeschlossen.
 
 ## 🔒 Wohin Ihre Stimme geht
 
-Der schnellste Weg zum Start ist zugleich der einzige, bei dem Ihre Stimme
-den Rechner verlässt. Die anderen beiden halten alles lokal, und der
-Wechsel zu einer davon ist nur eine Einstellung entfernt. Welche Art
-gerade aktiv ist, sehen Sie immer im Fenster.
+Voreingestellt ist die Web Speech API des Browsers, der schnellste Weg
+zum Start und der einzige, bei dem Ihre Stimme den Rechner verlässt.
+Die anderen beiden halten alles lokal, und der Wechsel zu einer davon
+ist nur eine Einstellung entfernt. Welche Art gerade aktiv ist, sehen
+Sie immer im Fenster.
 
 > [!NOTE]
 > Voreingestellt ist die Erkennung im Browser, das Audio geht also an Googles
