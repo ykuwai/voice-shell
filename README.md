@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/readme/images/logo.svg" alt="Voice Shell" width="88">
+</p>
+
 # Voice Shell
 
 English · [日本語](docs/readme/README.ja.md) · [Español](docs/readme/README.es.md) · [Français](docs/readme/README.fr.md) · [Deutsch](docs/readme/README.de.md) · [简体中文](docs/readme/README.zh.md) · [한국어](docs/readme/README.ko.md)
