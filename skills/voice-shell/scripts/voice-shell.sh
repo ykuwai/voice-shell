@@ -426,7 +426,19 @@ case "$cmd" in
       fi
     else
       echo "The way of recognizing is $engine"
-      "$PY" "$APP" --status
+      status_out="$("$PY" "$APP" --status)"
+      echo "$status_out"
+      # "Stopped." on its own reads as a plain, ordinary stop, the exact
+      # same line whether nobody ever started it or the model crashed on
+      # the very first real utterance right after wait-ready said READY
+      # (measured: Whisper on a machine missing its CUDA runtime does
+      # this). Neither daemon.out nor its Traceback ever reaches the
+      # screen otherwise, so a genuine crash and a normal stop were
+      # impossible to tell apart from here.
+      if [[ "$status_out" == "Stopped."* ]] \
+          && [ -s "$BOOT_LOG" ] && tail -20 "$BOOT_LOG" | grep -q "^Traceback"; then
+        echo "  It last ended in an error, not a plain stop. The log is $BOOT_LOG" >&2
+      fi
     fi
     echo
     echo "Sessions listening to this voice"

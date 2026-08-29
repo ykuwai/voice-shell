@@ -67,7 +67,31 @@ python3 -m venv .venv                    # Python 3.10 to 3.13
 .venv/bin/pip install -U faster-whisper aiohttp soxr numpy "sounddevice>=0.5.6"
 ```
 
-If `nvidia-smi` shows an NVIDIA GPU on the machine, the defaults are fine as they are.
+If `nvidia-smi` shows an NVIDIA GPU on the machine, the defaults (`cuda` /
+`float16`) are the right ones, but **the pip line above alone is not enough on
+Linux.** `ctranslate2` (what faster-whisper actually runs on) needs the CUDA
+12 build of cuBLAS and cuDNN, and unlike PyTorch it does not know to look
+inside its own `site-packages` copy for them, so a plain `pip install` step
+that only reaches `faster-whisper` leaves it unable to find either at the
+moment it actually runs (loading the model still succeeds either way, the
+first real utterance is where this shows up: `RuntimeError: Library
+libcublas.so.12 is not found or cannot be loaded`, or the equivalent for
+`libcudnn`).
+
+```bash
+.venv/bin/pip install -U nvidia-cublas-cu12 nvidia-cudnn-cu12
+export LD_LIBRARY_PATH="$(.venv/bin/python -c '
+import os, nvidia.cublas, nvidia.cudnn
+print(os.pathsep.join(os.path.dirname(m.__file__) + "/lib"
+                       for m in (nvidia.cublas, nvidia.cudnn)))
+')${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+```
+
+Put the `export` line in your shell's own startup file (`~/.bashrc` and
+similar) so it survives past this one session, since `voice-shell.sh` calls
+the interpreter directly rather than going through any `conda activate` or
+venv `activate` step, so a fix written into either of *those* alone is never
+picked up.
 
 ```bash
 voice-shell.sh whisper
@@ -118,7 +142,14 @@ held at 0.5.6 or newer, because before that it read which chip the machine has
 rather than which one the Python was built for, and loaded the wrong dll on a
 Windows machine with an ARM chip.
 
-Linux records through `arecord`, which is a separate program.
+**Linux records through `arecord` instead, always, whether or not
+`sounddevice` is installed there too.** `sounddevice` needs the PortAudio
+shared library underneath it, which the pip package alone does not carry on
+Linux, and importing it without that library installed raises `OSError:
+PortAudio library not found` (voice-shell only ever imports it inside its own
+try/except, so this cannot crash the tool itself, only a standalone `python3
+-c "import sounddevice"` run to check the install). Skip it and go straight
+to `alsa-utils`.
 
 ```bash
 sudo apt install alsa-utils      # Linux
@@ -146,6 +177,24 @@ ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh wait-ready
 Once `READY` shows up, have the user open http://127.0.0.1:47865 and talk.
 Set `VOICE_SHELL_PORT` before starting it to use another port.
 
+## Commands
+
+```bash
+voice-shell.sh start [--engine X] [--no-gui]
+voice-shell.sh stop
+voice-shell.sh status
+voice-shell.sh engines
+```
+
+| Command | What it does |
+|---|---|
+| `start` | Starts it, and remembers the way you picked last time |
+| `stop` | Stops it |
+| `status` | What is running, and which session is listening |
+| `engines` | The ways it can recognize speech |
+
+Everything you set stays in `~/.config/voice-shell/` and survives a restart.
+
 ## When you get stuck
 
 | Symptom | What to do |
@@ -154,6 +203,6 @@ Set `VOICE_SHELL_PORT` before starting it to use another port.
 | Nothing here can record | `pip install "sounddevice>=0.5.6"`. On Linux `sudo apt install alsa-utils` |
 | Startup says `FAILED` | Look at `voice-shell.sh status` and the tail of `daemon.out` |
 | Whisper is slow | Shrink the model (`--model base`). On a CPU add `--whisper-compute int8` |
-| You talk and nothing arrives | The trigger level is too high. Lower the mark under the mic in the viewer until the bar crosses it when you speak |
+| You talk and nothing arrives | Check `voice-shell.sh status` first (a crashed engine reads the same as a quiet one, see the row above). If it says it is running, the trigger level is too high, lower the mark under the mic in the viewer until the bar crosses it when you speak |
 | Noises send things on their own | The trigger level is too low. Raise that same mark until only your voice gets past it |
 | You want a different mic | Pick it in the viewer, or pass its name to `--device`. On Linux `--device` takes the `-D` of `arecord` (`arecord -L` lists them) |

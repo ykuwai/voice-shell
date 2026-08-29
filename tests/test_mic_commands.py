@@ -32,17 +32,24 @@ class MuteTailTest(unittest.TestCase):
 
 class UnmuteTailTest(unittest.TestCase):
     """Same idea, extended to unmute after the mute fix proved out, but held to a
-    tighter noise ceiling (3 chars, not 7) and a narrower wordlist: bare, generic
-    words like 「解除」/「かいじょ」 are excluded from the tail fallback since a false
-    hit here costs the whole stretch the speaker thought was off, not one
-    utterance. They still work as an exact match on their own."""
+    tighter noise ceiling (3 chars, not 7) and a narrower wordlist. 「解除」/
+    「かいじょ」 on their own used to be in that list too, exact-match only (never
+    through the tail fallback, they were excluded from that from the start). Real
+    use showed the exact-match side was not narrow enough either, someone saying
+    just that one word as a complete reply to something unrelated, muted at the
+    time, had it read as a command anyway. Pulled out entirely now, only wordings
+    that name 「ミュート」 or 「マイク」 somewhere remain."""
 
     def test_bare_phrase(self):
         self.assertEqual(mic_command_shape("ミュート解除", True), "unmute")
 
-    def test_bare_word_still_exact_matches(self):
-        self.assertEqual(mic_command_shape("解除", True), "unmute")
-        self.assertEqual(mic_command_shape("かいじょ", True), "unmute")
+    def test_generic_bare_word_no_longer_matches(self):
+        # Used to exact-match on their own. Pulled from the wordlist after a
+        # report of unrelated speech (muted at the time) firing this, since
+        # both stand on their own as ordinary words, not only as a reply to
+        # this tool.
+        self.assertIsNone(mic_command_shape("解除", True))
+        self.assertIsNone(mic_command_shape("かいじょ", True))
 
     def test_short_noise_prefix(self):
         self.assertEqual(mic_command_shape("えーとミュート解除", True), "unmute")
@@ -59,9 +66,9 @@ class UnmuteTailTest(unittest.TestCase):
         self.assertEqual(mic_command_shape("はい、ミュート解除", True), "unmute")
 
     def test_excluded_bare_word_does_not_tail_match(self):
-        # 「解除」 alone would exact-match (see above), but a generic sentence that
-        # merely ends with it should not fire through the tail fallback, it is
-        # excluded from UNMUTE_TAIL on purpose.
+        # A generic sentence that merely ends in 「解除」 should not fire
+        # through the tail fallback either, now that the word carries no
+        # match of its own to fall back from.
         self.assertIsNone(mic_command_shape("その契約を解除", True))
 
     def test_already_unmuted_does_nothing(self):

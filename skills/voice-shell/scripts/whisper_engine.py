@@ -118,6 +118,30 @@ class WhisperModel:
         print(f"Loading Whisper ({name} / {compute_type})",
               file=sys.stderr, flush=True)
         self._m = FW(name, device=device, compute_type=compute_type)
+        # Loading alone says nothing about whether it can actually run.
+        # ctranslate2 only touches the CUDA runtime (cuBLAS/cuDNN) once
+        # transcribe() really executes, and segments is a generator, so even
+        # calling transcribe() does nothing until it is iterated. On a
+        # machine missing those libraries this construction still succeeds,
+        # wait-ready reports READY, and the daemon dies on the very first
+        # real utterance instead, with nothing on screen explaining why the
+        # mic was clearly picking sound up. vad_filter is off here on
+        # purpose (real transcribing leaves it on): plain digital silence
+        # would otherwise let VAD skip the model outright, which would
+        # "pass" this without ever touching the GPU it exists to test.
+        try:
+            list(self._m.transcribe(np.zeros(SAMPLE_RATE, dtype=np.float32),
+                                     beam_size=1, vad_filter=False)[0])
+        except Exception as e:
+            if device == "cuda" and "libcu" in str(e).lower():
+                raise RuntimeError(
+                    f"{e}\n"
+                    "The model loaded, but this machine's CUDA runtime "
+                    "(cuBLAS/cuDNN) could not actually run it. See "
+                    "SETUP.md's Whisper section for how to point "
+                    "ctranslate2 at nvidia-cublas-cu12 / nvidia-cudnn-cu12."
+                ) from e
+            raise
         # Leave it None so it auto-detects. voice-shell always passes
         # --language Japanese, but letting that bite makes English arrive
         # translated into Japanese. Pin the language with --whisper-language.

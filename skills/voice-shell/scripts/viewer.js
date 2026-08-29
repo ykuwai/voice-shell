@@ -1857,7 +1857,7 @@ function paintPower() {
   el.powerLabel.textContent = t(engine === 'off' ? 'powerStart' : 'powerStop');
   el.power.disabled = busy;
 
-  if (engine === 'booting') {
+  if (engine === 'booting' && performance.now() > hintHoldUntil) {
     const sec = (Date.now() - startedAt) / 1000;
     const left = Math.max(0, Math.ceil(BOOT_SEC - sec));
     el.hint.textContent = left > 0 ? t('bootingLeft', {n: left}) : t('bootingSoon');
@@ -1905,6 +1905,7 @@ el.power.onclick = async () => {
 
 let seeded = false;   // restores what had piled up, once, on reload
 let uiStamp = 0;      // the mtime of the screen file at the moment it was loaded
+let wayland = false;  // whether the daemon's own session is Wayland (floating cannot stay on top there)
 
 el.fresh.onclick = () => {
   const w = floatingWindow();
@@ -1927,10 +1928,14 @@ async function refreshState() {
       if (uiStamp === 0) uiStamp = s.ui;
       else if (s.ui !== uiStamp) el.fresh.hidden = false;
     }
+    wayland = !!s.wayland;
 
     if (typeof s.engine === 'boolean') {
       if (s.engine) {
-        if (engine !== 'on') { clearInterval(tick); el.hint.textContent = ''; }
+        if (engine !== 'on') {
+          clearInterval(tick);
+          if (performance.now() > hintHoldUntil) el.hint.textContent = '';
+        }
         engine = 'on';
       } else if (s.loading) {
         // so that starting up is visible even when another tab was the one that pressed
@@ -4069,6 +4074,14 @@ el.floatBtn.onclick = async () => {
   paintFloat(true);
   paintFloatAsk();
   paint();                    // put the same title on the small window too
+  // Document Picture-in-Picture has no "stay above everything" flag of its
+  // own to ask for, it only works because the OS window manager honors a
+  // hint Chrome sends along with the request. X11 does, Wayland (GNOME
+  // among them) does not expose that to an ordinary browser window, so the
+  // small window floats but can still end up behind whatever is clicked
+  // next (#88, found on a real Ubuntu GNOME machine). Say so once, here,
+  // rather than leaving it to look broken with no explanation.
+  if (wayland) say(t('waylandFloatNote'), 12);
   win.addEventListener('pagehide', () => {
     // Put the target back first. A small window on its way closed is still
     // there, so left alone we would go and write the theme and the colors into

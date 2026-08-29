@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/readme/images/logo.svg" alt="Voice Shell" width="88">
+</p>
+
 # Voice Shell
 
 English · [日本語](docs/readme/README.ja.md) · [Español](docs/readme/README.es.md) · [Français](docs/readme/README.fr.md) · [Deutsch](docs/readme/README.de.md) · [简体中文](docs/readme/README.zh.md) · [한국어](docs/readme/README.ko.md)
@@ -10,26 +14,27 @@ English · [日本語](docs/readme/README.ja.md) · [Español](docs/readme/READM
 **Talk to Claude Code. No keyboard.**
 
 You think out loud while you work, and the sentence lands as a prompt, no
-Enter key involved. Not dictation bolted onto a text box: mute, review, undo,
+Enter key involved. Not dictation bolted onto a text box. Mute, review, undo,
 and pick which session hears you, all by voice, while your hands stay on
 whatever you were doing.
 
 <p align="center">
-  <img src="docs/readme/images/viewer.png" alt="The Voice Shell viewer: a floating window showing live transcription, session routing, and send mode" width="360">
+  <img src="docs/readme/images/viewer.png" alt="The Voice Shell viewer, a floating window showing live transcription, session routing, and send mode" width="360">
 </p>
 
-## Why
+## 💡 Why Voice Shell
 
 - **Nothing to press to send it.** Most voice tools fill a text box and wait
   for you to hit send. Here the sentence goes straight through the moment
   it's heard, no button, no confirmation step, no window to click into.
-- **Nothing to install to try it.** The default recognizer is your browser.
-  No model download, no wait. When you want it fully private, switch to
-  on-device recognition (Apple, or Whisper) with one setting, no re-learning
-  anything.
-- **A full voice UI, not a microphone icon.** "Mute", "hold", "live",
-  "cancel that", "session 2" — said at the end of a sentence, all of it works
-  hands-free. The floating window shows exactly what it heard as you say it.
+- **Free to try, nothing extra to install.** The default recognizer is your
+  browser. No model download, no wait, no API key. When you want it fully
+  private, switch to on-device recognition (Apple, or Whisper) with one
+  setting, no re-learning anything.
+- **A full voice UI, not a microphone icon.** Muting, switching between live
+  and hold, undoing what you just said, picking which session hears you, all
+  of it works hands-free too. See "What you can say" below. The floating
+  window shows exactly what it heard as you say it.
 - **Run it for more than one thing at once.** Keep voice mode on in several
   Claude Code sessions and choose which one gets your words, from the window
   or by voice.
@@ -37,28 +42,23 @@ whatever you were doing.
   Code") and the correction applies from then on, even to text still being
   recognized.
 
-## Install
+## 📦 Installing Voice Shell
 
 ```bash
-npx skills add ykuwai/voice-shell -g
 pip install numpy aiohttp "sounddevice>=0.5.6"
+npx skills add ykuwai/voice-shell -g -a claude-code -y
 ```
 
 If you have Chrome, that is all it takes. `-g` puts it in `~/.claude/skills/`,
 so it is there for every project. Only want to try it out inside one project?
 Drop the `-g` and it lands in `.claude/skills/` for that project alone.
+`-a claude-code` names Claude Code directly instead of leaving `npx` to guess,
+and `-y` skips the confirmation it would otherwise ask for.
 
 Type `/voice-shell` in Claude Code, or say "voice mode", to start. The steps
 an agent follows from there are in [SKILL.md](skills/voice-shell/SKILL.md).
 
-Running that from an agent, or from a script, name Claude Code instead of
-leaving it to detect on its own, and add `-y` to skip the confirmation.
-
-```bash
-npx skills add ykuwai/voice-shell -g -a claude-code -y
-```
-
-## Update
+### 🔄 Updating it
 
 ```bash
 npx skills update voice-shell -y
@@ -67,7 +67,12 @@ npx skills update voice-shell -y
 Leave off `-y` and it asks first. Drop the name and it updates every skill
 you have installed, this one included.
 
-## Where your voice goes
+## 🔒 Where your voice goes
+
+The default is the browser's own Web Speech API, the fastest way to
+start, and the only one that lets your voice leave the machine. The
+other two keep everything local, and either is one setting away. The
+window always shows which one is listening.
 
 > [!NOTE]
 > The default is browser recognition, so the audio is sent to Google's servers.
@@ -83,29 +88,35 @@ you have installed, this one included.
 It remembers the way you picked, so next time it starts the same way. The two ways
 that keep everything local are in [SETUP.md](skills/voice-shell/SETUP.md).
 
-Which languages it can recognize is decided by the way you picked. The browser
+The way you pick decides which languages it can recognize. The browser
 offers what Chrome carries, Apple offers the locales installed in the OS, Whisper
 offers what the model covers. The window itself comes in seven languages.
 
-## Commands
+## 🗣️ What you can say
 
-```bash
-voice-shell.sh start [--engine X] [--no-gui]
-voice-shell.sh stop
-voice-shell.sh status
-voice-shell.sh engines
-```
+Say one of these by itself and it happens right away.
 
-| Command | What it does |
+| Say this | What happens |
 |---|---|
-| `start` | Starts it, and remembers the way you picked last time |
-| `stop` | Stops it |
-| `status` | What is running, and which session is listening |
-| `engines` | The ways it can recognize speech |
+| "mute" | Microphone off |
+| "unmute" | Microphone back on (the on-device ways keep one ear open for this, the browser does not) |
+| "hold" or "draft" | What you say from here piles up instead of going out, so you can fix it before it sends |
+| "live" or "instant" | Back to going straight through |
+| "session 2" or "switch to 2" | Picks which listening session your words go to, when more than one is listening |
 
-Everything you set stays in `~/.config/voice-shell/` and survives a restart.
+Add one of these to the end of what you are saying and it applies to that
+one sentence alone.
 
-## A little more
+| Say this | What happens |
+|---|---|
+| "cancel that" | The sentence you just said is thrown away |
+| "edit this" | The sentence lands in the box instead of going out, so you can fix it first |
+
+Every phrase above can be switched off, and you can teach it your own
+wording, both from the settings in the window. The full list, in all seven
+languages the window comes in, is behind the lightbulb icon on screen.
+
+## 📖 Reading more
 
 The two below are in English only. What most people need is already above.
 
@@ -114,12 +125,12 @@ The two below are in English only. What most people need is already above.
 | [SETUP.md](skills/voice-shell/SETUP.md) | How to install it per environment, and what to do when you get stuck |
 | [SKILL.md](skills/voice-shell/SKILL.md) | The steps the agent reads. The fine behavior is here |
 
-## References
+## 🔗 References
 
 - [Web Speech API (MDN)](https://developer.mozilla.org/docs/Web/API/SpeechRecognition)
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
 
-## License
+## 📄 License
 
 MIT
 
