@@ -13,13 +13,13 @@ c'est l'anglais qui fait foi.
 **Parlez à Claude Code. Sans clavier.**
 
 Vous pensez tout haut en travaillant, et la phrase arrive telle quelle comme
-instruction, sans toucher à la touche Entrée. Ce n'est pas de la dictée collée
-sur un champ de texte : couper le micro, se relire, annuler, choisir quelle
-session vous écoute, tout cela se fait à la voix, pendant que vos mains
-restent sur ce que vous étiez en train de faire.
+instruction, sans toucher à la touche Entrée. Ce n'est pas de la dictée
+collée sur un champ de texte. Couper le micro, se relire, annuler, choisir
+quelle session vous écoute, tout cela se fait à la voix, pendant que vos
+mains restent sur ce que vous étiez en train de faire.
 
 <p align="center">
-  <img src="images/viewer.png" alt="La fenêtre de Voice Shell : une fenêtre flottante affichant la transcription en direct, le choix de la session et le mode d'envoi" width="360">
+  <img src="images/viewer.png" alt="La fenêtre de Voice Shell, une fenêtre flottante affichant la transcription en direct, le choix de la session et le mode d'envoi" width="360">
 </p>
 
 ## Points forts
@@ -32,9 +32,10 @@ restent sur ce que vous étiez en train de faire.
   le navigateur. Aucun modèle à télécharger, aucune attente. Le jour où vous
   voulez que tout reste privé, un seul réglage suffit pour passer à la
   reconnaissance sur l'appareil (Apple, ou Whisper), sans rien réapprendre.
-- **Une véritable interface vocale, pas une icône de micro.** « Coupe le
-  micro », « relecture », « direct », « annule ça », « session 2 » — dits en
-  fin de phrase, tout fonctionne mains libres. La fenêtre flottante affiche
+- **Une véritable interface vocale, pas une icône de micro.** Couper le
+  micro, passer de direct à relecture, annuler ce que vous venez de dire,
+  choisir quelle session vous écoute, tout cela fonctionne aussi à la voix.
+  Voir « Ce que vous pouvez dire » plus bas. La fenêtre flottante affiche
   exactement ce qu'elle entend, au fil de la parole.
 - **Utilisable sur plusieurs chantiers à la fois.** Gardez le mode vocal actif
   dans plusieurs sessions Claude Code et choisissez laquelle reçoit vos mots,
@@ -46,25 +47,20 @@ restent sur ce que vous étiez en train de faire.
 ## Installation
 
 ```bash
-npx skills add ykuwai/voice-shell -g
 pip install numpy aiohttp "sounddevice>=0.5.6"
+npx skills add ykuwai/voice-shell -g -a claude-code -y
 ```
 
 Si vous avez Chrome, il n'en faut pas plus. `-g` le met dans
 `~/.claude/skills/`, disponible depuis tous vos projets. Juste envie de
 l'essayer dans un seul projet ? Enlevez `-g` et il reste dans le
-`.claude/skills/` de ce projet-là.
+`.claude/skills/` de ce projet-là. `-a claude-code` nomme Claude Code
+directement plutôt que de laisser `npx` deviner, et `-y` saute la
+confirmation qu'il demanderait sinon.
 
 Tapez `/voice-shell` dans Claude Code, ou dites « mode vocal », pour démarrer.
 Les étapes que suit l'agent à partir de là sont dans
 [SKILL.md](../../skills/voice-shell/SKILL.md).
-
-Depuis un agent, ou depuis un script, nommez Claude Code plutôt que de le
-laisser le détecter tout seul, et ajoutez `-y` pour sauter la confirmation.
-
-```bash
-npx skills add ykuwai/voice-shell -g -a claude-code -y
-```
 
 ## Mettre à jour
 
@@ -98,24 +94,31 @@ celles que Chrome embarque, Apple les locales installées dans le système,
 Whisper celles que couvre le modèle. La fenêtre elle-même existe en sept
 langues.
 
-## Commandes
+## Ce que vous pouvez dire
 
-```bash
-voice-shell.sh start [--engine X] [--no-gui]
-voice-shell.sh stop
-voice-shell.sh status
-voice-shell.sh engines
-```
+Dites l'une de ces phrases seule, sans rien d'autre dans la phrase, et ça
+s'applique tout de suite.
 
-| Commande | Ce qu'elle fait |
+| Dites ceci | Ce qui se passe |
 |---|---|
-| `start` | Démarre, en retenant la façon choisie la fois précédente |
-| `stop` | Arrête |
-| `status` | Ce qui tourne, et quelle session écoute |
-| `engines` | Les façons de reconnaître la parole |
+| « couper le micro » | Le micro s'éteint |
+| « réactiver le micro » | Le micro revient (seulement pendant qu'un modèle sur cette machine écoute, pas le navigateur) |
+| « relecture » ou « brouillon » | Ce que vous dites s'accumule au lieu de partir, pour pouvoir le corriger avant l'envoi |
+| « direct » | Retour à l'envoi direct |
+| « session 2 » ou « numéro deux » | Choisit quelle session reçoit vos mots, quand plus d'une session écoute |
 
-Tous vos réglages restent dans `~/.config/voice-shell/` et survivent à un
-redémarrage.
+Ajoutez l'une de celles-ci à la fin de ce que vous dites et ça s'applique
+seulement à cette phrase-là.
+
+| Dites ceci | Ce qui se passe |
+|---|---|
+| « annule ça » | La phrase que vous venez de dire est jetée |
+| « je corrige » | La phrase atterrit dans la case au lieu de partir, pour pouvoir la corriger d'abord |
+
+Chacune de ces phrases peut être désactivée dans les réglages, et vous pouvez
+y enseigner votre propre formulation, le tout depuis la fenêtre. La liste
+complète, dans les sept langues de la fenêtre, se trouve derrière l'icône de
+l'ampoule à l'écran.
 
 ## Pour aller plus loin
 

@@ -177,6 +177,24 @@ ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh wait-ready
 Once `READY` shows up, have the user open http://127.0.0.1:47865 and talk.
 Set `VOICE_SHELL_PORT` before starting it to use another port.
 
+## Commands
+
+```bash
+voice-shell.sh start [--engine X] [--no-gui]
+voice-shell.sh stop
+voice-shell.sh status
+voice-shell.sh engines
+```
+
+| Command | What it does |
+|---|---|
+| `start` | Starts it, and remembers the way you picked last time |
+| `stop` | Stops it |
+| `status` | What is running, and which session is listening |
+| `engines` | The ways it can recognize speech |
+
+Everything you set stays in `~/.config/voice-shell/` and survives a restart.
+
 ## When you get stuck
 
 | Symptom | What to do |
