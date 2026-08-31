@@ -503,6 +503,7 @@ case "$cmd" in
     # legitimately runs two of these at once, so any other registration
     # carrying this same one is always a leftover, safe to retire outright
     # rather than merely warn about.
+    reattached=0
     if [[ -n "$session" && -d "$STATE_DIR/listeners" ]]; then
       for f in "$STATE_DIR/listeners"/*; do
         [[ -f "$f" ]] || continue
@@ -518,6 +519,7 @@ except Exception:
         if [[ -n "$other_session" && "$other_session" == "$session" ]]; then
           kill "$other_pid" 2>/dev/null || true
           rm -f "$f"
+          reattached=1
         fi
       done
     fi
@@ -536,6 +538,27 @@ json.dump({"started": time.strftime("%Y-%m-%d %H:%M:%S"), "since": now,
            "cwd": os.getcwd(), "agent": agent, "session": session, "name": name},
           open(reg, "w", encoding="utf-8"), ensure_ascii=False)
 REG
+
+    # Starting voice mode is as much a deliberate claim on the mic as picking
+    # a chip by hand, so it takes over the same way, the target this session
+    # is not the one already chosen (SKILL.md has always promised this: speech
+    # goes to whichever started later). Only on a session's first registration
+    # though. The loop above already tells the two apart: reattaching (the
+    # usual way compacting shows a second one, #81) sets reattached, and there
+    # the whole point is picking up where the old one left off, route and all,
+    # not stealing the mic out from under whatever else the person is doing.
+    # Clearing the file rather than writing this session's own pid leaves
+    # resolve_target's own fallback (whichever is newest) to name it, so a
+    # missing pick still means exactly what it always has.
+    #
+    # Done only now, after this session's own registration file is already on
+    # disk. Clearing it first, ahead of the write above, opened a window where
+    # nothing was chosen and this session did not exist yet either, so a word
+    # settling in that stretch fell to whatever else happened to be listening,
+    # neither the old pick nor the new session (the same shape of bug as #73).
+    if [[ -n "$session" && "$reattached" == 0 ]]; then
+      : > "$STATE_DIR/route"
+    fi
     # With exec the trap is not carried over (process replacement makes bash
     # itself disappear), so the automatic cleanup on exit stops working.
     #

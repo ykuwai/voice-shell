@@ -611,7 +611,7 @@
     font-variant-numeric:tabular-nums;
   }
   .draft-card .gutter .spacer { flex:1; }
-  .draft-card .gutter, .draft-card .draft-actions { flex:none; }
+  .draft-card .gutter { flex:none; }
   .draft-card > textarea { flex:0 1 auto; }   /* this gives too when seats run short */
   /* Edit, throw away, and send now. Three small tools of one make.
      They used to be lined up on one base, the way the mode switch on the main
@@ -628,13 +628,18 @@
      the same 8px in padding and border, so the group is the 106px it always
      was and the narrow window lays out as before. */
   .tiny.send { margin-left:.5rem; }
-  /* That reserved seat is what leaves cancelOnce sitting away from the card's
+  /* That reserved seat is what leaves the row sitting away from the card's
      own right edge while nothing is sendable yet, reading as a stray gap
      rather than a border. The pair it used to guard against sliding are
-     gone from this row already (this state hides them outright), so there
-     is nothing left for the reserved seat to protect here, and collapsing
-     it lets cancelOnce sit flush at the corner instead. */
-  .draft-card.editing .tiny.send:not(.on) { display:none; }
+     gone from this row already whenever discard and send have taken their
+     place instead, so there is nothing left for the reserved seat to
+     protect here, and collapsing it lets the row sit flush at the corner.
+     Keyed off discard's own hidden state rather than a mode class, since
+     the box behind it can be open for more than one reason (review, editing
+     just one, or plain live with text still sitting there unsent) and all
+     of them hide the pair the same way. */
+  .draft-card.editing .tiny.send:not(.on),
+  .draft-card:has(> .gutter #discard:not([hidden])) .tiny.send:not(.on) { display:none; }
   .tiny {
     display:grid; place-items:center; width:30px; height:30px;
     border-radius:50%; color:var(--faint);
@@ -646,6 +651,41 @@
   .tiny:active:not(:disabled) { transform:scale(.9); }
   .tiny.edit:hover:not(:disabled) { color:var(--accent-2); }
   .tiny.warn:hover:not(:disabled) { color:var(--danger); }
+  /* The whole draft going out, same seat and same size as the rest of this
+     row. It used to stand alone on its own big round base below the box,
+     which read fine but cost the history under it most of its own height.
+     Accent-colored at rest, unlike the others here, since this is the one of
+     the row you reach for on purpose.
+     The ring round it borrows sendOne's resting face, the one thing that used
+     to mark out "the one you press on purpose" among a row of plain icons.
+     Nothing here runs a countdown or turns to ink partway through, since this
+     button never carries a pause to send, so a ring drawn once and left alone
+     is the whole of it. */
+  .tiny.go {
+    margin-left:.5rem; color:var(--accent);
+    position:relative;
+    --cue-ring:color-mix(in srgb, var(--accent) 35%, var(--track));
+    border:2px solid transparent;
+    background-clip:padding-box;
+  }
+  .tiny.go::after {
+    content:'';
+    position:absolute; inset:-2px;
+    border-radius:50%;
+    pointer-events:none;
+    background:var(--cue-ring);
+    -webkit-mask-image:radial-gradient(closest-side,
+      transparent calc(100% - 2.7px), #000 calc(100% - 2.1px),
+      #000 calc(100% - .35px), transparent 100%);
+    mask-image:radial-gradient(closest-side,
+      transparent calc(100% - 2.7px), #000 calc(100% - 2.1px),
+      #000 calc(100% - .35px), transparent 100%);
+  }
+  /* Filled at rest rather than only on hover, the same way sendOne draws its
+     plane. An outline reads as the same weight as the trash beside it, and
+     this one is not. */
+  .tiny.go svg .solid { display:inline; }
+  .tiny.go svg .line { display:none; }
   /* On hover it turns filled. That is the feedback that says "this one" before you press. */
   .tiny:hover:not(:disabled) > svg .solid { display:inline; }
   .tiny:hover:not(:disabled) > svg .line { display:none; }
@@ -659,7 +699,7 @@
      Which one is about to be pressed is already said twice over, by the pencil
      button and by the help. */
   .draft-card:not(.holding):not(.editing) { cursor:text; }
-  .draft-card .draft-actions, .draft-card .tiny-row { cursor:default; }
+  .draft-card .tiny-row { cursor:default; }
   .draft-card .mark {
     padding:.05rem .4rem; border-radius:5px; font-size:.64rem; font-weight:600;
     color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, transparent);
@@ -893,6 +933,13 @@
     /* We want to show it scrolls, but in a narrow window the bar shoves the text aside */
     scrollbar-width:thin; scrollbar-color:var(--line) transparent;
   }
+  /* Once the edit box is open, the still-recognizing line and the box you are
+     actually fixing both reached for the same --stream-max on their own, so
+     an ordinary window (the 720px floating one included) could spend over
+     300px on the two of them together and leave the history below all but
+     gone. The sentence being fixed and the send button matter more here, so
+     hold the still-recognizing line to one row. */
+  .draft-card:has(> textarea:not([hidden])) .stream { max-height:1.7em; }
   /* A word that was taken as a signal. Lighting up the word itself shows it
      was handled as an operation and not as an instruction. */
   .stream mark.cmd {
@@ -942,17 +989,6 @@
     min-height:3.4em; max-height:var(--stream-max);
   }
   #draft:focus { outline:none; border-color:var(--accent-2); }
-  .draft-actions { display:flex; align-items:center; gap:.4rem; margin-top:.5rem; }
-  .draft-actions .spacer { flex:1; }
-  .round {
-    width:38px; height:38px; border-radius:50%; display:grid; place-items:center;
-    border:2px solid var(--line); color:var(--dim);
-    transition:border-color .15s, color .15s, box-shadow .15s;
-  }
-  .round svg { width:17px; height:17px; stroke-width:2.1; }
-  .round:hover { color:var(--text); border-color:var(--dim); }
-  .round.go { border-color:var(--accent); color:var(--accent); }
-  .round.go:hover { box-shadow:var(--glow) color-mix(in srgb, var(--accent) 50%, transparent); }
 
   .none { padding:1.5rem var(--pad); text-align:center; font-size:.78rem; color:var(--faint); }
 
@@ -1401,9 +1437,26 @@
     .mini-mic { width:30px; height:30px; }
   }
 
-  /* Short. Fold the log heading and the note line, and tighten the vertical padding */
-  @media (max-height: 639px) {
-    :root { --stream-max:6em; }
+  /* Short. Fold the log heading and the note line, and tighten the vertical padding.
+     639 used to be the line, on the idea that a floated window keeps close to the
+     720px it asks for. It does not. Chrome draws its own bar across the top of a
+     floated window, over the page's own content, and what is left inside measures
+     closer to 647px on the machine this was checked on. That sat 8px above the old
+     line, so the one window this tier exists for never actually reached it, full
+     size controls and all, and review mode with anything more than a short draft
+     left next to nothing for the history under it. Widened to clear that with room
+     to spare instead of by the 8px it was missing by. */
+  @media (max-height: 679px) {
+    :root {
+      --stream-max:6em;
+      /* The mic drawing and the two rings beside it sit at their own top end
+         throughout this whole range (24vh and 11vh alike clear it well before
+         the window gets this short), so nothing here is fighting the window for
+         room, it is fighting a ceiling that was set for a taller one. Brought
+         down with the rest of what gives at this line. */
+      --viz-h:clamp(78px, 24vh, 93px);
+      --ring:clamp(44px, 11vh, 51px);
+    }
     .hint { display:none; }
     .log-head { display:none; }
     .log-wrap { border-top:1px solid var(--line-soft); }   /* takes over the divider the heading had */
@@ -1414,9 +1467,6 @@
   @media (max-height: 479px) {
     :root { --stream-max:4.5em; }
     .meter-row { display:none; }
-    /* While the edit box is open, hold the live transcript to one line. The
-       sentence you are fixing and the send button should be seen first. */
-    .draft-card:has(> textarea:not([hidden])) .stream { max-height:1.7em; }
     #draft { min-height:2.4em; }
   }
 
@@ -1434,7 +1484,6 @@
        sentence you are fixing and the send button should be seen first, and the
        mic drawing already tells you whether you are being heard. */
     .draft-card:has(> textarea:not([hidden])) .stream { display:none; }
-    .draft-card:has(> textarea:not([hidden])) .draft-actions { margin-top:.3rem; }
   }
 
   @media (max-height: 379px) {
@@ -1475,13 +1524,6 @@
     .draft-card:has(> textarea:not([hidden])) .gutter { margin-left:auto; }
     .draft-card .stream { order:1; flex:1 1 6em; min-width:0; }
     .draft-card > textarea { order:3; flex:1 1 100%; margin-top:0; }
-    .draft-card .draft-actions { order:4; flex:1 1 100%; margin-top:0; }
-    /* It used to be dropped at this height. Back then it hung in the corner of
-       the card, and on a card about 40px tall there was nowhere for it to go
-       that was not under the tools. It rides inside the tools now, so it costs
-       no row and no corner, and the row it is in is already on screen here. So
-       it stays. Losing it was the worse trade anyway, since the small window is
-       where the card is most likely to be watched out of the corner of an eye. */
   }
 
   /* When it is short, cut the top bar down to the name tag. Neither the title
@@ -1491,8 +1533,11 @@
     header { padding:.35rem var(--pad) .25rem; gap:.35rem; }
     /* The sheet headings come down with it. The row of four is one node moved
        between the three, and left out of this it sat 8px lower in a sheet than
-       on the main screen. A floating window is about 446px tall, which is to
-       say it is the usual place this bites, not a corner of one. */
+       on the main screen. The 446px this was written against no longer holds.
+       A floating window at its default size gets about 647px once Chrome's own
+       bar across the top has taken its share, which sits above this line, so
+       what reaches here now is a window dragged shorter than that, or an
+       ordinary browser window resized down rather than the floated one. */
     .sheet-head { padding-top:.35rem; padding-bottom:.25rem; }
     .brand h1, #logoMark { display:none; }
     .machine { max-width:100%; }

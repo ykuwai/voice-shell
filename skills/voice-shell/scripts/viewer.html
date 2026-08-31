@@ -136,6 +136,17 @@
              also mean discarding what you typed. -->
         <button class="tiny cancel" id="cancelOnce" data-icon="close" data-icon-size="16"
                 data-i18n-title="cancelOnce" hidden></button>
+        <!-- The whole box goes out, or gets thrown away. Reviewing what piled
+             up in hold, and fixing just this one utterance, both land in this
+             same box, so the same pair covers both. Tiny like the rest of this
+             row, not the big round pair this used to be sitting under the box
+             on a row of its own. Talk long enough in hold and that row alone
+             cost the history below most of its own height, for a button doing
+             the same job a small one does everywhere else on this screen. -->
+        <button class="tiny warn" id="discard" data-icon="delete" data-icon-size="16"
+                data-i18n-title="discardTitle" hidden></button>
+        <button class="tiny go" id="send" data-icon="send" data-icon-size="16"
+                data-i18n-title="sendTitle" hidden></button>
         <!-- Send this one now. The drawing carries what is about to happen to
              the utterance as well as the way past it. Going out paints the
              inside across from the left. Being thrown away drains the ring
@@ -165,13 +176,6 @@
     </div>
     <div class="stream"><span id="stream" data-i18n-quiet="quiet"></span><span class="caret"></span></div>
     <textarea id="draft" data-i18n-ph="draftPlaceholder" hidden></textarea>
-    <div class="draft-actions" id="draftActions" hidden>
-      <span class="spacer"></span>
-      <button class="round" id="discard" data-icon="delete" data-icon-size="20"
-              data-i18n-title="discardTitle"></button>
-      <button class="round go" id="send" data-icon="send" data-icon-size="20"
-              data-i18n-title="sendTitle"></button>
-    </div>
   </section>
 
   <div class="log-head">

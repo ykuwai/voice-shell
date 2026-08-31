@@ -101,7 +101,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'power','powerLabel','powerRow','powerNote','openSettings','sheet','closeSettings','floatBtn','page',
                   'miniMic','miniViz','navRow','pageHead','sheetHead','helpHead','openDict','sheetTitle',
                   'routes','routeChips','routePick','routePickLabel','viz','meter','meterHit','meterFill','meterMark','logoMark',
-                  'tray','stream','draft','draftTime','draftActions','send','discard',
+                  'tray','stream','draft','draftTime','send','discard',
                   'editOnce','dropOne','sendOne','cancelOnce','draftMark',
                   'hint','note','log','none','count','fresh','floatAsk','taken','takeBack',
                   'mic','recogLang','recogLangField','thresh','threshVal','gaugeFill','gaugeMark',
@@ -955,7 +955,9 @@ function paintTinyButtons() {
   // ever show disabled — it opens what you are inside — and the trash reads
   // as a second copy of the discard sitting right under it. Two bins on one
   // card and neither says which one you want. Both step aside.
-  const editingHere = oneShot || route === 'hold';
+  // Switching back to live with unsent text still in the box is the same
+  // situation once more, even though route itself already reads live.
+  const editingHere = oneShot || route === 'hold' || !!el.draft.value.trim();
   el.editOnce.disabled = route !== 'live' || oneShot;
   el.editOnce.hidden = editingHere;
   el.dropOne.hidden = editingHere;
@@ -1001,7 +1003,7 @@ el.machineName.oninput = () => { machineDirty = true; paintMachine(); };
 function paintDraft() {
   const want = route === 'hold' || !!el.draft.value.trim();
   el.draft.hidden = !want;
-  el.draftActions.hidden = !want;
+  el.discard.hidden = el.send.hidden = !want;
 }
 
 /* ── The wait before it goes out ─────────
@@ -1233,16 +1235,16 @@ function worthSending() {
 function paintSendCue(now) {
   const on = sendCountdownOn();
   if (!on) clearSendCountdown();          // once the conditions drop, it resets itself every frame
-  // The big send button comes up whenever something is part way written (text
-  // carried over from review, for one). Two paper planes on one card, each
-  // sending a different thing, leave you working out which is which, so the
-  // small one steps aside while the big one is up. Every other time it stays
+  // The other send button comes up whenever something is part way written
+  // (text carried over from review, for one). Two paper planes on one row,
+  // each sending a different thing, leave you working out which is which, so
+  // the small one steps aside while the other is up. Every other time it stays
   // where it is and says by being dim that there is nothing to send. Raising
   // and sinking a target is what this screen refuses to do.
   // Shown and hidden by a class, never by the hidden attribute. Hidden takes the
   // seat away with it, and the two buttons beside it would slide every time this
   // comes and goes.
-  el.sendOne.classList.toggle('on', el.draftActions.hidden);
+  el.sendOne.classList.toggle('on', el.send.hidden);
   const wait = (Number(tuning.silence_duration) || 0) * 1000;
   /* The pause to send goes as low as 0.3s, under the held back stretch, and
      subtracting it there leaves nothing to divide by. At those settings the
