@@ -893,6 +893,13 @@
     /* We want to show it scrolls, but in a narrow window the bar shoves the text aside */
     scrollbar-width:thin; scrollbar-color:var(--line) transparent;
   }
+  /* Once the edit box is open, the still-recognizing line and the box you are
+     actually fixing both reached for the same --stream-max on their own, so
+     an ordinary window (the 720px floating one included) could spend over
+     300px on the two of them together and leave the history below all but
+     gone. The sentence being fixed and the send button matter more here, so
+     hold the still-recognizing line to one row. */
+  .draft-card:has(> textarea:not([hidden])) .stream { max-height:1.7em; }
   /* A word that was taken as a signal. Lighting up the word itself shows it
      was handled as an operation and not as an instruction. */
   .stream mark.cmd {
@@ -1414,9 +1421,6 @@
   @media (max-height: 479px) {
     :root { --stream-max:4.5em; }
     .meter-row { display:none; }
-    /* While the edit box is open, hold the live transcript to one line. The
-       sentence you are fixing and the send button should be seen first. */
-    .draft-card:has(> textarea:not([hidden])) .stream { max-height:1.7em; }
     #draft { min-height:2.4em; }
   }
 
