@@ -4,8 +4,12 @@
 voice-shell.sh listen slots this in behind tail. The daemon tags every
 utterance with "to" (the PID it is for). A line with no tag, or one addressed
 to somebody else, is dropped here (#73, not arriving beats arriving at the
-wrong desk). system_warning lines are the one exception, they carry no "to"
-on purpose and are meant for every session listening.
+wrong desk). A system_warning carries "to" only when it is about one
+particular session (a session being told it was just disconnected, say), and
+is filtered the same as any other line then. Left off "to" altogether, a
+system_warning is about the act of listening itself (two sessions listening
+at once, say), and reaches every session regardless of who utterances are
+being routed to.
 
     tail -F utterances.jsonl | listen_filter.py <my PID>
 
@@ -138,13 +142,16 @@ def main():
         if not isinstance(rec, dict):
             print(line, flush=True)   # keep unreadable lines, never drop one silently
             continue
-        # system_warning is a notice about the act of listening itself (two
-        # sessions listening at once, say), so every session sees it regardless
-        # of which one utterances are being routed to.
-        if "system_warning" not in rec:
-            to = rec.get("to")
-            if to is None or str(to) != me:
+        # A "to" on a system_warning means it is about one session in
+        # particular, so it is filtered exactly like any other line. Left off,
+        # it is a notice about the act of listening itself (two sessions
+        # listening at once, say), and every session sees it.
+        to = rec.get("to")
+        if to is not None:
+            if str(to) != me:
                 continue
+        elif "system_warning" not in rec:
+            continue
         # Write the split pieces back to back. Monitor bundles lines emitted
         # close in time into one notification, and bundling only caps each
         # line, so no gap is needed. Landing in the same notification is
