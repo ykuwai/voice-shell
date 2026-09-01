@@ -176,6 +176,10 @@ let audioCtx = null, analyser = null, micStream = null, freq = null;
 let daemonLevel = 0, daemonSpeaking = false;
 let vizFailed = false;
 let vizGeneration = 0, vizStarting = false;
+// How many times in a row opening it has failed with the device simply busy
+// (see the catch block in startViz for why that one alone gets retried).
+let vizBusyRetries = 0;
+const VIZ_BUSY_RETRY_MAX = 5;
 
 const canvas = el.viz, cx = canvas.getContext('2d');
 let cw = 0, ch = 0;
@@ -549,13 +553,35 @@ async function startViz(label) {
     analyser = nextAnalyser;
     freq = new Uint8Array(nextAnalyser.frequencyBinCount);
     vizFailed = false;
-  } catch {
+    vizBusyRetries = 0;
+  } catch (err) {
     if (outdated()) return;
     if (stream && micStream !== stream) stream.getTracks().forEach(tr => tr.stop());
     // The screen still has to hold together where permission is refused (it runs on the level alone)
     vizFailed = true;
     analyser = null;
+    // Swallowed before this, so there was no trace anywhere of why the pause
+    // to send gate had nothing to measure quiet with (browserGateTick reads
+    // 0 for the level whenever this failed, which the gate itself treats as
+    // silence, not as "unknown", the daemon-driven ring's own account of the
+    // same thing (see the comment on sendCountdownOn)).
+    console.warn('voice-shell: could not open the analyser mic stream', err);
     if (el.hint.textContent === '') el.hint.textContent = t('hintNoMic');
+    // NotReadableError means the device itself refused to open, not that
+    // permission was denied, and the common way that happens is something
+    // else holding it exclusively right at this instant, the browser's own
+    // recognition among them, having just grabbed the same microphone a
+    // moment earlier for the same start. Windows in particular tends not to
+    // let two callers open one input device at once. That contention is
+    // usually gone within a second, but nothing was retrying, so a stream
+    // that lost this race at startup stayed lost for the rest of the
+    // session. NotAllowedError and the rest are left alone; hammering a
+    // refusal helps nobody.
+    if (err?.name === 'NotReadableError' && vizBusyRetries < VIZ_BUSY_RETRY_MAX) {
+      vizBusyRetries++;
+      const delay = Math.min(8000, 500 * Math.pow(2, vizBusyRetries - 1));
+      setTimeout(() => { if (!outdated()) syncVizCapture(); }, delay);
+    }
   } finally {
     if (!outdated()) vizStarting = false;
   }
