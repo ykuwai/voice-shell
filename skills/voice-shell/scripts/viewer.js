@@ -561,10 +561,12 @@ async function startViz(label) {
     vizFailed = true;
     analyser = null;
     // Swallowed before this, so there was no trace anywhere of why the level
-    // meter (browserRmsNow, see computeBrowserRms) sat dead at 0. The pause
-    // to send gate itself no longer reads this at all (browserGateTick times
-    // each clause on its own, not on the room's level), so a failure here
-    // now costs only the meter, not whether things get held before sending.
+    // meter (browserRmsNow, see computeBrowserRms) sat dead at 0. With the
+    // analyser gone, computeBrowserRms reads 0, which never clears
+    // silence_threshold, so browserGateTick's lastLoudAt clock stops
+    // advancing and the pause to send wait runs out on its own (the queue
+    // still goes out; it just never sees the room as loud again). A failure
+    // here costs the meter, not whether things get held before sending.
     console.warn('voice-shell: could not open the analyser mic stream', err);
     if (el.hint.textContent === '') el.hint.textContent = t('hintNoMic');
     // NotReadableError means the device itself refused to open, not that
