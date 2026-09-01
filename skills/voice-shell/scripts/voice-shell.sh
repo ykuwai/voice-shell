@@ -583,7 +583,7 @@ REG
     # kill (TaskStop on Windows, #82) can take out this loop's own listen
     # process without the EXIT trap below ever running, so the registration
     # is left behind with nothing to remove it. The daemon side now treats a
-    # registration whose mtime has gone quiet for three of these in a row as
+    # registration whose mtime has gone quiet for ten of these in a row as
     # gone, whatever the PID itself still answers to (voice_daemon.py,
     # HEARTBEAT_STALE). Reading "since" out of this file's own content rather
     # than off its mtime is what keeps that from fighting the healing above,
