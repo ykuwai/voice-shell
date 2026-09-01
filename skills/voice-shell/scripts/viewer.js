@@ -3266,7 +3266,15 @@ function browserGateTick() {
     (quietFor >= waitMs || now - item.queuedAt >= cap ? ready : stillWaiting).push(item);
   }
   pendingBrowserSends = stillWaiting;
-  for (const item of ready) sendUtterance(item.text);
+  // Joined into one utterance, not one POST per clause. Chrome's own
+  // endpointing is what split a single continuous thought into several
+  // isFinal chunks to begin with (nothing this page controls), and clauses
+  // that clear the same wait together at the same moment are exactly the
+  // ones that were never really separate to the person saying them. Joining
+  // is also what lets a tail command land on the right side of the split:
+  // 「内容、キャンセル」reunited into one string is what the server's own
+  // trailing-キャンセル check (viewer.py, take_tail) was always meant to see.
+  if (ready.length) sendUtterance(ready.map(i => i.text).join(' '));
   paintPendingBrowserSends();
 }
 setInterval(browserGateTick, BROWSER_SEND_GATE_MS);
@@ -3274,7 +3282,7 @@ setInterval(browserGateTick, BROWSER_SEND_GATE_MS);
 function flushPendingBrowserSends() {
   const items = pendingBrowserSends;
   pendingBrowserSends = [];
-  for (const item of items) sendUtterance(item.text);
+  if (items.length) sendUtterance(items.map(i => i.text).join(' '));
   paintPendingBrowserSends();
 }
 
