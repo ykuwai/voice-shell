@@ -3010,6 +3010,45 @@ const spokenLang = () => asrActive() ? browserLang() : '';
 // we do not translate, for the reason written at the head of this file).
 const langName = code => (UI_LANGS.find(([c]) => c === code) || [, code])[1];
 
+/* Web Speech API does not just add words as it goes, it revises its own
+   guess mid-clause, so interim text can shrink back and regrow differently
+   several times a second, most visibly right when the person restates
+   something. Painting every one of those revisions on screen makes the
+   revising itself the thing that is seen, rather than what it settles into.
+   Trailing-edge throttled: painted at once if enough time has passed since
+   the last real paint, otherwise the newest text waits out the rest of the
+   window and is the one that lands, so nothing shown is ever stale by more
+   than the window itself. */
+const INTERIM_PAINT_THROTTLE_MS = 200;
+let lastInterimPaintAt = 0;
+let interimThrottleTimer = null;
+let latestInterimForPaint = '';
+
+function paintInterimNow(interim) {
+  lastInterimPaintAt = performance.now();
+  if (pendingBrowserSends.length) {
+    paintPendingBrowserSends(interim);
+  } else {
+    paintStream(withDict(interim));
+    el.tray.classList.toggle('idle', !interim);
+  }
+}
+
+function paintInterimThrottled(interim) {
+  latestInterimForPaint = interim;
+  const elapsed = performance.now() - lastInterimPaintAt;
+  if (elapsed >= INTERIM_PAINT_THROTTLE_MS) {
+    if (interimThrottleTimer) { clearTimeout(interimThrottleTimer); interimThrottleTimer = null; }
+    paintInterimNow(interim);
+    return;
+  }
+  if (interimThrottleTimer) return;
+  interimThrottleTimer = setTimeout(() => {
+    interimThrottleTimer = null;
+    paintInterimNow(latestInterimForPaint);
+  }, INTERIM_PAINT_THROTTLE_MS - elapsed);
+}
+
 function newRecognition(generation) {
   const r = new SR();
   r.lang = browserLang();
@@ -3043,13 +3082,10 @@ function newRecognition(generation) {
     // barely spent any real time queued, so there was next to never
     // anything here to lose by leaving interim out. Once it holds for the
     // real few seconds, someone still mid-thought watches their own words
-    // stop appearing the moment the first clause of it queues.
-    if (pendingBrowserSends.length) {
-      paintPendingBrowserSends(interim);
-    } else {
-      paintStream(withDict(interim));
-      el.tray.classList.toggle('idle', !interim);
-    }
+    // stop appearing the moment the first clause of it queues. Throttled
+    // (paintInterimThrottled) since this fires many times a second and each
+    // one can be a revision of the last, not just more added to the end.
+    paintInterimThrottled(interim);
     streamTail();
     paintTinyButtons();
     if (interim.trim()) lastVoiceAt = performance.now();
