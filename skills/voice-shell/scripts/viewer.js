@@ -3094,6 +3094,12 @@ function newRecognition(generation) {
   r.continuous = true;
   r.interimResults = true;
   r.maxAlternatives = 1;
+  // Off by default (Chrome 151+). With it off, nothing about a spoken pause
+  // or a falling tone at the end of a clause makes it into the transcript,
+  // which reads as flatter than it sounded, especially once several clauses
+  // are joined into one line. Checked rather than just set, for whatever
+  // browser or older Chrome build has never heard of the property.
+  if ('unspokenPunctuation' in r) r.unspokenPunctuation = true;
 
   // Check every time whether this is still us, so a signal from an old
   // instance does not break the new state. Without it, an old end can arrive
