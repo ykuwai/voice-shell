@@ -3032,7 +3032,19 @@ let latestInterimForPaint = '';
 // keeps the plain space, the same one already sitting inside each clause
 // between its own words.
 const NO_SPACE_LANGS = new Set(['ja', 'zh', 'th']);
-const clauseJoin = () => NO_SPACE_LANGS.has(browserLang().split('-')[0].toLowerCase()) ? '' : ' ';
+const speakingNoSpaceLang = () => NO_SPACE_LANGS.has(browserLang().split('-')[0].toLowerCase());
+const clauseJoin = () => speakingNoSpaceLang() ? '' : ' ';
+
+// Chrome's own recognizer writes a plain space between words even in
+// Japanese, where nothing was said in that gap at all, not for any of the
+// reasons clauseJoin exists for. Stripped only between two characters that
+// are both outside plain ASCII, so a space actually separating an English
+// word dropped into the sentence ("Claude Code", "GitHub", the everyday
+// case here) is left standing, only the ones the recognizer invented on
+// its own go.
+const INVENTED_SPACE_RE = /(?<=[^\x00-\x7F\s])[ \t]+(?=[^\x00-\x7F\s])/g;
+const stripInventedSpaces = text =>
+  speakingNoSpaceLang() ? text.replace(INVENTED_SPACE_RE, '') : text;
 
 /* The one string both writers to el.stream agree on: whatever is queued,
    with whatever was last recognized after it. Two different callers used to
@@ -3100,8 +3112,9 @@ function newRecognition(generation) {
     let interim = '';
     for (let i = ev.resultIndex; i < ev.results.length; i++) {
       const res = ev.results[i];
-      if (res.isFinal) queueOrSendFinal(res[0].transcript);
-      else interim += res[0].transcript;
+      const transcript = stripInventedSpaces(res[0].transcript);
+      if (res.isFinal) queueOrSendFinal(transcript);
+      else interim += transcript;
     }
     // A clause waiting out its quiet stretch keeps its own text on screen
     // (paintPendingBrowserSends), with whatever is being recognized now
