@@ -1257,11 +1257,11 @@ function worthSending(text = livePartial) {
   return !isBackchannel(text, dictIgnore);
 }
 
-/* Browser recognition has its own account of the same wait, kept per item in
-   pendingBrowserSends (browserGateTick) rather than in livePartial/silentAt/
-   the daemon's silence_run, so it needs its own drawing rather than forcing
-   sendCountdownOn's daemon-shaped question ("is the thing we are still
-   hearing worth keeping") onto a queue of clauses browser recognition
+/* Browser recognition has its own account of the same wait, kept in
+   pendingBrowserSends/lastLoudAt (browserGateTick) rather than in livePartial/
+   silentAt/the daemon's silence_run, so it needs its own drawing rather than
+   forcing sendCountdownOn's daemon-shaped question ("is the thing we are
+   still hearing worth keeping") onto a queue of clauses browser recognition
    already finished hearing. Same button, same custom property, same classes,
    read from the other side of the fork.
    No dead zone here (SEND_CUE_DEAD is a daemon-only concern): that gap exists
@@ -1278,7 +1278,7 @@ function paintBrowserSendCue(now) {
     return;
   }
   const wait = (Number(tuning.silence_duration) || 0) * 1000;
-  const target = wait > 0 ? Math.max(0, Math.min(1, (now - item.queuedAt) / wait)) : 1;
+  const target = wait > 0 ? Math.max(0, Math.min(1, (now - lastLoudAt) / wait)) : 1;
   el.sendOne.classList.toggle('drop', !worthSending(item.text));
   if (el.sendOne.disabled !== false) el.sendOne.disabled = false;
   el.sendOne.style.setProperty('--r', String(target));
@@ -3182,31 +3182,48 @@ setInterval(() => {
    to it, that call settles the words, not when they go out. Sent the instant
    isFinal fired, "pause to send" had nothing left to act on under this
    engine, which is why the setting sat disabled the whole time (see
-   paintBrowserAsr). Held here instead, for as long as the setting says,
-   counted from when this particular clause finalized.
+   paintBrowserAsr). Held here for a stretch of measured quiet instead, the
+   same number governs both engines again, browser or daemon.
 
-   One timer per clause, not a shared "how long has the room been quiet"
-   clock the way an earlier version of this read the room's own mic level
-   for. That reads simpler on paper but plays out the opposite way in
-   practice: starting the next clause while an earlier one is still waiting
-   does nothing to it (isFinal already settled its words, there is nothing
-   left for continued talking to change), the on-screen ring means exactly
-   what the setting says instead of also depending on how well the analyser
-   mic stream happens to be reading the room right now, and there is no
-   noise-floor case left to cap against, since a plain elapsed-time wait
-   always completes on its own regardless of what the level meter reads. */
+   Tried a plain per-clause timer first (no room-level reading at all): each
+   clause just waits out the setting from its own isFinal, unaffected by
+   anything said afterward. Simpler, and it is what the setting's own
+   description promises, but trying it live turned up the cost, someone still
+   mid-thought watches an already-finalized clause go out from under them
+   while they are still talking, because talking is exactly what the timer
+   never looked at. So: a shared clock instead. What actually needs watching
+   is "how long has the room been quiet", and every clause waiting to go out
+   watches the same answer, so lastLoudAt is the only state, not a timer per
+   entry. Ticked by setInterval, not the paint loop. A minimized or otherwise
+   occluded tab throttles requestAnimationFrame; a send must not quietly stop
+   working right when the person stepped away expecting it to go out on its
+   own. */
 const BROWSER_SEND_GATE_MS = 100;
+let lastLoudAt = 0;
 let pendingBrowserSends = [];   // [{text, queuedAt}], oldest first
 
 function browserGateTick() {
   browserRmsNow = computeBrowserRms();
   if (engine === 'off' || asrActive()) paintGauge();
-  if (!pendingBrowserSends.length) return;
+  // Tracked on every tick, queue empty or not, so a stretch of talking before
+  // anything has finalized yet still counts. Missing this the first time
+  // (only updating it once something was already queued) is what made the
+  // very first version of this send everything the instant it queued.
   const now = performance.now();
+  if (browserRmsNow >= tuning.silence_threshold) lastLoudAt = now;
+  if (!pendingBrowserSends.length) return;
+  const quietFor = now - lastLoudAt;
   const waitMs = Math.max(0, (Number(tuning.silence_duration) || 0) * 1000);
   const ready = [], stillWaiting = [];
   for (const item of pendingBrowserSends) {
-    (now - item.queuedAt >= waitMs ? ready : stillWaiting).push(item);
+    // A cap against a rising noise floor. Some machines' getUserMedia runs
+    // automatic gain control that climbs through a real pause and never
+    // dips back under a fixed mark on its own, and a wait with no ceiling
+    // then never ends, the exact "neither a command nor a prompt, gone
+    // nowhere" shape #76 exists to rule out, just reached from the sending
+    // side instead of the recognizing side this time.
+    const cap = Math.max(waitMs * 2, waitMs + 3000);
+    (quietFor >= waitMs || now - item.queuedAt >= cap ? ready : stillWaiting).push(item);
   }
   pendingBrowserSends = stillWaiting;
   for (const item of ready) sendUtterance(item.text);
