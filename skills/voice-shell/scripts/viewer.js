@@ -3024,6 +3024,16 @@ let lastInterimPaintAt = 0;
 let interimThrottleTimer = null;
 let latestInterimForPaint = '';
 
+// Joining clauses that were only ever split because Chrome's own
+// endpointing decided to, not because the person paused for one, still
+// needs something between them, just not a mark nobody said. A language
+// that does not write spaces between its own words was never going to want
+// one glued between two clauses either, so those get none. Everything else
+// keeps the plain space, the same one already sitting inside each clause
+// between its own words.
+const NO_SPACE_LANGS = new Set(['ja', 'zh', 'th']);
+const clauseJoin = () => NO_SPACE_LANGS.has(browserLang().split('-')[0].toLowerCase()) ? '' : ' ';
+
 /* The one string both writers to el.stream agree on: whatever is queued,
    with whatever was last recognized after it. Two different callers used to
    build two different strings, browserGateTick's own paintPendingBrowserSends
@@ -3037,9 +3047,10 @@ let latestInterimForPaint = '';
    again: there is only one string, so there is nothing left for them to
    disagree about. */
 function browserStreamText() {
-  const queued = pendingBrowserSends.map(p => p.text).join(' ');
+  const join = clauseJoin();
+  const queued = pendingBrowserSends.map(p => p.text).join(join);
   const interim = latestInterimForPaint;
-  return queued ? (interim ? `${queued} ${withDict(interim)}` : queued) : withDict(interim);
+  return queued ? (interim ? `${queued}${join}${withDict(interim)}` : queued) : withDict(interim);
 }
 
 function paintInterimNow(interim) {
@@ -3301,7 +3312,7 @@ function browserGateTick() {
   // is also what lets a tail command land on the right side of the split:
   // 「内容、キャンセル」reunited into one string is what the server's own
   // trailing-キャンセル check (viewer.py, take_tail) was always meant to see.
-  if (ready.length) sendUtterance(ready.map(i => i.text).join(' '));
+  if (ready.length) sendUtterance(ready.map(i => i.text).join(clauseJoin()));
   paintPendingBrowserSends();
 }
 setInterval(browserGateTick, BROWSER_SEND_GATE_MS);
@@ -3309,7 +3320,7 @@ setInterval(browserGateTick, BROWSER_SEND_GATE_MS);
 function flushPendingBrowserSends() {
   const items = pendingBrowserSends;
   pendingBrowserSends = [];
-  if (items.length) sendUtterance(items.map(i => i.text).join(' '));
+  if (items.length) sendUtterance(items.map(i => i.text).join(clauseJoin()));
   paintPendingBrowserSends();
 }
 
