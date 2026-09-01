@@ -1270,8 +1270,7 @@ function worthSending(text = livePartial) {
    for it, so there is nothing left to mistake a breath for. */
 function paintBrowserSendCue(now) {
   el.sendOne.classList.toggle('on', el.send.hidden);
-  const item = pendingBrowserSends[0];
-  if (!item) {
+  if (!pendingBrowserSends.length) {
     el.sendOne.classList.remove('drop');
     if (el.sendOne.disabled !== true) el.sendOne.disabled = true;
     el.sendOne.style.setProperty('--r', '0');
@@ -1279,7 +1278,13 @@ function paintBrowserSendCue(now) {
   }
   const wait = (Number(tuning.silence_duration) || 0) * 1000;
   const target = wait > 0 ? Math.max(0, Math.min(1, (now - lastLoudAt) / wait)) : 1;
-  el.sendOne.classList.toggle('drop', !worthSending(item.text));
+  // Checked against the whole queue joined together, the shape it actually
+  // goes out in (browserGateTick), not just the oldest item alone. A short
+  // clause sitting behind more still-accumulating queued content is not the
+  // same as a short clause on its own, and reading it that way left the ring
+  // showing "about to be dropped" the entire time more was still coming in.
+  const whole = pendingBrowserSends.map(i => i.text).join(clauseJoin());
+  el.sendOne.classList.toggle('drop', !worthSending(whole));
   if (el.sendOne.disabled !== false) el.sendOne.disabled = false;
   el.sendOne.style.setProperty('--r', String(target));
 }
