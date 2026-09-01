@@ -176,6 +176,10 @@ let audioCtx = null, analyser = null, micStream = null, freq = null;
 let daemonLevel = 0, daemonSpeaking = false;
 let vizFailed = false;
 let vizGeneration = 0, vizStarting = false;
+// How many times in a row opening it has failed with the device simply busy
+// (see the catch block in startViz for why that one alone gets retried).
+let vizBusyRetries = 0;
+const VIZ_BUSY_RETRY_MAX = 5;
 
 const canvas = el.viz, cx = canvas.getContext('2d');
 let cw = 0, ch = 0;
@@ -549,13 +553,37 @@ async function startViz(label) {
     analyser = nextAnalyser;
     freq = new Uint8Array(nextAnalyser.frequencyBinCount);
     vizFailed = false;
-  } catch {
+    vizBusyRetries = 0;
+  } catch (err) {
     if (outdated()) return;
     if (stream && micStream !== stream) stream.getTracks().forEach(tr => tr.stop());
     // The screen still has to hold together where permission is refused (it runs on the level alone)
     vizFailed = true;
     analyser = null;
+    // Swallowed before this, so there was no trace anywhere of why the level
+    // meter (browserRmsNow, see computeBrowserRms) sat dead at 0. With the
+    // analyser gone, computeBrowserRms reads 0, which never clears
+    // silence_threshold, so browserGateTick's lastLoudAt clock stops
+    // advancing and the pause to send wait runs out on its own (the queue
+    // still goes out; it just never sees the room as loud again). A failure
+    // here costs the meter, not whether things get held before sending.
+    console.warn('voice-shell: could not open the analyser mic stream', err);
     if (el.hint.textContent === '') el.hint.textContent = t('hintNoMic');
+    // NotReadableError means the device itself refused to open, not that
+    // permission was denied, and the common way that happens is something
+    // else holding it exclusively right at this instant, the browser's own
+    // recognition among them, having just grabbed the same microphone a
+    // moment earlier for the same start. Windows in particular tends not to
+    // let two callers open one input device at once. That contention is
+    // usually gone within a second, but nothing was retrying, so a stream
+    // that lost this race at startup stayed lost for the rest of the
+    // session. NotAllowedError and the rest are left alone; hammering a
+    // refusal helps nobody.
+    if (err?.name === 'NotReadableError' && vizBusyRetries < VIZ_BUSY_RETRY_MAX) {
+      vizBusyRetries++;
+      const delay = Math.min(8000, 500 * Math.pow(2, vizBusyRetries - 1));
+      setTimeout(() => { if (!outdated()) syncVizCapture(); }, delay);
+    }
   } finally {
     if (!outdated()) vizStarting = false;
   }
@@ -1210,8 +1238,7 @@ function endsWithTailCmd(text) {
    The order matches the daemon and viewer.py (minimum length, then ignored
    words, and the dictionary rewrites only after both), so the count here is of
    the raw characters, the same ones the floor is measured against. */
-function worthSending() {
-  const text = livePartial;
+function worthSending(text = livePartial) {
   if (!text) return false;                    // nothing heard yet, so nothing to promise
   // Asked before the floor, the same place the daemon asks it. 「認証まわりを直
   // して、手直し」 goes to the draft and 「テストを実行してキャンセル」 is dropped
@@ -1232,7 +1259,40 @@ function worthSending() {
   return !isBackchannel(text, dictIgnore);
 }
 
+/* Browser recognition has its own account of the same wait, kept in
+   pendingBrowserSends/lastLoudAt (browserGateTick) rather than in livePartial/
+   silentAt/the daemon's silence_run, so it needs its own drawing rather than
+   forcing sendCountdownOn's daemon-shaped question ("is the thing we are
+   still hearing worth keeping") onto a queue of clauses browser recognition
+   already finished hearing. Same button, same custom property, same classes,
+   read from the other side of the fork.
+   No dead zone here (SEND_CUE_DEAD is a daemon-only concern): that gap exists
+   to tell a real pause from a breath taken mid-sentence, while the words are
+   still being decided. A queued item has already been decided, isFinal fired
+   for it, so there is nothing left to mistake a breath for. */
+function paintBrowserSendCue(now) {
+  el.sendOne.classList.toggle('on', el.send.hidden);
+  if (!pendingBrowserSends.length) {
+    el.sendOne.classList.remove('drop');
+    if (el.sendOne.disabled !== true) el.sendOne.disabled = true;
+    el.sendOne.style.setProperty('--r', '0');
+    return;
+  }
+  const wait = (Number(tuning.silence_duration) || 0) * 1000;
+  const target = wait > 0 ? Math.max(0, Math.min(1, (now - lastLoudAt) / wait)) : 1;
+  // Checked against the whole queue joined together, the shape it actually
+  // goes out in (browserGateTick), not just the oldest item alone. A short
+  // clause sitting behind more still-accumulating queued content is not the
+  // same as a short clause on its own, and reading it that way left the ring
+  // showing "about to be dropped" the entire time more was still coming in.
+  const whole = pendingBrowserSends.map(i => i.text).join(clauseJoin());
+  el.sendOne.classList.toggle('drop', !worthSending(whole));
+  if (el.sendOne.disabled !== false) el.sendOne.disabled = false;
+  el.sendOne.style.setProperty('--r', String(target));
+}
+
 function paintSendCue(now) {
+  if (asrActive()) { paintBrowserSendCue(now); return; }
   const on = sendCountdownOn();
   if (!on) clearSendCountdown();          // once the conditions drop, it resets itself every frame
   // The other send button comes up whenever something is part way written
@@ -1547,7 +1607,11 @@ function paintStream(s) {
     tailMarkTimer = match ? setTimeout(showTailMark, TAIL_MARK_DELAY) : null;
   }
   if (match && !tailMarkTimer) { renderTailMark(s, match); return; }
-  el.stream.textContent = s;
+  // Browser recognition fires onresult repeatedly even when nothing about
+  // the interim guess actually changed, and a textContent write repaints
+  // regardless of whether the value is the same as what is already there.
+  // Skipping the no-op write is what tells those apart from a real update.
+  if (el.stream.textContent !== s) el.stream.textContent = s;
 }
 
 function showTailMark() {
@@ -2141,6 +2205,10 @@ el.dropOne.onclick = () => discardCurrent();
    comes up on the side that goes straight through, while the daemon is
    listening, with something heard. So there is no second guard to write here. */
 async function sendThisOne() {
+  // Browser recognition has already decided the words (isFinal already
+  // fired), there is nothing left for the daemon to settle, so the press
+  // just skips the rest of the wait for whatever is sitting in the queue.
+  if (asrActive()) { flushPendingBrowserSends(); return; }
   clearSendCountdown();
   try { await post('/api/send-current'); } catch {}
 }
@@ -2949,12 +3017,96 @@ const spokenLang = () => asrActive() ? browserLang() : '';
 // we do not translate, for the reason written at the head of this file).
 const langName = code => (UI_LANGS.find(([c]) => c === code) || [, code])[1];
 
+/* Web Speech API does not just add words as it goes, it revises its own
+   guess mid-clause, so interim text can shrink back and regrow differently
+   several times a second, most visibly right when the person restates
+   something. Painting every one of those revisions on screen makes the
+   revising itself the thing that is seen, rather than what it settles into.
+   Trailing-edge throttled: painted at once if enough time has passed since
+   the last real paint, otherwise the newest text waits out the rest of the
+   window and is the one that lands, so nothing shown is ever stale by more
+   than the window itself. */
+const INTERIM_PAINT_THROTTLE_MS = 200;
+let lastInterimPaintAt = 0;
+let interimThrottleTimer = null;
+let latestInterimForPaint = '';
+
+// Joining clauses that were only ever split because Chrome's own
+// endpointing decided to, not because the person paused for one, still
+// needs something between them, just not a mark nobody said. A language
+// that does not write spaces between its own words was never going to want
+// one glued between two clauses either, so those get none. Everything else
+// keeps the plain space, the same one already sitting inside each clause
+// between its own words.
+const NO_SPACE_LANGS = new Set(['ja', 'zh', 'th']);
+const speakingNoSpaceLang = () => NO_SPACE_LANGS.has(browserLang().split('-')[0].toLowerCase());
+const clauseJoin = () => speakingNoSpaceLang() ? '' : ' ';
+
+// Chrome's own recognizer writes a plain space between words even in
+// Japanese, where nothing was said in that gap at all, not for any of the
+// reasons clauseJoin exists for. Stripped only between two characters that
+// are both outside plain ASCII, so a space actually separating an English
+// word dropped into the sentence ("Claude Code", "GitHub", the everyday
+// case here) is left standing, only the ones the recognizer invented on
+// its own go.
+const INVENTED_SPACE_RE = /(?<=[^\x00-\x7F\s])[ \t]+(?=[^\x00-\x7F\s])/g;
+const stripInventedSpaces = text =>
+  speakingNoSpaceLang() ? text.replace(INVENTED_SPACE_RE, '') : text;
+
+/* The one string both writers to el.stream agree on: whatever is queued,
+   with whatever was last recognized after it. Two different callers used to
+   build two different strings, browserGateTick's own paintPendingBrowserSends
+   wrote the queued text alone, unconditionally, every 100ms, while this path
+   wrote queued-plus-interim on its own, slower, throttled schedule. Between
+   the two, the interim half got painted on and wiped off several times a
+   second purely from the two writers disagreeing, not from the recognizer
+   revising anything, "文字がついたり消えたり" even while nothing was
+   actually changing underneath. Routing both through the same function,
+   reading the same two pieces of live state, is what makes that impossible
+   again: there is only one string, so there is nothing left for them to
+   disagree about. */
+function browserStreamText() {
+  const join = clauseJoin();
+  const queued = pendingBrowserSends.map(p => p.text).join(join);
+  const interim = latestInterimForPaint;
+  return queued ? (interim ? `${queued}${join}${withDict(interim)}` : queued) : withDict(interim);
+}
+
+function paintInterimNow(interim) {
+  lastInterimPaintAt = performance.now();
+  latestInterimForPaint = interim;
+  const s = browserStreamText();
+  paintStream(s);
+  el.tray.classList.toggle('idle', !s);
+}
+
+function paintInterimThrottled(interim) {
+  latestInterimForPaint = interim;
+  const elapsed = performance.now() - lastInterimPaintAt;
+  if (elapsed >= INTERIM_PAINT_THROTTLE_MS) {
+    if (interimThrottleTimer) { clearTimeout(interimThrottleTimer); interimThrottleTimer = null; }
+    paintInterimNow(interim);
+    return;
+  }
+  if (interimThrottleTimer) return;
+  interimThrottleTimer = setTimeout(() => {
+    interimThrottleTimer = null;
+    paintInterimNow(latestInterimForPaint);
+  }, INTERIM_PAINT_THROTTLE_MS - elapsed);
+}
+
 function newRecognition(generation) {
   const r = new SR();
   r.lang = browserLang();
   r.continuous = true;
   r.interimResults = true;
   r.maxAlternatives = 1;
+  // Off by default (Chrome 151+). With it off, nothing about a spoken pause
+  // or a falling tone at the end of a clause makes it into the transcript,
+  // which reads as flatter than it sounded, especially once several clauses
+  // are joined into one line. Checked rather than just set, for whatever
+  // browser or older Chrome build has never heard of the property.
+  if ('unspokenPunctuation' in r) r.unspokenPunctuation = true;
 
   // Check every time whether this is still us, so a signal from an old
   // instance does not break the new state. Without it, an old end can arrive
@@ -2973,18 +3125,20 @@ function newRecognition(generation) {
     let interim = '';
     for (let i = ev.resultIndex; i < ev.results.length; i++) {
       const res = ev.results[i];
-      if (res.isFinal) queueOrSendFinal(res[0].transcript);
-      else interim += res[0].transcript;
+      const transcript = stripInventedSpaces(res[0].transcript);
+      if (res.isFinal) queueOrSendFinal(transcript);
+      else interim += transcript;
     }
     // A clause waiting out its quiet stretch keeps its own text on screen
-    // (paintPendingBrowserSends), the interim display beneath it stays out of
-    // the way rather than overwriting it with what is usually nothing anyway.
-    if (pendingBrowserSends.length) {
-      paintPendingBrowserSends();
-    } else {
-      paintStream(withDict(interim));
-      el.tray.classList.toggle('idle', !interim);
-    }
+    // (paintPendingBrowserSends), with whatever is being recognized now
+    // appended after it. Before the gate actually held anything, a clause
+    // barely spent any real time queued, so there was next to never
+    // anything here to lose by leaving interim out. Once it holds for the
+    // real few seconds, someone still mid-thought watches their own words
+    // stop appearing the moment the first clause of it queues. Throttled
+    // (paintInterimThrottled) since this fires many times a second and each
+    // one can be a revision of the last, not just more added to the end.
+    paintInterimThrottled(interim);
     streamTail();
     paintTinyButtons();
     if (interim.trim()) lastVoiceAt = performance.now();
@@ -3124,13 +3278,19 @@ setInterval(() => {
    paintBrowserAsr). Held here for a stretch of measured quiet instead, the
    same number governs both engines again, browser or daemon.
 
-   A shared clock rather than one timer per clause: what actually needs
-   watching is "how long has the room been quiet", and every clause waiting
-   to go out watches the same answer, so lastLoudAt is the only state, not a
-   timer per entry. Ticked by setInterval, not the paint loop. A minimized or
-   otherwise occluded tab throttles requestAnimationFrame; a send must not
-   quietly stop working right when the person stepped away expecting it to
-   go out on its own. */
+   Tried a plain per-clause timer first (no room-level reading at all): each
+   clause just waits out the setting from its own isFinal, unaffected by
+   anything said afterward. Simpler, and it is what the setting's own
+   description promises, but trying it live turned up the cost, someone still
+   mid-thought watches an already-finalized clause go out from under them
+   while they are still talking, because talking is exactly what the timer
+   never looked at. So: a shared clock instead. What actually needs watching
+   is "how long has the room been quiet", and every clause waiting to go out
+   watches the same answer, so lastLoudAt is the only state, not a timer per
+   entry. Ticked by setInterval, not the paint loop. A minimized or otherwise
+   occluded tab throttles requestAnimationFrame; a send must not quietly stop
+   working right when the person stepped away expecting it to go out on its
+   own. */
 const BROWSER_SEND_GATE_MS = 100;
 let lastLoudAt = 0;
 let pendingBrowserSends = [];   // [{text, queuedAt}], oldest first
@@ -3138,24 +3298,47 @@ let pendingBrowserSends = [];   // [{text, queuedAt}], oldest first
 function browserGateTick() {
   browserRmsNow = computeBrowserRms();
   if (engine === 'off' || asrActive()) paintGauge();
-  if (!pendingBrowserSends.length) return;
+  // Tracked on every tick, queue empty or not, so a stretch of talking before
+  // anything has finalized yet still counts. Missing this the first time
+  // (only updating it once something was already queued) is what made the
+  // very first version of this send everything the instant it queued.
   const now = performance.now();
   if (browserRmsNow >= tuning.silence_threshold) lastLoudAt = now;
+  if (!pendingBrowserSends.length) return;
   const quietFor = now - lastLoudAt;
   const waitMs = Math.max(0, (Number(tuning.silence_duration) || 0) * 1000);
-  const ready = [], stillWaiting = [];
-  for (const item of pendingBrowserSends) {
-    // A cap against a rising noise floor. Some machines' getUserMedia runs
-    // automatic gain control that climbs through a real pause and never
-    // dips back under a fixed mark on its own, and a wait with no ceiling
-    // then never ends, the exact "neither a command nor a prompt, gone
-    // nowhere" shape #76 exists to rule out, just reached from the sending
-    // side instead of the recognizing side this time.
-    const cap = Math.max(waitMs * 2, waitMs + 3000);
-    (quietFor >= waitMs || now - item.queuedAt >= cap ? ready : stillWaiting).push(item);
-  }
-  pendingBrowserSends = stillWaiting;
-  for (const item of ready) sendUtterance(item.text);
+  // A cap against a rising noise floor. Some machines' getUserMedia runs
+  // automatic gain control that climbs through a real pause and never dips
+  // back under a fixed mark on its own, and a wait with no ceiling then
+  // never ends, the exact "neither a command nor a prompt, gone nowhere"
+  // shape #76 exists to rule out, just reached from the sending side
+  // instead of the recognizing side this time. A genuine noise floor is the
+  // one case this is for, and that takes much longer than ordinary
+  // conversational pauses (which is exactly the case this used to trip on
+  // instead: someone talking continuously in short clauses, each one only
+  // ever a couple of seconds from its neighbor, never once from the room
+  // itself) to show up as a real problem, so this only has to be short
+  // next to "stuck forever," not next to the wait itself.
+  const cap = Math.max(waitMs * 10, waitMs + 30000);
+  const capTripped = pendingBrowserSends.some(item => now - item.queuedAt >= cap);
+  // Tripping the cap, like clearing the wait, releases everything currently
+  // pending together, not only the one item old enough to trip it.
+  // Releasing that one item alone was fragmentation by another name: three
+  // clauses queued a couple of seconds apart during one continuous stretch
+  // of talking each aged past the cap on their own staggered schedule, so
+  // each went out as its own POST, undoing the joining below entirely on
+  // exactly the path continuous speech takes most often.
+  const ready = (quietFor >= waitMs || capTripped) ? pendingBrowserSends : [];
+  pendingBrowserSends = ready.length ? [] : pendingBrowserSends;
+  // Joined into one utterance, not one POST per clause. Chrome's own
+  // endpointing is what split a single continuous thought into several
+  // isFinal chunks to begin with (nothing this page controls), and clauses
+  // that clear the same wait together at the same moment are exactly the
+  // ones that were never really separate to the person saying them. Joining
+  // is also what lets a tail command land on the right side of the split:
+  // 「内容、キャンセル」reunited into one string is what the server's own
+  // trailing-キャンセル check (viewer.py, take_tail) was always meant to see.
+  if (ready.length) sendUtterance(ready.map(i => i.text).join(clauseJoin()));
   paintPendingBrowserSends();
 }
 setInterval(browserGateTick, BROWSER_SEND_GATE_MS);
@@ -3163,16 +3346,19 @@ setInterval(browserGateTick, BROWSER_SEND_GATE_MS);
 function flushPendingBrowserSends() {
   const items = pendingBrowserSends;
   pendingBrowserSends = [];
-  for (const item of items) sendUtterance(item.text);
+  if (items.length) sendUtterance(items.map(i => i.text).join(clauseJoin()));
   paintPendingBrowserSends();
 }
 
-// Nothing is drawn once the queue empties, the interim painting in onresult
-// owns the display from that point on (see the `pendingBrowserSends.length`
-// branch there).
+// Called right after pendingBrowserSends itself changes (queued or
+// flushed), so the queued card(s) show up without waiting on the next
+// recognition event. Built through browserStreamText, the same function
+// paintInterimNow uses, so this and the next recognition event agree on
+// what belongs on screen rather than each painting their own half of it.
 function paintPendingBrowserSends() {
-  if (!pendingBrowserSends.length) return;
-  el.stream.textContent = pendingBrowserSends.map(p => p.text).join(' ');
+  const s = browserStreamText();
+  if (!s) return;
+  if (el.stream.textContent !== s) el.stream.textContent = s;   // see paintStream
   el.tray.classList.remove('idle');
   streamTail();
 }
@@ -3188,10 +3374,6 @@ function queueOrSendFinal(text) {
   // the point of queuing, since sendUtterance's own copy of this same check
   // never gets a turn to run until whatever the queue eventually flushes.
   if (dropNextLocal) { dropNextLocal = false; return; }
-  // No analyser to measure quiet with (armViz never got its gesture, or the
-  // visualization failed outright), so there is nothing to gate on. Sending
-  // right away, the way this always worked, beats a wait that could never end.
-  if (!analyser || vizFailed) { sendUtterance(text); return; }
   // A closing mute must not sit behind whatever else is already waiting for
   // quiet, or the room stays live for however long that wait runs, exactly
   // the cost #76 exists to avoid. Send everything already finalized ahead of
