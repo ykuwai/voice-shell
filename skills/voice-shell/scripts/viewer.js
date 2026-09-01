@@ -3024,14 +3024,30 @@ let lastInterimPaintAt = 0;
 let interimThrottleTimer = null;
 let latestInterimForPaint = '';
 
+/* The one string both writers to el.stream agree on: whatever is queued,
+   with whatever was last recognized after it. Two different callers used to
+   build two different strings, browserGateTick's own paintPendingBrowserSends
+   wrote the queued text alone, unconditionally, every 100ms, while this path
+   wrote queued-plus-interim on its own, slower, throttled schedule. Between
+   the two, the interim half got painted on and wiped off several times a
+   second purely from the two writers disagreeing, not from the recognizer
+   revising anything, "文字がついたり消えたり" even while nothing was
+   actually changing underneath. Routing both through the same function,
+   reading the same two pieces of live state, is what makes that impossible
+   again: there is only one string, so there is nothing left for them to
+   disagree about. */
+function browserStreamText() {
+  const queued = pendingBrowserSends.map(p => p.text).join(' ');
+  const interim = latestInterimForPaint;
+  return queued ? (interim ? `${queued} ${withDict(interim)}` : queued) : withDict(interim);
+}
+
 function paintInterimNow(interim) {
   lastInterimPaintAt = performance.now();
-  if (pendingBrowserSends.length) {
-    paintPendingBrowserSends(interim);
-  } else {
-    paintStream(withDict(interim));
-    el.tray.classList.toggle('idle', !interim);
-  }
+  latestInterimForPaint = interim;
+  const s = browserStreamText();
+  paintStream(s);
+  el.tray.classList.toggle('idle', !s);
 }
 
 function paintInterimThrottled(interim) {
@@ -3286,13 +3302,14 @@ function flushPendingBrowserSends() {
   paintPendingBrowserSends();
 }
 
-// Nothing is drawn once the queue empties, the interim painting in onresult
-// owns the display from that point on (see the `pendingBrowserSends.length`
-// branch there).
-function paintPendingBrowserSends(interim = '') {
-  if (!pendingBrowserSends.length) return;
-  const queued = pendingBrowserSends.map(p => p.text).join(' ');
-  const s = interim ? `${queued} ${withDict(interim)}` : queued;
+// Called right after pendingBrowserSends itself changes (queued or
+// flushed), so the queued card(s) show up without waiting on the next
+// recognition event. Built through browserStreamText, the same function
+// paintInterimNow uses, so this and the next recognition event agree on
+// what belongs on screen rather than each painting their own half of it.
+function paintPendingBrowserSends() {
+  const s = browserStreamText();
+  if (!s) return;
   if (el.stream.textContent !== s) el.stream.textContent = s;   // see paintStream
   el.tray.classList.remove('idle');
   streamTail();
