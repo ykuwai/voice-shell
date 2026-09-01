@@ -3138,9 +3138,16 @@ let pendingBrowserSends = [];   // [{text, queuedAt}], oldest first
 function browserGateTick() {
   browserRmsNow = computeBrowserRms();
   if (engine === 'off' || asrActive()) paintGauge();
-  if (!pendingBrowserSends.length) return;
+  // Tracked on every tick, queue empty or not. Gated behind the early return
+  // below, this only ever caught up the instant a clause finalized and got
+  // pushed, by which point the room had usually gone quiet already (that is
+  // the whole reason a clause just finalized), so quietFor measured all the
+  // way back to whenever lastLoudAt was last touched, page load if this was
+  // the first utterance. Always past any wait, so it went out on the very
+  // first tick after queuing, wait or no wait.
   const now = performance.now();
   if (browserRmsNow >= tuning.silence_threshold) lastLoudAt = now;
+  if (!pendingBrowserSends.length) return;
   const quietFor = now - lastLoudAt;
   const waitMs = Math.max(0, (Number(tuning.silence_duration) || 0) * 1000);
   const ready = [], stillWaiting = [];
