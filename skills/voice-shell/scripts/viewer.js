@@ -1236,8 +1236,7 @@ function endsWithTailCmd(text) {
    The order matches the daemon and viewer.py (minimum length, then ignored
    words, and the dictionary rewrites only after both), so the count here is of
    the raw characters, the same ones the floor is measured against. */
-function worthSending() {
-  const text = livePartial;
+function worthSending(text = livePartial) {
   if (!text) return false;                    // nothing heard yet, so nothing to promise
   // Asked before the floor, the same place the daemon asks it. 「認証まわりを直
   // して、手直し」 goes to the draft and 「テストを実行してキャンセル」 is dropped
@@ -1258,7 +1257,33 @@ function worthSending() {
   return !isBackchannel(text, dictIgnore);
 }
 
+/* Browser recognition has its own account of the same wait, kept in
+   pendingBrowserSends/lastLoudAt (browserGateTick) rather than in livePartial/
+   silentAt/the daemon's silence_run, so it needs its own drawing rather than
+   forcing sendCountdownOn's daemon-shaped question ("is the thing we are
+   still hearing worth keeping") onto a queue of clauses browser recognition
+   already finished hearing. Same button, same custom property, same classes,
+   read from the other side of the fork. */
+function paintBrowserSendCue(now) {
+  el.sendOne.classList.toggle('on', el.send.hidden);
+  const item = pendingBrowserSends[0];
+  if (!item) {
+    el.sendOne.classList.remove('drop');
+    if (el.sendOne.disabled !== true) el.sendOne.disabled = true;
+    el.sendOne.style.setProperty('--r', '0');
+    return;
+  }
+  const wait = (Number(tuning.silence_duration) || 0) * 1000;
+  const dead = wait > SEND_CUE_DEAD ? SEND_CUE_DEAD : 0;
+  const quietFor = now - lastLoudAt;
+  const target = wait > dead ? Math.max(0, Math.min(1, (quietFor - dead) / (wait - dead))) : 1;
+  el.sendOne.classList.toggle('drop', !worthSending(item.text));
+  if (el.sendOne.disabled !== false) el.sendOne.disabled = false;
+  el.sendOne.style.setProperty('--r', String(target));
+}
+
 function paintSendCue(now) {
+  if (asrActive()) { paintBrowserSendCue(now); return; }
   const on = sendCountdownOn();
   if (!on) clearSendCountdown();          // once the conditions drop, it resets itself every frame
   // The other send button comes up whenever something is part way written
@@ -2167,6 +2192,10 @@ el.dropOne.onclick = () => discardCurrent();
    comes up on the side that goes straight through, while the daemon is
    listening, with something heard. So there is no second guard to write here. */
 async function sendThisOne() {
+  // Browser recognition has already decided the words (isFinal already
+  // fired), there is nothing left for the daemon to settle, so the press
+  // just skips the rest of the wait for whatever is sitting in the queue.
+  if (asrActive()) { flushPendingBrowserSends(); return; }
   clearSendCountdown();
   try { await post('/api/send-current'); } catch {}
 }
