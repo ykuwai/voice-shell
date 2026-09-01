@@ -3270,18 +3270,29 @@ function browserGateTick() {
   if (!pendingBrowserSends.length) return;
   const quietFor = now - lastLoudAt;
   const waitMs = Math.max(0, (Number(tuning.silence_duration) || 0) * 1000);
-  const ready = [], stillWaiting = [];
-  for (const item of pendingBrowserSends) {
-    // A cap against a rising noise floor. Some machines' getUserMedia runs
-    // automatic gain control that climbs through a real pause and never
-    // dips back under a fixed mark on its own, and a wait with no ceiling
-    // then never ends, the exact "neither a command nor a prompt, gone
-    // nowhere" shape #76 exists to rule out, just reached from the sending
-    // side instead of the recognizing side this time.
-    const cap = Math.max(waitMs * 2, waitMs + 3000);
-    (quietFor >= waitMs || now - item.queuedAt >= cap ? ready : stillWaiting).push(item);
-  }
-  pendingBrowserSends = stillWaiting;
+  // A cap against a rising noise floor. Some machines' getUserMedia runs
+  // automatic gain control that climbs through a real pause and never dips
+  // back under a fixed mark on its own, and a wait with no ceiling then
+  // never ends, the exact "neither a command nor a prompt, gone nowhere"
+  // shape #76 exists to rule out, just reached from the sending side
+  // instead of the recognizing side this time. A genuine noise floor is the
+  // one case this is for, and that takes much longer than ordinary
+  // conversational pauses (which is exactly the case this used to trip on
+  // instead: someone talking continuously in short clauses, each one only
+  // ever a couple of seconds from its neighbor, never once from the room
+  // itself) to show up as a real problem, so this only has to be short
+  // next to "stuck forever," not next to the wait itself.
+  const cap = Math.max(waitMs * 10, waitMs + 30000);
+  const capTripped = pendingBrowserSends.some(item => now - item.queuedAt >= cap);
+  // Tripping the cap, like clearing the wait, releases everything currently
+  // pending together, not only the one item old enough to trip it.
+  // Releasing that one item alone was fragmentation by another name: three
+  // clauses queued a couple of seconds apart during one continuous stretch
+  // of talking each aged past the cap on their own staggered schedule, so
+  // each went out as its own POST, undoing the joining below entirely on
+  // exactly the path continuous speech takes most often.
+  const ready = (quietFor >= waitMs || capTripped) ? pendingBrowserSends : [];
+  pendingBrowserSends = ready.length ? [] : pendingBrowserSends;
   // Joined into one utterance, not one POST per clause. Chrome's own
   // endpointing is what split a single continuous thought into several
   // isFinal chunks to begin with (nothing this page controls), and clauses
