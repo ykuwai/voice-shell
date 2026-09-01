@@ -1600,7 +1600,11 @@ function paintStream(s) {
     tailMarkTimer = match ? setTimeout(showTailMark, TAIL_MARK_DELAY) : null;
   }
   if (match && !tailMarkTimer) { renderTailMark(s, match); return; }
-  el.stream.textContent = s;
+  // Browser recognition fires onresult repeatedly even when nothing about
+  // the interim guess actually changed, and a textContent write repaints
+  // regardless of whether the value is the same as what is already there.
+  // Skipping the no-op write is what tells those apart from a real update.
+  if (el.stream.textContent !== s) el.stream.textContent = s;
 }
 
 function showTailMark() {
@@ -3244,7 +3248,8 @@ function flushPendingBrowserSends() {
 function paintPendingBrowserSends(interim = '') {
   if (!pendingBrowserSends.length) return;
   const queued = pendingBrowserSends.map(p => p.text).join(' ');
-  el.stream.textContent = interim ? `${queued} ${withDict(interim)}` : queued;
+  const s = interim ? `${queued} ${withDict(interim)}` : queued;
+  if (el.stream.textContent !== s) el.stream.textContent = s;   // see paintStream
   el.tray.classList.remove('idle');
   streamTail();
 }
