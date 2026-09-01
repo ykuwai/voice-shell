@@ -3032,10 +3032,14 @@ function newRecognition(generation) {
       else interim += res[0].transcript;
     }
     // A clause waiting out its quiet stretch keeps its own text on screen
-    // (paintPendingBrowserSends), the interim display beneath it stays out of
-    // the way rather than overwriting it with what is usually nothing anyway.
+    // (paintPendingBrowserSends), with whatever is being recognized now
+    // appended after it. Before the gate actually held anything, a clause
+    // barely spent any real time queued, so there was next to never
+    // anything here to lose by leaving interim out. Once it holds for the
+    // real few seconds, someone still mid-thought watches their own words
+    // stop appearing the moment the first clause of it queues.
     if (pendingBrowserSends.length) {
-      paintPendingBrowserSends();
+      paintPendingBrowserSends(interim);
     } else {
       paintStream(withDict(interim));
       el.tray.classList.toggle('idle', !interim);
@@ -3232,9 +3236,10 @@ function flushPendingBrowserSends() {
 // Nothing is drawn once the queue empties, the interim painting in onresult
 // owns the display from that point on (see the `pendingBrowserSends.length`
 // branch there).
-function paintPendingBrowserSends() {
+function paintPendingBrowserSends(interim = '') {
   if (!pendingBrowserSends.length) return;
-  el.stream.textContent = pendingBrowserSends.map(p => p.text).join(' ');
+  const queued = pendingBrowserSends.map(p => p.text).join(' ');
+  el.stream.textContent = interim ? `${queued} ${withDict(interim)}` : queued;
   el.tray.classList.remove('idle');
   streamTail();
 }
