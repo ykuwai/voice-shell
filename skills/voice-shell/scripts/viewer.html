@@ -31,6 +31,11 @@
          it per screen instead and the copies drift apart, and the state on each
          would have to be painted three times over. -->
     <div class="icons" id="navRow">
+      <!-- Only shown while floating. Swaps the small window for one that is
+           not held on top of everything else, without a trip back through
+           the tab in between (viewer.js, moveIntoFloatWindow). -->
+      <button class="icon" id="pinBtn" data-icon="keep" data-icon-size="20"
+              data-i18n-title="pinBtn" hidden></button>
       <button class="icon" id="floatBtn" data-icon="pip_exit" data-icon-size="20"
               data-i18n-title="floatBtn" hidden></button>
       <!-- What to say out loud to make something happen. Do not leave this a

@@ -98,7 +98,7 @@ function applyI18n(root = uiDoc()) {
 const $ = id => document.getElementById(id);
 const el = {};
 for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
-                  'power','powerLabel','powerRow','powerNote','openSettings','sheet','closeSettings','floatBtn','page',
+                  'power','powerLabel','powerRow','powerNote','openSettings','sheet','closeSettings','floatBtn','pinBtn','page',
                   'miniMic','miniViz','navRow','pageHead','sheetHead','helpHead','openDict','sheetTitle',
                   'routes','routeChips','routePick','routePickLabel','viz','meter','meterHit','meterFill','meterMark','logoMark',
                   'tray','stream','draft','draftTime','send','discard',
@@ -3994,11 +3994,19 @@ function detectFloatingApi(target = window) {
 
 const documentPip = detectFloatingApi();
 let canFloat = !!documentPip;
+// The un-pinned floating window is a plain popup, not Picture-in-Picture, so
+// nothing in the browser tracks it for us the way documentPip.window does.
+// Kept here by hand instead, and only trusted while it has not been closed.
+let popupWin = null;
+// Which kind is open. Only meaningful while something actually is (paintPin
+// reads it only once floatingWindow() itself is truthy).
+let pinned = true;
 
 function disableFloat() {
   canFloat = false;
   el.floatBtn.disabled = true;
   el.floatBtn.hidden = true;
+  el.pinBtn.hidden = true;
   el.floatAsk.hidden = true;
   // floatStand is left alone on purpose. Hiding it here assumed this only
   // ever fires while not actually floating, but floatingWindow()'s own catch
@@ -4012,6 +4020,10 @@ function disableFloat() {
 }
 
 function floatingWindow() {
+  if (popupWin) {
+    if (!popupWin.closed) return popupWin;
+    popupWin = null;   // was open, is not any more
+  }
   if (!canFloat) return null;
   try {
     return documentPip.window || null;
@@ -4059,6 +4071,23 @@ function paintFloat(on) {
   el.floatBtn.title = t(on ? 'unfloatBtn' : 'floatBtn');
   el.floatBtn.setAttribute('aria-label', el.floatBtn.title);
   el.floatBtn.setAttribute('aria-pressed', String(on));
+}
+
+// pinBtn only makes sense while something is actually floating (there is
+// nothing to pin or unpin otherwise), so it stays hidden the rest of the
+// time. Filled means held on top of everything else, outline means it can
+// slip behind (same one drawing either way, CSS swaps which half of it shows).
+function paintPin(on) {
+  // Same reason paintFloat takes an explicit argument instead of always
+  // deriving it: called mid-close, floatingWindow() can still say something
+  // is open for a moment even though it is on its way out.
+  if (on === undefined) on = !!floatingWindow();
+  el.pinBtn.hidden = !on;
+  if (!on) return;
+  el.pinBtn.classList.toggle('lit', pinned);
+  el.pinBtn.title = t(pinned ? 'unpinBtn' : 'pinBtn');
+  el.pinBtn.setAttribute('aria-label', el.pinBtn.title);
+  el.pinBtn.setAttribute('aria-pressed', String(pinned));
 }
 
 /* ── Only one screen ─────────────────────
@@ -4193,40 +4222,20 @@ new ResizeObserver(positionFloatAsk).observe(el.floatAsk);
 // moment something is pressed).
 let armPending = false;
 
-let floating = false;      // waiting on requestWindow. Keeps a flurry of presses from opening two
+let floating = false;      // waiting on a window to open. Keeps a flurry of presses from opening two
+// Set only while pinBtn is swapping the pinned window for the unpinned one
+// (or back). handleFloatClosed reads it to tell that apart from an ordinary
+// close, since the DOM is about to be moved straight into the other window
+// rather than back to the tab.
+let switchingPin = false;
 
-el.floatBtn.onclick = async () => {
-  if (!canFloat || floating) return;
-  // A toggle. Press it again while it floats and it goes back to the original
-  // screen (the code that brings it back on 'pagehide' already exists. Calling
-  // window.close() is what runs it).
-  const currentWindow = floatingWindow();
-  if (currentWindow) {
-    try {
-      currentWindow.close();
-    } catch {
-      disableFloat();
-    }
-    return;
-  }
-  floating = true;
-  let win;
-  try {
-    // Where it opens is the browser's own call, on purpose (a page is not
-    // allowed to place a window that stays in front of everything else
-    // wherever it likes, and moveTo on it is silently ignored). Chrome does
-    // remember on its own though, so dragging it to the right edge once is
-    // enough. It reopens there from then on without anything asked for here.
-    win = await documentPip.requestWindow({width: 400, height: 720});
-  } catch {
-    disableFloat();
-    return;
-  } finally {
-    floating = false;
-  }
+// Shared by both floatBtn (always opens pinned) and pinBtn (can go either
+// way): once a window is open and `pinned` is set to say which kind it is,
+// this carries floatParts into it and wires it up the same way regardless.
+async function moveIntoFloatWindow(win) {
   // Carry the styles over as they are so it looks the same. This has to stay
-  // after requestWindow, because an await before it would spend the user
-  // gesture and the request to open would be refused.
+  // after the window is already open, because an await before opening it
+  // would spend the user gesture and the request would be refused.
   const css = await pipCss;
   if (css) {
     const sheet = win.document.createElement('style');
@@ -4263,6 +4272,7 @@ el.floatBtn.onclick = async () => {
   paintNav();
   fitCanvas();
   paintFloat(true);
+  paintPin(true);
   paintFloatAsk();
   paint();                    // put the same title on the small window too
   // Document Picture-in-Picture has no "stay above everything" flag of its
@@ -4271,23 +4281,96 @@ el.floatBtn.onclick = async () => {
   // among them) does not expose that to an ordinary browser window, so the
   // small window floats but can still end up behind whatever is clicked
   // next (#88, found on a real Ubuntu GNOME machine). Say so once, here,
-  // rather than leaving it to look broken with no explanation.
-  if (wayland) say(t('waylandFloatNote'), 12);
-  win.addEventListener('pagehide', () => {
-    // Put the target back first. A small window on its way closed is still
-    // there, so left alone we would go and write the theme and the colors into
-    // a document that is about to disappear.
-    pipDoc = null;
-    document.body.append(...floatParts);
-    el.floatStand.hidden = true;
-    paintFloat(false);          // mid-close the window is still around
-    paintFloatAsk();
-    fitCanvas();
-    fitMini();                  // it can come back with a sheet left open from the small window
-    releaseWakeLock();
-    wakeTarget = window;
-    syncWakeLock();
-  });
+  // rather than leaving it to look broken with no explanation. The unpinned
+  // window makes no such promise in the first place, so this is only worth
+  // saying for the pinned one.
+  if (wayland && pinned) say(t('waylandFloatNote'), 12);
+  win.addEventListener('pagehide', handleFloatClosed);
+}
+
+// Runs when whichever floating window is open closes, pinned or not, unless
+// pinBtn is what closed it (switchingPin), in which case its own code is
+// about to move floatParts straight into the window it just opened instead.
+function handleFloatClosed() {
+  if (switchingPin) return;
+  // Put the target back first. A small window on its way closed is still
+  // there, so left alone we would go and write the theme and the colors into
+  // a document that is about to disappear.
+  pipDoc = null;
+  document.body.append(...floatParts);
+  el.floatStand.hidden = true;
+  popupWin = null;
+  pinned = true;               // what floatBtn opens into next time
+  paintFloat(false);           // mid-close the window is still around
+  paintPin(false);
+  paintFloatAsk();
+  fitCanvas();
+  fitMini();                   // it can come back with a sheet left open from the small window
+  releaseWakeLock();
+  wakeTarget = window;
+  syncWakeLock();
+}
+
+el.floatBtn.onclick = async () => {
+  if (!canFloat || floating) return;
+  // A toggle. Press it again while it floats, pinned or not, and it goes back
+  // to the original screen (handleFloatClosed already exists for that.
+  // Calling window.close() is what runs it).
+  const currentWindow = floatingWindow();
+  if (currentWindow) {
+    try {
+      currentWindow.close();
+    } catch {
+      disableFloat();
+    }
+    return;
+  }
+  floating = true;
+  let win;
+  try {
+    // Where it opens is the browser's own call, on purpose (a page is not
+    // allowed to place a window that stays in front of everything else
+    // wherever it likes, and moveTo on it is silently ignored). Chrome does
+    // remember on its own though, so dragging it to the right edge once is
+    // enough. It reopens there from then on without anything asked for here.
+    win = await documentPip.requestWindow({width: 400, height: 720});
+  } catch {
+    disableFloat();
+    return;
+  } finally {
+    floating = false;
+  }
+  pinned = true;   // floatBtn always starts pinned. pinBtn is what steps off that.
+  await moveIntoFloatWindow(win);
+};
+
+// Swaps the pinned window for the unpinned one, or back, without a trip
+// through the tab (moveIntoFloatWindow carries floatParts straight from one
+// to the other). Opening the replacement has to come before closing the one
+// showing now, both because the open itself needs the user gesture this
+// click already is (nothing may await ahead of it) and because closing first
+// and having the open then fail would leave nothing floating at all.
+el.pinBtn.onclick = async () => {
+  const current = floatingWindow();
+  if (!current || floating) return;
+  const goingPinned = !pinned;
+  floating = true;
+  let win;
+  try {
+    win = goingPinned
+      ? await documentPip.requestWindow({width: 400, height: 720})
+      : window.open('', '_blank', 'popup,width=400,height=720');
+  } catch {
+    win = null;
+  }
+  floating = false;
+  if (!win) return;   // PiP refused, or the popup was blocked. Stays exactly as it was.
+  switchingPin = true;
+  try { current.close(); } catch {}
+  pinned = goingPinned;
+  popupWin = goingPinned ? null : win;
+  await moveIntoFloatWindow(win);
+  switchingPin = false;
 };
 
 // Same toggle a second press of floatBtn itself would run (closes the small
