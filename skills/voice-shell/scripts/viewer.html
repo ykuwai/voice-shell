@@ -258,8 +258,14 @@
     <div class="field">
       <label for="silence" data-icon="timer" data-icon-size="17" data-i18n="silence">Pause to send</label>
       <input type="range" id="silence" min="0.5" max="10" step="0.1">
-      <input class="val val-num" id="silenceVal" type="number" step="0.1"
-             inputmode="decimal" aria-describedby="silenceNote"><span class="unit">s</span>
+      <!-- Wrapped so the "s" rides along as one flex item with the box, rather
+           than as a sibling that pushes the whole row .6rem further right
+           than the plain-number fields, shortening the slider next to it to
+           make room. -->
+      <span class="val-wrap">
+        <input class="val val-num" id="silenceVal" type="number" step="0.1"
+               inputmode="decimal" aria-describedby="silenceNote"><span class="unit">s</span>
+      </span>
     </div>
     <p class="range-note" id="silenceNote" data-i18n="silenceNote"></p>
     <div class="field">
