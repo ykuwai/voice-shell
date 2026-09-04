@@ -612,6 +612,7 @@
   }
   .draft-card .gutter .spacer { flex:1; }
   .draft-card .gutter { flex:none; }
+  #draftTime { white-space:nowrap; flex-shrink:0; }
   .draft-card > textarea { flex:0 1 auto; }   /* this gives too when seats run short */
   /* Edit, throw away, and send now. Three small tools of one make.
      They used to be lined up on one base, the way the mode switch on the main
@@ -703,6 +704,12 @@
   .draft-card .mark {
     padding:.05rem .4rem; border-radius:5px; font-size:.64rem; font-weight:600;
     color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, transparent);
+    /* .gutter is a flex row that shrinks its children by default, and with no
+       white-space of its own the badge wrapped one character per line at a
+       narrow width, reading as vertical text instead of an unsent tag. Its
+       few characters are cheaper to just not shrink than to fold like the
+       transcript below does. */
+    white-space:nowrap; flex-shrink:0;
   }
   /* The wait before it goes out. It is sent once the pause to send has passed
      since you stopped talking, but nothing used to show on screen for that, so
