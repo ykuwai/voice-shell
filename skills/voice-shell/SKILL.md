@@ -132,6 +132,19 @@ picked last time (`~/.config/voice-shell/config.json`), and the first time it is
 **Keep only one Monitor of your own.** When re-attaching, stop the old one with
 TaskStop before making a new one. With two alive the same utterance arrives twice.
 
+**A resumed session (`claude -r`) does not know on its own whether its old
+Monitor is still alive**, and folder name plus timestamp are not enough to
+tell one listed session from another started from the same folder. Run
+`voice-shell.sh listeners` (or `status`) and look for **`<- this session`**
+next to an entry, this is added only to the one whose registration carries
+this exact conversation's own id, so it settles the question outright instead
+of being guessed. No such mark on any entry means your own Monitor is not
+registered right now (start one with `listen`, as above). Note that starting
+`listen` again is harmless either way, a second one under this same session id
+retires the earlier registration on its own (the usual way this comes up is
+compacting, #81), so this check is about knowing where things stand, not
+about avoiding a duplicate.
+
 **It is normal for other sessions to be listening too.** Using it alongside
 other work is the intended way, and speech goes to **whichever started later**
 (that is, the one you just started). `start` does not list the other sessions.

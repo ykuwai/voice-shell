@@ -2197,6 +2197,18 @@ def label_listeners(entries):
     return entries
 
 
+def my_session_id():
+    """This process's own conversation id, the same value voice-shell.sh's
+    `listen` registers under "session". Lets `--listeners` point out which
+    entry is the caller itself instead of leaving that to be guessed from
+    folder name and timestamp (a resumed session, `claude -r`, cannot tell
+    otherwise whether its own listener from before is still alive, #101)."""
+    return (os.environ.get("CLAUDE_CODE_SESSION_ID")
+            or os.environ.get("CODEX_THREAD_ID")
+            or os.environ.get("CODEX_SESSION_ID")
+            or "")
+
+
 def listeners_dir(log_path):
     return Path(log_path).parent / "listeners"
 
@@ -2398,8 +2410,10 @@ def main():
     if args.listeners:
         # Whether anything is printed is left to the caller (voice-shell.sh). Print
         # a fixed line here and the caller can no longer tell an empty result apart.
+        mine = my_session_id()
         for l in list_active_listeners(args.log_file):
-            print(f"  {l['label']}  (PID {l['pid']})")
+            mark = "  <- this session" if mine and l.get("session") == mine else ""
+            print(f"  {l['label']}  (PID {l['pid']}){mark}")
             print(f"    started at  {l['started']}")
             print(f"    folder      {l['cwd']}")
         return
