@@ -4308,6 +4308,7 @@ el.floatStandBack.onclick = () => el.floatBtn.onclick();
 const canWakeLock = target => { try { return !!(target && target.navigator && target.navigator.wakeLock); } catch { return false; } };
 let wakeLockPref = store.get('wakeLockOnMic', '1') !== '0';
 let wakeSentinel = null;
+let wakeLockRequesting = false;
 let wakeTarget = window;
 
 el.wakeLockField.hidden = !canWakeLock(window);
@@ -4332,12 +4333,16 @@ async function syncWakeLock() {
     && canWakeLock(wakeTarget) && wakeTarget.document.visibilityState === 'visible';
   if (!want) { releaseWakeLock(); return; }
   if (wakeSentinel && !wakeSentinel.released) return;   // already held
+  if (wakeLockRequesting) return;   // a request from a call earlier in this same tick is still in flight
+  wakeLockRequesting = true;
   try {
     const s = await wakeTarget.navigator.wakeLock.request('screen');
     wakeSentinel = s;
     s.addEventListener('release', () => { if (wakeSentinel === s) wakeSentinel = null; });
   } catch {
     wakeSentinel = null;
+  } finally {
+    wakeLockRequesting = false;
   }
 }
 document.addEventListener('visibilitychange', syncWakeLock);

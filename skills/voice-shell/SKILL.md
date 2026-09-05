@@ -137,9 +137,10 @@ Monitor is still alive**, and folder name plus timestamp are not enough to
 tell one listed session from another started from the same folder. Run
 `voice-shell.sh listeners` (or `status`) and look for **`<- this session`**
 next to an entry, this is added only to the one whose registration carries
-this exact conversation's own id, so it settles the question outright instead
-of being guessed. No such mark on any entry means your own Monitor is not
-registered right now (start one with `listen`, as above). Note that starting
+this exact conversation's own id ($CLAUDE_CODE_SESSION_ID, always set while
+you are running), so it settles the question outright instead of being
+guessed. No such mark on any entry means your own Monitor is not registered
+right now (start one with `listen`, as above). Note that starting
 `listen` again is harmless either way, a second one under this same session id
 retires the earlier registration on its own (the usual way this comes up is
 compacting, #81), so this check is about knowing where things stand, not
