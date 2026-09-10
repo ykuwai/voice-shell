@@ -1962,8 +1962,26 @@ def read_pid():
     try:
         pid = int(PID_FILE.read_text(encoding="utf-8"))
     except (FileNotFoundError, ValueError):
+        pid = None
+    if pid is not None and _pid_alive(pid):
+        return pid
+    # A daemon started by the previous version of this file wrote its PID
+    # under the old, pre-#102 location (STATE_DIR, not RUN_DIR) and holds its
+    # flock there too, a place this version no longer looks at on its own.
+    # Left unchecked, updating this file without first stopping that daemon
+    # is invisible to the "already running" guard above and to the flock in
+    # main() alike (different path, different inode), so `start` goes ahead
+    # and launches a second daemon right into the same #102 double-recording
+    # this move was meant to end, exactly across the one moment it matters
+    # (mid-upgrade). Falling back here, the same as read_pid falling back to
+    # the old STATE_DIR name once did (see STATE_DIR above), makes an old
+    # daemon still count as "running" until it is actually stopped, so both
+    # the refusal to start and --stop itself still reach it.
+    try:
+        legacy_pid = int((STATE_DIR / "daemon.pid").read_text(encoding="utf-8"))
+    except (FileNotFoundError, ValueError):
         return None
-    return pid if _pid_alive(pid) else None
+    return legacy_pid if _pid_alive(legacy_pid) else None
 
 
 def _proc_started_at(pid):

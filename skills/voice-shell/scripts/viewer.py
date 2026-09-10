@@ -748,6 +748,16 @@ async def main_async(args):
         try:
             return _pid_alive(int(pid_file.read_text(encoding="utf-8")))
         except (OSError, ValueError):
+            pass
+        # A daemon started by the previous version of this file still writes
+        # its PID under the old, pre-#102 location (state, not _RUN). Missing
+        # that here means engine_running() says False with one actually still
+        # recognizing, and browser recognition then starts up alongside it,
+        # the same double-recording #102 fixed, just reached from this side
+        # instead (see voice_daemon.py's read_pid for the fuller reasoning).
+        try:
+            return _pid_alive(int((state / "daemon.pid").read_text(encoding="utf-8")))
+        except (OSError, ValueError):
             return False
 
     stopping = {"until": 0.0}   # right after a stop, do not misread it as loading
