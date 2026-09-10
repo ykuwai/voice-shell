@@ -67,6 +67,11 @@ WAYLAND = bool(os.environ.get("WAYLAND_DISPLAY")
 # The user dictionary. Read and written in the same place as voice_daemon.py.
 _CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "voice-shell"
 DICT_FILE = _CONFIG / "dictionary.json"
+# Same place voice_daemon.py keeps its own daemon.pid, and for the same reason
+# (#102): under /tmp it is exposed to the OS's own periodic cleanup of files
+# gone untouched a few days, which one restart after that lets a second
+# daemon start believing there is none running yet.
+_RUN = _CONFIG / "run"
 # Mic sensitivity and the seconds of silence before settling. The daemon rereads
 # them every 0.5 seconds, so writing them is enough, with no restart.
 TUNING_FILE = _CONFIG / "tuning.json"
@@ -720,7 +725,7 @@ async def main_async(args):
     drop_done_path = state / "drop_done"
     drop_lock = asyncio.Lock()
 
-    pid_file = state / "daemon.pid"
+    pid_file = _RUN / "daemon.pid"
 
     def _pid_alive(pid) -> bool:
         """Check it is alive without a signal (same reason as voice_daemon.py).
