@@ -160,6 +160,19 @@
     display:flex; align-items:center; gap:.6rem;
     padding:.85rem var(--pad) .7rem;
     border-bottom:1px solid var(--line-soft);
+    /* Folded away below max-height:319px (further down). Held here rather
+       than left to display:none so the fold can play out instead of snap.
+       64px clears the header's own ~62px with a couple of px to spare, so the
+       transition starts moving right away instead of sitting idle first. */
+    overflow:hidden; max-height:64px;
+  }
+  @media (prefers-reduced-motion:no-preference) {
+    header {
+      transition:
+        max-height .22s ease, opacity .2s ease, visibility .22s,
+        padding-top .22s ease, padding-bottom .22s ease,
+        border-bottom-width .22s ease;
+    }
   }
   .brand { display:flex; align-items:center; gap:.55rem; margin-right:auto; min-width:0; }
   .brand h1 {
@@ -222,6 +235,16 @@
     display:flex; align-items:center; gap:.45rem;
     padding:.5rem var(--pad) .3rem; font-size:.75rem; color:var(--dim);
     white-space:nowrap; overflow:hidden;
+    /* Folded away alongside header below max-height:319px. 34px clears the
+       line's own ~32px, same reasoning as header above. */
+    max-height:34px;
+  }
+  @media (prefers-reduced-motion:no-preference) {
+    .status {
+      transition:
+        max-height .22s ease, opacity .2s ease, visibility .22s,
+        padding-top .22s ease, padding-bottom .22s ease;
+    }
   }
   .beacon { width:8px; height:8px; border-radius:50%; background:var(--faint); flex:none; }
   .beacon.live { background:var(--ok); box-shadow:var(--glow) var(--ok); }
@@ -1084,6 +1107,12 @@
     display:grid; place-items:center;
     transition:background .15s;
   }
+  /* Drops to 30px below max-width:212px (further down). Folded in on top of
+     the .15s hover fade above, rather than replacing it, so hovering still
+     feels the same at either size. */
+  @media (prefers-reduced-motion:no-preference) {
+    .mini-mic { transition:background .15s, width .18s ease, height .18s ease; }
+  }
   .mini-mic:hover:not(:disabled) { background:var(--raise); }
   .mini-mic:disabled { opacity:.35; }
   .mini-mic canvas { display:block; width:100%; height:100%; }
@@ -1536,7 +1565,18 @@
      state reads from the window title and from whether the mic is moving.
      Widen it and they come back. */
   @media (max-height: 319px) {
-    header, .status { display:none; }
+    /* Folded shut rather than switched to display:none outright, so a
+       transition (set on the base rules above) has a value change to play
+       out. visibility carries the same "gone, not just invisible" job
+       display:none used to: it lands at the end of the fold on the way out
+       and at the very start on the way back in, so nothing sits half-hidden
+       but still tabbable. pointer-events belongs to the instant, not the
+       fold, a header at 1% height is not worth a stray click either way. */
+    header, .status {
+      max-height:0; opacity:0; visibility:hidden; pointer-events:none;
+      padding-top:0; padding-bottom:0;
+    }
+    header { border-bottom-width:0; }
     .control-row { padding-top:.25rem; }
     /* Fold away the Unsent chip and the time, and move the tools beside the
        text. That frees up a whole row, which beats tightening padding. The edit
