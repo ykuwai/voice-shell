@@ -67,6 +67,11 @@ WAYLAND = bool(os.environ.get("WAYLAND_DISPLAY")
 # The user dictionary. Read and written in the same place as voice_daemon.py.
 _CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "voice-shell"
 DICT_FILE = _CONFIG / "dictionary.json"
+# Same place voice_daemon.py keeps its own daemon.pid, and for the same reason
+# (#102): under /tmp it is exposed to the OS's own periodic cleanup of files
+# gone untouched a few days, which one restart after that lets a second
+# daemon start believing there is none running yet.
+_RUN = _CONFIG / "run"
 # Mic sensitivity and the seconds of silence before settling. The daemon rereads
 # them every 0.5 seconds, so writing them is enough, with no restart.
 TUNING_FILE = _CONFIG / "tuning.json"
@@ -720,7 +725,7 @@ async def main_async(args):
     drop_done_path = state / "drop_done"
     drop_lock = asyncio.Lock()
 
-    pid_file = state / "daemon.pid"
+    pid_file = _RUN / "daemon.pid"
 
     def _pid_alive(pid) -> bool:
         """Check it is alive without a signal (same reason as voice_daemon.py).
@@ -742,6 +747,16 @@ async def main_async(args):
         """Whether recognition is ready (the PID is written after loading)."""
         try:
             return _pid_alive(int(pid_file.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            pass
+        # A daemon started by the previous version of this file still writes
+        # its PID under the old, pre-#102 location (state, not _RUN). Missing
+        # that here means engine_running() says False with one actually still
+        # recognizing, and browser recognition then starts up alongside it,
+        # the same double-recording #102 fixed, just reached from this side
+        # instead (see voice_daemon.py's read_pid for the fuller reasoning).
+        try:
+            return _pid_alive(int((state / "daemon.pid").read_text(encoding="utf-8")))
         except (OSError, ValueError):
             return False
 

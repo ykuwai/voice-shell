@@ -106,6 +106,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'hint','note','log','none','count','fresh','floatAsk','taken','takeBack',
                   'mic','recogLang','recogLangField','thresh','threshVal','gaugeFill','gaugeMark',
                   'silence','silenceVal','silenceNote','minChars','minCharsVal','clean',
+                  'wakeLockField','wakeLockOn','wakeLockNote',
                   'engineGroup','enginePick','engineNote','whisperModel','whisperModelField','whisperModelNote',
                   'browserAsrWarn','asrConflict','browserMic','micSettingsLink','asrLang','asrLangField',
                   'idleMute','idleMuteVal','idleMuteField','idleMinsField','idleMuteOn','idleMuteNote',
@@ -960,6 +961,7 @@ function paint() {
   el.tray.classList.toggle('idle', off);
   if (off) el.stream.textContent = '';
   paintDraft();
+  syncWakeLock();
 }
 
 /* Edit, discard and send stay put at all times outside of editing just this
@@ -1032,6 +1034,12 @@ function paintDraft() {
   const want = route === 'hold' || !!el.draft.value.trim();
   el.draft.hidden = !want;
   el.discard.hidden = el.send.hidden = !want;
+  // draftTime says when the held text now in the box was appended
+  // (appendHeld is the only place that sets it). With nothing held there
+  // any more, that stamp is left over from whichever utterance set it last
+  // and reads as though it were the current moment (reported live: 23:11
+  // still showing at 22:00, long after review mode had been left).
+  if (!want) el.draftTime.textContent = '';
 }
 
 /* ── The wait before it goes out ─────────
@@ -1948,6 +1956,7 @@ function paintPower() {
     : chosenEngine === WHISPER_ENGINE    ? t('powerNoteWhisper')
     : chosenEngine === APPLE_ENGINE      ? t('powerNoteApple')
     : '';
+  syncWakeLock();
 }
 
 el.power.onclick = async () => {
@@ -4236,6 +4245,10 @@ el.floatBtn.onclick = async () => {
   pipDoc = win.document;
   resolveLang();
   applyTheme(store.get('theme', 'auto'));
+  await releaseWakeLock();
+  wakeTarget = win;
+  win.addEventListener('visibilitychange', syncWakeLock);
+  syncWakeLock();
   // Move the elements themselves. The references stay live, so no JS has to change.
   win.document.body.append(...floatParts);
   // floatStand lives outside floatParts on purpose, so it is what is left
@@ -4277,12 +4290,68 @@ el.floatBtn.onclick = async () => {
     paintFloatAsk();
     fitCanvas();
     fitMini();                  // it can come back with a sheet left open from the small window
+    releaseWakeLock();
+    wakeTarget = window;
+    syncWakeLock();
   });
 };
 
 // Same toggle a second press of floatBtn itself would run (closes the small
 // window if one is open, which is always true while this button shows).
 el.floatStandBack.onclick = () => el.floatBtn.onclick();
+
+/* ── Keep the screen awake while listening ─────────────────────
+   Voice-only work touches neither the keyboard nor the mouse, so left alone
+   the screen goes dark mid-sentence exactly as it would on a machine no one
+   is using at all.
+
+   A wake lock only holds while its own window is the one on screen, and
+   which window that is changes here: the ordinary tab most of the time, the
+   small floating window once one is open (by then the tab it moved out of
+   sits empty and Chrome counts it as hidden, same as any other background
+   tab). wakeTarget is switched by hand alongside floatParts itself, right
+   where the small window opens and where its pagehide brings everything back. */
+const canWakeLock = target => { try { return !!(target && target.navigator && target.navigator.wakeLock); } catch { return false; } };
+let wakeLockPref = store.get('wakeLockOnMic', '1') !== '0';
+let wakeSentinel = null;
+let wakeLockRequesting = false;
+let wakeTarget = window;
+
+el.wakeLockField.hidden = !canWakeLock(window);
+el.wakeLockNote.hidden = !canWakeLock(window);
+if (canWakeLock(window)) el.wakeLockOn.checked = wakeLockPref;
+
+el.wakeLockOn.onchange = () => {
+  wakeLockPref = el.wakeLockOn.checked;
+  store.set('wakeLockOnMic', wakeLockPref ? '1' : '0');
+  syncWakeLock();
+};
+
+async function releaseWakeLock() {
+  const s = wakeSentinel;
+  if (!s) return;
+  wakeSentinel = null;
+  try { await s.release(); } catch {}
+}
+
+async function syncWakeLock() {
+  const want = wakeLockPref && route !== 'off' && (engineOnish() || asrActive())
+    && canWakeLock(wakeTarget) && wakeTarget.document.visibilityState === 'visible';
+  if (!want) { releaseWakeLock(); return; }
+  if (wakeSentinel && !wakeSentinel.released) return;   // already held
+  if (wakeLockRequesting) return;   // a request from a call earlier in this same tick is still in flight
+  wakeLockRequesting = true;
+  try {
+    const s = await wakeTarget.navigator.wakeLock.request('screen');
+    wakeSentinel = s;
+    s.addEventListener('release', () => { if (wakeSentinel === s) wakeSentinel = null; });
+  } catch {
+    wakeSentinel = null;
+  } finally {
+    wakeLockRequesting = false;
+  }
+}
+document.addEventListener('visibilitychange', syncWakeLock);
 
 /* A page cannot open chrome://, so pressing it only copies. */
 el.micSettingsLink.onclick = async () => {

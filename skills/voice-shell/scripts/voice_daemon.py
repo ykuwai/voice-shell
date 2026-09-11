@@ -72,7 +72,20 @@ TUNING_FILE = CONFIG_DIR / "tuning.json"
 # thresholds it goes in the config dir (in /tmp it would vanish on reboot and you
 # would have to pick again every time).
 CONFIG_FILE = CONFIG_DIR / "config.json"
-PID_FILE = STATE_DIR / "daemon.pid"
+# The daemon's own lock and PID file decide whether a second `start` is
+# allowed to proceed, a job that only means something if the files are still
+# there to check months from now. /tmp is the wrong home for that: macOS's
+# own daily housekeeping (and the Linux equivalent, systemd-tmpfiles-clean)
+# removes anything under it that has gone untouched long enough, and once
+# that takes daemon.lock a live process keeps holding the lock on an inode
+# nothing can see by that name any more, so the very next `start` finds
+# nothing in its way, opens a fresh daemon.lock of its own, and both end up
+# transcribing the same microphone into the same log, every utterance sent
+# twice (measured after 5 days uptime, #102). CONFIG_DIR never faces that
+# housekeeping, so that is where these two live instead; everything else
+# here is fine under /tmp precisely because it is meant to reset on reboot.
+RUN_DIR = CONFIG_DIR / "run"
+PID_FILE = RUN_DIR / "daemon.pid"
 LOG_FILE = STATE_DIR / "utterances.jsonl"
 # Text while recognition is still running. Overwritten, no history kept (for the
 # viewer).
@@ -1949,8 +1962,26 @@ def read_pid():
     try:
         pid = int(PID_FILE.read_text(encoding="utf-8"))
     except (FileNotFoundError, ValueError):
+        pid = None
+    if pid is not None and _pid_alive(pid):
+        return pid
+    # A daemon started by the previous version of this file wrote its PID
+    # under the old, pre-#102 location (STATE_DIR, not RUN_DIR) and holds its
+    # flock there too, a place this version no longer looks at on its own.
+    # Left unchecked, updating this file without first stopping that daemon
+    # is invisible to the "already running" guard above and to the flock in
+    # main() alike (different path, different inode), so `start` goes ahead
+    # and launches a second daemon right into the same #102 double-recording
+    # this move was meant to end, exactly across the one moment it matters
+    # (mid-upgrade). Falling back here, the same as read_pid falling back to
+    # the old STATE_DIR name once did (see STATE_DIR above), makes an old
+    # daemon still count as "running" until it is actually stopped, so both
+    # the refusal to start and --stop itself still reach it.
+    try:
+        legacy_pid = int((STATE_DIR / "daemon.pid").read_text(encoding="utf-8"))
+    except (FileNotFoundError, ValueError):
         return None
-    return pid if _pid_alive(pid) else None
+    return legacy_pid if _pid_alive(legacy_pid) else None
 
 
 def _proc_started_at(pid):
@@ -2197,6 +2228,18 @@ def label_listeners(entries):
     return entries
 
 
+def my_session_id():
+    """This process's own conversation id, the same value voice-shell.sh's
+    `listen` registers under "session". Lets `--listeners` point out which
+    entry is the caller itself instead of leaving that to be guessed from
+    folder name and timestamp (a resumed session, `claude -r`, cannot tell
+    otherwise whether its own listener from before is still alive, #101)."""
+    return (os.environ.get("CLAUDE_CODE_SESSION_ID")
+            or os.environ.get("CODEX_THREAD_ID")
+            or os.environ.get("CODEX_SESSION_ID")
+            or "")
+
+
 def listeners_dir(log_path):
     return Path(log_path).parent / "listeners"
 
@@ -2367,6 +2410,7 @@ def main():
     # daemon proper mkdir's STATE_DIR further down).
     _secure_dir(STATE_DIR)
     _secure_dir(CONFIG_DIR)
+    _secure_dir(RUN_DIR)
 
     if args.remember_engine is not None:
         write_config(engine=args.remember_engine)
@@ -2398,8 +2442,10 @@ def main():
     if args.listeners:
         # Whether anything is printed is left to the caller (voice-shell.sh). Print
         # a fixed line here and the caller can no longer tell an empty result apart.
+        mine = my_session_id()
         for l in list_active_listeners(args.log_file):
-            print(f"  {l['label']}  (PID {l['pid']})")
+            mark = "  <- this session" if mine and l.get("session") == mine else ""
+            print(f"  {l['label']}  (PID {l['pid']}){mark}")
             print(f"    started at  {l['started']}")
             print(f"    folder      {l['cwd']}")
         return
@@ -2443,7 +2489,7 @@ def main():
     # With two running they fight over the mic and both end up half broken. The lock
     # holds from the instant of startup, and the OS releases it even on a crash, so
     # nothing gets left behind.
-    _lock = open(STATE_DIR / "daemon.lock", "w")
+    _lock = open(RUN_DIR / "daemon.lock", "w")
     try:
         _lock_exclusive_nb(_lock)
     except OSError:
