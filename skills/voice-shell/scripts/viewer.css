@@ -261,12 +261,40 @@
   /* Scrolled sideways, the rightmost one is out of reach in a narrow window.
      Wrap instead and show them all. Long names get trimmed, but the number at
      the head always stays. */
-  .routes { padding:.1rem var(--pad) .5rem; }
-  .route-chips { display:flex; flex-wrap:wrap; gap:.25rem; }
+  /* Two rows, chips above picker, and only one of them ever has height. Below
+     max-height:379px (further down) the fractions flip, so the row that had
+     the room hands it to the other instead of either one just vanishing.
+     Working in fractions rather than a guessed pixel height is what lets this
+     hold up with any number of chips, from one row to several. */
+  .routes {
+    padding:.1rem var(--pad) .5rem;
+    display:grid; grid-template-rows:1fr 0fr;
+  }
+  @media (prefers-reduced-motion:no-preference) {
+    .routes { transition:grid-template-rows .22s ease; }
+  }
+  .route-chips {
+    display:flex; flex-wrap:wrap; gap:.25rem;
+    overflow:hidden; min-height:0;
+  }
+  @media (prefers-reduced-motion:no-preference) {
+    .route-chips { transition:visibility .22s; }
+  }
   /* The roll-up picker. It is never on screen next to the chips, but if its
      height and marker position shifted when it swapped in it would read as a
-     different thing, so it matches the chip sizes. */
-  .route-pick-wrap { display:none; position:relative; max-width:100%; }
+     different thing, so it matches the chip sizes.
+     Kept rendered (not display:none) even at 0fr/0 opacity, the same reason
+     header further down is: a value to transition away from instead of a
+     jump. visibility still does the "gone, not just invisible" job, timed to
+     the same fold. */
+  .route-pick-wrap {
+    display:flex; align-items:center; position:relative; max-width:100%;
+    overflow:hidden; min-height:0;
+    opacity:0; visibility:hidden; pointer-events:none;
+  }
+  @media (prefers-reduced-motion:no-preference) {
+    .route-pick-wrap { transition:opacity .18s ease, visibility .22s; }
+  }
   .route-pick {
     -webkit-appearance:none; appearance:none;
     font-size:.75rem; line-height:1.6; border:1.5px solid var(--line);
@@ -383,7 +411,15 @@
      both directions, so that frame does not break the shape. */
   #viz { display:block; width:var(--viz-h); height:var(--viz-h); margin:0 auto; }
   /* Put the mic on and off and the level meter on one row */
-  .meter-row { display:flex; align-items:center; gap:.55rem; padding:0 var(--pad); }
+  .meter-row {
+    display:flex; align-items:center; gap:.55rem; padding:0 var(--pad);
+    /* Folded away below max-height:479px (further down), same fold as header
+       and .status. 30px clears the row's own 27px. */
+    overflow:hidden; max-height:30px;
+  }
+  @media (prefers-reduced-motion:no-preference) {
+    .meter-row { transition:max-height .22s ease, opacity .2s ease, visibility .22s; }
+  }
   .meter-row .meter-hit { flex:1; min-width:0; padding-left:0; padding-right:0; }
 
   /* The level the daemon is picking up. It comes by a different path than the
@@ -1519,7 +1555,7 @@
   /* Shorter still. The sensitivity line can be changed from settings too, so it gives here */
   @media (max-height: 479px) {
     :root { --stream-max:4.5em; }
-    .meter-row { display:none; }
+    .meter-row { max-height:0; opacity:0; visibility:hidden; pointer-events:none; }
     #draft { min-height:2.4em; }
   }
 
@@ -1544,15 +1580,16 @@
     #draft { min-height:2em; }
     .mode span:not(.ring) { display:none; }   /* the drawings in the rings tell them apart */
     .mode { gap:0; padding-top:0; }
-    .routes { padding-bottom:.35rem; }
+    .routes { padding-bottom:.35rem; grid-template-rows:0fr 1fr; }
     /* Route chips each take a row of their own. This short, they fill the
        screen on their own, so rather than dropping the names, switch over to
-       the roll-up picker. */
-    .route-chips { display:none; }
+       the roll-up picker. The chips' own row above folds to 0fr, this one
+       fades in, in step (see the base rules for both). */
+    .route-chips { visibility:hidden; }
     /* Give it the look of the selected chip. If only this dropped back to the
        ground color, where your voice lands would read weaker here than it does
        on the chips. */
-    .route-pick-wrap { display:inline-block; color:var(--panel); }
+    .route-pick-wrap { opacity:1; visibility:visible; pointer-events:auto; color:var(--panel); }
     .route-pick {
       display:block; font-weight:600; border-color:transparent; color:inherit;
       background:linear-gradient(135deg, var(--accent-fill-1), var(--accent-fill-2));
@@ -1603,7 +1640,11 @@
        what reaches here now is a window dragged shorter than that, or an
        ordinary browser window resized down rather than the floated one. */
     .sheet-head { padding-top:.35rem; padding-bottom:.25rem; }
-    .brand h1, #logoMark { display:none; }
+    /* The logo used to drop here, well ahead of the header itself (further
+       down, at 319px). Splitting the two read as two separate things
+       happening rather than one bar going away, for a few px of width this
+       text was never actually competing for. Left in now, it goes dark with
+       the rest of the header instead. */
     .machine { max-width:100%; }
     .status { padding:.15rem var(--pad) .1rem; }
   }
