@@ -1620,7 +1620,18 @@
        box and the send button wrap to the row below only when they are open. */
     .draft-card { flex-flow:row wrap; align-items:flex-start; gap:.4rem; }
     .draft-card .mark, .draft-card .gutter .spacer, #draftTime { display:none; }
-    .draft-card .gutter { order:2; flex:none; margin:0; }
+    /* flex-basis:100% rather than none, same reasoning as the textarea below:
+       the tools get their own full-width row instead of a left-hugging
+       cluster with the rest of that row sitting empty. Send then has
+       somewhere to be pushed to (next rule). */
+    .draft-card .gutter { order:2; flex:1 1 100%; margin:0; }
+    .draft-card .tiny-row { flex:1; }
+    /* Edit and discard/cancel stay put on the left. Whichever of the two
+       send buttons is showing (sendOne ordinarily, go while editing or in
+       review) is the one you reach for on purpose, so it gets the far
+       corner instead of sitting shoulder to shoulder with the pair a
+       hurried tap could catch instead. */
+    .draft-card .tiny.send, .draft-card .tiny.go { margin-left:auto; }
     /* While editing, the text row disappears, and the tools get stranded on the left */
     .draft-card:has(> textarea:not([hidden])) .gutter { margin-left:auto; }
     .draft-card .stream { order:1; flex:1 1 6em; min-width:0; }
