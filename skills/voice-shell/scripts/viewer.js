@@ -853,6 +853,21 @@ function openPickMenu(anchor, items, currentKey, onPick, heading) {
     menu.style.left = Math.round(r.left) + 'px';
     const overflowRight = menu.getBoundingClientRect().right - (win.innerWidth - 8);
     if (overflowRight > 0) menu.style.left = Math.round(r.left - overflowRight) + 'px';
+    // Below the anchor is the default, but a short floated window leaves
+    // barely any of that for a row near the bottom, and the list (11rem
+    // max, its own scrollbar past that) mostly ran off the edge instead of
+    // scrolling into view. Flip above only once below genuinely does not
+    // fit and above actually has more room, so a menu that fits either way
+    // never jumps for no reason.
+    const menuRect = menu.getBoundingClientRect();
+    const overflowBottom = menuRect.bottom - (win.innerHeight - 8);
+    if (overflowBottom > 0) {
+      const roomAbove = r.top - 8;
+      const roomBelow = win.innerHeight - 8 - r.bottom;
+      if (roomAbove > roomBelow) {
+        menu.style.top = Math.max(8, Math.round(r.top - 4 - menuRect.height)) + 'px';
+      }
+    }
   }
   place();
 
