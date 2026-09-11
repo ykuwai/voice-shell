@@ -1034,6 +1034,12 @@ function paintDraft() {
   const want = route === 'hold' || !!el.draft.value.trim();
   el.draft.hidden = !want;
   el.discard.hidden = el.send.hidden = !want;
+  // draftTime says when the held text now in the box was appended
+  // (appendHeld is the only place that sets it). With nothing held there
+  // any more, that stamp is left over from whichever utterance set it last
+  // and reads as though it were the current moment (reported live: 23:11
+  // still showing at 22:00, long after review mode had been left).
+  if (!want) el.draftTime.textContent = '';
 }
 
 /* ── The wait before it goes out ─────────
