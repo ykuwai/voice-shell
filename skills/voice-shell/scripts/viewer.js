@@ -172,7 +172,25 @@ const format = raw => raw;
    WebSocket (level.txt). */
 const MARK_BASE_HEIGHTS = [23, 36, 18, 31, 20];
 const MARK_MIN_HEIGHT = 12;
-const MARK_GAIN = 24;
+const MARK_GAIN = 28;
+/* Each bar used to ride the exact same eased level, just added to a
+   different resting height, so all five moved in lockstep and read as one
+   mechanical shape rather than five independent ones. Tried a real
+   frequency split too (each bar its own FFT band), but a voice's energy
+   sits low, so that left the right-hand bars all but still.
+   Neither needs real per-band data. Each bar eases the raw level on its own
+   clock (so a burst reaches them at different speeds) and rides two sines
+   of its own period and phase on top, scaled down toward the outside and
+   gated by the level itself so nothing moves once you go quiet. */
+const MARK_RISE  = [0.035, 0.025, 0.020, 0.030, 0.045];   // seconds, per bar
+const MARK_FALL  = [0.22,  0.15,  0.11,  0.17,  0.26];    // seconds, per bar
+const MARK_SHAPE = [0.65,  0.90,  1.00,  0.85,  0.60];    // how much of MARK_GAIN each bar answers to
+const MARK_F1    = [1.9,   2.6,   3.1,   2.3,   1.7];     // Hz, the faster of the two sines
+const MARK_F2    = [0.31,  0.47,  0.59,  0.41,  0.37];    // Hz, the slower one
+const MARK_PHASE = [0.0,   1.3,   2.7,   4.1,   5.5];     // radians
+const MARK_WOBBLE_PX = 7;
+const markLevels = [0, 0, 0, 0, 0];
+let markAt = 0;
 let audioCtx = null, analyser = null, micStream = null, freq = null;
 let daemonLevel = 0, daemonSpeaking = false;
 let vizFailed = false;
@@ -483,13 +501,38 @@ function paintFrame(now) {
   }
 
   const marks = el.logoMark.querySelectorAll('rect');
-  const markLevel = route === 'off' ? 0 : micLevel;
-  for (let i = 0; i < marks.length; i++) {
-    const h = route === 'off'
-      ? MARK_MIN_HEIGHT
-      : Math.min(60, MARK_BASE_HEIGHTS[i] + markLevel * MARK_GAIN);
-    marks[i].setAttribute('y', ((66 - h) / 2).toFixed(2));
-    marks[i].setAttribute('height', h.toFixed(2));
+  if (route === 'off') {
+    markAt = 0;
+    for (let i = 0; i < marks.length; i++) {
+      markLevels[i] = 0;
+      marks[i].setAttribute('y', ((66 - MARK_MIN_HEIGHT) / 2).toFixed(2));
+      marks[i].setAttribute('height', MARK_MIN_HEIGHT.toFixed(2));
+    }
+  } else {
+    // The raw level, not micLevel. That one is already eased once for the
+    // mic drawing above, and easing an eased value again flattens the very
+    // difference in speed between bars that is the whole point here.
+    const raw = amplitudeNow();
+    const dt = markAt ? Math.min(Math.max((now - markAt) / 1000, 0), 0.1) : 0.1;
+    markAt = now;
+    const t = now / 1000;
+    for (let i = 0; i < marks.length; i++) {
+      const tau = raw > markLevels[i] ? MARK_RISE[i] : MARK_FALL[i];
+      markLevels[i] += (raw - markLevels[i]) * (1 - Math.exp(-dt / tau));
+      const lv = markLevels[i];
+      // Two sines of the bar's own period and phase, never a lookup back
+      // into the same frequency data the equalizer attempt already showed
+      // does not split evenly for a voice. Scaled by sqrt(lv) rather than
+      // lv itself, so a quiet voice still gets a little life in the wobble
+      // rather than needing to get loud before it shows at all, and gated
+      // by it either way, so silence holds still instead of drifting.
+      const wobble = 0.6 * Math.sin(Math.PI * 2 * MARK_F1[i] * t + MARK_PHASE[i])
+                   + 0.4 * Math.sin(Math.PI * 2 * MARK_F2[i] * t + MARK_PHASE[i] * 1.7);
+      let h = MARK_BASE_HEIGHTS[i] + MARK_GAIN * MARK_SHAPE[i] * lv + MARK_WOBBLE_PX * Math.sqrt(lv) * wobble;
+      h = Math.min(60, Math.max(MARK_MIN_HEIGHT, h));
+      marks[i].setAttribute('y', ((66 - h) / 2).toFixed(2));
+      marks[i].setAttribute('height', h.toFixed(2));
+    }
   }
 }
 requestAnimationFrame(frame);
