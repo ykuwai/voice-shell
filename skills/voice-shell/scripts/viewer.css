@@ -177,7 +177,14 @@
   .brand { display:flex; align-items:center; gap:.55rem; margin-right:auto; min-width:0; }
   .brand h1 {
     margin:0; font-size:.95rem; font-weight:600; letter-spacing:.01em;
-    white-space:nowrap;
+    /* .brand itself already gives up width first (min-width:0 above), but a
+       flex item's own default min-width is its content's full nowrap size,
+       so without this the name kept that width regardless and ran under the
+       icon row instead of yielding to it. Measured: the two started
+       overlapping at 290px wide, holding a good 9px past 300px, and below
+       279px the name is hidden outright anyway (further down), so the
+       overlap only ever had that one narrow band to happen in. */
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0;
   }
   .logo-mark { display:flex; align-items:center; width:24px; height:18px; flex:none; }
   .logo-mark svg { display:block; width:24px; height:18px; overflow:visible; }
@@ -1489,6 +1496,17 @@
     .field > label:not(.switch) { flex:1 0 100%; min-width:0; }
     .field .val, .val-wrap { margin-left:0; }
     .gauge { margin-left:0; }
+    /* Below this, the unsent tag and the tools (edit/discard/send) both hold
+       their width on purpose (flex-shrink:0 above, so the tag never wraps
+       vertically) and the middle spacer is the only thing left to give. Once
+       that hits zero there is nothing left, and measured, send starts
+       poking out past the card's own rounded edge at 195 to 210px depending
+       on how much the tag's own text weighs. Tightened gaps here buy back
+       enough room to hold the line down to about 175px instead, comfortably
+       past where a floated window is ever asked to go. */
+    .draft-card .gutter { gap:.2rem; }
+    .draft-card .tiny-row { gap:.15rem; }
+    .draft-card .tiny.send, .draft-card .tiny.go { margin-left:.25rem; }
   }
   /* The arrow is the last thing left to give, and below 252px it goes. That is
      against the decision to keep it, and it is still the least bad of what is
