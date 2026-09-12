@@ -154,6 +154,35 @@
      rest scrolls within it). */
   .page > .draft-card { flex:0 1 auto; min-height:0; }
   .log-wrap { flex:1 1 0; min-height:0; overflow-y:auto; overscroll-behavior:contain; }
+  /* Newest lands at the top of #log (viewer.js, addEntry), so scrolled down
+     into older ones is scrolled away from what just arrived, not toward it.
+     Shown from viewer.js only when a new entry comes in while scrolled away
+     from the top, so it means "something new is waiting up there" rather
+     than just "you are not at the top", which would be up more often than
+     not. Sticky rather than the fixed+measured-position way .fresh/.floatAsk
+     do it elsewhere on this page: pinned to .log-wrap's own top edge, it
+     tracks that edge through a header fold or a window resize on its own,
+     no separate reposition call to keep in sync with. The wrapper carries
+     the stickiness at zero height so the button floats over the first entry
+     instead of pushing it down when it appears; pointer-events go back to
+     auto on the button itself, since the zero-height box would otherwise
+     take the click along with it. */
+  .log-jump-wrap {
+    position:sticky; top:0; height:0; overflow:visible; z-index:5;
+    display:flex; justify-content:center; pointer-events:none;
+  }
+  .log-jump {
+    pointer-events:auto; margin-top:.5rem;
+    width:2.3rem; height:2.3rem; border:none; border-radius:50%;
+    display:grid; place-items:center; cursor:pointer;
+    background:var(--accent); color:var(--panel);
+    box-shadow:0 4px 14px color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  .log-jump svg { width:20px; height:20px; }
+  @media (prefers-reduced-motion:no-preference) {
+    .log-jump { animation:jumpPop .2s cubic-bezier(.25, 1.4, .5, 1); }
+  }
+  @keyframes jumpPop { from { opacity:0; transform:scale(.7); } }
 
   /* ── Header ───────────────────────────── */
   header {

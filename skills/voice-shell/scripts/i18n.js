@@ -182,6 +182,7 @@ const I18N = {
     keysNote:'A key on its own only moves the screen. Hold Shift and it changes where your voice goes. None of them fire while you are typing in a box.',
     keyMute:'Microphone on and off',
     keyClose:'Close whatever is open',
+    jumpTop:'Jump to newest',
   },
   ja: {
     connecting:'接続中',
@@ -363,6 +364,7 @@ const I18N = {
     keysNote:'素のキーは画面を動かすだけです。Shift を添えたキーが、声の行き先を変えます。文字を打っている最中は、どれも効きません。',
     keyMute:'マイクの入切',
     keyClose:'開いているものを閉じる',
+    jumpTop:'最新へ移動',
   },
   es: {
     connecting:'Conectando…',

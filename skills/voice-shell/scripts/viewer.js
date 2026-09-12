@@ -104,6 +104,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'tray','stream','draft','draftTime','send','discard',
                   'editOnce','dropOne','sendOne','cancelOnce','draftMark',
                   'hint','note','log','none','count','fresh','floatAsk','taken','takeBack',
+                  'logJumpWrap','logJump',
                   'mic','recogLang','recogLangField','thresh','threshVal','gaugeFill','gaugeMark',
                   'silence','silenceVal','silenceNote','minChars','minCharsVal','clean',
                   'wakeLockField','wakeLockOn','wakeLockNote',
@@ -674,6 +675,19 @@ function retally() {
   el.none.hidden = n > 0;
 }
 
+/* Scrolled away from the top (below, some slack for the odd sub-pixel
+   scrollTop scroll anchoring can leave behind) is scrolled away from
+   whatever just arrived, since newest lands at the top. */
+const logWrap = el.log.parentElement;
+function atLogTop() { return logWrap.scrollTop <= 4; }
+logWrap.addEventListener('scroll', () => {
+  if (atLogTop()) el.logJumpWrap.hidden = true;
+});
+el.logJump.onclick = () => {
+  el.logJumpWrap.hidden = true;
+  logWrap.scrollTo({top: 0, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'});
+};
+
 function addEntry(rec) {
   const row = document.createElement('div');
   row.className = 'entry';
@@ -711,7 +725,19 @@ function addEntry(rec) {
   gutter.append(buildToControl(row.dataset.to));
 
   row.append(gutter, text);
+  // Read before the insert below moves it: CSS scroll anchoring already
+  // keeps whatever you were reading in the same place on screen when a row
+  // lands above it (Chrome, tested), so a reader scrolled away from the top
+  // does not need any help from here to avoid a jump. Someone already
+  // sitting right at the top gets pulled along instead of anchored in
+  // place, the same as scrollTop:0 pinned to the bottom of a normal,
+  // newest-last log — the alternative (anchoring holds them a row's height
+  // below the true top) would read as the screen quietly drifting off the
+  // newest thing without anything having been clicked.
+  const wasAtTop = atLogTop();
   el.log.prepend(row);          // newest on top (same order as the mock)
+  if (wasAtTop) logWrap.scrollTop = 0;
+  else el.logJumpWrap.hidden = false;
   retally();
 }
 
