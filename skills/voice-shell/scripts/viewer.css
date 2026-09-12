@@ -302,6 +302,19 @@
     height:120px; min-height:1.75rem;
     overflow-y:auto; overflow-x:hidden;
     resize:vertical;
+    /* Same thin, theme-colored bar .stream already uses instead of the
+       screen-wide default. */
+    scrollbar-width:thin; scrollbar-color:var(--line) transparent;
+  }
+  /* The plain OS grip in the corner read as a stray form-control widget
+     left over from a browser default rather than a piece of this screen.
+     Chrome and Safari let the resize handle itself be painted (Firefox
+     keeps its own regardless, which is fine, resize:vertical still works
+     there); a few diagonal hairlines in the border color reads as a grip
+     without pulling in an outside color the rest of this box never uses. */
+  .route-chips-scroll::-webkit-resizer {
+    background-color:var(--panel-2);
+    background-image:repeating-linear-gradient(135deg, var(--line) 0 1.5px, transparent 1.5px 4px);
   }
   /* The roll-up picker. It is never on screen next to the chips, but if its
      height and marker position shifted when it swapped in it would read as a
@@ -667,6 +680,16 @@
     background:var(--panel-2); box-shadow:inset 0 0 0 1px var(--line), 0 8px 24px rgba(0,0,0,.35);
     display:flex; flex-direction:column; gap:.05rem;
   }
+  /* transform-origin is set in JS (openPickMenu's place()), top when it
+     opened below the anchor, bottom when it flipped above, so the pop
+     grows from the edge nearest the anchor either way rather than always
+     from the top regardless of which way it actually opened. */
+  @media (prefers-reduced-motion:no-preference) {
+    .to-menu { animation:menuPop .2s cubic-bezier(.25, 1.4, .5, 1); }
+  }
+  @keyframes menuPop {
+    from { opacity:0; transform:scale(.9); }
+  }
   /* Said once, here, rather than living on the chip the whole time whether
      it was ever going to be opened or not. */
   .to-menu-heading {
@@ -674,12 +697,26 @@
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
   }
   .to-menu-item {
-    display:block; width:100%; text-align:left; border:none; background:none;
+    display:flex; align-items:center; gap:.3rem;
+    width:100%; text-align:left; border:none; background:none;
     color:var(--dim); font-size:.76rem; padding:.28rem .5rem; border-radius:6px;
-    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .to-menu-item-label {
+    flex:1 1 auto; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
   }
   .to-menu-item:hover { background:var(--raise); color:var(--text); }
   .to-menu-item.on { color:var(--accent-2-ink); font-weight:600; }
+  /* Same two-step × as a chip's own (route-chip .x above), sized the same,
+     shown only on a row this menu's caller opted into (openPickMenu's
+     onDisconnect). The history resend menu never passes it, so its rows
+     stay exactly as they were, one label and nothing else. */
+  .to-menu-item .x {
+    display:grid; place-items:center; width:15px; height:15px; flex:none;
+    border-radius:50%; font-size:.7rem; line-height:1; opacity:.45;
+  }
+  .to-menu-item .x:hover { opacity:1; background:color-mix(in srgb, var(--danger) 30%, transparent); }
+  .to-menu-item.asking { color:var(--danger); }
+  .to-menu-item.asking .x { opacity:1; }
   .entry .text { font-size:.88rem; line-height:1.65; word-break:break-word; }
 
   /* The draft card. The live transcript shows up here too (prime spot) */

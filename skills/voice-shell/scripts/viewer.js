@@ -785,7 +785,7 @@ let closeToMenu = null;
    the way, whether it was ever going to be opened or not (#79 feedback:
    said outright once opened is enough, said every time it sits closed is
    noise). */
-function openPickMenu(anchor, items, currentKey, onPick, heading) {
+function openPickMenu(anchor, items, currentKey, onPick, heading, onDisconnect) {
   // A second press on the same anchor is a close, not a rebuild-and-reopen.
   if (openToMenuBtn === anchor) { closeToMenu(); return; }
   if (closeToMenu) closeToMenu();
@@ -820,8 +820,49 @@ function openPickMenu(anchor, items, currentKey, onPick, heading) {
     const item = doc.createElement('button');
     item.type = 'button';
     item.className = 'to-menu-item' + (it.key === currentKey ? ' on' : '');
-    item.textContent = it.label;
+    const label = doc.createElement('span');
+    label.className = 'to-menu-item-label';
+    label.textContent = it.label;
+    item.append(label);
+
+    // Ending a session from in here, not just switching to it. Only offered
+    // where the caller passes onDisconnect (the roll-up picker that stands
+    // in for the chips, each of which already carries its own ×; resending
+    // a sent card to a different destination has no such thing to offer).
+    // Same two-step ask/confirm as the chip's own ×, kept local to this one
+    // row instead of the module-wide flag that guards the chip's version,
+    // since this menu is thrown away and rebuilt fresh every time it opens
+    // rather than living through the five second poll that flag exists for.
+    let confirmDisconnect = null;
+    if (onDisconnect) {
+      const x = doc.createElement('span');
+      x.className = 'x';
+      x.textContent = '×';
+      x.title = t('disconnectTitle', {name: it.name || it.label});
+      let askTimer = null;
+      const askToConfirm = () => {
+        item.classList.add('asking');
+        label.textContent = t('disconnectAsk');
+        askTimer = setTimeout(() => {
+          item.classList.remove('asking');
+          label.textContent = it.label;
+        }, 4000);
+      };
+      confirmDisconnect = async () => {
+        clearTimeout(askTimer);
+        item.remove();
+        await onDisconnect(it.key, it.name || it.label);
+      };
+      x.onclick = ev => {
+        ev.stopPropagation();
+        if (!item.classList.contains('asking')) { askToConfirm(); return; }
+        confirmDisconnect();
+      };
+      item.append(x);
+    }
+
     item.onclick = () => {
+      if (item.classList.contains('asking')) { confirmDisconnect(); return; }
       close();
       if (it.key === currentKey) return;
       onPick(it.key);
@@ -851,6 +892,7 @@ function openPickMenu(anchor, items, currentKey, onPick, heading) {
     }
     menu.style.top = Math.round(r.bottom + 4) + 'px';
     menu.style.left = Math.round(r.left) + 'px';
+    menu.style.transformOrigin = 'top';
     const overflowRight = menu.getBoundingClientRect().right - (win.innerWidth - 8);
     if (overflowRight > 0) menu.style.left = Math.round(r.left - overflowRight) + 'px';
     // Below the anchor is the default, but a short floated window leaves
@@ -866,6 +908,10 @@ function openPickMenu(anchor, items, currentKey, onPick, heading) {
       const roomBelow = win.innerHeight - 8 - r.bottom;
       if (roomAbove > roomBelow) {
         menu.style.top = Math.max(8, Math.round(r.top - 4 - menuRect.height)) + 'px';
+        // Grow from the bottom edge (nearest the anchor now) instead of the
+        // top, so the pop-open animation reads as coming from the anchor
+        // whichever way it actually opened.
+        menu.style.transformOrigin = 'bottom';
       }
     }
   }
@@ -898,7 +944,7 @@ function openPickMenu(anchor, items, currentKey, onPick, heading) {
 /* The numbers are the ones said out loud (「2番に切り替え」). The chips, the
    chip menu and the roll-up picker all have to count them the same way. */
 const listenerItems = () =>
-  knownListeners.map((l, i) => ({key: String(l.pid), label: `${i + 1}. ${l.label}`}));
+  knownListeners.map((l, i) => ({key: String(l.pid), label: `${i + 1}. ${l.label}`, name: l.label}));
 
 // The chip on a sent card. Picking another name sends the same text there.
 // The chip is rebuilt right away rather than left for the five second poll,
@@ -3813,7 +3859,12 @@ function paintRoutePick() {
 }
 
 el.routePick.onclick = () =>
-  openPickMenu(el.routePick, listenerItems(), routeTo || effectiveTo, setRoute2);
+  openPickMenu(el.routePick, listenerItems(), routeTo || effectiveTo, setRoute2, undefined,
+    async (pid, name) => {
+      try { await post('/api/listeners/disconnect', {pid}); } catch {}
+      say(t('disconnected', {name}), 5);
+      setTimeout(loadListeners, 400);
+    });
 
 async function setRoute2(to) {
   routeTo = to;
