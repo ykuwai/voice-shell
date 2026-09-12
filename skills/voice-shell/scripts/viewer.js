@@ -3669,7 +3669,17 @@ function updateChipsSizing() {
   el.routeChips.style.resize = chipsRowCount() >= 4 ? 'vertical' : 'none';
   el.routeChips.style.maxHeight = (chipsNaturalHeight() + 1) + 'px';
 }
-addEventListener('resize', updateChipsSizing);
+/* window's own 'resize' event first, same as most everything else on this
+   page answers to. Unlike those, this one visibly lagged behind a live drag
+   of the window's own edge, catching up only once the drag let go. fitCanvas
+   above already settled this same question the other way: it repaints off a
+   ResizeObserver instead specifically because that one **does** fire every
+   frame while the window is in your hand, not just at the end. Watching
+   .routes rather than the element this function itself writes to
+   (routeChips) is what keeps that from re-triggering itself: the former's
+   width moves only with the window, never with our own height/max-height
+   writes below. */
+new ResizeObserver(updateChipsSizing).observe(el.routes);
 
 /* Double-click the resize corner itself to snap straight to that same
    content height, instead of dragging by eye. 16px is Chrome's own resizer

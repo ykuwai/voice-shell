@@ -177,13 +177,13 @@
   .brand { display:flex; align-items:center; gap:.55rem; margin-right:auto; min-width:0; }
   .brand h1 {
     margin:0; font-size:.95rem; font-weight:600; letter-spacing:.01em;
-    /* .brand itself already gives up width first (min-width:0 above), but a
-       flex item's own default min-width is its content's full nowrap size,
-       so without this the name kept that width regardless and ran under the
-       icon row instead of yielding to it. Measured: the two started
-       overlapping at 290px wide, holding a good 9px past 300px, and below
-       279px the name is hidden outright anyway (further down), so the
-       overlap only ever had that one narrow band to happen in. */
+    /* Between "Voice Shell" in full and gone outright there used to be a
+       stretch where it shrank letter by letter behind an ellipsis, which
+       read as the word slowly breaking rather than as a deliberate step.
+       It is either whole or not there at all now (below, at the width it
+       would otherwise start crowding the icon row), so overflow/min-width
+       here are only a fallback in case that width is ever measured wrong
+       for some font, not the everyday behavior. */
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0;
   }
   .logo-mark { display:flex; align-items:center; width:24px; height:18px; flex:none; }
@@ -1566,9 +1566,17 @@
        four screens you are on, so the word is the one thing here said twice. */
     .sheet-head h2 { display:none; }
   }
+  /* The name goes before the mark that draws next to it. The mark alone still
+     says "this is Voice Shell, and it is listening", the word just repeats
+     that, so it is the one asked to go first. Measured with the real font
+     stack: the full, un-ellipsized word starts to run under the icon row at
+     306px, so this sits a few px above that instead of waiting for the
+     ellipsis to catch it right at the edge. */
+  @media (max-width: 313px) {
+    .brand h1 { display:none; }   /* keep only the name tag */
+  }
   @media (max-width: 279px) {
     :root { --pad:.55rem; }
-    .brand h1, #logoMark { display:none; }   /* keep only the name tag */
     .machine { max-width:100%; }
     /* Gaps next. The row loses its own (36px targets touching still read as
        four, and 2.4px between them was never what told them apart), and the
@@ -1626,6 +1634,14 @@
   @media (max-width: 212px) {
     .sheet-head { gap:0; padding-left:0; }
     .mini-mic { width:30px; height:30px; }
+  }
+  /* The mark itself is the last thing left to give in the header, kept on
+     screen through everything above it. Measured (name already gone, padding
+     and icon gap already at their tightest): the icon row starts running
+     under it at 188px, so it goes a few px ahead of that instead of waiting
+     to actually overlap. */
+  @media (max-width: 195px) {
+    #logoMark { display:none; }
   }
 
   /* Short. Fold the log heading and the note line, and tighten the vertical padding.
