@@ -310,11 +310,25 @@
      left over from a browser default rather than a piece of this screen.
      Chrome and Safari let the resize handle itself be painted (Firefox
      keeps its own regardless, which is fine, resize:vertical still works
-     there); a few diagonal hairlines in the border color reads as a grip
-     without pulling in an outside color the rest of this box never uses. */
+     there). A first pass drew diagonal hairlines, which read as stray lane
+     markings rather than a control. A 2x3 dot grid is the more usual
+     shorthand for "grab here" (the same shape a drag handle draws), so it
+     reads as a real widget instead of a leftover default. */
   .route-chips-scroll::-webkit-resizer {
     background-color:var(--panel-2);
-    background-image:repeating-linear-gradient(135deg, var(--line) 0 1.5px, transparent 1.5px 4px);
+    background-image:
+      radial-gradient(circle, var(--line) 1.1px, transparent 1.4px),
+      radial-gradient(circle, var(--line) 1.1px, transparent 1.4px),
+      radial-gradient(circle, var(--line) 1.1px, transparent 1.4px),
+      radial-gradient(circle, var(--line) 1.1px, transparent 1.4px),
+      radial-gradient(circle, var(--line) 1.1px, transparent 1.4px),
+      radial-gradient(circle, var(--line) 1.1px, transparent 1.4px);
+    background-size:3px 3px;
+    background-repeat:no-repeat;
+    background-position:
+      bottom 2px right 6px, bottom 2px right 2px,
+      bottom 6px right 6px, bottom 6px right 2px,
+      bottom 10px right 6px, bottom 10px right 2px;
   }
   /* The roll-up picker. It is never on screen next to the chips, but if its
      height and marker position shifted when it swapped in it would read as a
