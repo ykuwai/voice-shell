@@ -280,12 +280,28 @@
   @media (prefers-reduced-motion:no-preference) {
     .routes { transition:grid-template-rows .22s ease; }
   }
-  .route-chips {
-    display:flex; flex-wrap:wrap; gap:.25rem;
-    overflow:hidden; min-height:0;
-  }
+  /* Holds the fold above (its own height is what grid-template-rows
+     animates) and nothing else. How tall the list itself is allowed to get
+     before it scrolls is a separate question, decided by the box inside it,
+     so the two do not end up fighting over one element's height. */
+  .route-chips { overflow:hidden; min-height:0; }
   @media (prefers-reduced-motion:no-preference) {
     .route-chips { transition:visibility .22s; }
+  }
+  /* Left running free, one row per chip past a certain count eats the
+     history under it. Opens at four rows' worth (measured: a chip row is
+     25.6px, the gap between rows 4.4px, so 4 rows is 116px, rounded up a
+     little) and scrolls for any more past that, but that starting height is
+     not a ceiling: resize:vertical hands the last word to whoever is
+     looking at it, drag it taller to see six sessions at once instead of
+     four, or shorter to keep it out of the way. A max-height here would
+     have capped the drag at the same four rows it opens with, so there is
+     none, only the floor below stops it collapsing to nothing. */
+  .route-chips-scroll {
+    display:flex; flex-wrap:wrap; gap:.25rem; align-content:flex-start;
+    height:120px; min-height:1.75rem;
+    overflow-y:auto; overflow-x:hidden;
+    resize:vertical;
   }
   /* The roll-up picker. It is never on screen next to the chips, but if its
      height and marker position shifted when it swapped in it would read as a
