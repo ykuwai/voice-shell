@@ -297,9 +297,15 @@
      four, or shorter to keep it out of the way. No max-height in the
      stylesheet itself, since the room a handful of chips actually need
      changes with how many there are: viewer.js keeps this in step with the
-     content instead (capChipsHeight, called after every re-paint), so
-     dragging past what four sessions need to show does nothing rather than
-     opening onto empty panel. */
+     content instead (updateChipsSizing, called after every re-paint and on
+     every window resize), so dragging past what four sessions need to show
+     does nothing rather than opening onto empty panel. Widening or
+     narrowing the window moves how many chips fit per row, so that same
+     cap can jump between one resize event and the next — transitioning it
+     is what keeps that jump from reading as the box merely being slow to
+     catch up (the corner drag itself sets height directly and is left
+     alone, so a live drag still tracks the pointer with no lag of its
+     own). */
   .route-chips-scroll {
     display:flex; flex-wrap:wrap; gap:.25rem; align-content:flex-start;
     height:120px; min-height:1.75rem;
@@ -308,6 +314,9 @@
     /* Same thin, theme-colored bar .stream already uses instead of the
        screen-wide default. */
     scrollbar-width:thin; scrollbar-color:var(--line) transparent;
+  }
+  @media (prefers-reduced-motion:no-preference) {
+    .route-chips-scroll { transition:max-height .2s ease; }
   }
   /* The plain OS grip in the corner read as a stray form-control widget
      left over from a browser default rather than a piece of this screen.

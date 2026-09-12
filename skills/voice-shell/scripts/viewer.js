@@ -3647,15 +3647,29 @@ function chipsNaturalHeight() {
   return h;
 }
 
+/* Rows are measured off where the chips actually land (offsetTop), not
+   counted or guessed at, so it holds regardless of how many fit across the
+   current width. */
+function chipsRowCount() {
+  const tops = new Set();
+  for (const b of el.routeChips.children) tops.add(Math.round(b.offsetTop));
+  return tops.size;
+}
+
 /* How far resize:vertical (below) lets the chip box be dragged. Fixed in the
    stylesheet it would either cap the box below what a long session list
    needs or, sized for that, leave a short list draggable into a stretch of
    empty panel below its own last row. Call after every re-paint and
-   whenever the window's own width might have moved where the chips wrap. */
-function capChipsHeight() {
+   whenever the window's own width might have moved where the chips wrap.
+   Below four rows the whole list already sits fully in view (that is the
+   height the box opens at), so there is nothing yet for a grab handle to
+   do — resize itself comes off, not just its corner mark, so a stray drag
+   cannot open a gap under a still-short list either. */
+function updateChipsSizing() {
+  el.routeChips.style.resize = chipsRowCount() >= 4 ? 'vertical' : 'none';
   el.routeChips.style.maxHeight = (chipsNaturalHeight() + 1) + 'px';
 }
-addEventListener('resize', capChipsHeight);
+addEventListener('resize', updateChipsSizing);
 
 /* Double-click the resize corner itself to snap straight to that same
    content height, instead of dragging by eye. 16px is Chrome's own resizer
@@ -3793,7 +3807,7 @@ function paintRoutes() {
     b.append(x);
     return b;
   }));
-  capChipsHeight();
+  updateChipsSizing();
 }
 
 /* Move the fill without rebuilding the row.
