@@ -3628,6 +3628,49 @@ let renaming = null;     // {pid} while the rename box is open
 // happened to fire early.
 let disconnectAsking = null;   // pid while a chip's × is asking to confirm
 
+/* scrollHeight alone only ever reports the larger of "what is set" and "what
+   the content needs" — with four short chips inside a box already dragged
+   tall, that is just the box's own height handed back, not the two rows the
+   chips actually take. Asking with the height briefly relaxed to auto (its
+   intrinsic size, wrapped rows and all) is what gets the real number, and
+   back on the very next line, before the layout this forces ever reaches
+   paint. The max-height set by an earlier call has to come off for that same
+   moment too, or it clips the auto size right back down to whatever the last
+   measurement was, and the box never notices the list growing past it. */
+function chipsNaturalHeight() {
+  const prevH = el.routeChips.style.height, prevMax = el.routeChips.style.maxHeight;
+  el.routeChips.style.height = 'auto';
+  el.routeChips.style.maxHeight = 'none';
+  const h = el.routeChips.scrollHeight;
+  el.routeChips.style.height = prevH;
+  el.routeChips.style.maxHeight = prevMax;
+  return h;
+}
+
+/* How far resize:vertical (below) lets the chip box be dragged. Fixed in the
+   stylesheet it would either cap the box below what a long session list
+   needs or, sized for that, leave a short list draggable into a stretch of
+   empty panel below its own last row. Call after every re-paint and
+   whenever the window's own width might have moved where the chips wrap. */
+function capChipsHeight() {
+  el.routeChips.style.maxHeight = (chipsNaturalHeight() + 1) + 'px';
+}
+addEventListener('resize', capChipsHeight);
+
+/* Double-click the resize corner itself to snap straight to that same
+   content height, instead of dragging by eye. 16px is Chrome's own resizer
+   square; a real click a few px short of dead-on the corner still lands
+   inside it, so this is generous rather than exact. A chip sitting in that
+   same corner keeps its own dblclick (rename) — checked first, so the two
+   never both fire off one click. */
+function fitChipsHeight(ev) {
+  if (ev.target.closest('.route-chip')) return;
+  const r = el.routeChips.getBoundingClientRect();
+  if (r.right - ev.clientX > 16 || r.bottom - ev.clientY > 16) return;
+  el.routeChips.style.height = chipsNaturalHeight() + 'px';
+}
+el.routeChips.addEventListener('dblclick', fitChipsHeight);
+
 function paintRoutes() {
   if (renaming) {
     // Still there. Leave the row exactly as it is until the box is done with.
@@ -3750,6 +3793,7 @@ function paintRoutes() {
     b.append(x);
     return b;
   }));
+  capChipsHeight();
 }
 
 /* Move the fill without rebuilding the row.

@@ -294,9 +294,12 @@
      little) and scrolls for any more past that, but that starting height is
      not a ceiling: resize:vertical hands the last word to whoever is
      looking at it, drag it taller to see six sessions at once instead of
-     four, or shorter to keep it out of the way. A max-height here would
-     have capped the drag at the same four rows it opens with, so there is
-     none, only the floor below stops it collapsing to nothing. */
+     four, or shorter to keep it out of the way. No max-height in the
+     stylesheet itself, since the room a handful of chips actually need
+     changes with how many there are: viewer.js keeps this in step with the
+     content instead (capChipsHeight, called after every re-paint), so
+     dragging past what four sessions need to show does nothing rather than
+     opening onto empty panel. */
   .route-chips-scroll {
     display:flex; flex-wrap:wrap; gap:.25rem; align-content:flex-start;
     height:120px; min-height:1.75rem;
@@ -310,25 +313,23 @@
      left over from a browser default rather than a piece of this screen.
      Chrome and Safari let the resize handle itself be painted (Firefox
      keeps its own regardless, which is fine, resize:vertical still works
-     there). A first pass drew diagonal hairlines, which read as stray lane
-     markings rather than a control. A 2x3 dot grid is the more usual
-     shorthand for "grab here" (the same shape a drag handle draws), so it
-     reads as a real widget instead of a leftover default. */
+     there). Diagonal hairlines read as stray lane markings, and a 2x3 dot
+     grid (tried next) read as taking up more of the corner than a grab mark
+     needs, and drawn at a fixed grid of offsets it also came apart from the
+     scrollbar next to it (the pair share this same corner, and a thin
+     scrollbar does not free up a fixed 16px column to draw those dots into,
+     so the ones nearest the scrollbar were the ones lost under it). An L
+     drawn hugging the very corner instead needs only the 2px right at the
+     tip, clear of the scrollbar regardless of how wide it renders, and
+     still reads as "grab here" the way a resize corner mark usually does. */
   .route-chips-scroll::-webkit-resizer {
     background-color:var(--panel-2);
     background-image:
-      radial-gradient(circle, var(--line) 1.1px, transparent 1.4px),
-      radial-gradient(circle, var(--line) 1.1px, transparent 1.4px),
-      radial-gradient(circle, var(--line) 1.1px, transparent 1.4px),
-      radial-gradient(circle, var(--line) 1.1px, transparent 1.4px),
-      radial-gradient(circle, var(--line) 1.1px, transparent 1.4px),
-      radial-gradient(circle, var(--line) 1.1px, transparent 1.4px);
-    background-size:3px 3px;
+      linear-gradient(var(--line), var(--line)),
+      linear-gradient(var(--line), var(--line));
+    background-size:6px 1.4px, 1.4px 6px;
+    background-position:bottom 2px right 2px, bottom 2px right 2px;
     background-repeat:no-repeat;
-    background-position:
-      bottom 2px right 6px, bottom 2px right 2px,
-      bottom 6px right 6px, bottom 6px right 2px,
-      bottom 10px right 6px, bottom 10px right 2px;
   }
   /* The roll-up picker. It is never on screen next to the chips, but if its
      height and marker position shifted when it swapped in it would read as a
