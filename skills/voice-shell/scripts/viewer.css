@@ -298,6 +298,13 @@
     display:flex; align-items:center; position:relative; max-width:100%;
     overflow:hidden; min-height:0;
     opacity:0; visibility:hidden; pointer-events:none;
+    /* .routes turned into a grid for the fold above, and a grid item
+       stretches to the full row width by default. The arrow below is
+       anchored off this element's own right edge, so full-width sent it
+       drifting off past the button entirely instead of sitting against it.
+       Shrink back to the button's own width, the way inline-block held it
+       before that change. */
+    justify-self:start;
   }
   @media (prefers-reduced-motion:no-preference) {
     .route-pick-wrap { transition:opacity .18s ease, visibility .22s; }
