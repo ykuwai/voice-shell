@@ -746,46 +746,56 @@ function addEntry(rec) {
    the correction is the only thing left to type. A page cannot add an item
    to the browser's own right-click menu, so this replaces it outright with
    one row of its own instead, in the same small floating shape .to-menu
-   already reads as this screen's own menu (openPickMenu, above). */
+   already reads as this screen's own menu (openPickMenu, above).
+
+   doc/win come from the element the click actually landed on rather than
+   the bare document/window/getSelection globals, the same reasoning as
+   openPickMenu above: while floating, el.page (the log along with it) has
+   been moved into the small window's own document (floatParts, further
+   down), so a selection, an append, or an innerWidth read against the bare
+   globals would all quietly answer for the wrong window instead of the one
+   actually on screen. */
 let closeSelMenu = null;
-function openSelectionMenu(x, y, text) {
+function openSelectionMenu(doc, win, x, y, text) {
   if (closeSelMenu) closeSelMenu();
-  const menu = document.createElement('div');
+  const menu = doc.createElement('div');
   menu.className = 'to-menu';
-  const item = document.createElement('button');
+  const item = doc.createElement('button');
   item.type = 'button';
   item.className = 'to-menu-item';
-  const label = document.createElement('span');
+  const label = doc.createElement('span');
   label.className = 'to-menu-item-label';
   label.textContent = t('addToDict');
   item.append(label);
   item.onclick = () => { close(); jumpToDictAdd(text); };
   menu.append(item);
-  document.body.append(menu);
+  doc.body.append(menu);
   // Clamped the same way openPickMenu's place() clamps a menu that would
   // otherwise run off whichever edge it is closest to, off the click itself
   // rather than an anchor's rect since there is no button here to measure.
   const r = menu.getBoundingClientRect();
-  const left = Math.max(8, Math.min(x, innerWidth - r.width - 8));
-  const top = Math.max(8, Math.min(y, innerHeight - r.height - 8));
+  const left = Math.max(8, Math.min(x, win.innerWidth - r.width - 8));
+  const top = Math.max(8, Math.min(y, win.innerHeight - r.height - 8));
   menu.style.left = Math.round(left) + 'px';
   menu.style.top = Math.round(top) + 'px';
   function close() {
     menu.remove();
-    document.removeEventListener('click', onDocClick, true);
-    document.removeEventListener('keydown', onKey);
+    doc.removeEventListener('click', onDocClick, true);
+    doc.removeEventListener('keydown', onKey);
     if (closeSelMenu === close) closeSelMenu = null;
   }
   function onDocClick(e) { if (!menu.contains(e.target)) close(); }
   function onKey(e) { if (e.key === 'Escape') close(); }
-  setTimeout(() => document.addEventListener('click', onDocClick, true), 0);
-  document.addEventListener('keydown', onKey);
+  setTimeout(() => doc.addEventListener('click', onDocClick, true), 0);
+  doc.addEventListener('keydown', onKey);
   closeSelMenu = close;
 }
 el.log.addEventListener('contextmenu', e => {
   const textEl = e.target.closest('.entry .text');
   if (!textEl) return;
-  const sel = getSelection();
+  const doc = textEl.ownerDocument;
+  const win = doc.defaultView;
+  const sel = win.getSelection();
   const picked = sel && sel.toString().trim();
   // Left uncaught (the browser's own menu shows) unless there really is a
   // selection, and it is this entry's own — the leftover selection from an
@@ -793,7 +803,7 @@ el.log.addEventListener('contextmenu', e => {
   // meant to act on.
   if (!picked || !sel.anchorNode || !textEl.contains(sel.anchorNode)) return;
   e.preventDefault();
-  openSelectionMenu(e.clientX, e.clientY, picked);
+  openSelectionMenu(doc, win, e.clientX, e.clientY, picked);
 });
 
 /* Opens (or switches to) the dictionary's replace tab with the word already
