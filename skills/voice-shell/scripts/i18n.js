@@ -183,6 +183,7 @@ const I18N = {
     keyMute:'Microphone on and off',
     keyClose:'Close whatever is open',
     jumpTop:'Jump to newest',
+    addToDict:'Add to dictionary',
   },
   ja: {
     connecting:'接続中',
@@ -365,6 +366,7 @@ const I18N = {
     keyMute:'マイクの入切',
     keyClose:'開いているものを閉じる',
     jumpTop:'最新へ移動',
+    addToDict:'辞書に追加',
   },
   es: {
     connecting:'Conectando…',

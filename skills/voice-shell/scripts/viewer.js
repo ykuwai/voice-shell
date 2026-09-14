@@ -741,6 +741,75 @@ function addEntry(rec) {
   retally();
 }
 
+/* Drag-select a misheard word inside a sent entry, right click it, and land
+   in the dictionary with that word already filling the "heard as" side —
+   the correction is the only thing left to type. A page cannot add an item
+   to the browser's own right-click menu, so this replaces it outright with
+   one row of its own instead, in the same small floating shape .to-menu
+   already reads as this screen's own menu (openPickMenu, above). */
+let closeSelMenu = null;
+function openSelectionMenu(x, y, text) {
+  if (closeSelMenu) closeSelMenu();
+  const menu = document.createElement('div');
+  menu.className = 'to-menu';
+  const item = document.createElement('button');
+  item.type = 'button';
+  item.className = 'to-menu-item';
+  const label = document.createElement('span');
+  label.className = 'to-menu-item-label';
+  label.textContent = t('addToDict');
+  item.append(label);
+  item.onclick = () => { close(); jumpToDictAdd(text); };
+  menu.append(item);
+  document.body.append(menu);
+  // Clamped the same way openPickMenu's place() clamps a menu that would
+  // otherwise run off whichever edge it is closest to, off the click itself
+  // rather than an anchor's rect since there is no button here to measure.
+  const r = menu.getBoundingClientRect();
+  const left = Math.max(8, Math.min(x, innerWidth - r.width - 8));
+  const top = Math.max(8, Math.min(y, innerHeight - r.height - 8));
+  menu.style.left = Math.round(left) + 'px';
+  menu.style.top = Math.round(top) + 'px';
+  function close() {
+    menu.remove();
+    document.removeEventListener('click', onDocClick, true);
+    document.removeEventListener('keydown', onKey);
+    if (closeSelMenu === close) closeSelMenu = null;
+  }
+  function onDocClick(e) { if (!menu.contains(e.target)) close(); }
+  function onKey(e) { if (e.key === 'Escape') close(); }
+  setTimeout(() => document.addEventListener('click', onDocClick, true), 0);
+  document.addEventListener('keydown', onKey);
+  closeSelMenu = close;
+}
+el.log.addEventListener('contextmenu', e => {
+  const textEl = e.target.closest('.entry .text');
+  if (!textEl) return;
+  const sel = getSelection();
+  const picked = sel && sel.toString().trim();
+  // Left uncaught (the browser's own menu shows) unless there really is a
+  // selection, and it is this entry's own — the leftover selection from an
+  // entry scrolled away under the pointer is not what a right click here
+  // meant to act on.
+  if (!picked || !sel.anchorNode || !textEl.contains(sel.anchorNode)) return;
+  e.preventDefault();
+  openSelectionMenu(e.clientX, e.clientY, picked);
+});
+
+/* Opens (or switches to) the dictionary's replace tab with the word already
+   in place, from openSelectionMenu above. Reopening it wholesale only when
+   it was not already showing the dictionary — doing that unconditionally
+   would reload the mics, languages and tuning along with it every time,
+   and mid-edit elsewhere in the same pane is exactly when this is likely
+   to be reached for. */
+async function jumpToDictAdd(text) {
+  if (navWhere() !== 'dict') await openSettings('dict');
+  showDictTab('replace');
+  el.newFrom.value = text;
+  el.newTo.value = '';
+  el.newTo.focus();
+}
+
 /* The destination chip doubles as the resend control, rather than a second,
    separate arrow sitting off at the row's own edge (an earlier build did
    that, and it read as two unrelated controls that happened to share a
