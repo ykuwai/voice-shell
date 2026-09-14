@@ -173,17 +173,22 @@
   }
   .log-jump {
     pointer-events:auto; margin-top:.5rem;
-    width:2.3rem; height:2.3rem; border:none; border-radius:50%;
+    width:1.9rem; height:1.9rem; border:none; border-radius:50%;
     display:grid; place-items:center; cursor:pointer;
-    background:var(--accent); color:var(--panel);
-    /* A plain dark shadow (the same one .to-menu drops) rather than a
-       color-mixed accent glow — this sits over the log at all times it
-       shows, not just for the one look a toast like .fresh gets, so a halo
-       that reads fine for a moment read as too bright for something meant
-       to sit there a while. */
+    /* A solid fill in the full accent color read as too strong for
+       something that sits over the log the whole time it shows, not just
+       for the one look a toast like .fresh gets — the same tint .icon.on
+       already uses for "this is lit, but not shouting about it" is toned
+       down further again for a background this floats over rather than
+       sits flush against. Icon and shadow follow the same reasoning: the
+       accent shows through as the mark's own color instead of a solid
+       fill, and the shadow is the plain dark one .to-menu drops rather
+       than a color-mixed glow. */
+    background:color-mix(in srgb, var(--accent) 22%, var(--panel-2));
+    color:var(--accent);
     box-shadow:0 4px 14px rgba(0, 0, 0, .35);
   }
-  .log-jump svg { width:20px; height:20px; }
+  .log-jump svg { width:16px; height:16px; }
   @media (prefers-reduced-motion:no-preference) {
     .log-jump { animation:jumpPop .2s cubic-bezier(.25, 1.4, .5, 1); }
   }
