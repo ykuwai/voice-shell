@@ -176,7 +176,12 @@
     width:2.3rem; height:2.3rem; border:none; border-radius:50%;
     display:grid; place-items:center; cursor:pointer;
     background:var(--accent); color:var(--panel);
-    box-shadow:0 4px 14px color-mix(in srgb, var(--accent) 45%, transparent);
+    /* A plain dark shadow (the same one .to-menu drops) rather than a
+       color-mixed accent glow — this sits over the log at all times it
+       shows, not just for the one look a toast like .fresh gets, so a halo
+       that reads fine for a moment read as too bright for something meant
+       to sit there a while. */
+    box-shadow:0 4px 14px rgba(0, 0, 0, .35);
   }
   .log-jump svg { width:20px; height:20px; }
   @media (prefers-reduced-motion:no-preference) {
