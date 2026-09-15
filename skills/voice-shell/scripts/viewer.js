@@ -104,6 +104,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'tray','stream','draft','draftTime','send','discard',
                   'editOnce','dropOne','sendOne','cancelOnce','draftMark',
                   'hint','note','log','none','count','fresh','floatAsk','taken','takeBack',
+                  'logJumpWrap','logJump',
                   'mic','recogLang','recogLangField','thresh','threshVal','gaugeFill','gaugeMark',
                   'silence','silenceVal','silenceNote','minChars','minCharsVal','clean',
                   'wakeLockField','wakeLockOn','wakeLockNote',
@@ -172,7 +173,25 @@ const format = raw => raw;
    WebSocket (level.txt). */
 const MARK_BASE_HEIGHTS = [23, 36, 18, 31, 20];
 const MARK_MIN_HEIGHT = 12;
-const MARK_GAIN = 24;
+const MARK_GAIN = 28;
+/* Each bar used to ride the exact same eased level, just added to a
+   different resting height, so all five moved in lockstep and read as one
+   mechanical shape rather than five independent ones. Tried a real
+   frequency split too (each bar its own FFT band), but a voice's energy
+   sits low, so that left the right-hand bars all but still.
+   Neither needs real per-band data. Each bar eases the raw level on its own
+   clock (so a burst reaches them at different speeds) and rides two sines
+   of its own period and phase on top, scaled down toward the outside and
+   gated by the level itself so nothing moves once you go quiet. */
+const MARK_RISE  = [0.035, 0.025, 0.020, 0.030, 0.045];   // seconds, per bar
+const MARK_FALL  = [0.22,  0.15,  0.11,  0.17,  0.26];    // seconds, per bar
+const MARK_SHAPE = [0.65,  0.90,  1.00,  0.85,  0.60];    // how much of MARK_GAIN each bar answers to
+const MARK_F1    = [1.9,   2.6,   3.1,   2.3,   1.7];     // Hz, the faster of the two sines
+const MARK_F2    = [0.31,  0.47,  0.59,  0.41,  0.37];    // Hz, the slower one
+const MARK_PHASE = [0.0,   1.3,   2.7,   4.1,   5.5];     // radians
+const MARK_WOBBLE_PX = 7;
+const markLevels = [0, 0, 0, 0, 0];
+let markAt = 0;
 let audioCtx = null, analyser = null, micStream = null, freq = null;
 let daemonLevel = 0, daemonSpeaking = false;
 let vizFailed = false;
@@ -483,13 +502,38 @@ function paintFrame(now) {
   }
 
   const marks = el.logoMark.querySelectorAll('rect');
-  const markLevel = route === 'off' ? 0 : micLevel;
-  for (let i = 0; i < marks.length; i++) {
-    const h = route === 'off'
-      ? MARK_MIN_HEIGHT
-      : Math.min(60, MARK_BASE_HEIGHTS[i] + markLevel * MARK_GAIN);
-    marks[i].setAttribute('y', ((66 - h) / 2).toFixed(2));
-    marks[i].setAttribute('height', h.toFixed(2));
+  if (route === 'off') {
+    markAt = 0;
+    for (let i = 0; i < marks.length; i++) {
+      markLevels[i] = 0;
+      marks[i].setAttribute('y', ((66 - MARK_MIN_HEIGHT) / 2).toFixed(2));
+      marks[i].setAttribute('height', MARK_MIN_HEIGHT.toFixed(2));
+    }
+  } else {
+    // The raw level, not micLevel. That one is already eased once for the
+    // mic drawing above, and easing an eased value again flattens the very
+    // difference in speed between bars that is the whole point here.
+    const raw = amplitudeNow();
+    const dt = markAt ? Math.min(Math.max((now - markAt) / 1000, 0), 0.1) : 0.1;
+    markAt = now;
+    const t = now / 1000;
+    for (let i = 0; i < marks.length; i++) {
+      const tau = raw > markLevels[i] ? MARK_RISE[i] : MARK_FALL[i];
+      markLevels[i] += (raw - markLevels[i]) * (1 - Math.exp(-dt / tau));
+      const lv = markLevels[i];
+      // Two sines of the bar's own period and phase, never a lookup back
+      // into the same frequency data the equalizer attempt already showed
+      // does not split evenly for a voice. Scaled by sqrt(lv) rather than
+      // lv itself, so a quiet voice still gets a little life in the wobble
+      // rather than needing to get loud before it shows at all, and gated
+      // by it either way, so silence holds still instead of drifting.
+      const wobble = 0.6 * Math.sin(Math.PI * 2 * MARK_F1[i] * t + MARK_PHASE[i])
+                   + 0.4 * Math.sin(Math.PI * 2 * MARK_F2[i] * t + MARK_PHASE[i] * 1.7);
+      let h = MARK_BASE_HEIGHTS[i] + MARK_GAIN * MARK_SHAPE[i] * lv + MARK_WOBBLE_PX * Math.sqrt(lv) * wobble;
+      h = Math.min(60, Math.max(MARK_MIN_HEIGHT, h));
+      marks[i].setAttribute('y', ((66 - h) / 2).toFixed(2));
+      marks[i].setAttribute('height', h.toFixed(2));
+    }
   }
 }
 requestAnimationFrame(frame);
@@ -631,6 +675,19 @@ function retally() {
   el.none.hidden = n > 0;
 }
 
+/* Scrolled away from the top (below, some slack for the odd sub-pixel
+   scrollTop scroll anchoring can leave behind) is scrolled away from
+   whatever just arrived, since newest lands at the top. */
+const logWrap = el.log.parentElement;
+function atLogTop() { return logWrap.scrollTop <= 4; }
+logWrap.addEventListener('scroll', () => {
+  if (atLogTop()) el.logJumpWrap.hidden = true;
+});
+el.logJump.onclick = () => {
+  el.logJumpWrap.hidden = true;
+  logWrap.scrollTo({top: 0, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'});
+};
+
 function addEntry(rec) {
   const row = document.createElement('div');
   row.className = 'entry';
@@ -668,8 +725,99 @@ function addEntry(rec) {
   gutter.append(buildToControl(row.dataset.to));
 
   row.append(gutter, text);
+  // Read before the insert below moves it: CSS scroll anchoring already
+  // keeps whatever you were reading in the same place on screen when a row
+  // lands above it (Chrome, tested), so a reader scrolled away from the top
+  // does not need any help from here to avoid a jump. Someone already
+  // sitting right at the top gets pulled along instead of anchored in
+  // place, the same as scrollTop:0 pinned to the bottom of a normal,
+  // newest-last log — the alternative (anchoring holds them a row's height
+  // below the true top) would read as the screen quietly drifting off the
+  // newest thing without anything having been clicked.
+  const wasAtTop = atLogTop();
   el.log.prepend(row);          // newest on top (same order as the mock)
+  if (wasAtTop) logWrap.scrollTop = 0;
+  else el.logJumpWrap.hidden = false;
   retally();
+}
+
+/* Drag-select a misheard word inside a sent entry, right click it, and land
+   in the dictionary with that word already filling the "heard as" side —
+   the correction is the only thing left to type. A page cannot add an item
+   to the browser's own right-click menu, so this replaces it outright with
+   one row of its own instead, in the same small floating shape .to-menu
+   already reads as this screen's own menu (openPickMenu, above).
+
+   doc/win come from the element the click actually landed on rather than
+   the bare document/window/getSelection globals, the same reasoning as
+   openPickMenu above: while floating, el.page (the log along with it) has
+   been moved into the small window's own document (floatParts, further
+   down), so a selection, an append, or an innerWidth read against the bare
+   globals would all quietly answer for the wrong window instead of the one
+   actually on screen. */
+let closeSelMenu = null;
+function openSelectionMenu(doc, win, x, y, text) {
+  if (closeSelMenu) closeSelMenu();
+  const menu = doc.createElement('div');
+  menu.className = 'to-menu';
+  const item = doc.createElement('button');
+  item.type = 'button';
+  item.className = 'to-menu-item';
+  const label = doc.createElement('span');
+  label.className = 'to-menu-item-label';
+  label.textContent = t('addToDict');
+  item.append(label);
+  item.onclick = () => { close(); jumpToDictAdd(text); };
+  menu.append(item);
+  doc.body.append(menu);
+  // Clamped the same way openPickMenu's place() clamps a menu that would
+  // otherwise run off whichever edge it is closest to, off the click itself
+  // rather than an anchor's rect since there is no button here to measure.
+  const r = menu.getBoundingClientRect();
+  const left = Math.max(8, Math.min(x, win.innerWidth - r.width - 8));
+  const top = Math.max(8, Math.min(y, win.innerHeight - r.height - 8));
+  menu.style.left = Math.round(left) + 'px';
+  menu.style.top = Math.round(top) + 'px';
+  function close() {
+    menu.remove();
+    doc.removeEventListener('click', onDocClick, true);
+    doc.removeEventListener('keydown', onKey);
+    if (closeSelMenu === close) closeSelMenu = null;
+  }
+  function onDocClick(e) { if (!menu.contains(e.target)) close(); }
+  function onKey(e) { if (e.key === 'Escape') close(); }
+  setTimeout(() => doc.addEventListener('click', onDocClick, true), 0);
+  doc.addEventListener('keydown', onKey);
+  closeSelMenu = close;
+}
+el.log.addEventListener('contextmenu', e => {
+  const textEl = e.target.closest('.entry .text');
+  if (!textEl) return;
+  const doc = textEl.ownerDocument;
+  const win = doc.defaultView;
+  const sel = win.getSelection();
+  const picked = sel && sel.toString().trim();
+  // Left uncaught (the browser's own menu shows) unless there really is a
+  // selection, and it is this entry's own — the leftover selection from an
+  // entry scrolled away under the pointer is not what a right click here
+  // meant to act on.
+  if (!picked || !sel.anchorNode || !textEl.contains(sel.anchorNode)) return;
+  e.preventDefault();
+  openSelectionMenu(doc, win, e.clientX, e.clientY, picked);
+});
+
+/* Opens (or switches to) the dictionary's replace tab with the word already
+   in place, from openSelectionMenu above. Reopening it wholesale only when
+   it was not already showing the dictionary — doing that unconditionally
+   would reload the mics, languages and tuning along with it every time,
+   and mid-edit elsewhere in the same pane is exactly when this is likely
+   to be reached for. */
+async function jumpToDictAdd(text) {
+  if (navWhere() !== 'dict') await openSettings('dict');
+  showDictTab('replace');
+  el.newFrom.value = text;
+  el.newTo.value = '';
+  el.newTo.focus();
 }
 
 /* The destination chip doubles as the resend control, rather than a second,
@@ -742,7 +890,7 @@ let closeToMenu = null;
    the way, whether it was ever going to be opened or not (#79 feedback:
    said outright once opened is enough, said every time it sits closed is
    noise). */
-function openPickMenu(anchor, items, currentKey, onPick, heading) {
+function openPickMenu(anchor, items, currentKey, onPick, heading, onDisconnect) {
   // A second press on the same anchor is a close, not a rebuild-and-reopen.
   if (openToMenuBtn === anchor) { closeToMenu(); return; }
   if (closeToMenu) closeToMenu();
@@ -777,8 +925,49 @@ function openPickMenu(anchor, items, currentKey, onPick, heading) {
     const item = doc.createElement('button');
     item.type = 'button';
     item.className = 'to-menu-item' + (it.key === currentKey ? ' on' : '');
-    item.textContent = it.label;
+    const label = doc.createElement('span');
+    label.className = 'to-menu-item-label';
+    label.textContent = it.label;
+    item.append(label);
+
+    // Ending a session from in here, not just switching to it. Only offered
+    // where the caller passes onDisconnect (the roll-up picker that stands
+    // in for the chips, each of which already carries its own ×; resending
+    // a sent card to a different destination has no such thing to offer).
+    // Same two-step ask/confirm as the chip's own ×, kept local to this one
+    // row instead of the module-wide flag that guards the chip's version,
+    // since this menu is thrown away and rebuilt fresh every time it opens
+    // rather than living through the five second poll that flag exists for.
+    let confirmDisconnect = null;
+    if (onDisconnect) {
+      const x = doc.createElement('span');
+      x.className = 'x';
+      x.textContent = '×';
+      x.title = t('disconnectTitle', {name: it.name || it.label});
+      let askTimer = null;
+      const askToConfirm = () => {
+        item.classList.add('asking');
+        label.textContent = t('disconnectAsk');
+        askTimer = setTimeout(() => {
+          item.classList.remove('asking');
+          label.textContent = it.label;
+        }, 4000);
+      };
+      confirmDisconnect = async () => {
+        clearTimeout(askTimer);
+        item.remove();
+        await onDisconnect(it.key, it.name || it.label);
+      };
+      x.onclick = ev => {
+        ev.stopPropagation();
+        if (!item.classList.contains('asking')) { askToConfirm(); return; }
+        confirmDisconnect();
+      };
+      item.append(x);
+    }
+
     item.onclick = () => {
+      if (item.classList.contains('asking')) { confirmDisconnect(); return; }
       close();
       if (it.key === currentKey) return;
       onPick(it.key);
@@ -808,8 +997,28 @@ function openPickMenu(anchor, items, currentKey, onPick, heading) {
     }
     menu.style.top = Math.round(r.bottom + 4) + 'px';
     menu.style.left = Math.round(r.left) + 'px';
+    menu.style.transformOrigin = 'top';
     const overflowRight = menu.getBoundingClientRect().right - (win.innerWidth - 8);
     if (overflowRight > 0) menu.style.left = Math.round(r.left - overflowRight) + 'px';
+    // Below the anchor is the default, but a short floated window leaves
+    // barely any of that for a row near the bottom, and the list (11rem
+    // max, its own scrollbar past that) mostly ran off the edge instead of
+    // scrolling into view. Flip above only once below genuinely does not
+    // fit and above actually has more room, so a menu that fits either way
+    // never jumps for no reason.
+    const menuRect = menu.getBoundingClientRect();
+    const overflowBottom = menuRect.bottom - (win.innerHeight - 8);
+    if (overflowBottom > 0) {
+      const roomAbove = r.top - 8;
+      const roomBelow = win.innerHeight - 8 - r.bottom;
+      if (roomAbove > roomBelow) {
+        menu.style.top = Math.max(8, Math.round(r.top - 4 - menuRect.height)) + 'px';
+        // Grow from the bottom edge (nearest the anchor now) instead of the
+        // top, so the pop-open animation reads as coming from the anchor
+        // whichever way it actually opened.
+        menu.style.transformOrigin = 'bottom';
+      }
+    }
   }
   place();
 
@@ -840,7 +1049,7 @@ function openPickMenu(anchor, items, currentKey, onPick, heading) {
 /* The numbers are the ones said out loud (「2番に切り替え」). The chips, the
    chip menu and the roll-up picker all have to count them the same way. */
 const listenerItems = () =>
-  knownListeners.map((l, i) => ({key: String(l.pid), label: `${i + 1}. ${l.label}`}));
+  knownListeners.map((l, i) => ({key: String(l.pid), label: `${i + 1}. ${l.label}`, name: l.label}));
 
 // The chip on a sent card. Picking another name sends the same text there.
 // The chip is rebuilt right away rather than left for the five second poll,
@@ -3524,6 +3733,73 @@ let renaming = null;     // {pid} while the rename box is open
 // happened to fire early.
 let disconnectAsking = null;   // pid while a chip's × is asking to confirm
 
+/* scrollHeight alone only ever reports the larger of "what is set" and "what
+   the content needs" — with four short chips inside a box already dragged
+   tall, that is just the box's own height handed back, not the two rows the
+   chips actually take. Asking with the height briefly relaxed to auto (its
+   intrinsic size, wrapped rows and all) is what gets the real number, and
+   back on the very next line, before the layout this forces ever reaches
+   paint. The max-height set by an earlier call has to come off for that same
+   moment too, or it clips the auto size right back down to whatever the last
+   measurement was, and the box never notices the list growing past it. */
+function chipsNaturalHeight() {
+  const prevH = el.routeChips.style.height, prevMax = el.routeChips.style.maxHeight;
+  el.routeChips.style.height = 'auto';
+  el.routeChips.style.maxHeight = 'none';
+  const h = el.routeChips.scrollHeight;
+  el.routeChips.style.height = prevH;
+  el.routeChips.style.maxHeight = prevMax;
+  return h;
+}
+
+/* Rows are measured off where the chips actually land (offsetTop), not
+   counted or guessed at, so it holds regardless of how many fit across the
+   current width. */
+function chipsRowCount() {
+  const tops = new Set();
+  for (const b of el.routeChips.children) tops.add(Math.round(b.offsetTop));
+  return tops.size;
+}
+
+/* How far resize:vertical (below) lets the chip box be dragged. Fixed in the
+   stylesheet it would either cap the box below what a long session list
+   needs or, sized for that, leave a short list draggable into a stretch of
+   empty panel below its own last row. Call after every re-paint and
+   whenever the window's own width might have moved where the chips wrap.
+   Below four rows the whole list already sits fully in view (that is the
+   height the box opens at), so there is nothing yet for a grab handle to
+   do — resize itself comes off, not just its corner mark, so a stray drag
+   cannot open a gap under a still-short list either. */
+function updateChipsSizing() {
+  el.routeChips.style.resize = chipsRowCount() >= 4 ? 'vertical' : 'none';
+  el.routeChips.style.maxHeight = (chipsNaturalHeight() + 1) + 'px';
+}
+/* window's own 'resize' event first, same as most everything else on this
+   page answers to. Unlike those, this one visibly lagged behind a live drag
+   of the window's own edge, catching up only once the drag let go. fitCanvas
+   above already settled this same question the other way: it repaints off a
+   ResizeObserver instead specifically because that one **does** fire every
+   frame while the window is in your hand, not just at the end. Watching
+   .routes rather than the element this function itself writes to
+   (routeChips) is what keeps that from re-triggering itself: the former's
+   width moves only with the window, never with our own height/max-height
+   writes below. */
+new ResizeObserver(updateChipsSizing).observe(el.routes);
+
+/* Double-click the resize corner itself to snap straight to that same
+   content height, instead of dragging by eye. 16px is Chrome's own resizer
+   square; a real click a few px short of dead-on the corner still lands
+   inside it, so this is generous rather than exact. A chip sitting in that
+   same corner keeps its own dblclick (rename) — checked first, so the two
+   never both fire off one click. */
+function fitChipsHeight(ev) {
+  if (ev.target.closest('.route-chip')) return;
+  const r = el.routeChips.getBoundingClientRect();
+  if (r.right - ev.clientX > 16 || r.bottom - ev.clientY > 16) return;
+  el.routeChips.style.height = chipsNaturalHeight() + 'px';
+}
+el.routeChips.addEventListener('dblclick', fitChipsHeight);
+
 function paintRoutes() {
   if (renaming) {
     // Still there. Leave the row exactly as it is until the box is done with.
@@ -3646,6 +3922,7 @@ function paintRoutes() {
     b.append(x);
     return b;
   }));
+  updateChipsSizing();
 }
 
 /* Move the fill without rebuilding the row.
@@ -3755,7 +4032,12 @@ function paintRoutePick() {
 }
 
 el.routePick.onclick = () =>
-  openPickMenu(el.routePick, listenerItems(), routeTo || effectiveTo, setRoute2);
+  openPickMenu(el.routePick, listenerItems(), routeTo || effectiveTo, setRoute2, undefined,
+    async (pid, name) => {
+      try { await post('/api/listeners/disconnect', {pid}); } catch {}
+      say(t('disconnected', {name}), 5);
+      setTimeout(loadListeners, 400);
+    });
 
 async function setRoute2(to) {
   routeTo = to;

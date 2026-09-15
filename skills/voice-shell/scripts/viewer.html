@@ -107,7 +107,13 @@
        next thing you say will land, so it belongs where your eye falls just
        before sending). -->
   <div class="routes" id="routes" hidden>
-    <div class="route-chips" id="routeChips"></div>
+    <div class="route-chips">
+      <!-- The fold above (routes' grid row) and the cap on how tall the
+           list itself gets before it scrolls are two different jobs, so
+           they live on two different boxes rather than fighting over one
+           element's height. -->
+      <div class="route-chips-scroll" id="routeChips"></div>
+    </div>
     <!-- When the height runs out, this comes up instead of the row of chips
          (CSS does the switching). Each chip takes a row of its own, so as the
          list grows they eat the height clean through. -->
@@ -186,6 +192,14 @@
   </div>
 
   <div class="log-wrap">
+    <div class="log-jump-wrap" id="logJumpWrap" hidden>
+      <button class="log-jump" id="logJump" data-i18n-title="jumpTop">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M6 15 L12 9 L18 15" stroke="currentColor" stroke-width="2.3"
+                stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>
     <div id="log"></div>
     <p class="none" id="none" data-i18n="empty">Nothing sent yet. Speak and it shows up here.</p>
   </div>

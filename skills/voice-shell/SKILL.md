@@ -129,8 +129,22 @@ picked last time (`~/.config/voice-shell/config.json`), and the first time it is
    )
    ```
 
-**Keep only one Monitor of your own.** When re-attaching, stop the old one with
-TaskStop before making a new one. With two alive the same utterance arrives twice.
+   **As of Claude Code 2.1.271, a watch may not run forever even with
+   `persistent: true`** (a deadline, 30 minutes at the longest, replacing
+   what used to be no timeout at all). Whether that holds going forward is
+   not something to build around, a later Claude Code update could just as
+   easily change it back, so nothing here leans on it. If a deadline
+   notification does arrive, **treat it the same as starting fresh: call
+   Monitor again with the exact same command.** `listen`'s own registration
+   only disappears once the process itself actually stops (TaskStop or the
+   session ending, same as ever), so a plain re-arm is enough, nothing needs
+   stopping first.
+
+**Keep only one Monitor of your own.** Re-arming on a deadline or "source
+ended" notification (above) is always safe on its own. Re-attaching for some
+other reason, compacting included, when the old one might still actually be
+alive, stop it with TaskStop first. With two alive the same utterance
+arrives twice.
 
 **A resumed session (`claude -r`) does not know on its own whether its old
 Monitor is still alive**, and folder name plus timestamp are not enough to
@@ -142,9 +156,9 @@ you are running), so it settles the question outright instead of being
 guessed. No such mark on any entry means your own Monitor is not registered
 right now (start one with `listen`, as above). Note that starting
 `listen` again is harmless either way, a second one under this same session id
-retires the earlier registration on its own (the usual way this comes up is
-compacting, #81), so this check is about knowing where things stand, not
-about avoiding a duplicate.
+retires the earlier registration on its own (compacting, #81, and a plain
+re-arm on a deadline, above, are both usual ways this comes up), so this
+check is about knowing where things stand, not about avoiding a duplicate.
 
 **It is normal for other sessions to be listening too.** Using it alongside
 other work is the intended way, and speech goes to **whichever started later**

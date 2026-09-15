@@ -264,6 +264,28 @@ list_listeners() {
   "$PY" "$APP" --listeners
 }
 
+# Stop a listener the reattach loop below (listen)) has decided is a leftover.
+#
+# #105: on Windows (Git Bash/MSYS), the registration filename is the real
+# Win32 PID (see reg_pid, below), but the builtin `kill` only understands
+# MSYS's own internal virtual PID, a different number. Handed the Win32 one
+# it always fails with "No such process", silently (kill ... || true), so
+# the old `listen` and everything under it (tail, listen_filter.py, its own
+# heal loop) kept running with nothing having actually stopped it.
+# taskkill takes the real Win32 PID directly. //T takes the whole tree with
+# it, its heal loop included, which matters: left alive even a few seconds
+# longer, that loop would have written the registration this function's
+# caller is about to delete right back (the same file, same bytes, per its
+# own comment further down).
+retire_pid() {
+  local pid="$1"
+  if [[ -r "/proc/$$/winpid" ]] && have taskkill; then
+    taskkill //PID "$pid" //T //F >/dev/null 2>&1 || true
+  else
+    kill "$pid" 2>/dev/null || true
+  fi
+}
+
 case "$cmd" in
   start)
     # Decide which engine to use (given > last choice > automatic).
@@ -517,7 +539,7 @@ except Exception:
     pass
 ' "$f" 2>/dev/null || true)"
         if [[ -n "$other_session" && "$other_session" == "$session" ]]; then
-          kill "$other_pid" 2>/dev/null || true
+          retire_pid "$other_pid"
           rm -f "$f"
           reattached=1
         fi
@@ -591,6 +613,19 @@ REG
     reg_bytes="$(cat "$reg" 2>/dev/null || true)"
     ( while kill -0 "$tail_pid" 2>/dev/null; do
         sleep 30
+        # #105: retire_pid above is meant to have stopped this process
+        # outright before it ever gets here again, on a reattach elsewhere
+        # for the same session. If that ever missed (taskkill unavailable,
+        # a permission error, the two racing within the same 30s window),
+        # this is the fallback: a registration for this same session with a
+        # newer "since" than this one's own means this one is the leftover,
+        # so it clears its own file and lets go rather than keep writing a
+        # stale registration back forever.
+        if [[ -n "$session" ]] && "$PY" "$APP" --newer-same-session "$reg" 2>/dev/null; then
+          rm -f "$reg"
+          kill "$tail_pid" 2>/dev/null || true
+          exit 0
+        fi
         [ -s "$reg" ] || printf '%s' "$reg_bytes" > "$reg" 2>/dev/null
         touch "$reg" 2>/dev/null
       done ) &

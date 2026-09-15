@@ -56,6 +56,13 @@
        comes through without a second copy of this line per theme. */
     --on-accent:var(--panel);
     --glow:0 0 14px;
+    /* A plain dark elevation shadow (not the colored --glow above, which is
+       for a lit indicator, not for lifting a whole shape off the page)
+       reads very differently by theme: the same rgba(0,0,0,.35) that barely
+       shows against a background this dark is a heavy black smudge once the
+       background is close to white, so this is themed the same way --glow
+       is rather than left as one flat value. */
+    --jump-shadow:0 4px 14px rgba(0, 0, 0, .35);
     --radius:20px;
   --pill:999px;
     /* Sizes that change with the window. Unlike the colors these never change
@@ -105,6 +112,7 @@
     --ok-ink:#066a4b;         /* 5.20:1 on the wash (2.96:1 if left as --ok) */
     --accent-2-ink:#6d28d9;   /* same, 5.36:1 (4.30:1 if left as --accent-2) */
     --glow:0 0 0;
+    --jump-shadow:0 2px 8px rgba(16, 24, 38, .18);
   }
   @media (prefers-color-scheme: light) {
     :root:not([data-theme="dark"]) {
@@ -118,6 +126,7 @@
       --mode-off:var(--accent); --mode-off-line:var(--accent);
       --accent-2:#7c3aed; --ok:#059669; --warn:#d97706;
       --danger:#dc2626; --ok-ink:#066a4b; --accent-2-ink:#6d28d9; --glow:0 0 0;
+      --jump-shadow:0 2px 8px rgba(16, 24, 38, .18);
     }
   }
 
@@ -154,17 +163,77 @@
      rest scrolls within it). */
   .page > .draft-card { flex:0 1 auto; min-height:0; }
   .log-wrap { flex:1 1 0; min-height:0; overflow-y:auto; overscroll-behavior:contain; }
+  /* Newest lands at the top of #log (viewer.js, addEntry), so scrolled down
+     into older ones is scrolled away from what just arrived, not toward it.
+     Shown from viewer.js only when a new entry comes in while scrolled away
+     from the top, so it means "something new is waiting up there" rather
+     than just "you are not at the top", which would be up more often than
+     not. Sticky rather than the fixed+measured-position way .fresh/.floatAsk
+     do it elsewhere on this page: pinned to .log-wrap's own top edge, it
+     tracks that edge through a header fold or a window resize on its own,
+     no separate reposition call to keep in sync with. The wrapper carries
+     the stickiness at zero height so the button floats over the first entry
+     instead of pushing it down when it appears; pointer-events go back to
+     auto on the button itself, since the zero-height box would otherwise
+     take the click along with it. */
+  .log-jump-wrap {
+    position:sticky; top:0; height:0; overflow:visible; z-index:5;
+    display:flex; justify-content:center; pointer-events:none;
+  }
+  .log-jump {
+    pointer-events:auto; margin-top:.5rem;
+    width:1.9rem; height:1.9rem; border:none; border-radius:50%;
+    display:grid; place-items:center; cursor:pointer;
+    /* A solid fill in the full accent color read as too strong for
+       something that sits over the log the whole time it shows, not just
+       for the one look a toast like .fresh gets — the same tint .icon.on
+       already uses for "this is lit, but not shouting about it" is toned
+       down further again for a background this floats over rather than
+       sits flush against. The shadow follows the same reasoning: plain and
+       dark rather than a color-mixed glow, the way .to-menu already drops
+       one, but themed (--jump-shadow, above) since that same dark shadow
+       read as too heavy once tried against the light theme's near-white
+       background. */
+    background:color-mix(in srgb, var(--accent) 22%, var(--panel-2));
+    color:var(--accent);
+    box-shadow:var(--jump-shadow);
+  }
+  .log-jump svg { width:16px; height:16px; }
+  @media (prefers-reduced-motion:no-preference) {
+    .log-jump { animation:jumpPop .2s cubic-bezier(.25, 1.4, .5, 1); }
+  }
+  @keyframes jumpPop { from { opacity:0; transform:scale(.7); } }
 
   /* ── Header ───────────────────────────── */
   header {
     display:flex; align-items:center; gap:.6rem;
     padding:.85rem var(--pad) .7rem;
     border-bottom:1px solid var(--line-soft);
+    /* Folded away below max-height:319px (further down). Held here rather
+       than left to display:none so the fold can play out instead of snap.
+       64px clears the header's own ~62px with a couple of px to spare, so the
+       transition starts moving right away instead of sitting idle first. */
+    overflow:hidden; max-height:64px;
+  }
+  @media (prefers-reduced-motion:no-preference) {
+    header {
+      transition:
+        max-height .22s ease, opacity .2s ease, visibility .22s,
+        padding-top .22s ease, padding-bottom .22s ease,
+        border-bottom-width .22s ease;
+    }
   }
   .brand { display:flex; align-items:center; gap:.55rem; margin-right:auto; min-width:0; }
   .brand h1 {
     margin:0; font-size:.95rem; font-weight:600; letter-spacing:.01em;
-    white-space:nowrap;
+    /* Between "Voice Shell" in full and gone outright there used to be a
+       stretch where it shrank letter by letter behind an ellipsis, which
+       read as the word slowly breaking rather than as a deliberate step.
+       It is either whole or not there at all now (below, at the width it
+       would otherwise start crowding the icon row), so overflow/min-width
+       here are only a fallback in case that width is ever measured wrong
+       for some font, not the everyday behavior. */
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0;
   }
   .logo-mark { display:flex; align-items:center; width:24px; height:18px; flex:none; }
   .logo-mark svg { display:block; width:24px; height:18px; overflow:visible; }
@@ -222,6 +291,16 @@
     display:flex; align-items:center; gap:.45rem;
     padding:.5rem var(--pad) .3rem; font-size:.75rem; color:var(--dim);
     white-space:nowrap; overflow:hidden;
+    /* Folded away alongside header below max-height:319px. 34px clears the
+       line's own ~32px, same reasoning as header above. */
+    max-height:34px;
+  }
+  @media (prefers-reduced-motion:no-preference) {
+    .status {
+      transition:
+        max-height .22s ease, opacity .2s ease, visibility .22s,
+        padding-top .22s ease, padding-bottom .22s ease;
+    }
   }
   .beacon { width:8px; height:8px; border-radius:50%; background:var(--faint); flex:none; }
   .beacon.live { background:var(--ok); box-shadow:var(--glow) var(--ok); }
@@ -238,12 +317,100 @@
   /* Scrolled sideways, the rightmost one is out of reach in a narrow window.
      Wrap instead and show them all. Long names get trimmed, but the number at
      the head always stays. */
-  .routes { padding:.1rem var(--pad) .5rem; }
-  .route-chips { display:flex; flex-wrap:wrap; gap:.25rem; }
+  /* Two rows, chips above picker, and only one of them ever has height. Below
+     max-height:379px (further down) the fractions flip, so the row that had
+     the room hands it to the other instead of either one just vanishing.
+     Working in fractions rather than a guessed pixel height is what lets this
+     hold up with any number of chips, from one row to several. */
+  .routes {
+    padding:.1rem var(--pad) .5rem;
+    display:grid; grid-template-rows:1fr 0fr;
+  }
+  @media (prefers-reduced-motion:no-preference) {
+    .routes { transition:grid-template-rows .22s ease; }
+  }
+  /* Holds the fold above (its own height is what grid-template-rows
+     animates) and nothing else. How tall the list itself is allowed to get
+     before it scrolls is a separate question, decided by the box inside it,
+     so the two do not end up fighting over one element's height. */
+  .route-chips { overflow:hidden; min-height:0; }
+  @media (prefers-reduced-motion:no-preference) {
+    .route-chips { transition:visibility .22s; }
+  }
+  /* Left running free, one row per chip past a certain count eats the
+     history under it. Opens at four rows' worth (measured: a chip row is
+     25.6px, the gap between rows 4.4px, so 4 rows is 116px, rounded up a
+     little) and scrolls for any more past that, but that starting height is
+     not a ceiling: resize:vertical hands the last word to whoever is
+     looking at it, drag it taller to see six sessions at once instead of
+     four, or shorter to keep it out of the way. No max-height in the
+     stylesheet itself, since the room a handful of chips actually need
+     changes with how many there are: viewer.js keeps this in step with the
+     content instead (updateChipsSizing, called after every re-paint and on
+     every window resize), so dragging past what four sessions need to show
+     does nothing rather than opening onto empty panel. Widening or
+     narrowing the window moves how many chips fit per row, so that same
+     cap can jump between one resize event and the next — transitioning it
+     is what keeps that jump from reading as the box merely being slow to
+     catch up (the corner drag itself sets height directly and is left
+     alone, so a live drag still tracks the pointer with no lag of its
+     own). */
+  .route-chips-scroll {
+    display:flex; flex-wrap:wrap; gap:.25rem; align-content:flex-start;
+    height:120px; min-height:1.75rem;
+    overflow-y:auto; overflow-x:hidden;
+    resize:vertical;
+    /* Same thin, theme-colored bar .stream already uses instead of the
+       screen-wide default. */
+    scrollbar-width:thin; scrollbar-color:var(--line) transparent;
+  }
+  @media (prefers-reduced-motion:no-preference) {
+    .route-chips-scroll { transition:max-height .2s ease; }
+  }
+  /* The plain OS grip in the corner read as a stray form-control widget
+     left over from a browser default rather than a piece of this screen.
+     Chrome and Safari let the resize handle itself be painted (Firefox
+     keeps its own regardless, which is fine, resize:vertical still works
+     there). Diagonal hairlines read as stray lane markings, and a 2x3 dot
+     grid (tried next) read as taking up more of the corner than a grab mark
+     needs, and drawn at a fixed grid of offsets it also came apart from the
+     scrollbar next to it (the pair share this same corner, and a thin
+     scrollbar does not free up a fixed 16px column to draw those dots into,
+     so the ones nearest the scrollbar were the ones lost under it). An L
+     drawn hugging the very corner instead needs only the 2px right at the
+     tip, clear of the scrollbar regardless of how wide it renders, and
+     still reads as "grab here" the way a resize corner mark usually does. */
+  .route-chips-scroll::-webkit-resizer {
+    background-color:var(--panel-2);
+    background-image:
+      linear-gradient(var(--line), var(--line)),
+      linear-gradient(var(--line), var(--line));
+    background-size:6px 1.4px, 1.4px 6px;
+    background-position:bottom 2px right 2px, bottom 2px right 2px;
+    background-repeat:no-repeat;
+  }
   /* The roll-up picker. It is never on screen next to the chips, but if its
      height and marker position shifted when it swapped in it would read as a
-     different thing, so it matches the chip sizes. */
-  .route-pick-wrap { display:none; position:relative; max-width:100%; }
+     different thing, so it matches the chip sizes.
+     Kept rendered (not display:none) even at 0fr/0 opacity, the same reason
+     header further down is: a value to transition away from instead of a
+     jump. visibility still does the "gone, not just invisible" job, timed to
+     the same fold. */
+  .route-pick-wrap {
+    display:flex; align-items:center; position:relative; max-width:100%;
+    overflow:hidden; min-height:0;
+    opacity:0; visibility:hidden; pointer-events:none;
+    /* .routes turned into a grid for the fold above, and a grid item
+       stretches to the full row width by default. The arrow below is
+       anchored off this element's own right edge, so full-width sent it
+       drifting off past the button entirely instead of sitting against it.
+       Shrink back to the button's own width, the way inline-block held it
+       before that change. */
+    justify-self:start;
+  }
+  @media (prefers-reduced-motion:no-preference) {
+    .route-pick-wrap { transition:opacity .18s ease, visibility .22s; }
+  }
   .route-pick {
     -webkit-appearance:none; appearance:none;
     font-size:.75rem; line-height:1.6; border:1.5px solid var(--line);
@@ -360,7 +527,15 @@
      both directions, so that frame does not break the shape. */
   #viz { display:block; width:var(--viz-h); height:var(--viz-h); margin:0 auto; }
   /* Put the mic on and off and the level meter on one row */
-  .meter-row { display:flex; align-items:center; gap:.55rem; padding:0 var(--pad); }
+  .meter-row {
+    display:flex; align-items:center; gap:.55rem; padding:0 var(--pad);
+    /* Folded away below max-height:479px (further down), same fold as header
+       and .status. 30px clears the row's own 27px. */
+    overflow:hidden; max-height:30px;
+  }
+  @media (prefers-reduced-motion:no-preference) {
+    .meter-row { transition:max-height .22s ease, opacity .2s ease, visibility .22s; }
+  }
   .meter-row .meter-hit { flex:1; min-width:0; padding-left:0; padding-right:0; }
 
   /* The level the daemon is picking up. It comes by a different path than the
@@ -578,6 +753,16 @@
     background:var(--panel-2); box-shadow:inset 0 0 0 1px var(--line), 0 8px 24px rgba(0,0,0,.35);
     display:flex; flex-direction:column; gap:.05rem;
   }
+  /* transform-origin is set in JS (openPickMenu's place()), top when it
+     opened below the anchor, bottom when it flipped above, so the pop
+     grows from the edge nearest the anchor either way rather than always
+     from the top regardless of which way it actually opened. */
+  @media (prefers-reduced-motion:no-preference) {
+    .to-menu { animation:menuPop .2s cubic-bezier(.25, 1.4, .5, 1); }
+  }
+  @keyframes menuPop {
+    from { opacity:0; transform:scale(.9); }
+  }
   /* Said once, here, rather than living on the chip the whole time whether
      it was ever going to be opened or not. */
   .to-menu-heading {
@@ -585,12 +770,26 @@
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
   }
   .to-menu-item {
-    display:block; width:100%; text-align:left; border:none; background:none;
+    display:flex; align-items:center; gap:.3rem;
+    width:100%; text-align:left; border:none; background:none;
     color:var(--dim); font-size:.76rem; padding:.28rem .5rem; border-radius:6px;
-    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .to-menu-item-label {
+    flex:1 1 auto; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
   }
   .to-menu-item:hover { background:var(--raise); color:var(--text); }
   .to-menu-item.on { color:var(--accent-2-ink); font-weight:600; }
+  /* Same two-step × as a chip's own (route-chip .x above), sized the same,
+     shown only on a row this menu's caller opted into (openPickMenu's
+     onDisconnect). The history resend menu never passes it, so its rows
+     stay exactly as they were, one label and nothing else. */
+  .to-menu-item .x {
+    display:grid; place-items:center; width:15px; height:15px; flex:none;
+    border-radius:50%; font-size:.7rem; line-height:1; opacity:.45;
+  }
+  .to-menu-item .x:hover { opacity:1; background:color-mix(in srgb, var(--danger) 30%, transparent); }
+  .to-menu-item.asking { color:var(--danger); }
+  .to-menu-item.asking .x { opacity:1; }
   .entry .text { font-size:.88rem; line-height:1.65; word-break:break-word; }
 
   /* The draft card. The live transcript shows up here too (prime spot) */
@@ -1084,6 +1283,12 @@
     display:grid; place-items:center;
     transition:background .15s;
   }
+  /* Drops to 30px below max-width:212px (further down). Folded in on top of
+     the .15s hover fade above, rather than replacing it, so hovering still
+     feels the same at either size. */
+  @media (prefers-reduced-motion:no-preference) {
+    .mini-mic { transition:background .15s, width .18s ease, height .18s ease; }
+  }
   .mini-mic:hover:not(:disabled) { background:var(--raise); }
   .mini-mic:disabled { opacity:.35; }
   .mini-mic canvas { display:block; width:100%; height:100%; }
@@ -1410,9 +1615,17 @@
        four screens you are on, so the word is the one thing here said twice. */
     .sheet-head h2 { display:none; }
   }
+  /* The name goes before the mark that draws next to it. The mark alone still
+     says "this is Voice Shell, and it is listening", the word just repeats
+     that, so it is the one asked to go first. Measured with the real font
+     stack: the full, un-ellipsized word starts to run under the icon row at
+     306px, so this sits a few px above that instead of waiting for the
+     ellipsis to catch it right at the edge. */
+  @media (max-width: 313px) {
+    .brand h1 { display:none; }   /* keep only the name tag */
+  }
   @media (max-width: 279px) {
     :root { --pad:.55rem; }
-    .brand h1, #logoMark { display:none; }   /* keep only the name tag */
     .machine { max-width:100%; }
     /* Gaps next. The row loses its own (36px targets touching still read as
        four, and 2.4px between them was never what told them apart), and the
@@ -1424,6 +1637,17 @@
     .field > label:not(.switch) { flex:1 0 100%; min-width:0; }
     .field .val, .val-wrap { margin-left:0; }
     .gauge { margin-left:0; }
+    /* Below this, the unsent tag and the tools (edit/discard/send) both hold
+       their width on purpose (flex-shrink:0 above, so the tag never wraps
+       vertically) and the middle spacer is the only thing left to give. Once
+       that hits zero there is nothing left, and measured, send starts
+       poking out past the card's own rounded edge at 195 to 210px depending
+       on how much the tag's own text weighs. Tightened gaps here buy back
+       enough room to hold the line down to about 175px instead, comfortably
+       past where a floated window is ever asked to go. */
+    .draft-card .gutter { gap:.2rem; }
+    .draft-card .tiny-row { gap:.15rem; }
+    .draft-card .tiny.send, .draft-card .tiny.go { margin-left:.25rem; }
   }
   /* The arrow is the last thing left to give, and below 252px it goes. That is
      against the decision to keep it, and it is still the least bad of what is
@@ -1460,6 +1684,14 @@
     .sheet-head { gap:0; padding-left:0; }
     .mini-mic { width:30px; height:30px; }
   }
+  /* The mark itself is the last thing left to give in the header, kept on
+     screen through everything above it. Measured (name already gone, padding
+     and icon gap already at their tightest): the icon row starts running
+     under it at 188px, so it goes a few px ahead of that instead of waiting
+     to actually overlap. */
+  @media (max-width: 195px) {
+    #logoMark { display:none; }
+  }
 
   /* Short. Fold the log heading and the note line, and tighten the vertical padding.
      639 used to be the line, on the idea that a floated window keeps close to the
@@ -1490,7 +1722,7 @@
   /* Shorter still. The sensitivity line can be changed from settings too, so it gives here */
   @media (max-height: 479px) {
     :root { --stream-max:4.5em; }
-    .meter-row { display:none; }
+    .meter-row { max-height:0; opacity:0; visibility:hidden; pointer-events:none; }
     #draft { min-height:2.4em; }
   }
 
@@ -1515,15 +1747,16 @@
     #draft { min-height:2em; }
     .mode span:not(.ring) { display:none; }   /* the drawings in the rings tell them apart */
     .mode { gap:0; padding-top:0; }
-    .routes { padding-bottom:.35rem; }
+    .routes { padding-bottom:.35rem; grid-template-rows:0fr 1fr; }
     /* Route chips each take a row of their own. This short, they fill the
        screen on their own, so rather than dropping the names, switch over to
-       the roll-up picker. */
-    .route-chips { display:none; }
+       the roll-up picker. The chips' own row above folds to 0fr, this one
+       fades in, in step (see the base rules for both). */
+    .route-chips { visibility:hidden; }
     /* Give it the look of the selected chip. If only this dropped back to the
        ground color, where your voice lands would read weaker here than it does
        on the chips. */
-    .route-pick-wrap { display:inline-block; color:var(--panel); }
+    .route-pick-wrap { opacity:1; visibility:visible; pointer-events:auto; color:var(--panel); }
     .route-pick {
       display:block; font-weight:600; border-color:transparent; color:inherit;
       background:linear-gradient(135deg, var(--accent-fill-1), var(--accent-fill-2));
@@ -1536,14 +1769,36 @@
      state reads from the window title and from whether the mic is moving.
      Widen it and they come back. */
   @media (max-height: 319px) {
-    header, .status { display:none; }
+    /* Folded shut rather than switched to display:none outright, so a
+       transition (set on the base rules above) has a value change to play
+       out. visibility carries the same "gone, not just invisible" job
+       display:none used to: it lands at the end of the fold on the way out
+       and at the very start on the way back in, so nothing sits half-hidden
+       but still tabbable. pointer-events belongs to the instant, not the
+       fold, a header at 1% height is not worth a stray click either way. */
+    header, .status {
+      max-height:0; opacity:0; visibility:hidden; pointer-events:none;
+      padding-top:0; padding-bottom:0;
+    }
+    header { border-bottom-width:0; }
     .control-row { padding-top:.25rem; }
     /* Fold away the Unsent chip and the time, and move the tools beside the
        text. That frees up a whole row, which beats tightening padding. The edit
        box and the send button wrap to the row below only when they are open. */
     .draft-card { flex-flow:row wrap; align-items:flex-start; gap:.4rem; }
     .draft-card .mark, .draft-card .gutter .spacer, #draftTime { display:none; }
-    .draft-card .gutter { order:2; flex:none; margin:0; }
+    /* flex-basis:100% rather than none, same reasoning as the textarea below:
+       the tools get their own full-width row instead of a left-hugging
+       cluster with the rest of that row sitting empty. Send then has
+       somewhere to be pushed to (next rule). */
+    .draft-card .gutter { order:2; flex:1 1 100%; margin:0; }
+    .draft-card .tiny-row { flex:1; }
+    /* Edit and discard/cancel stay put on the left. Whichever of the two
+       send buttons is showing (sendOne ordinarily, go while editing or in
+       review) is the one you reach for on purpose, so it gets the far
+       corner instead of sitting shoulder to shoulder with the pair a
+       hurried tap could catch instead. */
+    .draft-card .tiny.send, .draft-card .tiny.go { margin-left:auto; }
     /* While editing, the text row disappears, and the tools get stranded on the left */
     .draft-card:has(> textarea:not([hidden])) .gutter { margin-left:auto; }
     .draft-card .stream { order:1; flex:1 1 6em; min-width:0; }
@@ -1563,7 +1818,11 @@
        what reaches here now is a window dragged shorter than that, or an
        ordinary browser window resized down rather than the floated one. */
     .sheet-head { padding-top:.35rem; padding-bottom:.25rem; }
-    .brand h1, #logoMark { display:none; }
+    /* The logo used to drop here, well ahead of the header itself (further
+       down, at 319px). Splitting the two read as two separate things
+       happening rather than one bar going away, for a few px of width this
+       text was never actually competing for. Left in now, it goes dark with
+       the rest of the header instead. */
     .machine { max-width:100%; }
     .status { padding:.15rem var(--pad) .1rem; }
   }
