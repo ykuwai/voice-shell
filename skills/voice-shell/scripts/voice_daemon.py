@@ -1914,6 +1914,10 @@ def parse_args():
                    help="Stop the resident process and exit")
     p.add_argument("--listeners", action="store_true",
                    help="List the sessions listening to the utterance log and exit")
+    p.add_argument("--newer-same-session", metavar="REG", default=None,
+                   help="Exit 0 if some other registration shares REG's "
+                        "session and was written more recently, 1 "
+                        "otherwise (voice-shell.sh's heal loop, #105)")
     p.add_argument("--resolve-engine", metavar="WANT", default=None,
                    help="Settle which engine to use and print it. What is given "
                         "beats last time's choice, which beats automatic")
@@ -2244,6 +2248,41 @@ def listeners_dir(log_path):
     return Path(log_path).parent / "listeners"
 
 
+def _has_newer_same_session(log_path, reg_path):
+    """True when some other registration under listeners_dir shares reg_path's
+    session and was written more recently.
+
+    #105: a reattach (voice-shell.sh's `listen)`) is meant to stop the old
+    registration's whole process tree outright (retire_pid there) before it
+    ever calls this, so ordinarily nothing here ever finds anything. It is
+    the fallback for when that missed anyway — a heal loop calls this on
+    its own registration every 30s and, told yes, clears its own file and
+    lets go rather than keep writing a leftover registration back forever.
+    """
+    reg_path = Path(reg_path)
+    try:
+        mine = json.loads(reg_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    session = mine.get("session")
+    since = mine.get("since")
+    if not session or since is None:
+        return False
+    d = listeners_dir(log_path)
+    if not d.is_dir():
+        return False
+    for f in d.iterdir():
+        if f.resolve() == reg_path.resolve():
+            continue
+        try:
+            other = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if other.get("session") == session and other.get("since", 0) > since:
+            return True
+    return False
+
+
 # voice-shell.sh's heal loop touches a registration file's mtime every 30s
 # (#82). Set well past a laptop's lid-close/wake gap or a slow machine's own
 # scheduling delay, since either one is only a cosmetic flicker anyway
@@ -2332,7 +2371,37 @@ def list_active_listeners(log_path):
                 f.unlink(missing_ok=True)   # Clear away the dead ones
             except PermissionError:
                 pass                        # Somebody else's. Leave it
-    return label_listeners(out)
+
+    # #105: a session id never legitimately runs two of these at once
+    # (voice-shell.sh's own reattach loop already treats a second one as a
+    # leftover and stops it outright), but on Windows the process tree that
+    # would otherwise still be writing a leftover registration back can
+    # briefly survive its own retirement. This is the last line of defense
+    # rather than the fix itself: among registrations sharing a session,
+    # keep only the one with the latest "since" and clear the rest's files
+    # the same way a genuinely dead one gets cleared above, so a stale
+    # listener cannot sit in the chip row as its own numbered duplicate
+    # (2)(3)... waiting for its process to actually go away.
+    newest_by_session = {}
+    for info in out:
+        session = info.get("session")
+        if not session:
+            continue
+        other = newest_by_session.get(session)
+        if other is None or info.get("since", 0) > other.get("since", 0):
+            newest_by_session[session] = info
+    kept = {id(info) for info in newest_by_session.values()}
+    deduped = []
+    for info in out:
+        if info.get("session") and id(info) not in kept:
+            try:
+                (d / str(info["pid"])).unlink(missing_ok=True)
+            except OSError:
+                pass
+            continue
+        deduped.append(info)
+
+    return label_listeners(deduped)
 
 
 def set_display_name(log_path, pid, name):
@@ -2449,6 +2518,9 @@ def main():
             print(f"    started at  {l['started']}")
             print(f"    folder      {l['cwd']}")
         return
+
+    if args.newer_same_session is not None:
+        sys.exit(0 if _has_newer_same_session(args.log_file, args.newer_same_session) else 1)
 
     if args.status:
         pid = read_pid()
