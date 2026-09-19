@@ -292,7 +292,11 @@
     content:""; position:absolute; bottom:4px; left:50%; transform:translateX(-50%);
     width:4px; height:4px; border-radius:50%; background:transparent;
   }
-  .icon.lit { color:var(--text); }
+  /* Same weight as an ordinary icon (--dim), not the full --text. The dot
+     right below it already says "on"; the icon itself does not also need to
+     stand out, and in light theme --text is dark enough to read as a small
+     black blot next to the row's other, softer icons. */
+  .icon.lit { color:var(--dim); }
   .icon.lit::after { background:var(--ok); box-shadow:var(--glow) var(--ok); }
   .icon.warn { color:var(--warn); }
   .icon.warn::after { background:var(--warn); box-shadow:var(--glow) var(--warn); }
