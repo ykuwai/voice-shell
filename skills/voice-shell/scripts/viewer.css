@@ -1041,8 +1041,14 @@
        That strip is the antialiasing of the moving edge itself, and no boundary
        that moves at all is rid of it. Widen the band to 6% and the light figure
        goes to 2px, which is why it is not wider. */
+    /* --accent-bright (falling back to --accent in dark, which has none of
+       its own), not --accent: the same reasoning as the switch's track
+       above, a shape filled edge to edge with the contrast-darkened --accent
+       reads as a dark, muted blue. .btn.go already knocks white text out of
+       --accent-fill-1/2 the same way this knocks the plane out of its fill,
+       so this follows that same pairing rather than introducing a third. */
     background-image:linear-gradient(to right,
-      var(--accent) calc(var(--cue-edge) - var(--cue-soft)),
+      var(--accent-bright, var(--accent)) calc(var(--cue-edge) - var(--cue-soft)),
       transparent   calc(var(--cue-edge) + var(--cue-soft)));
     /* Held whether it is showing or not. Take the seat away and the two buttons
        beside it slide as it comes and goes, which moves a target under a finger
