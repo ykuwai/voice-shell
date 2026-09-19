@@ -434,6 +434,7 @@
   .route-chip {
     flex:0 1 auto; min-width:0; max-width:100%;
     display:inline-flex; align-items:center; gap:.3rem;
+    line-height:1;   /* same reasoning as .entry .mark, further down */
     padding:.3rem .7rem; border-radius:var(--pill);
     font-size:.75rem; white-space:nowrap;
     border:1.5px solid var(--line); color:var(--dim);
@@ -690,6 +691,15 @@
   }
   .entry .mark {
     display:inline-flex; align-items:center; gap:.25rem;
+    /* align-items:center centers the *line box*, not the ink. A line box
+       carries the font's own ascent/descent, which for most fonts (this one,
+       the CJK glyphs and the ✓ before them included) is not split evenly
+       around the glyphs themselves, so the padding above kept reading
+       thinner than the one below even at equal .05rem top and bottom.
+       Pinning the line height to 1 does not fix that split, but it shrinks
+       the box carrying it, which is what actually narrows the gap on
+       screen. */
+    line-height:1;
     padding:.05rem .4rem; border-radius:5px; font-size:.64rem; font-weight:600;
   }
   /* Flex items shrink to their content's min width by default, and CJK text
@@ -708,6 +718,7 @@
      from staring at the log wondering which one you said it to. */
   .entry .to {
     display:inline-flex; align-items:center; gap:.2rem; min-width:0;
+    line-height:1;   /* same reasoning as .entry .mark, above */
     padding:.05rem .4rem; border-radius:5px; font-size:.64rem;
     color:var(--dim); background:var(--raise);
     /* The Sent and Edited chips beside it show their ground through color, but
@@ -905,13 +916,15 @@
   .draft-card:not(.holding):not(.editing) { cursor:text; }
   .draft-card .tiny-row { cursor:default; }
   .draft-card .mark {
-    /* Without display:flex the text sits in its line box, and a line box's
-       leading is not split evenly above and below the glyphs, so the padding
-       above read thinner than the padding below even though both are the
-       same .05rem. .entry .mark (the Sent/Edited tags in history) already
-       centers on the flex box instead for the same reason; this one just
-       never got it. */
-    display:inline-flex; align-items:center;
+    /* Without display:flex the text sat in its line box, uncentered at all
+       (.entry .mark, the Sent/Edited tags in history, already used flex for
+       this; this one never got it). Centering the box is not the whole fix
+       though: a line box's leading is not split evenly above and below the
+       glyphs to begin with, so even centered, the padding above still reads
+       thinner than the one below at equal .05rem top and bottom.
+       line-height:1 shrinks the box carrying that uneven split, which is
+       what actually narrows the visible gap. */
+    display:inline-flex; align-items:center; line-height:1;
     padding:.05rem .4rem; border-radius:5px; font-size:.64rem; font-weight:600;
     color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, transparent);
     /* .gutter is a flex row that shrinks its children by default, and with no
