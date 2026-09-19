@@ -103,7 +103,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'routes','routeChips','routePick','routePickLabel','viz','meter','meterHit','meterFill','meterMark','logoMark',
                   'tray','stream','draft','draftTime','send','discard',
                   'editOnce','dropOne','sendOne','cancelOnce','draftMark',
-                  'hint','note','log','none','count','fresh','floatAsk','taken','takeBack',
+                  'hint','note','log','none','fresh','floatAsk','taken','takeBack',
                   'logJumpWrap','logJump',
                   'mic','recogLang','recogLangField','thresh','threshVal','gaugeFill','gaugeMark',
                   'silence','silenceVal','silenceNote','minChars','minCharsVal','clean',
@@ -681,9 +681,7 @@ function setState(kind, text) {
 }
 
 function retally() {
-  const n = el.log.children.length;
-  el.count.textContent = n;
-  el.none.hidden = n > 0;
+  el.none.hidden = el.log.children.length > 0;
 }
 
 /* Scrolled away from the top (below, some slack for the odd sub-pixel
