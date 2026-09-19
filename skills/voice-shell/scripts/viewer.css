@@ -734,21 +734,25 @@
   .entry .mark.edited { color:var(--accent-2-ink); background:color-mix(in srgb, var(--accent-2) 14%, transparent); }
   /* Neither a fresh utterance nor a touch-up, so it takes neither of their
      colors. The same quiet outline the destination chip next to it uses. */
-  .entry .mark.resent { color:var(--dim); background:var(--raise); box-shadow:inset 0 0 0 1px var(--line); }
+  .entry .mark.resent { color:var(--dim); background:var(--panel-2); box-shadow:inset 0 0 0 1px var(--line-soft); }
   /* Which session it went to. With several jobs going at once, this keeps you
      from staring at the log wondering which one you said it to. */
   .entry .to {
     display:inline-flex; align-items:center; gap:.2rem; min-width:0;
     line-height:1;   /* same reasoning as .entry .mark, above */
     padding:.2rem .4rem; border-radius:5px; font-size:.64rem;
-    color:var(--dim); background:var(--raise);
+    color:var(--dim); background:var(--panel-2);
     /* The Sent and Edited chips beside it show their ground through color, but
        this one is only a note about where it went, so it cannot carry a color.
        Darkening the ground alone drops the --dim riding on top under 4.5:1.
        Show the shape with an outline and keep the ground no darker than the text
        can stand. The outline is drawn inside so it stays level with the chips
-       next to it. */
-    box-shadow:inset 0 0 0 1px var(--line);
+       next to it.
+       --panel-2/--line-soft rather than --raise/--line (lighter still): in
+       light theme --raise reads as a fairly solid gray-blue block, heavier
+       than every chip around it once those were softened up elsewhere, and
+       this one shows on every single history row, not occasionally. */
+    box-shadow:inset 0 0 0 1px var(--line-soft);
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:12rem;
   }
   /* Working alone the whole time, this comes back empty from buildToControl
