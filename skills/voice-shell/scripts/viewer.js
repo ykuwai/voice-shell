@@ -1616,23 +1616,30 @@ function stepCue(now, target) {
 function setRoute(next) {
   const prev = route;
   const revision = ++routeRevision;
+  // Stamped right here, before routeQueue can sit behind anything already
+  // pending. Taken instead at the top of changeRoute (once this call's turn
+  // in that queue finally comes up), a backlog of earlier route changes
+  // delays the stamp by however long they took to clear, and a fresh
+  // utterance begun the instant this button was pressed can then look
+  // "already running" to the discard below and gets cut along with it (#108).
+  const clickedAt = Date.now() / 1000;
   route = next;
   resetBrowserGesture();
   if (next !== 'off') lastMode = next;
   paint();                            // show it the instant it is pressed
   inFlight = true;
-  const task = routeQueue.then(() => changeRoute(next, prev, revision, true));
+  const task = routeQueue.then(() => changeRoute(next, prev, revision, true, clickedAt));
   routeQueue = task.catch(() => {});
   return task;
 }
 
-async function changeRoute(next, prev, revision, syncServer) {
+async function changeRoute(next, prev, revision, syncServer, clickedAt) {
   let applied = false;
   try {
     if (revision !== routeRevision) return;
     const w = ROUTE[next];
     if (prev === 'off' && next !== 'off' && engineOnish() && !asrActive()) {
-      const discarded = await discardCurrent({announce: false});
+      const discarded = await discardCurrent({announce: false, at: clickedAt});
       if (!discarded) throw new Error('Could not discard current utterance');
       if (revision !== routeRevision) return;
     }
@@ -1695,12 +1702,13 @@ async function changeRoute(next, prev, revision, syncServer) {
 function setRemoteRoute(next) {
   const prev = route;
   const revision = ++routeRevision;
+  const clickedAt = Date.now() / 1000;   // same reasoning as setRoute above
   route = next;
   resetBrowserGesture();
   if (next !== 'off') lastMode = next;
   paint();
   inFlight = true;
-  const task = routeQueue.then(() => changeRoute(next, prev, revision, false));
+  const task = routeQueue.then(() => changeRoute(next, prev, revision, false, clickedAt));
   routeQueue = task.catch(() => {});
   return task;
 }
@@ -2348,13 +2356,18 @@ function newDropId() {
   return globalThis.crypto?.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
 }
 
-function discardCurrent(options) {
-  const task = discardQueue.then(() => discardCurrentNow(options));
+function discardCurrent(options = {}) {
+  // Stamped here, ahead of discardQueue, for the same reason setRoute stamps
+  // clickedAt ahead of routeQueue (#108). A caller that already has a truer
+  // moment in mind (changeRoute, handing over when the button was actually
+  // pressed) passes its own `at` and this leaves it alone.
+  const at = options.at ?? (Date.now() / 1000);
+  const task = discardQueue.then(() => discardCurrentNow({...options, at}));
   discardQueue = task.catch(() => {});
   return task;
 }
 
-async function discardCurrentNow({announce = true} = {}) {
+async function discardCurrentNow({announce = true, at} = {}) {
   discardResultCutoff = Math.max(discardResultCutoff, wsMessageNumber);
   discardInProgress++;
   try {
@@ -2380,7 +2393,7 @@ async function discardCurrentNow({announce = true} = {}) {
       dropBarriers.add(id);
       let response;
       try {
-        response = await post('/api/drop-current', {id});
+        response = await post('/api/drop-current', {id, at});
         const body = await response.json();
         if (!response.ok || body.ok !== true || body.id !== id) {
           dropBarriers.delete(id);

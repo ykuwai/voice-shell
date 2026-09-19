@@ -1237,10 +1237,21 @@ async def main_async(args):
         """
         body = await _req.json()
         request = str(body.get("id") or time.time_ns())[:80]
+        # The page hands over the moment the button was actually pressed,
+        # taken before its own queue of pending route/discard calls could
+        # delay it. Trust it only within a sane window of now (clock skew
+        # between the two is not expected on one machine, but a stale or
+        # forged value must not let a request discard something said long
+        # before or after it was ever asked for) and fall back to this
+        # process's own clock otherwise (#108).
+        now = time.time()
+        at = body.get("at")
+        if not isinstance(at, (int, float)) or not (now - 60 <= at <= now + 5):
+            at = now
         async with drop_lock:
             tail.drop_pending = request
             tmp = drop_path.with_suffix(".tmp")
-            tmp.write_text(json.dumps({"id": request, "at": time.time()}), encoding="utf-8")
+            tmp.write_text(json.dumps({"id": request, "at": at}), encoding="utf-8")
             os.replace(tmp, drop_path)
             if not engine_running():
                 partial_file.write_text("", encoding="utf-8")
