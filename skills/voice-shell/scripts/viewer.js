@@ -102,7 +102,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'miniMic','miniViz','navRow','pageHead','sheetHead','helpHead','openDict','sheetTitle',
                   'routes','routeChips','routePick','routePickLabel','viz','meter','meterHit','meterFill','meterMark','logoMark',
                   'tray','stream','draft','draftTime','send','discard',
-                  'editOnce','dropOne','sendOne','cancelOnce','draftMark',
+                  'editOnce','dropOne','sendOne','draftMark',
                   'hint','note','log','none','fresh','floatAsk','taken','takeBack',
                   'logJumpWrap','logJump',
                   'mic','recogLang','recogLangField','thresh','threshVal','gaugeFill','gaugeMark',
@@ -750,14 +750,14 @@ function addEntry(rec) {
   retally();
 }
 
-/* Drag-select a misheard word inside a sent entry, right click it, and land
-   in the dictionary with that word already filling the "heard as" side —
-   the correction is the only thing left to type. A page cannot add an item
-   to the browser's own right-click menu, so this replaces it outright with
-   one row of its own instead, in the same small floating shape .to-menu
-   already reads as this screen's own menu (openPickMenu, above).
+/* Drag-select a misheard word inside a sent entry and land in the dictionary
+   with that word already filling the "heard as" side — the correction is
+   the only thing left to type. Offered the moment the drag itself finishes
+   (mouseup with a non-empty selection), not behind a right click, so the
+   right-click menu stays the browser's own (Copy included, wanted often
+   enough on its own that overriding the menu outright got in its way).
 
-   doc/win come from the element the click actually landed on rather than
+   doc/win come from the element the mouseup actually landed on rather than
    the bare document/window/getSelection globals, the same reasoning as
    openPickMenu above: while floating, el.page (the log along with it) has
    been moved into the small window's own document (floatParts, further
@@ -799,19 +799,23 @@ function openSelectionMenu(doc, win, x, y, text) {
   doc.addEventListener('keydown', onKey);
   closeSelMenu = close;
 }
-el.log.addEventListener('contextmenu', e => {
+el.log.addEventListener('mouseup', e => {
+  // Left button only. mouseup also fires releasing a right click, and with
+  // a selection already sitting there from an earlier drag (unchanged by
+  // the right click itself) this would otherwise pop the menu up right
+  // alongside the browser's own, which is exactly the clash leaving the
+  // right-click menu alone was meant to avoid.
+  if (e.button !== 0) return;
   const textEl = e.target.closest('.entry .text');
   if (!textEl) return;
   const doc = textEl.ownerDocument;
   const win = doc.defaultView;
   const sel = win.getSelection();
   const picked = sel && sel.toString().trim();
-  // Left uncaught (the browser's own menu shows) unless there really is a
-  // selection, and it is this entry's own — the leftover selection from an
-  // entry scrolled away under the pointer is not what a right click here
-  // meant to act on.
+  // Nothing to offer unless the drag actually left a selection behind, and
+  // it is this entry's own — the leftover selection from an entry scrolled
+  // away under the pointer is not what this mouseup meant to act on.
   if (!picked || !sel.anchorNode || !textEl.contains(sel.anchorNode)) return;
-  e.preventDefault();
   openSelectionMenu(doc, win, e.clientX, e.clientY, picked);
 });
 
@@ -1191,8 +1195,13 @@ function paint() {
    Editing just this one is the one exception. The pencil can only ever show
    disabled there, since you are already inside what it opens, and the trash
    next to it reads as a second copy of the discard already sitting in the
-   edit box below. Neither is doing a job worth the seat, so the two of them
-   swap for cancelOnce, the one thing missing: a plain way back out. */
+   edit box below. Neither is doing a job worth the seat, so both step aside
+   and leave the box's own discard/send pair as the only thing showing (a
+   dedicated way-back-out button, cancelOnce, sat in that seat once, but
+   pressing it left whatever was still in the box sitting there hold with no
+   visible way to tell — confusing enough in practice that it was dropped
+   outright, in favor of discard doing the one thing needed instead: see
+   below). */
 function paintTinyButtons() {
   // Discard can always be pressed. Press it with nothing to discard and
   // nothing happens, because there is simply nothing being said right now.
@@ -1209,10 +1218,6 @@ function paintTinyButtons() {
   el.editOnce.disabled = route !== 'live' || oneShot;
   el.editOnce.hidden = editingHere;
   el.dropOne.hidden = editingHere;
-  // The way out belongs to the momentary case only. Review mode is not
-  // something you back out of from here — it is a setting, and the control
-  // that turns it off is the one that turned it on.
-  el.cancelOnce.hidden = !oneShot;
 }
 
 /* The setting for using several machines. It changes what it takes for a
@@ -2349,7 +2354,13 @@ el.discard.onclick = async () => {
     };
     el.hint.appendChild(undo);
   }
-  endOneShot();
+  // Editing just this one, unlike send, is left standing rather than closed
+  // out here (no endOneShot). Discard used to always end it, and the box
+  // it closed down into still had whatever was said sitting in it, held,
+  // with nothing on screen marking that it was still there to deal with —
+  // confusing enough in practice that this box staying open, empty and
+  // ready to type into, replaced it. Clicking outside while it is empty
+  // (leaveOneShotIfEmpty, further down) is still the way out for good.
 };
 
 /* Stay on instant and route just this one utterance to review.
@@ -2480,16 +2491,13 @@ el.tray.onclick = e => {
   editThisOne();
 };
 
-// Once it is sent or discarded, go back to the mode it came from
+// Once it is sent, or the box empties out and you click away
+// (leaveOneShotIfEmpty, below), go back to the mode it came from.
 async function endOneShot() {
   if (!oneShot) return;
   oneShot = false;
   await setRoute('live');
 }
-// cancelOnce is this same door, just opened by hand instead of by sending or
-// discarding. Whatever is sitting in the edit box is left exactly as it was,
-// so nothing spoken is lost, only the "editing just this one" framing is.
-el.cancelOnce.onclick = endOneShot;
 
 /* After going into review, pressing outside with nothing there counts as
    backing out. Bracing yourself while empty is the real use for this, so we

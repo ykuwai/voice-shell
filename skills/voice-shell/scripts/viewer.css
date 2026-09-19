@@ -377,8 +377,20 @@
     overflow-y:auto; overflow-x:hidden;
     resize:vertical;
     /* Same thin, theme-colored bar .stream already uses instead of the
-       screen-wide default. */
+       screen-wide default. Firefox reads the two lines above; Chrome/Safari
+       read ::-webkit-scrollbar below instead, needed because macOS's own
+       "only while scrolling" overlay-scrollbar behavior otherwise still
+       applies underneath, even with a color set, and a bar that fades out
+       the moment you let go read as the extra chips themselves having gone
+       missing rather than as merely being scrolled out of view. The
+       -webkit- pseudo-elements reserve a real gutter instead of overlaying,
+       which is what keeps it drawn regardless of that OS setting. */
     scrollbar-width:thin; scrollbar-color:var(--line) transparent;
+  }
+  .route-chips-scroll::-webkit-scrollbar { width:7px; }
+  .route-chips-scroll::-webkit-scrollbar-track { background:transparent; }
+  .route-chips-scroll::-webkit-scrollbar-thumb {
+    background-color:var(--line); border-radius:4px;
   }
   @media (prefers-reduced-motion:no-preference) {
     .route-chips-scroll { transition:max-height .2s ease; }
@@ -734,21 +746,30 @@
   .entry .mark.edited { color:var(--accent-2-ink); background:color-mix(in srgb, var(--accent-2) 14%, transparent); }
   /* Neither a fresh utterance nor a touch-up, so it takes neither of their
      colors. The same quiet outline the destination chip next to it uses. */
-  .entry .mark.resent { color:var(--dim); background:var(--raise); box-shadow:inset 0 0 0 1px var(--line); }
+  .entry .mark.resent { color:var(--dim); background:color-mix(in srgb, var(--raise) 55%, var(--panel)); box-shadow:inset 0 0 0 1px var(--line-soft); }
   /* Which session it went to. With several jobs going at once, this keeps you
      from staring at the log wondering which one you said it to. */
   .entry .to {
     display:inline-flex; align-items:center; gap:.2rem; min-width:0;
     line-height:1;   /* same reasoning as .entry .mark, above */
     padding:.2rem .4rem; border-radius:5px; font-size:.64rem;
-    color:var(--dim); background:var(--raise);
+    color:var(--dim);
     /* The Sent and Edited chips beside it show their ground through color, but
        this one is only a note about where it went, so it cannot carry a color.
        Darkening the ground alone drops the --dim riding on top under 4.5:1.
        Show the shape with an outline and keep the ground no darker than the text
        can stand. The outline is drawn inside so it stays level with the chips
-       next to it. */
-    box-shadow:inset 0 0 0 1px var(--line);
+       next to it.
+       Plain --raise read as a fairly solid gray-blue block in light, heavier
+       than every chip around it, and it was tried backed down to --panel-2
+       once for exactly that — but --panel-2 sits close enough to --panel that
+       in dark it stopped reading as a raised, pressable shape at all (it is
+       a button, when 2+ sessions are listening, and looking like one matters
+       more than the outline does). Splitting the difference with --panel
+       itself keeps a fill that still shows against the page in both themes,
+       just not the full weight of --raise. */
+    background:color-mix(in srgb, var(--raise) 55%, var(--panel));
+    box-shadow:inset 0 0 0 1px var(--line-soft);
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:12rem;
   }
   /* Working alone the whole time, this comes back empty from buildToControl
