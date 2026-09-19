@@ -1635,14 +1635,13 @@ function setRoute(next) {
 
 async function changeRoute(next, prev, revision, syncServer, clickedAt) {
   let applied = false;
+  // Whether this call is the one that already told the server "not off"
+  // (below), separate from syncServer=false calls, which start from a state
+  // the server told *us* about, already unmuted before this call began.
+  let muteSynced = false;
   try {
     if (revision !== routeRevision) return;
     const w = ROUTE[next];
-    if (prev === 'off' && next !== 'off' && engineOnish() && !asrActive()) {
-      const discarded = await discardCurrent({announce: false, at: clickedAt});
-      if (!discarded) throw new Error('Could not discard current utterance');
-      if (revision !== routeRevision) return;
-    }
     if (syncServer) {
       // ROUTE.off carries paused:false as a fixed shape for the table, not as
       // the daemon's real hold/live state. Posting that verbatim on mute would
@@ -1654,6 +1653,19 @@ async function changeRoute(next, prev, revision, syncServer, clickedAt) {
       await post('/api/pause', {paused});
       if (revision !== routeRevision) return;
       await post('/api/mute', {muted: w.muted});
+      muteSynced = true;
+      if (revision !== routeRevision) return;
+    }
+    // Run after the server already knows the mic is live again (#108), not
+    // before it. Discarding first left the server still muted for as long as
+    // the discard's own round trip took, so anything actually said in that
+    // stretch was judged against a mute that had not been lifted yet from the
+    // daemon's own point of view (voice_daemon.py's separate mute-generation
+    // check) and got thrown away there instead, unmoved by this fix.
+    if (prev === 'off' && next !== 'off' && engineOnish() && !asrActive()) {
+      const discarded = await discardCurrent({announce: false, at: clickedAt});
+      if (!discarded) throw new Error('Could not discard current utterance');
+      if (revision !== routeRevision) return;
     }
     if (revision !== routeRevision) return;
     applyRouteSideEffects(next);
@@ -1661,7 +1673,11 @@ async function changeRoute(next, prev, revision, syncServer, clickedAt) {
   } catch (err) {
     if (revision !== routeRevision) return;
     let rollbackError = null;
-    if (!syncServer && prev === 'off' && next !== 'off') {
+    // The server was already told "not off", either by this call just above
+    // or by whatever triggered a syncServer=false call in the first place,
+    // before the step meant to follow it (the discard) failed. Left alone
+    // that shows off on screen while the mic is actually live underneath.
+    if (prev === 'off' && next !== 'off' && (muteSynced || !syncServer)) {
       try {
         const response = await post('/api/mute', {muted: true});
         if (!response.ok) rollbackError = new Error(`HTTP ${response.status}`);
