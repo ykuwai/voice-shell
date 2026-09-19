@@ -377,8 +377,20 @@
     overflow-y:auto; overflow-x:hidden;
     resize:vertical;
     /* Same thin, theme-colored bar .stream already uses instead of the
-       screen-wide default. */
+       screen-wide default. Firefox reads the two lines above; Chrome/Safari
+       read ::-webkit-scrollbar below instead, needed because macOS's own
+       "only while scrolling" overlay-scrollbar behavior otherwise still
+       applies underneath, even with a color set, and a bar that fades out
+       the moment you let go read as the extra chips themselves having gone
+       missing rather than as merely being scrolled out of view. The
+       -webkit- pseudo-elements reserve a real gutter instead of overlaying,
+       which is what keeps it drawn regardless of that OS setting. */
     scrollbar-width:thin; scrollbar-color:var(--line) transparent;
+  }
+  .route-chips-scroll::-webkit-scrollbar { width:7px; }
+  .route-chips-scroll::-webkit-scrollbar-track { background:transparent; }
+  .route-chips-scroll::-webkit-scrollbar-thumb {
+    background-color:var(--line); border-radius:4px;
   }
   @media (prefers-reduced-motion:no-preference) {
     .route-chips-scroll { transition:max-height .2s ease; }
