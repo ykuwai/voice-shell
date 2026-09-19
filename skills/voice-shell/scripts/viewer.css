@@ -119,7 +119,7 @@
     --ok-ink:#066a4b;         /* 5.20:1 on the wash (2.96:1 if left as --ok) */
     --accent-2-ink:#6d28d9;   /* same, 5.36:1 (4.30:1 if left as --accent-2) */
     --glow:0 0 0;
-    --mode-glow:0 0 6px;   /* a little, not none (see the dark :root above) */
+    --mode-glow:0 0 20px;   /* wide and soft, not tight (see the dark :root above) */
     --jump-shadow:0 2px 8px rgba(16, 24, 38, .18);
   }
   @media (prefers-color-scheme: light) {
@@ -134,7 +134,7 @@
       --mode-off:var(--accent); --mode-off-line:var(--accent);
       --accent-2:#7c3aed; --ok:#059669; --warn:#d97706;
       --danger:#dc2626; --ok-ink:#066a4b; --accent-2-ink:#6d28d9; --glow:0 0 0;
-      --mode-glow:0 0 6px;
+      --mode-glow:0 0 20px;
       --jump-shadow:0 2px 8px rgba(16, 24, 38, .18);
     }
   }
