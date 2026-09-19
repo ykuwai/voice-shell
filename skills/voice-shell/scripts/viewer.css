@@ -56,6 +56,14 @@
        comes through without a second copy of this line per theme. */
     --on-accent:var(--panel);
     --glow:0 0 14px;
+    /* Its own token rather than reusing --glow: the live/hold dot answers
+       "on right now", and everywhere else that reads is meant to disappear
+       entirely in light (a haze around a small dot reads as muddy on white),
+       but the mode buttons are a filled shape the size of a coin, not a dot,
+       and going fully flat there read as missing something rather than as
+       restrained. Kept close to --glow's own size, just not tied to it, so
+       the two can keep drifting apart on purpose. */
+    --mode-glow:0 0 14px;
     /* A plain dark elevation shadow (not the colored --glow above, which is
        for a lit indicator, not for lifting a whole shape off the page)
        reads very differently by theme: the same rgba(0,0,0,.35) that barely
@@ -111,6 +119,7 @@
     --ok-ink:#066a4b;         /* 5.20:1 on the wash (2.96:1 if left as --ok) */
     --accent-2-ink:#6d28d9;   /* same, 5.36:1 (4.30:1 if left as --accent-2) */
     --glow:0 0 0;
+    --mode-glow:0 0 6px;   /* a little, not none (see the dark :root above) */
     --jump-shadow:0 2px 8px rgba(16, 24, 38, .18);
   }
   @media (prefers-color-scheme: light) {
@@ -125,6 +134,7 @@
       --mode-off:var(--accent); --mode-off-line:var(--accent);
       --accent-2:#7c3aed; --ok:#059669; --warn:#d97706;
       --danger:#dc2626; --ok-ink:#066a4b; --accent-2-ink:#6d28d9; --glow:0 0 0;
+      --mode-glow:0 0 6px;
       --jump-shadow:0 2px 8px rgba(16, 24, 38, .18);
     }
   }
@@ -602,18 +612,18 @@
   #segLive.on .ring {
     border-color:transparent; color:var(--panel);
     background:linear-gradient(145deg, var(--accent-fill-1), var(--accent-fill-2));
-    /* Same --glow token the other filled dots use (.meter-fill.on, .beacon.hold),
-       instead of a fixed 22px/55% that never checked itself against the light
-       theme. --glow is already 0 in light (a soft haze reads as muddy on white)
-       and a calmer 14px in dark, so this stops being the one spot that stayed
-       heavy after the rest were toned down. */
-    box-shadow:var(--glow) color-mix(in srgb, var(--accent) 55%, transparent);
+    /* --mode-glow, not --glow: a fixed 22px/55% never checked itself against
+       the light theme and stayed heavy after every other lit shape was toned
+       down, but going all the way to --glow's own light value (0, meant for
+       a small dot) read as the shadow having gone missing rather than calm.
+       --mode-glow keeps a little of it in light on purpose (see :root). */
+    box-shadow:var(--mode-glow) color-mix(in srgb, var(--accent) 55%, transparent);
   }
   #segHold.on { color:var(--accent-2); }
   #segHold.on .ring {
     border-color:transparent; color:var(--panel);
     background:linear-gradient(145deg, color-mix(in srgb, var(--accent-2) 70%, var(--accent)), var(--accent-2));
-    box-shadow:var(--glow) color-mix(in srgb, var(--accent-2) 55%, transparent);
+    box-shadow:var(--mode-glow) color-mix(in srgb, var(--accent-2) 55%, transparent);
   }
   /* While muted there is nothing to choose, so sink them, but still show which
      one you come back to. Pull the color out to gray and lift the selected one
