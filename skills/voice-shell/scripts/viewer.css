@@ -56,6 +56,15 @@
        comes through without a second copy of this line per theme. */
     --on-accent:var(--panel);
     --glow:0 0 14px;
+    /* Its own token rather than reusing --glow: the live/hold dot answers
+       "on right now", and everywhere else that reads is meant to disappear
+       entirely in light (a haze around a small dot reads as muddy on white),
+       but the mode buttons are a filled shape the size of a coin, not a dot,
+       and going fully flat there read as missing something rather than as
+       restrained. Kept close to --glow's own size, just not tied to it, so
+       the two can keep drifting apart on purpose. */
+    --mode-glow:0 0 14px;
+    --mode-glow-pct:55%;
     /* A plain dark elevation shadow (not the colored --glow above, which is
        for a lit indicator, not for lifting a whole shape off the page)
        reads very differently by theme: the same rgba(0,0,0,.35) that barely
@@ -89,18 +98,17 @@
     --text:#101826;
     --dim:#4d5a6c;      /* 7.0:1 */
     --faint:#636f80;    /* 4.7:1  meets the small-text floor even on the tab base */
-    /* Hue and saturation sampled straight from the reference screenshot's
-       filled button (214°, 97% saturated). At the sampled lightness a bare
-       blue that vivid only clears 3.6:1 on white, the same trap the old
-       comment warned about (Apple's own system blue clears just 4.0:1), so
-       here only the lightness is pulled down from the sample, to 6.72:1 on
-       white, close to the old accent's 6.9:1, so filled buttons stay
-       readable. --accent-bright keeps the sampled color itself for the
-       gradients, where a fill only needs 3:1. --accent-2 (review) is
-       untouched, so the two modes still read as distinct colors, not just
-       distinct shapes. */
-    --accent:#0356c2;
-    --accent-bright:#2e95fd;
+    /* Hue and saturation sampled from a picked reference blue (217°, 92%
+       saturated). At the sampled lightness that blue only clears 3.6:1 on
+       white, the same trap the old comment warned about (Apple's own system
+       blue clears just 4.0:1), so here only the lightness is pulled down
+       from the sample, to 6.97:1 on white, close to the old accent's 6.9:1,
+       so filled buttons stay readable. --accent-bright keeps the sampled
+       color itself for the gradients, where a fill only needs 3:1.
+       --accent-2 (review) is untouched, so the two modes still read as
+       distinct colors, not just distinct shapes. */
+    --accent:#0851c6;
+    --accent-bright:#3a83f7;
     --accent-fill-1:var(--accent-bright);
     --accent-fill-2:color-mix(in srgb, var(--accent-bright) 70%, var(--accent));
     --mode-off:var(--accent);
@@ -112,6 +120,8 @@
     --ok-ink:#066a4b;         /* 5.20:1 on the wash (2.96:1 if left as --ok) */
     --accent-2-ink:#6d28d9;   /* same, 5.36:1 (4.30:1 if left as --accent-2) */
     --glow:0 0 0;
+    --mode-glow:0 0 26px;   /* wide and soft, not tight (see the dark :root above) */
+    --mode-glow-pct:28%;   /* thinner than dark's 55%, so a wide blur does not read as a wash */
     --jump-shadow:0 2px 8px rgba(16, 24, 38, .18);
   }
   @media (prefers-color-scheme: light) {
@@ -120,12 +130,14 @@
       --bg:#eef1f6; --panel:#ffffff; --panel-2:#f4f6fa; --raise:#ccd5e3;
       --line:#78869b; --line-soft:#d9e0ea; --track:#dce2ec;
       --text:#101826; --dim:#4d5a6c; --faint:#636f80;
-      --accent:#0356c2; --accent-bright:#2e95fd;
+      --accent:#0851c6; --accent-bright:#3a83f7;
       --accent-fill-1:var(--accent-bright);
       --accent-fill-2:color-mix(in srgb, var(--accent-bright) 70%, var(--accent));
       --mode-off:var(--accent); --mode-off-line:var(--accent);
       --accent-2:#7c3aed; --ok:#059669; --warn:#d97706;
       --danger:#dc2626; --ok-ink:#066a4b; --accent-2-ink:#6d28d9; --glow:0 0 0;
+      --mode-glow:0 0 26px;
+      --mode-glow-pct:28%;
       --jump-shadow:0 2px 8px rgba(16, 24, 38, .18);
     }
   }
@@ -280,7 +292,11 @@
     content:""; position:absolute; bottom:4px; left:50%; transform:translateX(-50%);
     width:4px; height:4px; border-radius:50%; background:transparent;
   }
-  .icon.lit { color:var(--text); }
+  /* Same weight as an ordinary icon (--dim), not the full --text. The dot
+     right below it already says "on"; the icon itself does not also need to
+     stand out, and in light theme --text is dark enough to read as a small
+     black blot next to the row's other, softer icons. */
+  .icon.lit { color:var(--dim); }
   .icon.lit::after { background:var(--ok); box-shadow:var(--glow) var(--ok); }
   .icon.warn { color:var(--warn); }
   .icon.warn::after { background:var(--warn); box-shadow:var(--glow) var(--warn); }
@@ -435,7 +451,15 @@
   .route-chip {
     flex:0 1 auto; min-width:0; max-width:100%;
     display:inline-flex; align-items:center; gap:.3rem;
-    padding:.3rem .7rem; border-radius:var(--pill);
+    /* line-height:1 for the same reasoning as .entry .mark, further down,
+       but that shrinks the box the padding is measured against, so the
+       vertical padding is bumped by the same amount (+.15rem) the badges
+       further down got, rather than left at its old .3rem (a sub-agent
+       review of this change caught it sitting alone at the old figure and
+       reading visibly shorter than every other chip once line-height
+       dropped). */
+    line-height:1;
+    padding:.45rem .7rem; border-radius:var(--pill);
     font-size:.75rem; white-space:nowrap;
     border:1.5px solid var(--line); color:var(--dim);
     transition:border-color .15s, color .15s, background .15s;
@@ -561,7 +585,11 @@
     height:100%; width:0; border-radius:2px; background:var(--faint);
     transition:width .1s linear, background .2s;
   }
-  .meter-fill.on { background:var(--accent); box-shadow:var(--glow) var(--accent); }
+  /* --accent-fill-1, not --accent: same reasoning as .switch's track above. */
+  .meter-fill.on {
+    background:var(--accent-fill-1);
+    box-shadow:var(--glow) var(--accent-fill-1);
+  }
 
   /* ── Where speech goes (instant / review) ── */
   /* No box around them. Give them one and you are laying out two things, the
@@ -602,13 +630,20 @@
   #segLive.on .ring {
     border-color:transparent; color:var(--panel);
     background:linear-gradient(145deg, var(--accent-fill-1), var(--accent-fill-2));
-    box-shadow:0 0 22px color-mix(in srgb, var(--accent) 55%, transparent);
+    /* --mode-glow/--mode-glow-pct, not --glow: a fixed 22px/55% never checked
+       itself against the light theme and stayed heavy after every other lit
+       shape was toned down, but going all the way to --glow's own light
+       value (0, meant for a small dot) read as the shadow having gone
+       missing rather than calm. Light keeps a wide, faint version instead
+       (see :root): a bigger blur at the same 55% still reads as a solid wash
+       up close, so the percentage itself comes down too, only in light. */
+    box-shadow:var(--mode-glow) color-mix(in srgb, var(--accent) var(--mode-glow-pct), transparent);
   }
   #segHold.on { color:var(--accent-2); }
   #segHold.on .ring {
     border-color:transparent; color:var(--panel);
     background:linear-gradient(145deg, color-mix(in srgb, var(--accent-2) 70%, var(--accent)), var(--accent-2));
-    box-shadow:0 0 22px color-mix(in srgb, var(--accent-2) 55%, transparent);
+    box-shadow:var(--mode-glow) color-mix(in srgb, var(--accent-2) var(--mode-glow-pct), transparent);
   }
   /* While muted there is nothing to choose, so sink them, but still show which
      one you come back to. Pull the color out to gray and lift the selected one
@@ -649,15 +684,6 @@
     display:flex; align-items:center; gap:.35rem;
   }
   .log-head h2 svg { opacity:.75; }
-  /* How many have been sent. Back when this lived inside settings, you had to
-     open settings just to see the number. Next to the heading you read it with
-     the same eyes you are already using on the log. */
-  .log-head .count {
-    flex:none; padding:.1rem .5rem; border-radius:var(--pill);
-    font-size:.68rem; color:var(--faint); background:var(--panel-2);
-    box-shadow:inset 0 0 0 1px var(--line-soft);
-    font-variant-numeric:tabular-nums;
-  }
   /* The base under the tabs. Lift the ground color all the way to 3:1 and a
      quiet screen becomes a gray staircase. Show the shape with the outline
      instead and leave the base color quiet. The selected one is shown by the
@@ -686,7 +712,16 @@
   }
   .entry .mark {
     display:inline-flex; align-items:center; gap:.25rem;
-    padding:.05rem .4rem; border-radius:5px; font-size:.64rem; font-weight:600;
+    /* align-items:center centers the *line box*, not the ink. A line box
+       carries the font's own ascent/descent, which for most fonts (this one,
+       the CJK glyphs and the ✓ before them included) is not split evenly
+       around the glyphs themselves, so the padding above kept reading
+       thinner than the one below even at equal .05rem top and bottom.
+       Pinning the line height to 1 does not fix that split, but it shrinks
+       the box carrying it, which is what actually narrows the gap on
+       screen. */
+    line-height:1;
+    padding:.2rem .4rem; border-radius:5px; font-size:.64rem; font-weight:600;
   }
   /* Flex items shrink to their content's min width by default, and CJK text
      wraps with no space needed, so with nothing said here the word folded
@@ -704,7 +739,8 @@
      from staring at the log wondering which one you said it to. */
   .entry .to {
     display:inline-flex; align-items:center; gap:.2rem; min-width:0;
-    padding:.05rem .4rem; border-radius:5px; font-size:.64rem;
+    line-height:1;   /* same reasoning as .entry .mark, above */
+    padding:.2rem .4rem; border-radius:5px; font-size:.64rem;
     color:var(--dim); background:var(--raise);
     /* The Sent and Edited chips beside it show their ground through color, but
        this one is only a note about where it went, so it cannot carry a color.
@@ -901,7 +937,16 @@
   .draft-card:not(.holding):not(.editing) { cursor:text; }
   .draft-card .tiny-row { cursor:default; }
   .draft-card .mark {
-    padding:.05rem .4rem; border-radius:5px; font-size:.64rem; font-weight:600;
+    /* Without display:flex the text sat in its line box, uncentered at all
+       (.entry .mark, the Sent/Edited tags in history, already used flex for
+       this; this one never got it). Centering the box is not the whole fix
+       though: a line box's leading is not split evenly above and below the
+       glyphs to begin with, so even centered, the padding above still reads
+       thinner than the one below at equal .05rem top and bottom.
+       line-height:1 shrinks the box carrying that uneven split, which is
+       what actually narrows the visible gap. */
+    display:inline-flex; align-items:center; line-height:1;
+    padding:.2rem .4rem; border-radius:5px; font-size:.64rem; font-weight:600;
     color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, transparent);
     /* .gutter is a flex row that shrinks its children by default, and with no
        white-space of its own the badge wrapped one character per line at a
@@ -1002,8 +1047,13 @@
        That strip is the antialiasing of the moving edge itself, and no boundary
        that moves at all is rid of it. Widen the band to 6% and the light figure
        goes to 2px, which is why it is not wider. */
+    /* --accent-fill-1, not --accent: a shape filled edge to edge with the
+       contrast-darkened --accent reads as a dark, muted blue (the same
+       reasoning as the switch's track above). --accent-fill-1 is already
+       the token .btn.go's gradient uses to knock white text out cleanly, so
+       this follows that same pairing rather than introducing a third. */
     background-image:linear-gradient(to right,
-      var(--accent) calc(var(--cue-edge) - var(--cue-soft)),
+      var(--accent-fill-1) calc(var(--cue-edge) - var(--cue-soft)),
       transparent   calc(var(--cue-edge) + var(--cue-soft)));
     /* Held whether it is showing or not. Take the seat away and the two buttons
        beside it slide as it comes and goes, which moves a target under a finger
@@ -1204,7 +1254,10 @@
     position:fixed; left:50%; bottom:1rem; transform:translateX(-50%);
     display:flex; align-items:center; gap:.4rem; z-index:30;
     padding:.45rem .9rem; border-radius:var(--pill);
-    background:var(--accent); color:var(--panel);
+    /* --accent-fill-1, not --accent: same reasoning as .switch and
+       .tiny.send above, a shape filled solid with the contrast-darkened
+       --accent reads as a dark, muted blue. */
+    background:var(--accent-fill-1); color:var(--panel);
     font-size:.78rem; font-weight:600;
     box-shadow:0 4px 18px color-mix(in srgb, var(--accent) 45%, transparent);
   }
@@ -1357,7 +1410,10 @@
   }
   input[type=range]::-webkit-slider-thumb {
     -webkit-appearance:none; width:17px; height:17px; border-radius:50%;
-    background:var(--accent); box-shadow:var(--glow) color-mix(in srgb, var(--accent) 50%, transparent);
+    /* --accent-fill-1, not --accent: same reasoning as .switch's track,
+       a small solid disc reads the same as a small solid track. */
+    background:var(--accent-fill-1);
+    box-shadow:var(--glow) color-mix(in srgb, var(--accent) 50%, transparent);
     cursor:pointer;
   }
   .range-note { font-size:.75rem; line-height:1.5; color:var(--faint); margin:-.1rem 0 .8rem; }
@@ -1379,7 +1435,7 @@
     height:100%; width:0; border-radius:var(--pill); background:var(--dim);
     transition:width .1s linear, background .2s;
   }
-  .gauge-fill.on { background:var(--accent); }
+  .gauge-fill.on { background:var(--accent-fill-1); }
   .gauge-mark {
     position:absolute; top:-3px; width:2px; height:12px; border-radius:1px;
     background:var(--warn); box-shadow:var(--glow) var(--warn);
@@ -1534,7 +1590,18 @@
     background:var(--dim); transition:transform .15s, background .15s;
   }
   .switch input:checked + .track {
-    background:var(--accent); border-color:var(--accent);
+    /* --accent-fill-1, not --accent: --accent is deliberately darkened from
+       the picked color so text and icons drawn in it stay readable on white
+       (see :root[data-theme="light"]), and a whole track filled solid with
+       that darkened shade reads as a dark, muted blue barely different from
+       the old accent, even though the hue itself did change. --accent-fill-1
+       is already the per-theme token for exactly this (a large filled shape,
+       the mode buttons and .btn.go both use it), undarkened in light and the
+       same as --accent in dark (which needs no darkening against a dark
+       ground to begin with). border-color follows it here too, so the ring
+       around the track is not a visibly different, darker blue than the
+       fill it outlines. */
+    background:var(--accent-fill-1); border-color:var(--accent-fill-1);
   }
   .switch input:checked + .track .knob {
     background:var(--panel); transform:translateX(16px);
