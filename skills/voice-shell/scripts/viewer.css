@@ -89,18 +89,17 @@
     --text:#101826;
     --dim:#4d5a6c;      /* 7.0:1 */
     --faint:#636f80;    /* 4.7:1  meets the small-text floor even on the tab base */
-    /* Hue and saturation sampled straight from the reference screenshot's
-       filled button (214°, 97% saturated). At the sampled lightness a bare
-       blue that vivid only clears 3.6:1 on white, the same trap the old
-       comment warned about (Apple's own system blue clears just 4.0:1), so
-       here only the lightness is pulled down from the sample, to 6.72:1 on
-       white, close to the old accent's 6.9:1, so filled buttons stay
-       readable. --accent-bright keeps the sampled color itself for the
-       gradients, where a fill only needs 3:1. --accent-2 (review) is
-       untouched, so the two modes still read as distinct colors, not just
-       distinct shapes. */
-    --accent:#0356c2;
-    --accent-bright:#2e95fd;
+    /* Hue and saturation sampled from a picked reference blue (217°, 92%
+       saturated). At the sampled lightness that blue only clears 3.6:1 on
+       white, the same trap the old comment warned about (Apple's own system
+       blue clears just 4.0:1), so here only the lightness is pulled down
+       from the sample, to 6.97:1 on white, close to the old accent's 6.9:1,
+       so filled buttons stay readable. --accent-bright keeps the sampled
+       color itself for the gradients, where a fill only needs 3:1.
+       --accent-2 (review) is untouched, so the two modes still read as
+       distinct colors, not just distinct shapes. */
+    --accent:#0851c6;
+    --accent-bright:#3a83f7;
     --accent-fill-1:var(--accent-bright);
     --accent-fill-2:color-mix(in srgb, var(--accent-bright) 70%, var(--accent));
     --mode-off:var(--accent);
@@ -120,7 +119,7 @@
       --bg:#eef1f6; --panel:#ffffff; --panel-2:#f4f6fa; --raise:#ccd5e3;
       --line:#78869b; --line-soft:#d9e0ea; --track:#dce2ec;
       --text:#101826; --dim:#4d5a6c; --faint:#636f80;
-      --accent:#0356c2; --accent-bright:#2e95fd;
+      --accent:#0851c6; --accent-bright:#3a83f7;
       --accent-fill-1:var(--accent-bright);
       --accent-fill-2:color-mix(in srgb, var(--accent-bright) 70%, var(--accent));
       --mode-off:var(--accent); --mode-off-line:var(--accent);
@@ -602,13 +601,18 @@
   #segLive.on .ring {
     border-color:transparent; color:var(--panel);
     background:linear-gradient(145deg, var(--accent-fill-1), var(--accent-fill-2));
-    box-shadow:0 0 22px color-mix(in srgb, var(--accent) 55%, transparent);
+    /* Same --glow token the other filled dots use (.meter-fill.on, .beacon.hold),
+       instead of a fixed 22px/55% that never checked itself against the light
+       theme. --glow is already 0 in light (a soft haze reads as muddy on white)
+       and a calmer 14px in dark, so this stops being the one spot that stayed
+       heavy after the rest were toned down. */
+    box-shadow:var(--glow) color-mix(in srgb, var(--accent) 55%, transparent);
   }
   #segHold.on { color:var(--accent-2); }
   #segHold.on .ring {
     border-color:transparent; color:var(--panel);
     background:linear-gradient(145deg, color-mix(in srgb, var(--accent-2) 70%, var(--accent)), var(--accent-2));
-    box-shadow:0 0 22px color-mix(in srgb, var(--accent-2) 55%, transparent);
+    box-shadow:var(--glow) color-mix(in srgb, var(--accent-2) 55%, transparent);
   }
   /* While muted there is nothing to choose, so sink them, but still show which
      one you come back to. Pull the color out to gray and lift the selected one
@@ -901,6 +905,13 @@
   .draft-card:not(.holding):not(.editing) { cursor:text; }
   .draft-card .tiny-row { cursor:default; }
   .draft-card .mark {
+    /* Without display:flex the text sits in its line box, and a line box's
+       leading is not split evenly above and below the glyphs, so the padding
+       above read thinner than the padding below even though both are the
+       same .05rem. .entry .mark (the Sent/Edited tags in history) already
+       centers on the flex box instead for the same reason; this one just
+       never got it. */
+    display:inline-flex; align-items:center;
     padding:.05rem .4rem; border-radius:5px; font-size:.64rem; font-weight:600;
     color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, transparent);
     /* .gutter is a flex row that shrinks its children by default, and with no

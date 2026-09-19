@@ -206,7 +206,14 @@ let cw = 0, ch = 0;
 
 function fitCanvas() {
   const r = canvas.getBoundingClientRect();
-  const dpr = window.devicePixelRatio || 1;
+  // Not the bare global: while floating, this canvas lives inside the small
+  // Picture-in-Picture window, a separate top-level window from the one this
+  // script itself loaded into, and window.devicePixelRatio would keep
+  // reading whichever monitor the *main* tab sits on. Dragging the small
+  // window to a second display with a different DPI than that one left the
+  // mic drawn at the wrong resolution for where it actually ended up,
+  // scaled soft by whichever side over- or under-shot.
+  const dpr = (canvas.ownerDocument.defaultView || window).devicePixelRatio || 1;
   cw = Math.max(1, Math.round(r.width));
   ch = Math.max(1, Math.round(r.height));
   canvas.width = cw * dpr;
@@ -229,10 +236,13 @@ const minis = [[el.miniViz, el.sheet, el.miniMic],
                [el.helpMiniViz, el.helpSheet, el.helpMini]]
   .map(([canvas, sheet, box]) => ({canvas, sheet, box, cx: canvas.getContext('2d'), w: 0, h: 0}));
 function fitMini() {
-  const dpr = window.devicePixelRatio || 1;
   for (const m of minis) {
     const r = m.canvas.getBoundingClientRect();
     if (!r.width || !r.height) { m.w = m.h = 0; continue; }
+    // Per canvas, not hoisted above the loop: same reasoning as fitCanvas,
+    // and while floating this one can be measured before or after the
+    // window it just moved into settles on its own devicePixelRatio.
+    const dpr = (m.canvas.ownerDocument.defaultView || window).devicePixelRatio || 1;
     m.w = Math.round(r.width);
     m.h = Math.round(r.height);
     m.canvas.width = m.w * dpr;
@@ -476,7 +486,8 @@ function frame(now) {
     // every single frame failing, all you know is that no picture shows (which
     // is exactly how it once went unnoticed).
     if (!frameFailed) { frameFailed = true; console.error('paintFrame:', err); }
-    cx.setTransform(window.devicePixelRatio || 1, 0, 0, window.devicePixelRatio || 1, 0, 0);
+    const dpr = (canvas.ownerDocument.defaultView || window).devicePixelRatio || 1;
+    cx.setTransform(dpr, 0, 0, dpr, 0, 0);
     cx.globalAlpha = 1;
     cx.globalCompositeOperation = 'source-over';
   }
