@@ -451,8 +451,15 @@
   .route-chip {
     flex:0 1 auto; min-width:0; max-width:100%;
     display:inline-flex; align-items:center; gap:.3rem;
-    line-height:1;   /* same reasoning as .entry .mark, further down */
-    padding:.3rem .7rem; border-radius:var(--pill);
+    /* line-height:1 for the same reasoning as .entry .mark, further down,
+       but that shrinks the box the padding is measured against, so the
+       vertical padding is bumped by the same amount (+.15rem) the badges
+       further down got, rather than left at its old .3rem (a sub-agent
+       review of this change caught it sitting alone at the old figure and
+       reading visibly shorter than every other chip once line-height
+       dropped). */
+    line-height:1;
+    padding:.45rem .7rem; border-radius:var(--pill);
     font-size:.75rem; white-space:nowrap;
     border:1.5px solid var(--line); color:var(--dim);
     transition:border-color .15s, color .15s, background .15s;
