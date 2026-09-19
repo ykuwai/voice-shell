@@ -64,6 +64,7 @@
        restrained. Kept close to --glow's own size, just not tied to it, so
        the two can keep drifting apart on purpose. */
     --mode-glow:0 0 14px;
+    --mode-glow-pct:55%;
     /* A plain dark elevation shadow (not the colored --glow above, which is
        for a lit indicator, not for lifting a whole shape off the page)
        reads very differently by theme: the same rgba(0,0,0,.35) that barely
@@ -119,7 +120,8 @@
     --ok-ink:#066a4b;         /* 5.20:1 on the wash (2.96:1 if left as --ok) */
     --accent-2-ink:#6d28d9;   /* same, 5.36:1 (4.30:1 if left as --accent-2) */
     --glow:0 0 0;
-    --mode-glow:0 0 20px;   /* wide and soft, not tight (see the dark :root above) */
+    --mode-glow:0 0 26px;   /* wide and soft, not tight (see the dark :root above) */
+    --mode-glow-pct:28%;   /* thinner than dark's 55%, so a wide blur does not read as a wash */
     --jump-shadow:0 2px 8px rgba(16, 24, 38, .18);
   }
   @media (prefers-color-scheme: light) {
@@ -134,7 +136,8 @@
       --mode-off:var(--accent); --mode-off-line:var(--accent);
       --accent-2:#7c3aed; --ok:#059669; --warn:#d97706;
       --danger:#dc2626; --ok-ink:#066a4b; --accent-2-ink:#6d28d9; --glow:0 0 0;
-      --mode-glow:0 0 20px;
+      --mode-glow:0 0 26px;
+      --mode-glow-pct:28%;
       --jump-shadow:0 2px 8px rgba(16, 24, 38, .18);
     }
   }
@@ -612,18 +615,20 @@
   #segLive.on .ring {
     border-color:transparent; color:var(--panel);
     background:linear-gradient(145deg, var(--accent-fill-1), var(--accent-fill-2));
-    /* --mode-glow, not --glow: a fixed 22px/55% never checked itself against
-       the light theme and stayed heavy after every other lit shape was toned
-       down, but going all the way to --glow's own light value (0, meant for
-       a small dot) read as the shadow having gone missing rather than calm.
-       --mode-glow keeps a little of it in light on purpose (see :root). */
-    box-shadow:var(--mode-glow) color-mix(in srgb, var(--accent) 55%, transparent);
+    /* --mode-glow/--mode-glow-pct, not --glow: a fixed 22px/55% never checked
+       itself against the light theme and stayed heavy after every other lit
+       shape was toned down, but going all the way to --glow's own light
+       value (0, meant for a small dot) read as the shadow having gone
+       missing rather than calm. Light keeps a wide, faint version instead
+       (see :root): a bigger blur at the same 55% still reads as a solid wash
+       up close, so the percentage itself comes down too, only in light. */
+    box-shadow:var(--mode-glow) color-mix(in srgb, var(--accent) var(--mode-glow-pct), transparent);
   }
   #segHold.on { color:var(--accent-2); }
   #segHold.on .ring {
     border-color:transparent; color:var(--panel);
     background:linear-gradient(145deg, color-mix(in srgb, var(--accent-2) 70%, var(--accent)), var(--accent-2));
-    box-shadow:var(--mode-glow) color-mix(in srgb, var(--accent-2) 55%, transparent);
+    box-shadow:var(--mode-glow) color-mix(in srgb, var(--accent-2) var(--mode-glow-pct), transparent);
   }
   /* While muted there is nothing to choose, so sink them, but still show which
      one you come back to. Pull the color out to gray and lift the selected one
@@ -710,7 +715,7 @@
        the box carrying it, which is what actually narrows the gap on
        screen. */
     line-height:1;
-    padding:.05rem .4rem; border-radius:5px; font-size:.64rem; font-weight:600;
+    padding:.2rem .4rem; border-radius:5px; font-size:.64rem; font-weight:600;
   }
   /* Flex items shrink to their content's min width by default, and CJK text
      wraps with no space needed, so with nothing said here the word folded
@@ -729,7 +734,7 @@
   .entry .to {
     display:inline-flex; align-items:center; gap:.2rem; min-width:0;
     line-height:1;   /* same reasoning as .entry .mark, above */
-    padding:.05rem .4rem; border-radius:5px; font-size:.64rem;
+    padding:.2rem .4rem; border-radius:5px; font-size:.64rem;
     color:var(--dim); background:var(--raise);
     /* The Sent and Edited chips beside it show their ground through color, but
        this one is only a note about where it went, so it cannot carry a color.
@@ -935,7 +940,7 @@
        line-height:1 shrinks the box carrying that uneven split, which is
        what actually narrows the visible gap. */
     display:inline-flex; align-items:center; line-height:1;
-    padding:.05rem .4rem; border-radius:5px; font-size:.64rem; font-weight:600;
+    padding:.2rem .4rem; border-radius:5px; font-size:.64rem; font-weight:600;
     color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, transparent);
     /* .gutter is a flex row that shrinks its children by default, and with no
        white-space of its own the badge wrapped one character per line at a
