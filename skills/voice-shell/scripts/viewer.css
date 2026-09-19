@@ -574,7 +574,11 @@
     height:100%; width:0; border-radius:2px; background:var(--faint);
     transition:width .1s linear, background .2s;
   }
-  .meter-fill.on { background:var(--accent); box-shadow:var(--glow) var(--accent); }
+  /* --accent-fill-1, not --accent: same reasoning as .switch's track above. */
+  .meter-fill.on {
+    background:var(--accent-fill-1);
+    box-shadow:var(--glow) var(--accent-fill-1);
+  }
 
   /* ── Where speech goes (instant / review) ── */
   /* No box around them. Give them one and you are laying out two things, the
@@ -669,15 +673,6 @@
     display:flex; align-items:center; gap:.35rem;
   }
   .log-head h2 svg { opacity:.75; }
-  /* How many have been sent. Back when this lived inside settings, you had to
-     open settings just to see the number. Next to the heading you read it with
-     the same eyes you are already using on the log. */
-  .log-head .count {
-    flex:none; padding:.1rem .5rem; border-radius:var(--pill);
-    font-size:.68rem; color:var(--faint); background:var(--panel-2);
-    box-shadow:inset 0 0 0 1px var(--line-soft);
-    font-variant-numeric:tabular-nums;
-  }
   /* The base under the tabs. Lift the ground color all the way to 3:1 and a
      quiet screen becomes a gray staircase. Show the shape with the outline
      instead and leave the base color quiet. The selected one is shown by the
@@ -1041,14 +1036,13 @@
        That strip is the antialiasing of the moving edge itself, and no boundary
        that moves at all is rid of it. Widen the band to 6% and the light figure
        goes to 2px, which is why it is not wider. */
-    /* --accent-bright (falling back to --accent in dark, which has none of
-       its own), not --accent: the same reasoning as the switch's track
-       above, a shape filled edge to edge with the contrast-darkened --accent
-       reads as a dark, muted blue. .btn.go already knocks white text out of
-       --accent-fill-1/2 the same way this knocks the plane out of its fill,
-       so this follows that same pairing rather than introducing a third. */
+    /* --accent-fill-1, not --accent: a shape filled edge to edge with the
+       contrast-darkened --accent reads as a dark, muted blue (the same
+       reasoning as the switch's track above). --accent-fill-1 is already
+       the token .btn.go's gradient uses to knock white text out cleanly, so
+       this follows that same pairing rather than introducing a third. */
     background-image:linear-gradient(to right,
-      var(--accent-bright, var(--accent)) calc(var(--cue-edge) - var(--cue-soft)),
+      var(--accent-fill-1) calc(var(--cue-edge) - var(--cue-soft)),
       transparent   calc(var(--cue-edge) + var(--cue-soft)));
     /* Held whether it is showing or not. Take the seat away and the two buttons
        beside it slide as it comes and goes, which moves a target under a finger
@@ -1249,7 +1243,10 @@
     position:fixed; left:50%; bottom:1rem; transform:translateX(-50%);
     display:flex; align-items:center; gap:.4rem; z-index:30;
     padding:.45rem .9rem; border-radius:var(--pill);
-    background:var(--accent); color:var(--panel);
+    /* --accent-fill-1, not --accent: same reasoning as .switch and
+       .tiny.send above, a shape filled solid with the contrast-darkened
+       --accent reads as a dark, muted blue. */
+    background:var(--accent-fill-1); color:var(--panel);
     font-size:.78rem; font-weight:600;
     box-shadow:0 4px 18px color-mix(in srgb, var(--accent) 45%, transparent);
   }
@@ -1402,7 +1399,10 @@
   }
   input[type=range]::-webkit-slider-thumb {
     -webkit-appearance:none; width:17px; height:17px; border-radius:50%;
-    background:var(--accent); box-shadow:var(--glow) color-mix(in srgb, var(--accent) 50%, transparent);
+    /* --accent-fill-1, not --accent: same reasoning as .switch's track,
+       a small solid disc reads the same as a small solid track. */
+    background:var(--accent-fill-1);
+    box-shadow:var(--glow) color-mix(in srgb, var(--accent) 50%, transparent);
     cursor:pointer;
   }
   .range-note { font-size:.75rem; line-height:1.5; color:var(--faint); margin:-.1rem 0 .8rem; }
@@ -1424,7 +1424,7 @@
     height:100%; width:0; border-radius:var(--pill); background:var(--dim);
     transition:width .1s linear, background .2s;
   }
-  .gauge-fill.on { background:var(--accent); }
+  .gauge-fill.on { background:var(--accent-fill-1); }
   .gauge-mark {
     position:absolute; top:-3px; width:2px; height:12px; border-radius:1px;
     background:var(--warn); box-shadow:var(--glow) var(--warn);
@@ -1579,20 +1579,18 @@
     background:var(--dim); transition:transform .15s, background .15s;
   }
   .switch input:checked + .track {
-    /* --accent-bright, not --accent: --accent is deliberately darkened from
+    /* --accent-fill-1, not --accent: --accent is deliberately darkened from
        the picked color so text and icons drawn in it stay readable on white
        (see :root[data-theme="light"]), and a whole track filled solid with
        that darkened shade reads as a dark, muted blue barely different from
-       the old accent, even though the hue itself did change. Everywhere else
-       a large filled shape uses the bright, undarkened color instead (the
-       mode buttons, .btn.go), and border-color follows it here too so the
-       ring around the track is not a visibly different, darker blue than
-       the fill it outlines. */
-    /* Falls back to --accent: dark theme has no --accent-bright of its own
-       (its --accent is already the vivid, undarkened cyan, no contrast
-       trick needed against a dark ground), so the bare var above would
-       otherwise resolve to nothing there and leave the track unpainted. */
-    background:var(--accent-bright, var(--accent)); border-color:var(--accent-bright, var(--accent));
+       the old accent, even though the hue itself did change. --accent-fill-1
+       is already the per-theme token for exactly this (a large filled shape,
+       the mode buttons and .btn.go both use it), undarkened in light and the
+       same as --accent in dark (which needs no darkening against a dark
+       ground to begin with). border-color follows it here too, so the ring
+       around the track is not a visibly different, darker blue than the
+       fill it outlines. */
+    background:var(--accent-fill-1); border-color:var(--accent-fill-1);
   }
   .switch input:checked + .track .knob {
     background:var(--panel); transform:translateX(16px);
