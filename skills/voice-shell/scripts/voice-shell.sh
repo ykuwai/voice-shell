@@ -239,12 +239,18 @@ open_gui() {
           "/c/Program Files/Microsoft/Edge/Application/msedge.exe"
         do
           [[ -n "$exe" && -f "$exe" ]] || continue
-          cmd.exe /c start "" "$(cygpath -w "$exe")" "$url" >/dev/null 2>&1 && return 0
+          # //c, not /c: MSYS auto-converts a bare "/c" into the path it
+          # thinks it is (the C: drive), the same class of bug //PID, //T
+          # and //F were already worked around for below. With that
+          # mangled, cmd.exe silently does nothing while still exiting 0,
+          # so this looked like success (the "viewer started" line still
+          # printed) while no window ever opened.
+          cmd.exe //c start "" "$(cygpath -w "$exe")" "$url" >/dev/null 2>&1 && return 0
         done
         # None of the usual install paths panned out. Try the name-based
         # form as a last resort, in case Chrome is registered under it by
         # some other means (the Microsoft Store build, for one).
-        cmd.exe /c start "" chrome "$url" >/dev/null 2>&1 && return 0
+        cmd.exe //c start "" chrome "$url" >/dev/null 2>&1 && return 0
       fi
       ;;
   esac
