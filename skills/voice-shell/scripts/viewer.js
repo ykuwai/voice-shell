@@ -1616,26 +1616,32 @@ function stepCue(now, target) {
 function setRoute(next) {
   const prev = route;
   const revision = ++routeRevision;
+  // Stamped right here, before routeQueue can sit behind anything already
+  // pending. Taken instead at the top of changeRoute (once this call's turn
+  // in that queue finally comes up), a backlog of earlier route changes
+  // delays the stamp by however long they took to clear, and a fresh
+  // utterance begun the instant this button was pressed can then look
+  // "already running" to the discard below and gets cut along with it (#108).
+  const clickedAt = Date.now() / 1000;
   route = next;
   resetBrowserGesture();
   if (next !== 'off') lastMode = next;
   paint();                            // show it the instant it is pressed
   inFlight = true;
-  const task = routeQueue.then(() => changeRoute(next, prev, revision, true));
+  const task = routeQueue.then(() => changeRoute(next, prev, revision, true, clickedAt));
   routeQueue = task.catch(() => {});
   return task;
 }
 
-async function changeRoute(next, prev, revision, syncServer) {
+async function changeRoute(next, prev, revision, syncServer, clickedAt) {
   let applied = false;
+  // Whether this call is the one that already told the server "not off"
+  // (below), separate from syncServer=false calls, which start from a state
+  // the server told *us* about, already unmuted before this call began.
+  let muteSynced = false;
   try {
     if (revision !== routeRevision) return;
     const w = ROUTE[next];
-    if (prev === 'off' && next !== 'off' && engineOnish() && !asrActive()) {
-      const discarded = await discardCurrent({announce: false});
-      if (!discarded) throw new Error('Could not discard current utterance');
-      if (revision !== routeRevision) return;
-    }
     if (syncServer) {
       // ROUTE.off carries paused:false as a fixed shape for the table, not as
       // the daemon's real hold/live state. Posting that verbatim on mute would
@@ -1647,6 +1653,19 @@ async function changeRoute(next, prev, revision, syncServer) {
       await post('/api/pause', {paused});
       if (revision !== routeRevision) return;
       await post('/api/mute', {muted: w.muted});
+      muteSynced = true;
+      if (revision !== routeRevision) return;
+    }
+    // Run after the server already knows the mic is live again (#108), not
+    // before it. Discarding first left the server still muted for as long as
+    // the discard's own round trip took, so anything actually said in that
+    // stretch was judged against a mute that had not been lifted yet from the
+    // daemon's own point of view (voice_daemon.py's separate mute-generation
+    // check) and got thrown away there instead, unmoved by this fix.
+    if (prev === 'off' && next !== 'off' && engineOnish() && !asrActive()) {
+      const discarded = await discardCurrent({announce: false, at: clickedAt});
+      if (!discarded) throw new Error('Could not discard current utterance');
+      if (revision !== routeRevision) return;
     }
     if (revision !== routeRevision) return;
     applyRouteSideEffects(next);
@@ -1654,7 +1673,11 @@ async function changeRoute(next, prev, revision, syncServer) {
   } catch (err) {
     if (revision !== routeRevision) return;
     let rollbackError = null;
-    if (!syncServer && prev === 'off' && next !== 'off') {
+    // The server was already told "not off", either by this call just above
+    // or by whatever triggered a syncServer=false call in the first place,
+    // before the step meant to follow it (the discard) failed. Left alone
+    // that shows off on screen while the mic is actually live underneath.
+    if (prev === 'off' && next !== 'off' && (muteSynced || !syncServer)) {
       try {
         const response = await post('/api/mute', {muted: true});
         if (!response.ok) rollbackError = new Error(`HTTP ${response.status}`);
@@ -1695,12 +1718,13 @@ async function changeRoute(next, prev, revision, syncServer) {
 function setRemoteRoute(next) {
   const prev = route;
   const revision = ++routeRevision;
+  const clickedAt = Date.now() / 1000;   // same reasoning as setRoute above
   route = next;
   resetBrowserGesture();
   if (next !== 'off') lastMode = next;
   paint();
   inFlight = true;
-  const task = routeQueue.then(() => changeRoute(next, prev, revision, false));
+  const task = routeQueue.then(() => changeRoute(next, prev, revision, false, clickedAt));
   routeQueue = task.catch(() => {});
   return task;
 }
@@ -2348,13 +2372,18 @@ function newDropId() {
   return globalThis.crypto?.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
 }
 
-function discardCurrent(options) {
-  const task = discardQueue.then(() => discardCurrentNow(options));
+function discardCurrent(options = {}) {
+  // Stamped here, ahead of discardQueue, for the same reason setRoute stamps
+  // clickedAt ahead of routeQueue (#108). A caller that already has a truer
+  // moment in mind (changeRoute, handing over when the button was actually
+  // pressed) passes its own `at` and this leaves it alone.
+  const at = options.at ?? (Date.now() / 1000);
+  const task = discardQueue.then(() => discardCurrentNow({...options, at}));
   discardQueue = task.catch(() => {});
   return task;
 }
 
-async function discardCurrentNow({announce = true} = {}) {
+async function discardCurrentNow({announce = true, at} = {}) {
   discardResultCutoff = Math.max(discardResultCutoff, wsMessageNumber);
   discardInProgress++;
   try {
@@ -2380,7 +2409,7 @@ async function discardCurrentNow({announce = true} = {}) {
       dropBarriers.add(id);
       let response;
       try {
-        response = await post('/api/drop-current', {id});
+        response = await post('/api/drop-current', {id, at});
         const body = await response.json();
         if (!response.ok || body.ok !== true || body.id !== id) {
           dropBarriers.delete(id);

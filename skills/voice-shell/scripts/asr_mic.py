@@ -1145,13 +1145,20 @@ def stream_utterances(model, args, should_stop=lambda: False):
     tuning_wait = 0
     # The discard button on screen writes the time it was pressed into a file,
     # the same way the mic choice and the tuning are handed over. It is read,
-    # never deleted, and the time inside it is what gets compared.
+    # never deleted, and the request id inside it is what marks one as already
+    # handled (#108: the time used to serve that purpose too, back when it was
+    # always this process's own clock and so always arrived in order; now that
+    # the page hands over the moment its own button was pressed, a request
+    # queued behind an earlier one can carry an *older* time than one that
+    # reaches here first, and comparing times would wrongly treat the later
+    # arrival as already-seen and never answer it, hanging the button that
+    # asked for it).
     want_drop = getattr(args, "want_drop", None)
     drop_wait = 0
     # A press left behind by an earlier run must not throw away the first
     # utterance of this one, so whatever the file holds now counts as handled.
     last_drop = (want_drop() if want_drop is not None else (0.0, "")) or (0.0, "")
-    last_drop_at = float(last_drop[0] if isinstance(last_drop, tuple) else last_drop)
+    last_drop_id = str(last_drop[1] if isinstance(last_drop, tuple) else "")
     # The send button leaves its press time in a file of its own, read the same
     # way and never deleted either.
     want_send = getattr(args, "want_send", None)
@@ -1174,21 +1181,23 @@ def stream_utterances(model, args, should_stop=lambda: False):
     def drop_asked():
         """Whether the discard button was pressed during the utterance running now.
 
-        The press time is compared against the time the utterance began.
-        Without the compare, a press that lands just after a settle would take
-        the next utterance down with it, so undoing one line would eat the line
-        after it too. A press counts as spent whichever way the compare goes,
-        so it never fires twice.
+        Which request this is, is settled by its id (never spent twice), and
+        which utterance it is aimed at, by comparing its press time against
+        the time that utterance began. Without the id check, the same request
+        sitting in the file would be answered again on every poll; without
+        the time check, a press that lands just after a settle would take the
+        next utterance down with it, so undoing one line would eat the line
+        after it too.
         """
-        nonlocal last_drop_at
-        asked = (want_drop() if want_drop is not None else 0.0) or 0.0
+        nonlocal last_drop_id
+        asked = (want_drop() if want_drop is not None else (0.0, "")) or (0.0, "")
         if isinstance(asked, tuple):
             at, drop_id = asked
         else:
             at, drop_id = float(asked), str(asked)
-        if at <= last_drop_at:
+        if not drop_id or drop_id == last_drop_id:
             return None
-        last_drop_at = at
+        last_drop_id = drop_id
         return {"id": drop_id,
                 "active": speaking_at is not None and at >= speaking_at}
 
