@@ -709,6 +709,21 @@ async def main_async(args):
         tail.clients.add(ws)
         for rec in list(tail.history):
             await ws.send_str(json.dumps(rec, ensure_ascii=False))
+        # watch_partial only broadcasts on change, one text shared by every
+        # connected client, so a browser that opens (or reloads) mid-sentence
+        # never gets told what is already sitting there until it changes
+        # again, or until it settles and is sent. Silence in the room between
+        # those two makes neither happen, so the page you just reloaded shows
+        # the draft as empty right up to the moment it goes out with no
+        # warning at all (measured: reload right as one gets read out, and
+        # it sends before you can catch it). Send it once here too, straight
+        # from the file, so this one connection starts already caught up.
+        try:
+            partial_now = partial_file.read_text(encoding="utf-8")
+        except OSError:
+            partial_now = ""
+        if partial_now:
+            await ws.send_str(json.dumps({"partial": partial_now}, ensure_ascii=False))
         try:
             async for _ in ws:
                 pass
