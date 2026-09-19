@@ -1573,7 +1573,20 @@
     background:var(--dim); transition:transform .15s, background .15s;
   }
   .switch input:checked + .track {
-    background:var(--accent); border-color:var(--accent);
+    /* --accent-bright, not --accent: --accent is deliberately darkened from
+       the picked color so text and icons drawn in it stay readable on white
+       (see :root[data-theme="light"]), and a whole track filled solid with
+       that darkened shade reads as a dark, muted blue barely different from
+       the old accent, even though the hue itself did change. Everywhere else
+       a large filled shape uses the bright, undarkened color instead (the
+       mode buttons, .btn.go), and border-color follows it here too so the
+       ring around the track is not a visibly different, darker blue than
+       the fill it outlines. */
+    /* Falls back to --accent: dark theme has no --accent-bright of its own
+       (its --accent is already the vivid, undarkened cyan, no contrast
+       trick needed against a dark ground), so the bare var above would
+       otherwise resolve to nothing there and leave the track unpainted. */
+    background:var(--accent-bright, var(--accent)); border-color:var(--accent-bright, var(--accent));
   }
   .switch input:checked + .track .knob {
     background:var(--panel); transform:translateX(16px);
