@@ -750,14 +750,14 @@ function addEntry(rec) {
   retally();
 }
 
-/* Drag-select a misheard word inside a sent entry, right click it, and land
-   in the dictionary with that word already filling the "heard as" side —
-   the correction is the only thing left to type. A page cannot add an item
-   to the browser's own right-click menu, so this replaces it outright with
-   one row of its own instead, in the same small floating shape .to-menu
-   already reads as this screen's own menu (openPickMenu, above).
+/* Drag-select a misheard word inside a sent entry and land in the dictionary
+   with that word already filling the "heard as" side — the correction is
+   the only thing left to type. Offered the moment the drag itself finishes
+   (mouseup with a non-empty selection), not behind a right click, so the
+   right-click menu stays the browser's own (Copy included, wanted often
+   enough on its own that overriding the menu outright got in its way).
 
-   doc/win come from the element the click actually landed on rather than
+   doc/win come from the element the mouseup actually landed on rather than
    the bare document/window/getSelection globals, the same reasoning as
    openPickMenu above: while floating, el.page (the log along with it) has
    been moved into the small window's own document (floatParts, further
@@ -799,19 +799,23 @@ function openSelectionMenu(doc, win, x, y, text) {
   doc.addEventListener('keydown', onKey);
   closeSelMenu = close;
 }
-el.log.addEventListener('contextmenu', e => {
+el.log.addEventListener('mouseup', e => {
+  // Left button only. mouseup also fires releasing a right click, and with
+  // a selection already sitting there from an earlier drag (unchanged by
+  // the right click itself) this would otherwise pop the menu up right
+  // alongside the browser's own, which is exactly the clash leaving the
+  // right-click menu alone was meant to avoid.
+  if (e.button !== 0) return;
   const textEl = e.target.closest('.entry .text');
   if (!textEl) return;
   const doc = textEl.ownerDocument;
   const win = doc.defaultView;
   const sel = win.getSelection();
   const picked = sel && sel.toString().trim();
-  // Left uncaught (the browser's own menu shows) unless there really is a
-  // selection, and it is this entry's own — the leftover selection from an
-  // entry scrolled away under the pointer is not what a right click here
-  // meant to act on.
+  // Nothing to offer unless the drag actually left a selection behind, and
+  // it is this entry's own — the leftover selection from an entry scrolled
+  // away under the pointer is not what this mouseup meant to act on.
   if (!picked || !sel.anchorNode || !textEl.contains(sel.anchorNode)) return;
-  e.preventDefault();
   openSelectionMenu(doc, win, e.clientX, e.clientY, picked);
 });
 
