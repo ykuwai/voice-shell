@@ -105,8 +105,17 @@ through it).
 $env:PATH = (.venv\Scripts\python -c "import os, nvidia.cublas, nvidia.cudnn; print(os.pathsep.join(os.path.join(os.path.dirname(m.__file__), 'bin') for m in (nvidia.cublas, nvidia.cudnn)))") + ';' + $env:PATH
 ```
 
-Make it stick with `setx PATH` or from the system settings, for the same reason
-as above. If you would rather not have pip carry them at all,
+Make it stick from the system settings, or the same way from here. Do not reach
+for `setx PATH`, it writes the merged value back into the user's own `PATH` and
+cuts it off at 1024 characters.
+
+```powershell
+$u = [Environment]::GetEnvironmentVariable('Path', 'User')
+[Environment]::SetEnvironmentVariable('Path', "$u;<the two folders above>", 'User')
+```
+
+It survives past this one session for the same reason as on Linux. If you would
+rather not have pip carry them at all,
 [Purfview's whisper-standalone-win](https://github.com/Purfview/whisper-standalone-win)
 hands you the same libraries in one archive, which is where faster-whisper's own
 README sends Windows. Unpack it into any folder already on `PATH`.

@@ -75,8 +75,10 @@ picked last time (`~/.config/voice-shell/config.json`), and the first time it is
    When the user says "I want recognition to stay local" or "I do not want it
    sent to the cloud", show the list with `voice-shell.sh engines` and pass
    `--engine <the one they picked>` **after they have picked it**. On macOS 26
-   or newer `apple` should already be there, so they can switch on the spot and
-   compare with no extra download.
+   or newer `apple` should already be there, so they can switch on the spot with
+   nothing to install. The first switch on a machine still takes tens of seconds,
+   while the OS fetches the speech model for that language by itself, and it is
+   instant from then on.
 
    **Do not pass `--engine X` on your own to recover from a failure.** The name
    you pass is remembered as the default from then on, so passing it silently
