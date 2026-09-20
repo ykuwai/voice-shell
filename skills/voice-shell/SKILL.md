@@ -511,7 +511,11 @@ picking a local model.
   to wait for, and starting takes 1 to 2 minutes as well. How much memory it
   uses is decided by the size of the model
   - `--engine apple` (macOS 26 or newer, the recognition that ships with the OS)
-    loads no model, so this limit does not apply to it
+    loads no model of its own, so neither the memory nor the 1 to 2 minutes
+    apply to it. **The first run on a machine still waits**, tens of seconds,
+    while the OS fetches the speech model for that language by itself. Nothing
+    has to be installed for it and it happens on its own, and the model stays
+    on the machine afterwards, so it is the first run only
 - The microphone is taken through `sounddevice` (macOS and Windows) or
   `arecord` (Linux). Without `sounddevice` installed, macOS and Windows fall
   back to `ffmpeg`
