@@ -4164,13 +4164,25 @@ const engineLabel = e => ENGINE_KEYS[e.id] ? t(ENGINE_KEYS[e.id]) : (e.label || 
 
 function paintEnginePick() {
   const opts = [];
-  if (canBrowserASR) opts.push([BROWSER_ENGINE, engineLabel({id: BROWSER_ENGINE})]);
-  for (const e of localEngines) opts.push([e.id, engineLabel(e)]);
-  // There can be machines with no browser recognition and no installed model either
-  if (!opts.length) opts.push(['', t('engineNone')]);
-  el.enginePick.replaceChildren(...opts.map(([id, label]) => {
+  if (canBrowserASR) opts.push([BROWSER_ENGINE, engineLabel({id: BROWSER_ENGINE}), false]);
+  /* An engine the server marked not ready is shown, not hidden. It cannot be
+     picked yet, so the row carries the one command that makes it pickable
+     (`apple` on a Mac without the Command Line Tools is the case this is for).
+     Dropping it from the list would leave no way of learning that. */
+  for (const e of localEngines) {
+    const notYet = e.ready === false && e.need;
+    opts.push([e.id,
+               notYet ? t('engineNotYet', {label: engineLabel(e), cmd: e.need})
+                      : engineLabel(e),
+               !!notYet]);
+  }
+  // There can be machines with no browser recognition and no installed model
+  // either. One that is only a command away does not count as having one.
+  if (!opts.some(([, , off]) => !off)) opts.push(['', t('engineNone'), false]);
+  el.enginePick.replaceChildren(...opts.map(([id, label, off]) => {
     const o = document.createElement('option');
     o.value = id; o.textContent = label; o.selected = id === chosenEngine;
+    o.disabled = off;
     return o;
   }));
 }
