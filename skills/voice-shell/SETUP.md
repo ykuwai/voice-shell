@@ -93,6 +93,35 @@ the interpreter directly rather than going through any `conda activate` or
 venv `activate` step, so a fix written into either of *those* alone is never
 picked up.
 
+**On Windows it is the same two libraries, pointed at a different way.** The
+wheels above carry Windows builds as well, but there the dlls land in `bin`
+rather than `lib`, and `LD_LIBRARY_PATH` means nothing. ctranslate2 looks them
+up through the plain `PATH`, so that is what has to hold the two folders
+(`os.add_dll_directory` on its own is not enough, its loader does not go
+through it).
+
+```powershell
+.venv\Scripts\pip install -U nvidia-cublas-cu12 nvidia-cudnn-cu12
+$env:PATH = (.venv\Scripts\python -c "import os, nvidia.cublas, nvidia.cudnn; print(os.pathsep.join(os.path.join(os.path.dirname(m.__file__), 'bin') for m in (nvidia.cublas, nvidia.cudnn)))") + ';' + $env:PATH
+```
+
+Make it stick with `setx PATH` or from the system settings, for the same reason
+as above. If you would rather not have pip carry them at all,
+[Purfview's whisper-standalone-win](https://github.com/Purfview/whisper-standalone-win)
+hands you the same libraries in one archive, which is where faster-whisper's own
+README sends Windows. Unpack it into any folder already on `PATH`.
+
+Either way ctranslate2 4 wants **CUDA 12 and cuDNN 9**, and an older system-wide
+CUDA toolkit on `PATH` will shadow what pip put there. When it is still not
+working, ask it what it can see.
+
+```powershell
+.venv\Scripts\python -c "import ctranslate2; print(ctranslate2.get_cuda_device_count())"
+```
+
+`0` means it is not reaching the GPU at all, so nothing about the model or the
+options is going to change it.
+
 ```bash
 voice-shell.sh whisper
 ```
