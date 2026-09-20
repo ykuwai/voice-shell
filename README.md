@@ -82,7 +82,7 @@ window always shows which one is listening.
 | Way | What it needs | Where the audio goes |
 |---|---|---|
 | **This browser** (default) | Chrome. Works only while the window is open | **Google's servers** |
-| Apple on-device | macOS 26 or later. Nothing extra to install | Stays on the machine |
+| Apple on-device | macOS 26 or later, and the Command Line Tools (`xcode-select --install`). No model to download | Stays on the machine |
 | Whisper | `faster-whisper`. Strong on proper nouns | Stays on the machine |
 
 It remembers the way you picked, so next time it starts the same way. The two ways

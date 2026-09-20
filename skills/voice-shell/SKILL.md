@@ -34,7 +34,9 @@ The argument is `$ARGUMENTS` (`start` / `stop` / `status` / `setup`. `start` whe
 If `start` fails with `No Python it can run was found`, or if the user says
 "set it up", walk them through [SETUP.md](SETUP.md).
 
-On macOS 26 or newer there is nothing to install, anywhere else it means
+On macOS 26 or newer there is no model to download, though `apple` does build a
+small Swift helper the first time and so wants the Command Line Tools
+(`xcode-select --install`), which not every Mac has. Anywhere else it means
 installing Whisper. Check first, then confirm which way to go. Do not install
 everything on your own.
 
@@ -75,10 +77,11 @@ picked last time (`~/.config/voice-shell/config.json`), and the first time it is
    When the user says "I want recognition to stay local" or "I do not want it
    sent to the cloud", show the list with `voice-shell.sh engines` and pass
    `--engine <the one they picked>` **after they have picked it**. On macOS 26
-   or newer `apple` should already be there, so they can switch on the spot with
-   nothing to install. The first switch on a machine still takes tens of seconds,
-   while the OS fetches the speech model for that language by itself, and it is
-   instant from then on.
+   or newer `apple` should already be there, so they can switch on the spot with no
+   model to download. Two things still take time the first time on a machine, and
+   only the first: the Swift helper is built (which fails outright without the
+   Command Line Tools, saying so), and the OS fetches the speech model for that
+   language by itself, tens of seconds. It is instant from then on.
 
    **Do not pass `--engine X` on your own to recover from a failure.** The name
    you pass is remembered as the default from then on, so passing it silently
