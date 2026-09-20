@@ -572,6 +572,9 @@ def write_config(**kw) -> dict:
     return cur
 
 
+_SAID_UNUSABLE = False
+
+
 def resolve_engine(want: str = "") -> str:
     """Decide which engine to use from here on.
 
@@ -589,9 +592,14 @@ def resolve_engine(want: str = "") -> str:
             sys.exit(f'"{want}" cannot be used.\n'
                      f"  The choices are {', '.join(sorted(known))}.\n"
                      f"  See them all with voice-shell.sh engines")
-        # A not-ready one asked for by name is let through on purpose. The engine
-        # itself says what is missing and how to put it there, which is more use
-        # than being turned away here.
+        # A not-ready one asked for by name is let through on purpose, but the
+        # saying-so has to happen here. The engine says it while starting, and
+        # the daemon is detached with its output going to BOOT_LOG, so the
+        # terminal would otherwise be told nothing at all.
+        need = next((e["need"] for e in engines if e["id"] == want and e["need"]), "")
+        if need:
+            print(f'"{want}" cannot run yet on this machine.\n'
+                  f"  Do this first, and it works: {need}", file=sys.stderr)
         return want
     if not want:
         remembered = read_config().get("engine")
@@ -600,7 +608,10 @@ def resolve_engine(want: str = "") -> str:
         # What was remembered is no longer usable (the model got deleted, or the
         # Command Line Tools went away from under `apple`). Falling back to the
         # one that needs nothing beats failing silently.
-        if remembered:
+        if remembered and not _SAID_UNUSABLE:
+            # viewer's /api/engines resolves this every 5 seconds per open tab.
+            # Said every time, it fills viewer.out and tells nobody anything new.
+            globals()["_SAID_UNUSABLE"] = True
             need = next((e["need"] for e in engines
                          if e["id"] == remembered and e["need"]), "")
             print(f'The choice from last time, "{remembered}", cannot be used now, '
@@ -611,7 +622,7 @@ def resolve_engine(want: str = "") -> str:
     # For want == "auto", pick from among the models that are installed. Only the
     # ready ones: auto has nobody to tell that one command away is not the same
     # as installed.
-    have = [e["id"] for e in asr_mic.available_engines() if e["ready"]]
+    have = [e["id"] for e in engines if e["ready"]]
     for pick in ("apple", "whisper"):
         if pick in have:
             return pick

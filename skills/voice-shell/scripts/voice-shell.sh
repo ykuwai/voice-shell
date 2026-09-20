@@ -449,7 +449,8 @@ case "$cmd" in
     "$0" start --engine whisper "$@"
     ;;
   apple)
-    # Use the on-device recognition that ships with macOS 26. No model to load, so it starts fast.
+    # Use the on-device recognition that ships with macOS 26. Nothing multi-GB to
+    # load, so it starts fast (the OS does fetch the speech model the first time).
     "$0" start --engine apple "$@"
     ;;
   status)

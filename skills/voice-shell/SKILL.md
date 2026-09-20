@@ -34,8 +34,8 @@ The argument is `$ARGUMENTS` (`start` / `stop` / `status` / `setup`. `start` whe
 If `start` fails with `No Python it can run was found`, or if the user says
 "set it up", walk them through [SETUP.md](SETUP.md).
 
-On macOS 26 or newer there is no model to download, though `apple` does build a
-small Swift helper the first time and so wants the Command Line Tools
+On macOS 26 or newer there is no multi-GB model to download, though `apple` does
+build a small Swift helper the first time and so wants the Command Line Tools
 (`xcode-select --install`), which not every Mac has. Anywhere else it means
 installing Whisper. Check first, then confirm which way to go. Do not install
 everything on your own.
