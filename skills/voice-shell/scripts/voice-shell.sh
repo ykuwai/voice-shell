@@ -350,10 +350,26 @@ case "$cmd" in
       if [[ "$first_run" == 1 ]]; then
         echo
         echo "Note. This uses the browser's built-in speech recognition feature to transcribe your voice."
-        alt="$("$PY" "$APP" --list-engines | sed -n '2p' | awk '{print $1}')"
+        engines="$("$PY" "$APP" --list-engines)"
+        # The first local engine that can run as things stand. browser is the
+        # first line and "Last time's choice" starts with a capital, so the
+        # lowercase test passes over both.
+        alt="$(printf '%s\n' "$engines" |
+               awk 'NR > 1 && /^  [a-z]/ && !/\(not yet: / {print $1; exit}')"
+        # One this machine could run, but only after a single command. Carried
+        # as "id<tab>command".
+        pending="$(printf '%s\n' "$engines" |
+                   awk 'match($0, /\(not yet: [^)]+\)/) {
+                          print $1 "\t" substr($0, RSTART + 10, RLENGTH - 11); exit }')"
         if [[ -n "$alt" ]]; then
           echo "   To keep it all on this machine, this one can be used here too."
           echo "     voice-shell.sh start --engine $alt"
+        elif [[ -n "$pending" ]]; then
+          # Saying only "it cannot be used" leaves the user stuck. The one command
+          # that changes that is the whole point of naming it.
+          echo "   To keep it all on this machine, this one is one command away."
+          echo "     ${pending#*$'\t'}"
+          echo "     voice-shell.sh start --engine ${pending%%$'\t'*}"
         fi
       fi
       exit 0
@@ -433,7 +449,8 @@ case "$cmd" in
     "$0" start --engine whisper "$@"
     ;;
   apple)
-    # Use the on-device recognition that ships with macOS 26. No model to load, so it starts fast.
+    # Use the on-device recognition that ships with macOS 26. Nothing multi-GB to
+    # load, so it starts fast (the OS does fetch the speech model the first time).
     "$0" start --engine apple "$@"
     ;;
   status)

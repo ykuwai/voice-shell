@@ -93,6 +93,60 @@ the interpreter directly rather than going through any `conda activate` or
 venv `activate` step, so a fix written into either of *those* alone is never
 picked up.
 
+**On Windows it is the same two libraries, pointed at a different way.** The
+wheels above carry Windows builds as well, but there the dlls land in `bin`
+rather than `lib`, and `LD_LIBRARY_PATH` means nothing. ctranslate2 looks them
+up through the plain `PATH`, so that is what has to hold the two folders
+(`os.add_dll_directory` on its own is not enough, its loader does not go
+through it).
+
+```powershell
+.venv\Scripts\pip install -U nvidia-cublas-cu12 nvidia-cudnn-cu12
+$p = .venv\Scripts\python -c "import os, nvidia.cublas, nvidia.cudnn; print(os.pathsep.join(os.path.join(os.path.dirname(m.__file__), 'bin') for m in (nvidia.cublas, nvidia.cudnn)))"
+if (-not $p) { throw "the two packages are not in this venv" }
+$env:PATH = "$p;$env:PATH"
+```
+
+Keep `$p`. The next step wants it, and without the `throw` a line that failed
+here would quietly put an empty entry at the front of `PATH` instead of saying
+anything.
+
+Make it stick from the system settings, or the same way from here. Do not reach
+for `setx PATH`, it writes the merged value back into the user's own `PATH` and
+cuts it off at 1024 characters.
+
+```powershell
+$u = [Environment]::GetEnvironmentVariable('Path', 'User')
+[Environment]::SetEnvironmentVariable('Path', "$u;$p", 'User')
+```
+
+It survives past this one session for the same reason as on Linux. If you would
+rather not have pip carry them at all,
+[Purfview's whisper-standalone-win](https://github.com/Purfview/whisper-standalone-win)
+hands you the same libraries in one archive, which is where faster-whisper's own
+README sends Windows. Unpack it into any folder already on `PATH`.
+
+Which cuDNN you want depends on the version underneath. **ctranslate2 4.5 and
+newer want CUDA 12 and cuDNN 9**, which is what the pip line above gives you,
+and what a fresh install lands on (faster-whisper asks only for
+`ctranslate2<5,>=4.0`, so it comes down at its newest). Only if something is
+already holding ctranslate2 at 4.4 or below, an old lock file or a pinned image,
+do you want the other pairing. 4.4 is the last one built against cuDNN 8.
+
+```powershell
+.venv\Scripts\pip install -U "ctranslate2==4.4.0" "nvidia-cudnn-cu12==8.*"
+```
+
+Either way an older system-wide CUDA toolkit on `PATH` will shadow what pip put
+there. When it is still not working, ask it what it can see.
+
+```powershell
+.venv\Scripts\python -c "import ctranslate2; print(ctranslate2.get_cuda_device_count())"
+```
+
+`0` means it is not reaching the GPU at all, so nothing about the model or the
+options is going to change it.
+
 ```bash
 voice-shell.sh whisper
 ```

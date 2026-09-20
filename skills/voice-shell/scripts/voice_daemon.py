@@ -572,6 +572,9 @@ def write_config(**kw) -> dict:
     return cur
 
 
+_SAID_UNUSABLE = False
+
+
 def resolve_engine(want: str = "") -> str:
     """Decide which engine to use from here on.
 
@@ -580,26 +583,46 @@ def resolve_engine(want: str = "") -> str:
     open) does the caller pass --engine auto, and then the pick comes from the models
     that are installed.
     """
-    known = {"browser"} | {e["id"] for e in asr_mic.available_engines()}
+    engines = asr_mic.available_engines()
+    known = {"browser"} | {e["id"] for e in engines}
+    ready = {"browser"} | {e["id"] for e in engines if e["ready"]}
 
     if want and want != "auto":
         if want not in known:
             sys.exit(f'"{want}" cannot be used.\n'
                      f"  The choices are {', '.join(sorted(known))}.\n"
                      f"  See them all with voice-shell.sh engines")
+        # A not-ready one asked for by name is let through on purpose, but the
+        # saying-so has to happen here. The engine says it while starting, and
+        # the daemon is detached with its output going to BOOT_LOG, so the
+        # terminal would otherwise be told nothing at all.
+        need = next((e["need"] for e in engines if e["id"] == want and e["need"]), "")
+        if need:
+            print(f'"{want}" cannot run yet on this machine.\n'
+                  f"  Do this first, and it works: {need}", file=sys.stderr)
         return want
     if not want:
         remembered = read_config().get("engine")
-        if remembered in known:
+        if remembered in ready:
             return remembered
-        # What was remembered is no longer usable (the model got deleted, say).
-        # Falling back to the one that needs nothing beats failing silently.
-        if remembered:
+        # What was remembered is no longer usable (the model got deleted, or the
+        # Command Line Tools went away from under `apple`). Falling back to the
+        # one that needs nothing beats failing silently.
+        if remembered and not _SAID_UNUSABLE:
+            # viewer's /api/engines resolves this every 5 seconds per open tab.
+            # Said every time, it fills viewer.out and tells nobody anything new.
+            globals()["_SAID_UNUSABLE"] = True
+            need = next((e["need"] for e in engines
+                         if e["id"] == remembered and e["need"]), "")
             print(f'The choice from last time, "{remembered}", cannot be used now, '
-                  f'so this browser does the recognizing.', file=sys.stderr)
+                  f'so this browser does the recognizing.'
+                  + (f"\n  It works again once this is done: {need}" if need else ""),
+                  file=sys.stderr)
         return "browser"
-    # For want == "auto", pick from among the models that are installed
-    have = [e["id"] for e in asr_mic.available_engines()]
+    # For want == "auto", pick from among the models that are installed. Only the
+    # ready ones: auto has nobody to tell that one command away is not the same
+    # as installed.
+    have = [e["id"] for e in engines if e["ready"]]
     for pick in ("apple", "whisper"):
         if pick in have:
             return pick
@@ -2504,7 +2527,8 @@ def main():
         have = asr_mic.available_engines()
         print("  browser   This browser. Runs with nothing installed")
         for e in have:
-            print(f"  {e['id']:<9} {e['label']}")
+            tail = "" if e["ready"] else f"  (not yet: {e['need']})"
+            print(f"  {e['id']:<9} {e['label']}{tail}")
         print(f"\n  Last time's choice was {remembered or '(none yet)'}")
         return
 
