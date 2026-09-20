@@ -127,9 +127,11 @@ hands you the same libraries in one archive, which is where faster-whisper's own
 README sends Windows. Unpack it into any folder already on `PATH`.
 
 Which cuDNN you want depends on the version underneath. **ctranslate2 4.5 and
-newer want CUDA 12.3 or newer and cuDNN 9**, which is what the pip line above
-gives you. 4.4 is the last one built against cuDNN 8, and faster-whisper 1.0.x
-holds ctranslate2 below 4.5, so pin both together there.
+newer want CUDA 12 and cuDNN 9**, which is what the pip line above gives you,
+and what a fresh install lands on (faster-whisper asks only for
+`ctranslate2<5,>=4.0`, so it comes down at its newest). Only if something is
+already holding ctranslate2 at 4.4 or below, an old lock file or a pinned image,
+do you want the other pairing. 4.4 is the last one built against cuDNN 8.
 
 ```powershell
 .venv\Scripts\pip install -U "ctranslate2==4.4.0" "nvidia-cudnn-cu12==8.*"

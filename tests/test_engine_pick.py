@@ -39,6 +39,31 @@ class AvailableEnginesTest(unittest.TestCase):
         self.assertEqual(apple["need"], "xcode-select --install")
 
 
+class CltProbeTest(unittest.TestCase):
+    """The probe itself, not a stand-in for it. Every other test here mocks
+    _clt_installed, so a slip back to which("swiftc") inside it would leave them
+    all green while saying yes on every Mac, which is the bug this suite exists
+    for."""
+
+    def setUp(self):
+        asr_mic._CLT_OK = False   # a yes is sticky, so clear it between tests
+
+    def probe(self, returncode):
+        with mock.patch.object(asr_mic.subprocess, "run",
+                               return_value=mock.Mock(returncode=returncode)) as run:
+            got = asr_mic._clt_installed()
+        return got, run.call_args[0][0]
+
+    def test_asks_xcode_select_and_believes_a_zero(self):
+        got, argv = self.probe(0)
+        self.assertTrue(got)
+        self.assertEqual(argv, ["xcode-select", "-p"])
+
+    def test_a_two_means_they_are_not_there(self):
+        # "unable to get active developer directory"
+        self.assertFalse(self.probe(2)[0])
+
+
 class ResolveEngineTest(unittest.TestCase):
     """Named outright, a not-ready engine is let through: the caller asked for
     it, and being told what is missing beats being turned away. Coming from the
