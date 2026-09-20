@@ -232,11 +232,20 @@ def _mac_version():
 
 
 def available_engines() -> list:
-    """Give back the engines this environment can really use.
+    """Give back the engines this environment can use, and what is still missing.
 
     Judged by whether the import works (loading for real is heavy, find_spec only).
+
+    An entry carries `ready`. False means the machine could run it but one thing
+    is not in place yet, and `need` is the command that puts it there. `apple`
+    goes this way rather than being dropped: it builds a Swift helper the first
+    time, so a Mac without the Command Line Tools cannot run it, and a Mac
+    without them is the usual Mac. Hiding it would leave the user with no way of
+    learning that one command is all that stands between them and local
+    recognition. Only pick a not-ready engine when the user asked for it by name.
     """
     import importlib.util as iu
+    import shutil
 
     def have(mod):
         try:
@@ -246,10 +255,12 @@ def available_engines() -> list:
 
     out = []
     if sys.platform == "darwin" and _mac_version() >= 26:
-        out.append("apple")
+        out.append(("apple", "xcode-select --install"
+                             if not shutil.which("swiftc") else ""))
     if have("faster_whisper"):
-        out.append("whisper")
-    return [{"id": e, "label": ENGINE_LABELS.get(e, e)} for e in out]
+        out.append(("whisper", ""))
+    return [{"id": e, "label": ENGINE_LABELS.get(e, e),
+             "ready": not need, "need": need} for e, need in out]
 
 
 # ── How the mic gets opened ──────────────
