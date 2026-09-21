@@ -1013,7 +1013,8 @@ async def main_async(args):
         """The list of recognition engines to pick from.
 
         Browser recognition runs with nothing installed, so it is the default.
-        For people who want it all local, only what is really installed is listed.
+        For people who want it all local, what is installed is listed, and so is
+        one that is only a command away, marked not ready and carrying it.
         """
         import asr_mic, voice_daemon as vd
         return web.json_response({

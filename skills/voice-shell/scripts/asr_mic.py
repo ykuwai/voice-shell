@@ -208,8 +208,9 @@ def _kill_engine_on_exit():
 #
 # Browser recognition (Web Speech API) runs with nothing installed, so that is
 # the default. For people who want it all local, or who pick by accuracy or by
-# language, list what is installed so they can choose. What is not installed is
-# left out, since listing it would only offer something unpickable.
+# language, list what is installed so they can choose. One that is not installed
+# but is a single command away is listed too, marked not ready and carrying that
+# command, since hiding it leaves nobody any way of learning it is within reach.
 
 # These stay English. They are what `voice-shell.sh engines` prints, and an agent
 # reads that and puts it to the user in whatever language the user speaks. The
@@ -222,6 +223,34 @@ ENGINE_LABELS = {
 }
 
 
+_CLT_OK = False
+
+
+def _clt_installed() -> bool:
+    """Whether the Command Line Tools (or Xcode) are really there.
+
+    Not `which("swiftc")`. A stock Mac carries /usr/bin/swiftc before they are
+    installed, as an xcode-select shim, and running one is exactly what raises
+    the install dialog, so `which` says yes on every Mac and settles nothing.
+    `xcode-select -p` is the same question asked without a dialog: 0 with the
+    developer directory, 2 with "unable to get active developer directory".
+
+    A yes is remembered, since they do not go away again under a running daemon,
+    while a no is asked afresh. /api/engines asks every 5 seconds per open tab,
+    and the point of asking is to notice the moment the user comes back from
+    running the very command this told them to run.
+    """
+    global _CLT_OK
+    if _CLT_OK:
+        return True
+    try:
+        _CLT_OK = subprocess.run(["xcode-select", "-p"],
+                                 capture_output=True, timeout=5).returncode == 0
+    except Exception:
+        _CLT_OK = False
+    return _CLT_OK
+
+
 def _mac_version():
     try:
         return int(subprocess.run(["sw_vers", "-productVersion"],
@@ -232,9 +261,17 @@ def _mac_version():
 
 
 def available_engines() -> list:
-    """Give back the engines this environment can really use.
+    """Give back the engines this environment can use, and what is still missing.
 
     Judged by whether the import works (loading for real is heavy, find_spec only).
+
+    An entry carries `ready`. False means the machine could run it but one thing
+    is not in place yet, and `need` is the command that puts it there. `apple`
+    goes this way rather than being dropped: it builds a Swift helper the first
+    time, so a Mac without the Command Line Tools cannot run it, and a Mac
+    without them is the usual Mac. Hiding it would leave the user with no way of
+    learning that one command is all that stands between them and local
+    recognition. Only pick a not-ready engine when the user asked for it by name.
     """
     import importlib.util as iu
 
@@ -246,10 +283,11 @@ def available_engines() -> list:
 
     out = []
     if sys.platform == "darwin" and _mac_version() >= 26:
-        out.append("apple")
+        out.append(("apple", "" if _clt_installed() else "xcode-select --install"))
     if have("faster_whisper"):
-        out.append("whisper")
-    return [{"id": e, "label": ENGINE_LABELS.get(e, e)} for e in out]
+        out.append(("whisper", ""))
+    return [{"id": e, "label": ENGINE_LABELS.get(e, e),
+             "ready": not need, "need": need} for e, need in out]
 
 
 # ── How the mic gets opened ──────────────
