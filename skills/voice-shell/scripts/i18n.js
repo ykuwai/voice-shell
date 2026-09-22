@@ -4,7 +4,7 @@
 const I18N = {
   en: {
     connecting:'Connecting…',
-    statusLive:'Going to Claude', statusHold:'Drafting', statusOff:'Paused',
+    statusLive:'Sending to Claude', statusHold:'Drafting', statusOff:'Paused',
     statusDown:'Disconnected. Reconnecting', statusBooting:'Starting up',
     statusEnded:'Voice mode ended',
     hintEnded:'Recognition stopped and the microphone was released.',
