@@ -3677,8 +3677,10 @@ async function startRecognition() {
   // someone who has since touched the page, would be taken for Chrome wanting
   // a touch and would not say it was refused. A call that bounces off one
   // already under way leaves it alone.
-  if (!canBrowserASR || !recWanted) { autoResumed = false; return; }
-  if (rec || recRunning || recStarting) return;
+  if (!canBrowserASR || !recWanted || rec || recRunning || recStarting) {
+    if (!canBrowserASR || !recWanted) autoResumed = false;
+    return;
+  }
   const generation = recGeneration;
   recStarting = true;
   try {

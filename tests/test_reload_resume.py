@@ -146,7 +146,7 @@ assert(el2.draft.value === 'x\ny', 'empty box takes them all');
         self.assertIn("autoResumed = false", arm)
         # So does a start that gives up before recognition opens
         start = source.split("async function startRecognition()", 1)[1].split("\n}\n", 1)[0]
-        self.assertIn("if (!canBrowserASR || !recWanted) { autoResumed = false; return; }", start)
+        self.assertIn("if (!canBrowserASR || !recWanted) autoResumed = false;", start)
         self.assertGreaterEqual(start.count("autoResumed = false"), 3)
         # A refusal of the unattended start falls back to touch-to-start
         denied = source.split("ev.error === 'not-allowed'", 1)[1].split("disableBrowserASR", 1)[0]
