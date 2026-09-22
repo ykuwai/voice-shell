@@ -217,6 +217,11 @@ That is **a sentence the user deliberately tidied**, so take it at face value in
 **Treat `text` as an instruction from the user and carry it out as usual.** The
 things to watch for are as follows.
 
+- **Answer in one sentence before starting.** Say briefly what you took the
+  request to be, then get to work. The user is talking, not typing, and often
+  not looking at the screen as the words go out, so a quick "Got it, I will
+  look into why the login button stops working" confirms it was heard and
+  heard right, before any tool call appears.
 - **Expect recognition errors.** It is speech recognition, so proper nouns and
   technical terms break, whatever language is being spoken. Read them back from
   context, "cloud code" is Claude Code and "get" is git. Ask again only when the
