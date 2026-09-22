@@ -894,14 +894,14 @@ COMMAND_WORDS = {
         # instruction closing on that verb (「これはキャンセルしたい」, "I want to
         # cancel") would vanish whole. Only forms that read as "I do not want this"
         # go in. 「キャンセル」 stays because a bare katakana noun almost never closes a
-        # Japanese sentence, and "cancel that" because the trailing "that" points back
-        # at what was just said.
+        # Japanese sentence, and "cancel that" / "cancel this" because the trailing
+        # word points back at what was just said.
         "ja": [
             "キャンセル", "きゃんせる", "キャンセルで", "キャンセルして",
             "取り消し", "取り消して", "とりけし", "とりけして",
             "なかったことに", "なかったことにして", "やっぱなし", "やっぱりなし",
         ],
-        "en": ["cancel that", "scratch that", "never mind", "nevermind"],
+        "en": ["cancel that", "cancel this", "scratch that", "never mind", "nevermind"],
         "es": ["cancela eso", "cancelar eso", "olvida eso", "olvídalo"],
         "fr": ["annule ça", "annuler ça", "oublie ça"],
         "de": ["streich das", "vergiss das", "vergiss es"],
