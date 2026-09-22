@@ -1872,6 +1872,8 @@ def apply_voice_command(text: str, log_path, muted: bool, user_dict=None):
             pause_path.touch()
         else:
             pause_path.unlink(missing_ok=True)
+        # A mode chosen by voice ends any carry the page had going.
+        (pause_path.parent / "draft_carry").unlink(missing_ok=True)
         note_voice_cmd(log_path, "mode_" + mode, "", text)
         return "mode_" + mode
 
@@ -3139,6 +3141,7 @@ def main():
         # first utterance after a restart.
         level_path.write_text("0 0 0", encoding="utf-8")
         pause_path.unlink(missing_ok=True)   # Always start from the sending state
+        (pause_path.parent / "draft_carry").unlink(missing_ok=True)
         mute_path.unlink(missing_ok=True)
         hold_path.write_text("", encoding="utf-8")
 

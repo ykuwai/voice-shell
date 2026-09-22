@@ -721,6 +721,9 @@ async def main_async(args):
     tail.read_existing()
 
     async def handle_index(_req):
+        # A page (re)loading starts with no carry of its own, so the daemon's
+        # draft cap goes back to normal rather than staying lifted for good.
+        carry_file.unlink(missing_ok=True)
         # It gets edited during development, so let the browser cache nothing
         # (which heads off the accident where an old page's buttons do nothing)
         return web.FileResponse(page, headers={
@@ -970,12 +973,14 @@ async def main_async(args):
         text = (body.get("text") or "").strip()
         if not text:
             return web.json_response({"error": "empty"}, status=400)
-        # Two open screens can both send the same draft for one action (the
-        # carry, say). The same text inside a few seconds goes out once.
+        # Two open screens can both send the same box for one carry (each
+        # hears the same switch). Only sends made by a carry are compared, so
+        # someone sending the same words twice on purpose is never stopped.
         now = time.time()
-        if text == last_send["text"] and now - last_send["at"] < 5:
-            return web.json_response({"duplicate": True})
-        last_send.update(text=text, at=now)
+        if body.get("carry"):
+            if text == last_send["text"] and now - last_send["at"] < 5:
+                return web.json_response({"duplicate": True})
+            last_send.update(text=text, at=now)
 
         # The line reaching Claude is the body alone. A mark goes on only when
         # it was edited. Hardcode it here and the mark lands on anything that

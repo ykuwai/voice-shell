@@ -2136,7 +2136,12 @@ async function handleWsMessage({ev, message, number, discardInProgress: wasDisca
           // holding the next one so the draft rides along with it (carryIntoNext).
           // Every open screen hears this echo and each may send the box; the
           // server lets the same text through only once in a few seconds.
-          setRoute('hold').then(() => carryIntoNext());
+          // Only if nothing else was chosen during the round trip (a press
+          // on Draft or mute in the meantime wins).
+          const rev = routeRevision + 1;
+          setRoute('hold').then(() => {
+            if (routeRevision === rev && route === 'hold' && el.draft.value.trim()) carryIntoNext();
+          });
         } else if (next !== route) {
           route = lastMode = next; oneShot = false; carryDraft = false; paint();
         }
@@ -2186,7 +2191,7 @@ async function handleWsMessage({ev, message, number, discardInProgress: wasDisca
       // The utterance the draft was waiting to ride along with. Out they go.
       if (carryDraft && voiceSinceCarry) {
         carryDraft = false;
-        el.send.onclick();
+        sendDraft({carry: true});
       }
 
     } else if (m.text != null) {
@@ -2392,17 +2397,18 @@ async function refreshState() {
 }
 
 /* ── Send and discard ───────────────────── */
-el.send.onclick = async () => {
+async function sendDraft({carry = false} = {}) {
   carryDraft = false;
   const text = el.draft.value.trim();
   if (!text) return;
-  await post('/api/send', {text, edited: draftTouched});
+  await post('/api/send', {text, edited: draftTouched, carry});
   el.draft.value = '';
   draftTouched = false;
   grow();
   paintDraft();
   endOneShot();
-};
+}
+el.send.onclick = () => sendDraft();
 
 // What you discard can be brought back once (a confirm dialog every time is a nuisance)
 let lastDiscarded = '';
@@ -3651,8 +3657,8 @@ setInterval(() => {
    own. */
 const BROWSER_SEND_GATE_MS = 100;
 let lastLoudAt = 0;
-let lastInterimHeard = '';
-let lastInterimChangeAt = 0;   // the interim last seen, so an unchanged repeat is not counted as talking
+let lastInterimHeard = '';      // the interim last seen, so an unchanged repeat is not counted as talking
+let lastInterimChangeAt = 0;   // when it last changed (words still coming in)
 let pendingBrowserSends = [];   // [{text, queuedAt}], oldest first
 
 /* How long to wait for quiet before a finished clause moves on. In draft mode
@@ -3699,8 +3705,10 @@ function browserGateTick() {
   // the level never drops below, not for someone who simply talks for longer
   // than the cap: cutting them off there split one long thought in two.
   const stillTalking = now - lastInterimChangeAt < waitMs;
-  const capTripped = !stillTalking &&
-    pendingBrowserSends.some(item => now - item.queuedAt >= cap);
+  // Still with an outer limit: background speech (a TV, a meeting) keeps the
+  // interim changing too, and must not hold a clause back forever.
+  const capTripped = pendingBrowserSends.some(item =>
+    now - item.queuedAt >= (stillTalking ? cap * 3 : cap));
   // Tripping the cap, like clearing the wait, releases everything currently
   // pending together, not only the one item old enough to trip it.
   // Releasing that one item alone was fragmentation by another name: three
