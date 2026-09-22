@@ -1481,11 +1481,18 @@ function matchingTailWord(text) {
     if (cmdOff.kinds.has(id)) continue;
     const off = cmdOff.words[id] || new Set();
     const ceiling = TAIL_NOISE_MAX[id];
+    // The longest wording at the tail decides, struck or not, and a struck one
+    // then takes the whole kind out for this utterance. Skipping struck wordings
+    // before choosing would let a shorter one inside it fire instead (「静音」
+    // inside a struck 「麦克风静音」), which the daemon does not do.
+    let hit = null;
     for (const w of tailWords[id]) {
-      if (off.has(w) || !body.endsWith(w)) continue;
+      if (!body.endsWith(w)) continue;
       if (ceiling !== undefined && body.length - w.length > ceiling) continue;
-      if (!best || w.length > best.word.length) best = {id, word: w};
+      if (!hit || w.length > hit.length) hit = w;
     }
+    if (hit === null || off.has(hit)) continue;
+    if (!best || hit.length > best.word.length) best = {id, word: hit};
   }
   return best;
 }

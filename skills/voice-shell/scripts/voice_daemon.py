@@ -1469,8 +1469,8 @@ def user_command_phrases() -> dict:
     return clean_user_commands(data)
 
 
-def mic_command_shape(text: str, muted: bool):
-    """Return "mute" / "unmute" when the utterance has the shape of one.
+def mic_command_match(text: str, muted: bool):
+    """Return ("mute" / "unmute", the wording that matched), or None.
 
     **The switched-off list is not read here.** Two different questions get asked of
     the same phrase. "What does this look like" has one answer everywhere, and
@@ -1488,32 +1488,49 @@ def mic_command_shape(text: str, muted: bool):
     nowhere. Unmute's ceiling is tighter and its wordlist narrower
     (UNMUTE_TAIL_NOISE_MAX), a false hit there costs the whole stretch the
     speaker thought was off, not one utterance.
+
+    The wording handed back is the one the switch-offs are asked about (the whole
+    utterance on an exact match, the table wording at the tail otherwise). The
+    longest wording at the tail is the one that counts, struck or not, the same as
+    on an exact match, so striking 「麦克风静音」 does not let 「嗯麦克风静音」 through
+    on the shorter 「静音」 inside it.
     """
     key = command_key(text)
     if key:
         if muted:
             # Added unmute phrasings are not checked (they cannot be added anyway)
             if key in UNMUTE_WORDS:
-                return "unmute"
+                return "unmute", key
         elif key in MUTE_WORDS or key in load_commands()["mute"]:
-            return "mute"
+            return "mute", key
     if muted:
-        body = take_tail(text, UNMUTE_TAIL)
-        if body is not None and len(body) <= UNMUTE_TAIL_NOISE_MAX:
-            return "unmute"
+        hit = take_tail_word(text, UNMUTE_TAIL)
+        if hit is not None and len(hit[0]) <= UNMUTE_TAIL_NOISE_MAX:
+            return "unmute", hit[1]
     else:
-        body = take_tail(text, MUTE_TAIL)
-        if body is not None and len(body) <= MUTE_TAIL_NOISE_MAX:
-            return "mute"
+        hit = take_tail_word(text, MUTE_TAIL)
+        if hit is not None and len(hit[0]) <= MUTE_TAIL_NOISE_MAX:
+            return "mute", hit[1]
     return None
+
+
+def mic_command_shape(text: str, muted: bool):
+    """Return "mute" / "unmute" when the utterance has the shape of one (see mic_command_match)."""
+    hit = mic_command_match(text, muted)
+    return hit[0] if hit else None
 
 
 def voice_command(text: str, muted: bool):
     """Return "mute" / "unmute" when the utterance itself is an on or off command."""
     # Off and on are asked about one at a time. Someone who wants the mic never cut
     # by voice but still wants to bring it back that way gets exactly that.
-    cmd = mic_command_shape(text, muted)
-    return cmd if cmd and command_enabled(cmd) and word_enabled(cmd, text) else None
+    # The switched-off wording is asked about by the wording that matched, never
+    # the whole utterance, or any lead-in ahead of it would walk it past the check.
+    hit = mic_command_match(text, muted)
+    if not hit:
+        return None
+    cmd, word = hit
+    return cmd if command_enabled(cmd) and word_enabled(cmd, word) else None
 
 
 # How a number is said drifts with every recognition. Say 「2」 and out comes 「に」,
@@ -1745,10 +1762,10 @@ def _route_rx(key: str):
     return re.compile(rf"^{re.escape(head)}({_NUM_ALT}){re.escape(tail)}$")
 
 
-def mode_command_shape(text: str):
-    """Return "live" / "hold" when the utterance has that shape. Switched off or not.
+def mode_command_match(text: str):
+    """Return ("live" / "hold", the wording that matched), or None. Switched off or not.
 
-    Same split as mic_command_shape, and for the same reason. Hold also matches
+    Same split as mic_command_match, and for the same reason. Hold also matches
     with a short noise prefix ahead of the word (HOLD_MODE_TAIL, #76 follow-up),
     live stays exact only, the same asymmetry mic_command_shape draws between
     mute and unmute. The loanword names of both modes are the one exception
@@ -1758,26 +1775,36 @@ def mode_command_shape(text: str):
     key = command_key(text)
     if key:
         if key in LIVE_WORDS or key in load_commands()["live"]:
-            return "live"
+            return "live", key
         if key in HOLD_WORDS or key in load_commands()["hold"]:
-            return "hold"
-    body = take_tail(text, HOLD_MODE_TAIL)
-    if body is not None and len(body) <= HOLD_MODE_TAIL_NOISE_MAX:
-        return "hold"
+            return "hold", key
+    hit = take_tail_word(text, HOLD_MODE_TAIL)
+    if hit is not None and len(hit[0]) <= HOLD_MODE_TAIL_NOISE_MAX:
+        return "hold", hit[1]
     # The loanword names, with nothing but a filler ahead of them
     for mode, tails in MODE_LOANWORD_TAIL.items():
-        body = take_tail(text, tails)
-        if body is not None and only_fillers(body):
-            return mode
+        hit = take_tail_word(text, tails)
+        if hit is not None and only_fillers(hit[0]):
+            return mode, hit[1]
     return None
+
+
+def mode_command_shape(text: str):
+    """Return "live" / "hold" when the utterance has that shape (see mode_command_match)."""
+    hit = mode_command_match(text)
+    return hit[0] if hit else None
 
 
 def mode_command(text: str):
     """Return "live" / "hold" when this is a command to switch how speech gets sent."""
     # The two sides are asked about separately, the same as mute and unmute. Switching
     # off one side does not hand its wordings to the other, it just stops them biting.
-    mode = mode_command_shape(text)
-    return mode if mode and command_enabled(mode) and word_enabled(mode, text) else None
+    # The wording that matched is what gets asked about, as in voice_command.
+    hit = mode_command_match(text)
+    if not hit:
+        return None
+    mode, word = hit
+    return mode if command_enabled(mode) and word_enabled(mode, word) else None
 
 
 def route_shape(text: str):
@@ -1842,8 +1869,13 @@ _TAIL_PREFIX = ("コマンド", "こまんど", "command")
 _TAIL_TRIM = " \t\u3000。、．，・！？!?.,"
 
 
-def take_tail(text: str, tails):
-    """When the tail is a command, return the body with it removed. None when it is not."""
+def take_tail_word(text: str, tails):
+    """Like take_tail, but hand back (body, the wording that matched), or None.
+
+    The wording is what a switch-off is checked against. Checked against the
+    whole utterance instead, 「はいミュート」 is not the struck 「ミュート」 and
+    the lead-in slips a switched-off wording straight past the check.
+    """
     body = text.strip().rstrip(_TAIL_TRIM)
     low = body.lower()
     for w in tails:
@@ -1857,8 +1889,14 @@ def take_tail(text: str, tails):
             if rest.lower().endswith(pre):
                 rest = rest[: len(rest) - len(pre)].rstrip(_TAIL_TRIM)
                 break
-        return rest
+        return rest, w
     return None
+
+
+def take_tail(text: str, tails):
+    """When the tail is a command, return the body with it removed. None when it is not."""
+    hit = take_tail_word(text, tails)
+    return None if hit is None else hit[0]
 
 
 # ── Using several machines at once ───────────────
