@@ -23,7 +23,10 @@ what vanishes. Only this path splits. utterances.jsonl and the viewer history
 keep one line per utterance.
 """
 import json
+import os
 import sys
+import threading
+import time
 
 # How much Monitor carries on one line. Measured, a JSON line was cut off past
 # 500 characters. Not bytes (Japanese and ASCII both cut at the same 490th
@@ -129,35 +132,182 @@ def split_line(rec, line):
     return out or [line]
 
 
+# How the reader side's state reads back through NtQueryInformationFile
+# (FilePipeLocalInformation). CLOSING means whoever was reading our stdout,
+# Monitor, has gone away.
+_FILE_PIPE_LOCAL_INFORMATION = 24
+_FILE_PIPE_CLOSING_STATE = 4
+
+
+def _exit_when_reader_gone(every=5.0):
+    """On Windows, quit once nobody reads our stdout any more.
+
+    When a Monitor watch expires on Windows, Claude Code does not always take
+    down the whole listen tree. The part left behind never notices, because
+    it only writes when an utterance is addressed to it, and one addressed to
+    a session that has ended never comes. Meanwhile its heal loop keeps
+    touching the registration, so the ended session sits in the destination
+    row for good. Measured: a closed reader flips the pipe state from
+    CONNECTED (3) to CLOSING (4), while an empty write still succeeds and a
+    PeekNamedPipe on the write end is refused, so the pipe state is the one
+    reliable signal. Exiting ends the pipeline `listen` waits on, and its
+    EXIT trap removes the registration.
+
+    POSIX needs none of this (a closed reader and SIGPIPE, or the process
+    group going down with the watch, already take care of it).
+    """
+    if not sys.platform.startswith("win"):
+        return
+    try:
+        import ctypes
+        import msvcrt
+        from ctypes import wintypes
+
+        class _IoStatus(ctypes.Structure):
+            _fields_ = [("Status", ctypes.c_void_p), ("Information", ctypes.c_void_p)]
+
+        class _PipeLocalInfo(ctypes.Structure):
+            _fields_ = [(n, wintypes.ULONG) for n in (
+                "NamedPipeType", "NamedPipeConfiguration", "MaximumInstances",
+                "CurrentInstances", "InboundQuota", "ReadDataAvailable",
+                "OutboundQuota", "WriteQuotaAvailable", "NamedPipeState",
+                "NamedPipeEnd")]
+
+        handle = wintypes.HANDLE(msvcrt.get_osfhandle(sys.stdout.fileno()))
+        query = ctypes.windll.ntdll.NtQueryInformationFile
+    except Exception:
+        return
+
+    def state():
+        io, info = _IoStatus(), _PipeLocalInfo()
+        status = query(handle, ctypes.byref(io), ctypes.byref(info),
+                       ctypes.sizeof(info), _FILE_PIPE_LOCAL_INFORMATION)
+        return info.NamedPipeState if status == 0 else None
+
+    # Not a pipe at all (a console, a file): there is no reader to lose.
+    if state() is None:
+        return
+
+    def watch():
+        while True:
+            time.sleep(every)
+            if state() == _FILE_PIPE_CLOSING_STATE:
+                os._exit(0)
+
+    threading.Thread(target=watch, daemon=True).start()
+
+
+class _Progress:
+    """How far into the log this listen has handled, in bytes.
+
+    Written after every line that was either delivered or not meant for us,
+    never after one whose write failed. When a Monitor watch expires, the
+    next listen of this session starts reading from here, so an utterance
+    that arrived while nobody was reading is handed on instead of lost.
+    """
+
+    def __init__(self):
+        self.path = os.environ.get("VOICE_SHELL_PROGRESS") or None
+        # The daemon empties the log each time it starts and writes a new
+        # epoch next to it. An offset only means something within one epoch,
+        # so the two are recorded together.
+        self.epoch_file = os.environ.get("VOICE_SHELL_EPOCH_FILE") or None
+        self.epoch = self._read_epoch()
+        try:
+            self.offset = int(os.environ.get("VOICE_SHELL_START_OFFSET", ""))
+        except ValueError:
+            self.path = None
+            self.offset = 0
+        self.advance(0)             # on record from the start, before any line
+
+    def _read_epoch(self):
+        if not self.epoch_file:
+            return ""
+        try:
+            with open(self.epoch_file, encoding="utf-8") as f:
+                return f.read().strip()
+        except OSError:
+            return ""
+
+    def check(self):
+        """The log was emptied under us (tail -F starts over from its top)."""
+        now = self._read_epoch()
+        if now != self.epoch:
+            self.epoch, self.offset = now, 0
+
+    def advance(self, n):
+        self.offset += n
+        if not self.path:
+            return
+        tmp = self.path + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(f"{self.epoch or '-'} {self.offset}")
+            os.replace(tmp, self.path)
+        except OSError:
+            pass
+
+
+def _emit(lines):
+    """Write the lines out. If the reader is already gone, stop here, with
+    the progress left pointing at this line so the next listen replays it."""
+    for out in lines:
+        try:
+            print(out, flush=True)
+        except (OSError, ValueError):
+            os._exit(0)
+
+
 def main():
+    # The first id is this listen's own. Any after it are earlier PIDs of the
+    # same session, whose utterances it picks up on a re-arm. Those count only
+    # for lines written before the handover (VOICE_SHELL_ALIAS_UNTIL): Windows
+    # hands PIDs out again, and a later listen of some other session could get
+    # the same number.
     me = sys.argv[1] if len(sys.argv) > 1 else ""
-    for line in sys.stdin:
-        line = line.strip()
+    aliases = set(sys.argv[2:])
+    try:
+        alias_until = int(os.environ.get("VOICE_SHELL_ALIAS_UNTIL", ""))
+    except ValueError:
+        alias_until = 0
+    _exit_when_reader_gone()
+    progress = _Progress()
+    for raw in sys.stdin.buffer:
+        progress.check()
+        size = len(raw)
+        if not raw.endswith(b"\n"):
+            break                   # a half-written last line, read again next time
+        line = raw.decode("utf-8", errors="replace").strip()
         if not line:
+            progress.advance(size)
             continue
         try:
             rec = json.loads(line)
         except ValueError:
             rec = None
         if not isinstance(rec, dict):
-            print(line, flush=True)   # keep unreadable lines, never drop one silently
+            _emit([line])   # keep unreadable lines, never drop one silently
+            progress.advance(size)
             continue
         # A "to" on a system_warning means it is about one session in
         # particular, so it is filtered exactly like any other line. Left off,
         # it is a notice about the act of listening itself (two sessions
         # listening at once, say), and every session sees it.
         to = rec.get("to")
+        mine = {me} | (aliases if progress.offset < alias_until else set())
         if to is not None:
-            if str(to) != me:
+            if str(to) not in mine:
+                progress.advance(size)
                 continue
         elif "system_warning" not in rec:
+            progress.advance(size)
             continue
         # Write the split pieces back to back. Monitor bundles lines emitted
         # close in time into one notification, and bundling only caps each
         # line, so no gap is needed. Landing in the same notification is
         # better anyway, the reader sees all of it before acting.
-        for out in split_line(rec, line):
-            print(out, flush=True)
+        _emit(split_line(rec, line))
+        progress.advance(size)
 
 
 if __name__ == "__main__":

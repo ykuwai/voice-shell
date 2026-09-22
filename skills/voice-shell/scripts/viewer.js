@@ -121,6 +121,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'dictNote','dictExport','dictImport','dictFile',
                   'paneBasic','paneDict',
                   'openHelp','helpSheet','closeHelp','helpMini','helpMiniViz',
+                  'clearHistory','clearHistoryLabel',
                   'cmdGroups','cmdNote','floatStand','floatStandBack'])
   el[id] = $(id);
 
@@ -679,6 +680,24 @@ function setState(kind, text) {
     m.box.setAttribute('aria-label', s);
   }
 }
+
+/* Clear history takes two presses, the same as the × on a destination chip.
+   It cannot be undone, and it sits in settings where a stray click is easy. */
+let clearHistoryAsking = 0;
+function resetClearHistory() {
+  clearTimeout(clearHistoryAsking);
+  clearHistoryAsking = 0;
+  el.clearHistoryLabel.textContent = t('clearHistory');
+}
+el.clearHistory.onclick = async () => {
+  if (!clearHistoryAsking) {
+    el.clearHistoryLabel.textContent = t('clearHistoryAsk');
+    clearHistoryAsking = setTimeout(resetClearHistory, 3000);
+    return;
+  }
+  resetClearHistory();
+  try { await post('/api/history/clear'); } catch {}
+};
 
 function retally() {
   el.none.hidden = el.log.children.length > 0;
@@ -1509,7 +1528,7 @@ function paintBrowserSendCue(now) {
     el.sendOne.style.setProperty('--r', '0');
     return;
   }
-  const wait = (Number(tuning.silence_duration) || 0) * 1000;
+  const wait = sendWaitMs();
   const target = wait > 0 ? Math.max(0, Math.min(1, (now - lastLoudAt) / wait)) : 1;
   // Checked against the whole queue joined together, the shape it actually
   // goes out in (browserGateTick), not just the oldest item alone. A short
@@ -1952,9 +1971,38 @@ function chime(kind) {
   } catch { /* where no sound can play, give up quietly (the display has already changed) */ }
 }
 
+/* Back to instant with text still in the draft box. Left as it was, the box
+   sat there unsent while everything said after it went straight out ahead of
+   it. Sending it the instant the mode flips was the other way, but a switch
+   made by mistake would then send a draft that was not finished. So it rides
+   along with the next utterance instead: that one is held like Edit this one,
+   lands at the end of the box, and the whole box goes out together, in the
+   order it was said. Until then the screen already reads instant. */
+let carryDraft = false;
+// Whether any voice has started since the switch. A held line that was
+// already on its way (a clause still waiting out its quiet, a POST in
+// flight, a line the daemon settled a moment before) is only added to the
+// box. The one that sends it all is the one begun after the switch.
+let voiceSinceCarry = false;
+function carryIntoNext() {
+  oneShot = true;
+  carryDraft = true;
+  voiceSinceCarry = false;
+  el.note.hidden = true;
+  paint();
+  el.hint.textContent = t('hintCarry');
+  // The daemon caps its quiet wait at 2s while drafting. Carrying is really
+  // sending, so it is told to wait the full time again.
+  post('/api/pause', {paused: true, carry: true}).catch(() => {});
+}
+
 // Choosing a mode yourself clears both Edit this one and the line from Claude
-el.segLive.onclick = () => { oneShot = false; el.note.hidden = true; setRoute('live'); };
-el.segHold.onclick = () => { oneShot = false; el.note.hidden = true; setRoute('hold'); };
+el.segLive.onclick = () => {
+  el.note.hidden = true;
+  if (route === 'hold' && !carryDraft && el.draft.value.trim()) { carryIntoNext(); return; }
+  oneShot = false; carryDraft = false; setRoute('live');
+};
+el.segHold.onclick = () => { oneShot = false; carryDraft = false; el.note.hidden = true; setRoute('hold'); };
 el.segOff.onclick = () => setRoute(route === 'off' ? lastMode : 'off');
 
 /* The small mics in the sheet headings do the same as the big one. While a
@@ -2008,6 +2056,12 @@ async function handleWsMessage({ev, message, number, discardInProgress: wasDisca
     await routeQueue;
     const m = message || JSON.parse(ev.data);
     if (m.drop_done) return;
+    if (m.history_cleared) {
+      el.log.replaceChildren();
+      el.logJumpWrap.hidden = true;
+      retally();
+      return;
+    }
     const result = 'partial' in m || 'held' in m || m.text != null;
     if (result && (wasDiscarding || number <= discardResultCutoff || dropBarriers.size)) return;
 
@@ -2017,6 +2071,7 @@ async function handleWsMessage({ev, message, number, discardInProgress: wasDisca
       // silence, so we spot the turning points ourselves.
       if (m.speaking !== daemonSpeaking) {
         if (m.speaking) {
+          if (carryDraft) voiceSinceCarry = true;
           voiceSeen = sendCountdownOn(); silentAt = 0;
           // Voice again means the ring starts over, whether that is a breath in
           // the middle of a sentence or the next utterance beginning while the
@@ -2076,7 +2131,20 @@ async function handleWsMessage({ev, message, number, discardInProgress: wasDisca
       // This switches by voice as well. While muted the display can stay on off, so leave it alone.
       if (route !== 'off') {
         const next = m.paused ? 'hold' : 'live';
-        if (next !== route) { route = lastMode = next; oneShot = false; paint(); }
+        if (next === 'live' && route === 'hold' && !carryDraft && el.draft.value.trim()) {
+          // Switched to instant by voice with a draft still in the box: keep
+          // holding the next one so the draft rides along with it (carryIntoNext).
+          // Every open screen hears this echo and each may send the box; the
+          // server lets the same text through only once in a few seconds.
+          // Only if nothing else was chosen during the round trip (a press
+          // on Draft or mute in the meantime wins).
+          const rev = routeRevision + 1;
+          setRoute('hold').then(() => {
+            if (routeRevision === rev && route === 'hold' && el.draft.value.trim()) carryIntoNext();
+          });
+        } else if (next !== route) {
+          route = lastMode = next; oneShot = false; carryDraft = false; paint();
+        }
       } else {
         lastMode = m.paused ? 'hold' : 'live';
       }
@@ -2113,6 +2181,18 @@ async function handleWsMessage({ev, message, number, discardInProgress: wasDisca
       // clearing it here is only to be safe.
       clearSendCountdown();
       appendHeld(m.held);
+      // It is in the box now, so take it out of the live line above, the same
+      // as a sent one is. Left there, it sat in both places until the next
+      // repaint came round, a few seconds later. Whatever is being said right
+      // now (browser recognition's current interim) stays.
+      const still = asrActive() ? browserStreamText() : '';
+      el.stream.textContent = still;
+      el.tray.classList.toggle('idle', !still);
+      // The utterance the draft was waiting to ride along with. Out they go.
+      if (carryDraft && voiceSinceCarry) {
+        carryDraft = false;
+        sendDraft({carry: true});
+      }
 
     } else if (m.text != null) {
       clearSendCountdown();   // that is one utterance done. Counting starts again with the next voice
@@ -2317,16 +2397,18 @@ async function refreshState() {
 }
 
 /* ── Send and discard ───────────────────── */
-el.send.onclick = async () => {
+async function sendDraft({carry = false} = {}) {
+  carryDraft = false;
   const text = el.draft.value.trim();
   if (!text) return;
-  await post('/api/send', {text, edited: draftTouched});
+  await post('/api/send', {text, edited: draftTouched, carry});
   el.draft.value = '';
   draftTouched = false;
   grow();
   paintDraft();
   endOneShot();
-};
+}
+el.send.onclick = () => sendDraft();
 
 // What you discard can be brought back once (a confirm dialog every time is a nuisance)
 let lastDiscarded = '';
@@ -2334,6 +2416,8 @@ let lastDiscarded = '';
 let lastDiscardedTouched = false;
 
 el.discard.onclick = async () => {
+  // Nothing left to carry along, so back to plain instant.
+  if (carryDraft) { carryDraft = false; endOneShot(); }
   lastDiscarded = el.draft.value;
   lastDiscardedTouched = draftTouched;
   await post('/api/discard');
@@ -2494,6 +2578,7 @@ el.tray.onclick = e => {
 // Once it is sent, or the box empties out and you click away
 // (leaveOneShotIfEmpty, below), go back to the mode it came from.
 async function endOneShot() {
+  carryDraft = false;
   if (!oneShot) return;
   oneShot = false;
   await setRoute('live');
@@ -3406,6 +3491,17 @@ function newRecognition(generation) {
     streamTail();
     paintTinyButtons();
     if (interim.trim()) lastVoiceAt = performance.now();
+    // Words still coming in are talking, whatever the level meter says.
+    // The quiet wait (browserGateTick) is timed off the mic level alone, and
+    // someone speaking softly, under the trigger mark, read as silent: the
+    // clauses already finalized went out while the rest of the sentence was
+    // still growing on screen, and it arrived cut in two. A changed interim
+    // restarts the wait the same way a loud frame does.
+    if (interim.trim() && interim !== lastInterimHeard) {
+      lastLoudAt = lastInterimChangeAt = performance.now();
+      if (carryDraft) voiceSinceCarry = true;
+    }
+    lastInterimHeard = interim;
   };
 
   r.onerror = ev => {
@@ -3429,7 +3525,10 @@ function newRecognition(generation) {
     recStarting = false;
     recRunning = false;
     rec = null;
-    el.stream.textContent = '';
+    // What was being recognized ended with the session. Keep the clauses
+    // still waiting to go out on screen, drop the stale interim.
+    latestInterimForPaint = lastInterimHeard = '';
+    el.stream.textContent = browserStreamText();
     if (!recWanted) return;
     if (recFails > MAX_FAILS) {
       disableBrowserASR(t('asrFailed'));
@@ -3473,7 +3572,8 @@ function stopRecognition(keepWanted = false) {
   const r = rec;
   rec = null; recRunning = false; recStarting = false; recFails = 0;
   if (r) { try { r.abort(); } catch {} }
-  el.stream.textContent = '';
+  latestInterimForPaint = lastInterimHeard = '';
+  el.stream.textContent = browserStreamText();
 }
 
 // When it can no longer be used, bring the setting, what is saved and the
@@ -3557,7 +3657,20 @@ setInterval(() => {
    own. */
 const BROWSER_SEND_GATE_MS = 100;
 let lastLoudAt = 0;
+let lastInterimHeard = '';      // the interim last seen, so an unchanged repeat is not counted as talking
+let lastInterimChangeAt = 0;   // when it last changed (words still coming in)
 let pendingBrowserSends = [];   // [{text, queuedAt}], oldest first
+
+/* How long to wait for quiet before a finished clause moves on. In draft mode
+   it only lands in the box on screen, nothing goes to Claude yet, so a long
+   "pause to send" (5 or 10 seconds, set for thinking out loud) would just
+   leave the box lagging behind. There the wait is capped at DRAFT_WAIT_MS. */
+const DRAFT_WAIT_MS = 2000;
+function sendWaitMs() {
+  const wait = Math.max(0, (Number(tuning.silence_duration) || 0) * 1000);
+  // Carrying a draft along is really sending, so it waits the full time.
+  return route === 'hold' && !carryDraft ? Math.min(wait, DRAFT_WAIT_MS) : wait;
+}
 
 function browserGateTick() {
   browserRmsNow = computeBrowserRms();
@@ -3568,9 +3681,13 @@ function browserGateTick() {
   // very first version of this send everything the instant it queued.
   const now = performance.now();
   if (browserRmsNow >= tuning.silence_threshold) lastLoudAt = now;
+  // Chrome cuts its session every 7 to 10 seconds and the next one takes a
+  // moment to come up. Nothing can be heard in that gap, so it must not count
+  // as the quiet that sends what was said so far.
+  if (recWanted && (!recRunning || recStarting)) lastLoudAt = now;
   if (!pendingBrowserSends.length) return;
   const quietFor = now - lastLoudAt;
-  const waitMs = Math.max(0, (Number(tuning.silence_duration) || 0) * 1000);
+  const waitMs = sendWaitMs();
   // A cap against a rising noise floor. Some machines' getUserMedia runs
   // automatic gain control that climbs through a real pause and never dips
   // back under a fixed mark on its own, and a wait with no ceiling then
@@ -3584,7 +3701,16 @@ function browserGateTick() {
   // itself) to show up as a real problem, so this only has to be short
   // next to "stuck forever," not next to the wait itself.
   const cap = Math.max(waitMs * 10, waitMs + 30000);
-  const capTripped = pendingBrowserSends.some(item => now - item.queuedAt >= cap);
+  // Not while words are still coming in, though. The cap is for a noise floor
+  // the level never drops below, not for someone who simply talks for longer
+  // than the cap: cutting them off there split one long thought in two.
+  const stillTalking = now - lastInterimChangeAt < waitMs;
+  // No outer limit while words keep coming in: people do talk for minutes on
+  // end, and cutting them off at any fixed length split the thought. A noisy
+  // room keeping recognition busy is not a place anyone dictates from, and
+  // the send button is always there.
+  const capTripped = !stillTalking &&
+    pendingBrowserSends.some(item => now - item.queuedAt >= cap);
   // Tripping the cap, like clearing the wait, releases everything currently
   // pending together, not only the one item old enough to trip it.
   // Releasing that one item alone was fragmentation by another name: three
@@ -3886,7 +4012,9 @@ function paintRoutes() {
     // see where it goes.
     const on = pick(l);
     const b = document.createElement('button');
-    b.className = 'route-chip' + (on ? ' on' : '');
+    // Between two watches (a Monitor deadline): it keeps its number and its
+    // place as destination, shown faded until its next watch picks it up.
+    b.className = 'route-chip' + (on ? ' on' : '') + (l.away ? ' away' : '');
     b.dataset.pid = String(l.pid);
     // The number is the same one used in the spoken signal (「2番」). Even when
     // a narrow window folds the name away, this part always stays.
@@ -3897,8 +4025,8 @@ function paintRoutes() {
     nm.className = 'nm';
     nm.textContent = l.label;
     b.append(no, nm);
-    b.title = [`${l.no}. ${l.label}`, l.cwd || '', t('renameHint')]
-                .filter(Boolean).join('\n');
+    b.title = [`${l.no}. ${l.label}`, l.away ? t('listenerAway') : '', l.cwd || '',
+               t('renameHint')].filter(Boolean).join('\n');
 
     /* Double click the chip to change its name. A long press does the same, for
        screens where a double tap is either awkward or already spoken for by the
