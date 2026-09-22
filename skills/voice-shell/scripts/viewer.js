@@ -2309,8 +2309,69 @@ let seeded = false;   // restores what had piled up, once, on reload
 let uiStamp = 0;      // the mtime of the screen file at the moment it was loaded
 let wayland = false;  // whether the daemon's own session is Wayland (floating cannot stay on top there)
 
+/* What this tab had going at the moment it was reloaded, handed across the
+   reload in its own sessionStorage. A reload used to come back muted with
+   everything unsent gone: only the held lines the server keeps (s.held) ever
+   made it back, never the instant-mode box, the clauses still waiting out
+   their quiet stretch, or the words being recognized (#118). It is written on
+   the main window's pagehide, so the "Updated" button and an ordinary F5
+   both go through it. The small window closing fires pagehide on its own
+   window, never this one, so that is not mistaken for a reload. But the
+   button closes the small window before reloading, and by pagehide nothing
+   is floating any more, so the button notes it first (floatAtReload). */
+const RESUME_KEY = 'vs.resume';
+const RESUME_MAX_AGE_MS = 30000;   // older than this is some other visit, not this reload
+let floatAtReload = null;
+
+function resumeSnapshot() {
+  return {
+    live: route !== 'off' && recWanted,
+    draft: el.draft.value,
+    touched: draftTouched,
+    pending: browserStreamText(),
+    float: floatAtReload ?? !!floatingWindow(),
+    at: Date.now(),
+  };
+}
+
+// Read once and removed at once, so a later reload never picks up an old one.
+function takeResume(storage, now) {
+  let raw = null;
+  try {
+    raw = storage.getItem(RESUME_KEY);
+    storage.removeItem(RESUME_KEY);
+  } catch { return null; }
+  if (!raw) return null;
+  let r;
+  try { r = JSON.parse(raw); } catch { return null; }
+  if (!r || typeof r.at !== 'number' || !(now - r.at <= RESUME_MAX_AGE_MS)) return null;
+  return r;
+}
+
+/* The box comes back as it was, with whatever had not gone out yet added at
+   the end rather than queued again. It may already have reached Claude in the
+   instant the page went away, so it waits for a look and a press instead of
+   going out twice. seeded is raised so the held lines from the server do not
+   go in on top of the same text. */
+function restoreDraft(r) {
+  const text = [r.draft, r.pending]
+    .map(s => (typeof s === 'string' ? s.trim() : ''))
+    .filter(Boolean).join('\n');
+  if (!text) return;
+  el.draft.value = text;
+  draftTouched = !!r.touched;
+  seeded = true;
+  paintDraft();
+  grow();
+}
+
+addEventListener('pagehide', () => {
+  try { sessionStorage.setItem(RESUME_KEY, JSON.stringify(resumeSnapshot())); } catch {}
+});
+
 el.fresh.onclick = () => {
   const w = floatingWindow();
+  floatAtReload = !!w;
   if (w) {
     try { w.close(); } catch { disableFloat(); }
   }
@@ -2376,11 +2437,18 @@ async function refreshState() {
     el.note.textContent = s.note || '';
     el.note.hidden = !s.note;
 
+    const prevRoute = route;
     if (!armPending) {
       route = s.muted ? 'off' : (s.paused ? 'hold' : 'live');
       if (route !== 'off') lastMode = route;
     }
     paint();
+    // Coming out of off here, not through a press, still has to bring
+    // recognition back. Only the display flipping left the screen saying live
+    // while nothing listened, and with the idle clock never started, the
+    // idle mute then really muted a few minutes later (#118, after a reload
+    // whose first touch was not the mic).
+    if (prevRoute === 'off' && route !== 'off') applyRouteSideEffects(route);
 
     // Restore what was collected so a reload does not lose it (never touched while you are typing)
     if (!seeded && Array.isArray(s.held) && s.held.length && !el.draft.value.trim()) {
@@ -3286,6 +3354,11 @@ let recStartedAt = 0;        // when the current session was opened
 let recFails = 0;            // failures in a row (used to decide when to give up)
 let recStarting = false;
 let recGeneration = 0;
+// Set only while recognition is being started on its own after a reload
+// (#118), with nothing touched yet. A refusal then may be Chrome wanting a
+// touch first rather than the person saying no, so it falls back to "touch to
+// start" instead of switching browser recognition off.
+let autoResumed = false;
 
 /* Whether browser recognition is set to be used and whether it is running
    right now are two different things. Treating them as one meant that the
@@ -3467,6 +3540,7 @@ function newRecognition(generation) {
     recStarting = false;
     recRunning = true; recStartedAt = performance.now(); recFails = 0;
     asrDeniedFlag = false;
+    autoResumed = false;
   };
 
   r.onresult = ev => {
@@ -3509,6 +3583,14 @@ function newRecognition(generation) {
     recStarting = false;
     // A refused microphone needs a person to act. Roll the setting back and say so.
     if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
+      if (autoResumed && !vizArmed) {
+        autoResumed = false;
+        armPending = true;
+        route = 'off';
+        applyRouteSideEffects('off');
+        paint();
+        return;
+      }
       asrDeniedFlag = true;
       beat('denied');            // make the refusal visible from outside too
       disableBrowserASR(t('asrDenied'));
@@ -5620,23 +5702,52 @@ if (canBrowserASR) {
   // By browser rule the microphone cannot open until something is touched, so
   // it starts the moment it is touched. Some people work from the keyboard
   // alone, so a keypress starts it too.
-  const arm = () => {
+  // Held off, the route here is the screen's alone, so the touch asks the
+  // server where it really stands and refreshState takes it from off to that
+  // through applyRouteSideEffects. Just clearing the flag and starting left
+  // the screen saying live with recognition never started (#118). Not when
+  // the touch is on a mic, though: its click is the switch on, and had the
+  // answer come back first, that click would read live and switch it off.
+  const arm = ev => {
     vizArmed = true;
-    armPending = false;
+    if (armPending) {
+      armPending = false;
+      const onMic = [el.segOff, el.miniMic, el.helpMini]
+        .some(b => { try { return b.contains(ev.target); } catch { return false; } });
+      if (!onMic) refreshState();
+    }
     if (recWanted) startRecognition();
   };
   addEventListener('pointerdown', arm, {once:true});
   addEventListener('keydown', arm, {once:true});
 }
+// What the tab had going the moment it was reloaded, if that was just now
+let resume = null;
+try { resume = takeResume(sessionStorage, Date.now()); } catch {}
+if (resume) restoreDraft(resume);
+// A floating window cannot be reopened without a press. The bubble that asks
+// to float it shows on every load anyway (paintFloatAsk), so that press is one
+// click away and resume.float needs nothing more here.
 loadEngines().then(() => {
   if (!recWanted) return;
   if (vizArmed) { startRecognition(); return; }
+  // It was listening right up to the reload, so carry on without waiting for
+  // a touch. The meter still waits for one (armViz), and a refusal falls back
+  // to the held-off start below (autoResumed, in onerror).
+  if (resume?.live) {
+    autoResumed = true;
+    startRecognition();
+    return;
+  }
   // By browser rule the microphone cannot open until the screen has been
   // touched once. Instead of asking anyone to please click, we start switched
   // off. Pressing the mic to turn it on, the obvious thing to do, is itself the
   // touch.
   armPending = true;
   route = 'off';
+  // Make it really off, not only on screen, so that leaving it takes the
+  // same way back as any other off (see arm above and refreshState).
+  applyRouteSideEffects('off');
   paint();
 });
 applyTheme(store.get('theme', 'auto'));
