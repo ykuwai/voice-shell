@@ -894,6 +894,8 @@ COMMAND_WORDS = {
             "てなおし", "てなおしもーど", "手直しに", "ためて", "溜める", "ためる",
             # The English loanword comes out as readily as the native word here.
             # Left out, somebody who reaches for it gets no answer and no reason.
+            # Only alone or after a filler though, like ドラフト below, since
+            # 「記事をエディット」 is an ordinary sentence (MODE_COMMON_WORDS).
             "エディット", "えでぃっと", "エディットモード",
             # The mode is called Draft on the English screen, and people who
             # read that say the loanword too. Only alone or after a filler
@@ -968,9 +970,10 @@ COMMAND_WORDS = {
             # 「てなおし」 easily comes out as 「出直し」 (measured)
             "出直し", "でなおし", "出直して",
             "直してから", "なおしてから", "あとで直す", "ちょっと直す",
-            # A bare katakana noun, the same reasoning that lets 「キャンセル」
-            # stand alone: it almost never closes a real Japanese sentence.
-            "エディット", "えでぃっと",
+            # 「エディット」 is not here. It closes ordinary sentences
+            # (「記事をエディット」, 「写真をエディット」), and one that did would
+            # land in the draft cut down to 「記事を」. Said alone it still switches
+            # to hold, through the mode words.
         ],
         "en": ["edit this", "let me edit", "hold this"],
         # Bare "edit" is in no column either, for the same reason as bare "cancel".
@@ -1088,34 +1091,56 @@ UNMUTE_TAIL_NOISE_MAX = 3
 # live, stays exact only, that is the direction a false hit actually costs
 # something (speech during a call going straight through again).
 #
-# The Draft loanwords are left out of the tail, the way unmute leaves out 「解除」.
-# A draft is something people talk about (a PR, an email, the baseball draft),
-# so 「PRをドラフトにして」 or 「PR을 드래프트 모드」 would be parked instead of sent.
-# Said alone they still switch, through HOLD_WORDS, and so they do with nothing
-# but a filler ahead of them (MODE_LOANWORD_TAIL below).
-_HOLD_MODE_TAIL_EXCLUDE = {"ドラフト", "どらふと", "ドラフトモード", "드래프트 모드"}
+# Words people also use in ordinary talk are left out of the tail, the way unmute
+# leaves out 「解除」. A draft is something people talk about (a PR, an email, the
+# baseball draft), and so are editing, holding and going live, so 「PRをドラフトに
+# して」, 「記事をエディット」, "save a draft" or 「PR을 드래프트 모드」 would be parked
+# instead of sent. Said alone they still switch, through HOLD_WORDS / LIVE_WORDS,
+# and so they do with nothing but a filler ahead of them (MODE_LOANWORD_TAIL below).
+# Native Japanese words like 手直し and 即時 are not in here. Nobody says them about
+# anything but this tool, so hold keeps its lead-in tolerance for them.
+MODE_COMMON_WORDS = {
+    "hold": {
+        "エディット", "えでぃっと", "エディットモード",
+        "ドラフト", "どらふと", "ドラフトモード",
+        "hold", "hold mode", "draft", "draft mode", "edit mode",
+        # 「revisar」 and 「relecture」 are everyday verbs and nouns too
+        # ("¿puedes revisar el código?").
+        "revisar", "modo revisar", "modo revisión", "borrador", "modo borrador",
+        "relecture", "mode relecture", "brouillon", "mode brouillon",
+        "Entwurf", "Entwurfsmodus",
+        "草稿模式",
+        "초안 모드", "드래프트 모드",
+    },
+    "live": {
+        "インスタント", "いんすたんと", "インスタントモード",
+        "live", "live mode", "instant", "instant mode", "send live",
+    },
+}
+# Kept under its old name, the draft words are what it was made for.
+_HOLD_MODE_TAIL_EXCLUDE = MODE_COMMON_WORDS["hold"]
 HOLD_MODE_TAIL = tuple(sorted(
     {w for w in builtin_words("hold") if w not in _HOLD_MODE_TAIL_EXCLUDE},
     key=len, reverse=True,
 ))
 HOLD_MODE_TAIL_NOISE_MAX = 7
 
-# The screen's own names for the two modes, said as loanwords (「ドラフト」 for
-# Draft, 「インスタント」 for Instant). A few characters of anything ahead of them
-# is too loose (「今年のドラフト」, 「PR을 드래프트 모드」), but a bare filler ahead
-# of them is still the word said alone, and 「えーとドラフト」 or 「はいインスタント」
-# going nowhere is the #76 bug over again. So only fillers may come first here.
+# The words above, with a filler and nothing else ahead of them. A few characters
+# of anything ahead of them is too loose (「今年のドラフト」, "go live"), but a bare
+# filler ahead of them is still the word said alone, and 「えーとドラフト」 or
+# "um, live mode" going nowhere is the #76 bug over again.
 MODE_LOANWORD_TAIL = {
-    "hold": tuple(sorted(_HOLD_MODE_TAIL_EXCLUDE, key=len, reverse=True)),
-    "live": tuple(sorted({"インスタント", "いんすたんと", "インスタントモード"},
-                         key=len, reverse=True)),
+    mode: tuple(sorted(words, key=len, reverse=True))
+    for mode, words in MODE_COMMON_WORDS.items()
 }
-# The fillers of the two languages these loanwords are said in, plus the short
-# replies that open a sentence out of habit. 「あの」 goes in here though it is
-# kept out of FILLERS, since nothing is being deleted, only let ahead of the word.
+# The fillers of every language, plus the short replies that open a sentence out
+# of habit. 「あの」 goes in here though it is kept out of FILLERS, since nothing is
+# being deleted, only let ahead of the word.
 _MODE_LEAD_FILLERS = tuple(sorted(
-    set(FILLERS["ja"]) | NOISE_ONLY["ja"] | set(FILLERS["ko"]) | NOISE_ONLY["ko"]
-    | {"はい", "うん", "ええ", "えー", "あー", "あの", "ん", "네", "예", "응", "그", "저"},
+    {w.lower() for ws in FILLERS.values() for w in ws}
+    | {w.lower() for ws in NOISE_ONLY.values() for w in ws}
+    | {"はい", "うん", "ええ", "えー", "あー", "あの", "ん", "네", "예", "응", "그", "저",
+       "yes", "yeah", "ok", "okay", "sí", "vale", "oui", "ja", "好", "好的"},
     key=len, reverse=True,
 ))
 _MODE_LEAD_TRIM = " \t　。、．，・！？!?.,…ー~〜"
@@ -1123,7 +1148,7 @@ _MODE_LEAD_TRIM = " \t　。、．，・！？!?.,…ー~〜"
 
 def only_fillers(text: str) -> bool:
     """Whether what is left is nothing but fillers (or nothing at all)."""
-    rest = text.strip(_MODE_LEAD_TRIM)
+    rest = text.lower().strip(_MODE_LEAD_TRIM)
     while rest:
         for f in _MODE_LEAD_FILLERS:
             if rest.startswith(f):
@@ -1768,9 +1793,10 @@ def mode_command_match(text: str):
     Same split as mic_command_match, and for the same reason. Hold also matches
     with a short noise prefix ahead of the word (HOLD_MODE_TAIL, #76 follow-up),
     live stays exact only, the same asymmetry mic_command_shape draws between
-    mute and unmute. The loanword names of both modes are the one exception
-    either way, they may have a filler and nothing else ahead of them
-    (MODE_LOANWORD_TAIL).
+    mute and unmute. The words that also turn up in ordinary talk
+    (MODE_COMMON_WORDS: the loanwords, the English names and the like) are
+    the exception either way, they may have a filler and nothing else ahead
+    of them (MODE_LOANWORD_TAIL).
     """
     key = command_key(text)
     if key:
