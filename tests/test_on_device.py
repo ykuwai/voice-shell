@@ -284,7 +284,8 @@ class OnDeviceWiringTest(unittest.TestCase):
         keys = ["engineBrowserLocal", "onDeviceChecking", "onDeviceReady",
                 "onDeviceNeedsDownload", "onDeviceDownloading", "onDeviceUnavailable",
                 "onDeviceRefused", "onDeviceDownload", "onDeviceDownloadFailed",
-                "onDevicePressMain", "onDeviceHold", "onDeviceReload", "onDeviceLoad"]
+                "onDevicePressMain", "onDeviceHold", "onDeviceReload", "onDeviceLoad",
+                "idleMuteNoteLocal"]
         for key in keys:
             self.assertEqual(i18n.count(f"\n    {key}:'"), 8, key)
 

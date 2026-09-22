@@ -4684,6 +4684,9 @@ function paintBrowserAsr() {
   el.asrLangField.hidden = !asrChosen;
   el.idleMuteField.hidden = !asrChosen;
   el.idleMuteNote.hidden = !asrChosen;
+  // "Keeps reconnecting to Google" is untrue on the local entry, where the
+  // reason to switch off is the same but nothing goes anywhere
+  el.idleMuteNote.textContent = t(onDeviceLocal ? 'idleMuteNoteLocal' : 'idleMuteNote');
   el.browserGestureField.hidden = !asrChosen;
   paintIdleMute();
   // Browser recognition decides for itself when a clause is grammatically
