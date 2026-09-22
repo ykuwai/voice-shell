@@ -1971,9 +1971,29 @@ function chime(kind) {
   } catch { /* where no sound can play, give up quietly (the display has already changed) */ }
 }
 
+/* Back to instant with text still in the draft box. Left as it was, the box
+   sat there unsent while everything said after it went straight out ahead of
+   it. Sending it the instant the mode flips was the other way, but a switch
+   made by mistake would then send a draft that was not finished. So it rides
+   along with the next utterance instead: that one is held like Edit this one,
+   lands at the end of the box, and the whole box goes out together, in the
+   order it was said. Until then the screen already reads instant. */
+let carryDraft = false;
+function carryIntoNext() {
+  oneShot = true;
+  carryDraft = true;
+  el.note.hidden = true;
+  paint();
+  el.hint.textContent = t('hintCarry');
+}
+
 // Choosing a mode yourself clears both Edit this one and the line from Claude
-el.segLive.onclick = () => { oneShot = false; el.note.hidden = true; setRoute('live'); };
-el.segHold.onclick = () => { oneShot = false; el.note.hidden = true; setRoute('hold'); };
+el.segLive.onclick = () => {
+  el.note.hidden = true;
+  if (route === 'hold' && !oneShot && el.draft.value.trim()) { carryIntoNext(); return; }
+  oneShot = false; carryDraft = false; setRoute('live');
+};
+el.segHold.onclick = () => { oneShot = false; carryDraft = false; el.note.hidden = true; setRoute('hold'); };
 el.segOff.onclick = () => setRoute(route === 'off' ? lastMode : 'off');
 
 /* The small mics in the sheet headings do the same as the big one. While a
@@ -2101,7 +2121,14 @@ async function handleWsMessage({ev, message, number, discardInProgress: wasDisca
       // This switches by voice as well. While muted the display can stay on off, so leave it alone.
       if (route !== 'off') {
         const next = m.paused ? 'hold' : 'live';
-        if (next !== route) { route = lastMode = next; oneShot = false; paint(); }
+        if (next === 'live' && route === 'hold' && !oneShot && el.draft.value.trim()) {
+          // Switched to instant by voice with a draft still in the box: keep
+          // holding the next one so the draft rides along with it (carryIntoNext).
+          setRoute('hold');
+          carryIntoNext();
+        } else if (next !== route) {
+          route = lastMode = next; oneShot = false; carryDraft = false; paint();
+        }
       } else {
         lastMode = m.paused ? 'hold' : 'live';
       }
@@ -2145,6 +2172,11 @@ async function handleWsMessage({ev, message, number, discardInProgress: wasDisca
       const still = asrActive() ? browserStreamText() : '';
       el.stream.textContent = still;
       el.tray.classList.toggle('idle', !still);
+      // The utterance the draft was waiting to ride along with. Out they go.
+      if (carryDraft) {
+        carryDraft = false;
+        el.send.onclick();
+      }
 
     } else if (m.text != null) {
       clearSendCountdown();   // that is one utterance done. Counting starts again with the next voice
@@ -2350,6 +2382,7 @@ async function refreshState() {
 
 /* ── Send and discard ───────────────────── */
 el.send.onclick = async () => {
+  carryDraft = false;
   const text = el.draft.value.trim();
   if (!text) return;
   await post('/api/send', {text, edited: draftTouched});
@@ -2366,6 +2399,8 @@ let lastDiscarded = '';
 let lastDiscardedTouched = false;
 
 el.discard.onclick = async () => {
+  // Nothing left to carry along, so back to plain instant.
+  if (carryDraft) { carryDraft = false; endOneShot(); }
   lastDiscarded = el.draft.value;
   lastDiscardedTouched = draftTouched;
   await post('/api/discard');
@@ -2526,6 +2561,7 @@ el.tray.onclick = e => {
 // Once it is sent, or the box empties out and you click away
 // (leaveOneShotIfEmpty, below), go back to the mode it came from.
 async function endOneShot() {
+  carryDraft = false;
   if (!oneShot) return;
   oneShot = false;
   await setRoute('live');
@@ -3438,6 +3474,14 @@ function newRecognition(generation) {
     streamTail();
     paintTinyButtons();
     if (interim.trim()) lastVoiceAt = performance.now();
+    // Words still coming in are talking, whatever the level meter says.
+    // The quiet wait (browserGateTick) is timed off the mic level alone, and
+    // someone speaking softly, under the trigger mark, read as silent: the
+    // clauses already finalized went out while the rest of the sentence was
+    // still growing on screen, and it arrived cut in two. A changed interim
+    // restarts the wait the same way a loud frame does.
+    if (interim.trim() && interim !== lastInterimHeard) lastLoudAt = performance.now();
+    lastInterimHeard = interim;
   };
 
   r.onerror = ev => {
@@ -3589,6 +3633,7 @@ setInterval(() => {
    own. */
 const BROWSER_SEND_GATE_MS = 100;
 let lastLoudAt = 0;
+let lastInterimHeard = '';   // the interim last seen, so an unchanged repeat is not counted as talking
 let pendingBrowserSends = [];   // [{text, queuedAt}], oldest first
 
 /* How long to wait for quiet before a finished clause moves on. In draft mode
@@ -3598,7 +3643,8 @@ let pendingBrowserSends = [];   // [{text, queuedAt}], oldest first
 const DRAFT_WAIT_MS = 2000;
 function sendWaitMs() {
   const wait = Math.max(0, (Number(tuning.silence_duration) || 0) * 1000);
-  return route === 'hold' ? Math.min(wait, DRAFT_WAIT_MS) : wait;
+  // Carrying a draft along is really sending, so it waits the full time.
+  return route === 'hold' && !carryDraft ? Math.min(wait, DRAFT_WAIT_MS) : wait;
 }
 
 function browserGateTick() {
