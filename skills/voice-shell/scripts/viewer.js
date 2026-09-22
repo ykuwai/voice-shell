@@ -1979,18 +1979,27 @@ function chime(kind) {
    lands at the end of the box, and the whole box goes out together, in the
    order it was said. Until then the screen already reads instant. */
 let carryDraft = false;
+// Whether any voice has started since the switch. A held line that was
+// already on its way (a clause still waiting out its quiet, a POST in
+// flight, a line the daemon settled a moment before) is only added to the
+// box. The one that sends it all is the one begun after the switch.
+let voiceSinceCarry = false;
 function carryIntoNext() {
   oneShot = true;
   carryDraft = true;
+  voiceSinceCarry = false;
   el.note.hidden = true;
   paint();
   el.hint.textContent = t('hintCarry');
+  // The daemon caps its quiet wait at 2s while drafting. Carrying is really
+  // sending, so it is told to wait the full time again.
+  post('/api/pause', {paused: true, carry: true}).catch(() => {});
 }
 
 // Choosing a mode yourself clears both Edit this one and the line from Claude
 el.segLive.onclick = () => {
   el.note.hidden = true;
-  if (route === 'hold' && !oneShot && el.draft.value.trim()) { carryIntoNext(); return; }
+  if (route === 'hold' && !carryDraft && el.draft.value.trim()) { carryIntoNext(); return; }
   oneShot = false; carryDraft = false; setRoute('live');
 };
 el.segHold.onclick = () => { oneShot = false; carryDraft = false; el.note.hidden = true; setRoute('hold'); };
@@ -2062,6 +2071,7 @@ async function handleWsMessage({ev, message, number, discardInProgress: wasDisca
       // silence, so we spot the turning points ourselves.
       if (m.speaking !== daemonSpeaking) {
         if (m.speaking) {
+          if (carryDraft) voiceSinceCarry = true;
           voiceSeen = sendCountdownOn(); silentAt = 0;
           // Voice again means the ring starts over, whether that is a breath in
           // the middle of a sentence or the next utterance beginning while the
@@ -2121,11 +2131,12 @@ async function handleWsMessage({ev, message, number, discardInProgress: wasDisca
       // This switches by voice as well. While muted the display can stay on off, so leave it alone.
       if (route !== 'off') {
         const next = m.paused ? 'hold' : 'live';
-        if (next === 'live' && route === 'hold' && !oneShot && el.draft.value.trim()) {
+        if (next === 'live' && route === 'hold' && !carryDraft && el.draft.value.trim()) {
           // Switched to instant by voice with a draft still in the box: keep
           // holding the next one so the draft rides along with it (carryIntoNext).
-          setRoute('hold');
-          carryIntoNext();
+          // Every open screen hears this echo and each may send the box; the
+          // server lets the same text through only once in a few seconds.
+          setRoute('hold').then(() => carryIntoNext());
         } else if (next !== route) {
           route = lastMode = next; oneShot = false; carryDraft = false; paint();
         }
@@ -2173,7 +2184,7 @@ async function handleWsMessage({ev, message, number, discardInProgress: wasDisca
       el.stream.textContent = still;
       el.tray.classList.toggle('idle', !still);
       // The utterance the draft was waiting to ride along with. Out they go.
-      if (carryDraft) {
+      if (carryDraft && voiceSinceCarry) {
         carryDraft = false;
         el.send.onclick();
       }
@@ -3480,7 +3491,10 @@ function newRecognition(generation) {
     // clauses already finalized went out while the rest of the sentence was
     // still growing on screen, and it arrived cut in two. A changed interim
     // restarts the wait the same way a loud frame does.
-    if (interim.trim() && interim !== lastInterimHeard) lastLoudAt = performance.now();
+    if (interim.trim() && interim !== lastInterimHeard) {
+      lastLoudAt = lastInterimChangeAt = performance.now();
+      if (carryDraft) voiceSinceCarry = true;
+    }
     lastInterimHeard = interim;
   };
 
@@ -3505,7 +3519,10 @@ function newRecognition(generation) {
     recStarting = false;
     recRunning = false;
     rec = null;
-    el.stream.textContent = '';
+    // What was being recognized ended with the session. Keep the clauses
+    // still waiting to go out on screen, drop the stale interim.
+    latestInterimForPaint = lastInterimHeard = '';
+    el.stream.textContent = browserStreamText();
     if (!recWanted) return;
     if (recFails > MAX_FAILS) {
       disableBrowserASR(t('asrFailed'));
@@ -3549,7 +3566,8 @@ function stopRecognition(keepWanted = false) {
   const r = rec;
   rec = null; recRunning = false; recStarting = false; recFails = 0;
   if (r) { try { r.abort(); } catch {} }
-  el.stream.textContent = '';
+  latestInterimForPaint = lastInterimHeard = '';
+  el.stream.textContent = browserStreamText();
 }
 
 // When it can no longer be used, bring the setting, what is saved and the
@@ -3633,7 +3651,8 @@ setInterval(() => {
    own. */
 const BROWSER_SEND_GATE_MS = 100;
 let lastLoudAt = 0;
-let lastInterimHeard = '';   // the interim last seen, so an unchanged repeat is not counted as talking
+let lastInterimHeard = '';
+let lastInterimChangeAt = 0;   // the interim last seen, so an unchanged repeat is not counted as talking
 let pendingBrowserSends = [];   // [{text, queuedAt}], oldest first
 
 /* How long to wait for quiet before a finished clause moves on. In draft mode
@@ -3656,6 +3675,10 @@ function browserGateTick() {
   // very first version of this send everything the instant it queued.
   const now = performance.now();
   if (browserRmsNow >= tuning.silence_threshold) lastLoudAt = now;
+  // Chrome cuts its session every 7 to 10 seconds and the next one takes a
+  // moment to come up. Nothing can be heard in that gap, so it must not count
+  // as the quiet that sends what was said so far.
+  if (recWanted && (!recRunning || recStarting)) lastLoudAt = now;
   if (!pendingBrowserSends.length) return;
   const quietFor = now - lastLoudAt;
   const waitMs = sendWaitMs();
@@ -3672,7 +3695,12 @@ function browserGateTick() {
   // itself) to show up as a real problem, so this only has to be short
   // next to "stuck forever," not next to the wait itself.
   const cap = Math.max(waitMs * 10, waitMs + 30000);
-  const capTripped = pendingBrowserSends.some(item => now - item.queuedAt >= cap);
+  // Not while words are still coming in, though. The cap is for a noise floor
+  // the level never drops below, not for someone who simply talks for longer
+  // than the cap: cutting them off there split one long thought in two.
+  const stillTalking = now - lastInterimChangeAt < waitMs;
+  const capTripped = !stillTalking &&
+    pendingBrowserSends.some(item => now - item.queuedAt >= cap);
   // Tripping the cap, like clearing the wait, releases everything currently
   // pending together, not only the one item old enough to trip it.
   // Releasing that one item alone was fragmentation by another name: three

@@ -770,6 +770,8 @@ async def main_async(args):
 
     state = Path(args.log_file).parent
     pause_file = state / "paused"
+    carry_file = state / "draft_carry"
+    last_send = {"text": "", "at": 0.0}
     hold_file = state / "held.jsonl"
     mute_file = state / "muted"
     partial_file = state / "partial.txt"
@@ -953,6 +955,13 @@ async def main_async(args):
         else:
             pause_file.unlink(missing_ok=True)
             note_file.unlink(missing_ok=True)
+        # Holding only so the draft can go out with the next utterance (the
+        # page's carry). That one is really being sent, so the daemon waits
+        # the full quiet for it rather than the draft mode's 2s.
+        if body.get("carry"):
+            carry_file.touch()
+        else:
+            carry_file.unlink(missing_ok=True)
         return web.json_response({"paused": pause_file.exists(), "note": note})
 
     async def handle_send(req):
@@ -961,6 +970,12 @@ async def main_async(args):
         text = (body.get("text") or "").strip()
         if not text:
             return web.json_response({"error": "empty"}, status=400)
+        # Two open screens can both send the same draft for one action (the
+        # carry, say). The same text inside a few seconds goes out once.
+        now = time.time()
+        if text == last_send["text"] and now - last_send["at"] < 5:
+            return web.json_response({"duplicate": True})
+        last_send.update(text=text, at=now)
 
         # The line reaching Claude is the body alone. A mark goes on only when
         # it was edited. Hardcode it here and the mark lands on anything that

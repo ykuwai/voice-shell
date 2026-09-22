@@ -3041,7 +3041,8 @@ def main():
         tuned = want_tuning()
         if tuned is None:
             return None
-        if (Path(args.log_file).parent / PAUSE_FILE.name).exists():
+        state = Path(args.log_file).parent
+        if (state / PAUSE_FILE.name).exists() and not (state / "draft_carry").exists():
             wait = tuned.get("silence_duration")
             if isinstance(wait, (int, float)) and wait > DRAFT_WAIT_SEC:
                 tuned = dict(tuned, silence_duration=DRAFT_WAIT_SEC)
