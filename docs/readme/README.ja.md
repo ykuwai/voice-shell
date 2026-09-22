@@ -18,7 +18,7 @@
 <p align="center">Voice Shell は、Claude Code に声で直接指示できる Agent Skill です。</p>
 
 <p align="center">
-  <img src="images/viewer.png" alt="Voice Shell の画面。マイク、送信モード、送信先、認識中の文字が並ぶ" width="360">
+  <img src="images/screen-ja.png" alt="Voice Shell の画面。マイク、送信モード、送信先、認識中の文字が並ぶ" width="380">
 </p>
 
 ## 💡 特長

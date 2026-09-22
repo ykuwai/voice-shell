@@ -11,14 +11,10 @@ whenever the viewer's look changes.
 .venv/bin/python docs/readme/tools/make_screenshots.py
 ```
 
-It writes two PNGs per language into `docs/readme/images/`, at 380x640 CSS
-pixels and twice that in real pixels, dark theme:
-
-- `screen-<lang>-instant.png`: Instant mode, two listening sessions with the
-  first one chosen, text being recognized in the Unsent card, and three sent
-  cards (one of them marked as edited).
-- `screen-<lang>-draft.png`: Draft mode, the same sessions and history, with
-  two utterances collected in the draft box and a short one still being said.
+It writes one PNG per language into `docs/readme/images/`, `screen-<lang>.png`,
+at 380x640 CSS pixels and twice that in real pixels, dark theme: Instant mode,
+two listening sessions with the first one chosen, text being recognized in the
+Unsent card, and three sent cards (one of them marked as edited).
 
 Options: `--lang ja` (repeatable) to do only some languages, `--out DIR` to
 write somewhere else, `--keep-temp` to keep the temp folder (state, config and

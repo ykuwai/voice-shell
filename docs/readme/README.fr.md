@@ -23,7 +23,7 @@ quelle session vous écoute, tout cela se fait à la voix, pendant que vos
 mains restent sur ce que vous étiez en train de faire.
 
 <p align="center">
-  <img src="images/viewer.png" alt="La fenêtre de Voice Shell, une fenêtre flottante affichant la transcription en direct, le choix de la session et le mode d'envoi" width="360">
+  <img src="images/screen-fr.png" alt="La fenêtre de Voice Shell, une fenêtre flottante affichant la transcription en direct, le choix de la session et le mode d'envoi" width="380">
 </p>
 
 ## 💡 Points forts

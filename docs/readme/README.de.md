@@ -22,7 +22,7 @@ wurde. Stummschalten, Gegenlesen, Rückgängigmachen und die Wahl, welche Sitzun
 hört, all das per Stimme, während Ihre Hände bei der eigentlichen Arbeit bleiben.
 
 <p align="center">
-  <img src="images/viewer.png" alt="Der Voice-Shell-Viewer. Ein schwebendes Fenster mit laufender Transkription, Sitzungsauswahl und Sendemodus" width="360">
+  <img src="images/screen-de.png" alt="Der Voice-Shell-Viewer. Ein schwebendes Fenster mit laufender Transkription, Sitzungsauswahl und Sendemodus" width="380">
 </p>
 
 ## 💡 Warum Voice Shell

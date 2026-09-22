@@ -20,7 +20,7 @@
 说话，这些全都只靠说话就能做到，手可以一直放在手头的事情上。
 
 <p align="center">
-  <img src="images/viewer.png" alt="Voice Shell 的悬浮查看窗口，显示正在识别的文字、会话选择和发送方式" width="360">
+  <img src="images/screen-zh.png" alt="Voice Shell 的悬浮查看窗口，显示正在识别的文字、会话选择和发送方式" width="380">
 </p>
 
 ## 💡 特点

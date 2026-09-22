@@ -18,7 +18,7 @@
 <p align="center">Voice Shell is an Agent Skill for talking to Claude Code instead of typing.</p>
 
 <p align="center">
-  <img src="docs/readme/images/viewer.png" alt="The Voice Shell window, showing the microphone, send mode, destinations, and live transcription" width="360">
+  <img src="docs/readme/images/screen-en.png" alt="The Voice Shell window, showing the microphone, send mode, destinations, and live transcription" width="380">
 </p>
 
 ## 💡 Features

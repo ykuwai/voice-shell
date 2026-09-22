@@ -21,7 +21,7 @@ deshacer y elegir a qué sesión le llega lo que dice, todo con la voz, con las
 manos donde ya las tenía.
 
 <p align="center">
-  <img src="images/viewer.png" alt="La ventana de Voice Shell, transcripción en vivo, selección de sesión y forma de envío, todo en una ventana flotante" width="360">
+  <img src="images/screen-es.png" alt="La ventana de Voice Shell, transcripción en vivo, selección de sesión y forma de envío, todo en una ventana flotante" width="380">
 </p>
 
 ## 💡 Por qué Voice Shell

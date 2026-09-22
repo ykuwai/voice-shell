@@ -21,7 +21,7 @@
 처리할 수 있어서, 손은 하던 일에 그대로 둘 수 있습니다.
 
 <p align="center">
-  <img src="images/viewer.png" alt="Voice Shell 뷰어 창. 실시간으로 인식되는 문자와 세션 선택, 전송 방식이 함께 나타난다" width="360">
+  <img src="images/screen-ko.png" alt="Voice Shell 뷰어 창. 실시간으로 인식되는 문자와 세션 선택, 전송 방식이 함께 나타난다" width="380">
 </p>
 
 ## 💡 특징

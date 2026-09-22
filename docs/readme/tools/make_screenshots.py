@@ -47,7 +47,7 @@ REAL_PORT = 47865
 LANGS = ["en", "ja", "es", "fr", "de", "zh", "ko"]
 
 # The CSS size of the picture. A little taller than the old hand-made
-# viewer.png (355x470, which was a floating window) so the chips, the
+# screenshot (355x470, which was a floating window) so the chips, the
 # unsent card and a few sent cards all fit in one frame.
 WIDTH, HEIGHT, SCALE = 380, 640, 2
 
@@ -56,10 +56,7 @@ WIDTH, HEIGHT, SCALE = 380, 640, 2
 # actually talk to Claude Code in it, rather than a word-for-word copy of the
 # English. "chips" are the listening sessions (the first one is the selected
 # destination), "sent" goes oldest first as (time, chip index, edited, text),
-# "partial" is what is being recognized right now, and "draft" is the
-# utterances collected in the draft box in the second picture, with
-# "draft_partial" being said after them. That one is kept short, since in
-# draft mode the live line is a single line that does not wrap.
+# and "partial" is what is being recognized right now.
 SAMPLES = {
     "en": {
         "chips": ["Fix login bug", "Write API docs"],
@@ -69,8 +66,6 @@ SAMPLES = {
             ("10:46:30", 0, False, "Run the tests again and tell me what is still failing."),
         ],
         "partial": "And add a regression test for the plus sign case",
-        "draft": ["Make the error message clearer.", "Then add a line to the changelog."],
-        "draft_partial": "Also run the linter",
     },
     "ja": {
         "chips": ["ログインのバグ修正", "API ドキュメント作成"],
@@ -80,8 +75,6 @@ SAMPLES = {
             ("10:46:30", 0, False, "もう一度テストを回して、まだ落ちているものを教えて。"),
         ],
         "partial": "それとプラスのケースの回帰テストも追加して",
-        "draft": ["エラーメッセージを分かりやすくして。", "CHANGELOG にも一行足しておいて。"],
-        "draft_partial": "あとリンターも回して",
     },
     "es": {
         "chips": ["Arreglar bug de login", "Documentar la API"],
@@ -91,8 +84,6 @@ SAMPLES = {
             ("10:46:30", 0, False, "Vuelve a pasar los tests y dime cuáles siguen fallando."),
         ],
         "partial": "Y añade un test de regresión para el caso del signo más",
-        "draft": ["Deja más claro el mensaje de error.", "Luego añade una línea al changelog."],
-        "draft_partial": "Y pasa también el linter",
     },
     "fr": {
         "chips": ["Bug de connexion", "Doc de l'API"],
@@ -102,8 +93,6 @@ SAMPLES = {
             ("10:46:30", 0, False, "Relance les tests et dis-moi ce qui échoue encore."),
         ],
         "partial": "Et ajoute un test de non-régression pour le cas du plus",
-        "draft": ["Rends le message d'erreur plus clair.", "Puis ajoute une ligne au changelog."],
-        "draft_partial": "Et lance aussi le linter",
     },
     "de": {
         "chips": ["Login-Bug beheben", "API-Doku schreiben"],
@@ -113,8 +102,6 @@ SAMPLES = {
             ("10:46:30", 0, False, "Lass die Tests noch mal laufen und sag mir, was noch fehlschlägt."),
         ],
         "partial": "Und schreib einen Regressionstest für das Pluszeichen",
-        "draft": ["Mach die Fehlermeldung verständlicher.", "Dann ergänze den Changelog."],
-        "draft_partial": "Und lass den Linter laufen",
     },
     "zh": {
         "chips": ["修复登录 bug", "编写 API 文档"],
@@ -124,8 +111,6 @@ SAMPLES = {
             ("10:46:30", 0, False, "再跑一遍测试，告诉我还有哪些没通过。"),
         ],
         "partial": "另外给加号的情况补一个回归测试",
-        "draft": ["把错误信息改得更清楚一些。", "再在 CHANGELOG 里加一行。"],
-        "draft_partial": "顺便跑一下 lint",
     },
     "ko": {
         "chips": ["로그인 버그 수정", "API 문서 작성"],
@@ -135,14 +120,12 @@ SAMPLES = {
             ("10:46:30", 0, False, "테스트를 다시 돌리고 아직 실패하는 게 뭔지 알려 줘."),
         ],
         "partial": "그리고 플러스 기호 경우에 대한 회귀 테스트도 추가해 줘",
-        "draft": ["오류 메시지를 더 알기 쉽게 고쳐 줘.", "CHANGELOG에도 한 줄 추가해 줘."],
-        "draft_partial": "린터도 돌려 줘",
     },
 }
 
 
-# Runs in the page before any of the viewer's own scripts. Two things happen
-# here, both only inside this throwaway Chrome.
+# Runs in the page before any of the viewer's own scripts. Everything here
+# happens only inside this throwaway Chrome.
 #
 # The language and theme are the viewer's own per-browser settings
 # (localStorage "vs.lang" and "vs.theme"), set the way picking them in the
@@ -155,7 +138,13 @@ SAMPLES = {
 # the path it already has for browsers that lack recognition: it relies on
 # the daemon for recognition and shows whatever the server reports, which is
 # exactly what the sample state below feeds it.
+#
+# The page also carries its unsent text and the mic state across a reload in
+# the same tab (sessionStorage "vs.resume", issue #118). Every shot here reloads
+# the same tab with new sample state, so without clearing it the previous
+# language's text came back into the next one (Japanese text in the Korean shot).
 PAGE_PRELUDE = """
+try { sessionStorage.clear(); } catch (e) {}
 try {
   localStorage.setItem('vs.lang', %(lang)s);
   localStorage.setItem('vs.theme', 'dark');
@@ -248,8 +237,8 @@ class Stage:
         # screen rather than "stopped".
         (self.config / "run" / "daemon.pid").write_text(str(self.dummies[2].pid), encoding="utf-8")
 
-    def seed(self, lang, draft):
-        """Lay down everything the viewer reads, for one language and one mode.
+    def seed(self, lang):
+        """Lay down everything the viewer reads, for one language.
 
         The listener registrations are written after their processes started,
         since one claiming to predate its own PID is treated as a recycled PID
@@ -270,19 +259,7 @@ class Stage:
         write_jsonl(self.state / "utterances.jsonl",
                     [{"time": at, "text": text, "to": chip_pids[chip], **({"edited": True} if edited else {})}
                      for at, chip, edited, text in sample["sent"]])
-        (self.state / "partial.txt").write_text(sample["draft_partial" if draft else "partial"],
-                                               encoding="utf-8")
-        # Draft mode is the daemon's "paused" flag, and what it collected
-        # while paused is held.jsonl, which the page loads into the draft box.
-        paused = self.state / "paused"
-        held = self.state / "held.jsonl"
-        if draft:
-            paused.write_text("", encoding="utf-8")
-            write_jsonl(held, [{"time": "10:47:12", "text": line}
-                               for line in sample["draft"]])
-        else:
-            paused.unlink(missing_ok=True)
-            held.unlink(missing_ok=True)
+        (self.state / "partial.txt").write_text(sample["partial"], encoding="utf-8")
         for name in ("muted", "history_cleared_at", "draft_carry"):
             (self.state / name).unlink(missing_ok=True)
 
@@ -451,8 +428,8 @@ class Chrome:
 
 # The page is ready to photograph once the language took, both chips are in,
 # every sent card is on screen with its destination named, the unsent card
-# holds the recognized text and the fonts are loaded. In draft mode the draft
-# box has to be filled as well.
+# holds the recognized text, Instant mode is the one selected and the fonts
+# are loaded.
 READY = """
 (async () => {
   const q = s => [...document.querySelectorAll(s)];
@@ -460,9 +437,7 @@ READY = """
   if (q('#routeChips > *').length < 2) return false;
   if (q('#log .entry').length !== %(sent)d) return false;
   if (!document.getElementById('stream').textContent.trim()) return false;
-  if (%(draft)s && !document.getElementById('draft').value.trim()) return false;
-  if (!%(draft)s && document.getElementById('segLive').getAttribute('aria-checked') !== 'true') return false;
-  if (%(draft)s && document.getElementById('segHold').getAttribute('aria-checked') !== 'true') return false;
+  if (document.getElementById('segLive').getAttribute('aria-checked') !== 'true') return false;
   await document.fonts.ready;
   return true;
 })()
@@ -477,27 +452,24 @@ async def capture_all(langs, out_dir, python, keep):
         stage.setup()
         await chrome.start()
         for lang in langs:
-            for mode in ("instant", "draft"):
-                draft = mode == "draft"
-                stage.seed(lang, draft)
-                stage.start_viewer()
-                url = f"http://127.0.0.1:{stage.port}/"
-                await wait_http(url, stage)
-                await chrome.open(url, PAGE_PRELUDE % {"lang": json.dumps(lang)})
-                await chrome.wait_for(READY % {"lang": json.dumps(lang), "sent": len(SAMPLES[lang]["sent"]),
-                                               "draft": "true" if draft else "false"},
-                                      f"the {lang} {mode} screen")
-                # An ordinary tab asks "Keep this window on top" in a bubble
-                # every time it loads, and any click outside it puts it away.
-                # Put it away the same way here, so it does not cover the
-                # header in every picture.
-                await chrome.evaluate("document.getElementById('floatAsk').hidden = true")
-                # Let the chips, the log and the level meter settle their
-                # transitions before the shutter.
-                await asyncio.sleep(1.5)
-                out = out_dir / f"screen-{lang}-{mode}.png"
-                await chrome.screenshot(out)
-                print(f"wrote {out.relative_to(REPO) if out.is_relative_to(REPO) else out}")
+            stage.seed(lang)
+            stage.start_viewer()
+            url = f"http://127.0.0.1:{stage.port}/"
+            await wait_http(url, stage)
+            await chrome.open(url, PAGE_PRELUDE % {"lang": json.dumps(lang)})
+            await chrome.wait_for(READY % {"lang": json.dumps(lang), "sent": len(SAMPLES[lang]["sent"])},
+                                  f"the {lang} screen")
+            # An ordinary tab asks "Keep this window on top" in a bubble
+            # every time it loads, and any click outside it puts it away.
+            # Put it away the same way here, so it does not cover the
+            # header in every picture.
+            await chrome.evaluate("document.getElementById('floatAsk').hidden = true")
+            # Let the chips, the log and the level meter settle their
+            # transitions before the shutter.
+            await asyncio.sleep(1.5)
+            out = out_dir / f"screen-{lang}.png"
+            await chrome.screenshot(out)
+            print(f"wrote {out.relative_to(REPO) if out.is_relative_to(REPO) else out}")
     finally:
         # Chrome going down badly must not keep the viewer and the dummies
         # from being stopped after it.
