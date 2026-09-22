@@ -377,10 +377,21 @@ class Tail:
                 if rec and "system_warning" not in rec:
                     self.history.append(rec)
 
-    def _cleared_offset(self) -> int:
+    def _epoch(self) -> str:
         try:
-            offset = int(self.cleared_file.read_text(encoding="utf-8").strip())
+            return (self.path.parent / "log_epoch").read_text(encoding="utf-8").strip() or "-"
+        except OSError:
+            return "-"
+
+    def _cleared_offset(self) -> int:
+        # The daemon empties the log every time it starts (and writes a new
+        # log_epoch), so a mark from before that points into a different file.
+        try:
+            epoch, offset = self.cleared_file.read_text(encoding="utf-8").split()
+            offset = int(offset)
         except (OSError, ValueError):
+            return 0
+        if epoch != self._epoch():
             return 0
         # A log smaller than the mark was rebuilt since, so the mark no
         # longer points at a line boundary. Show all of the new one.
@@ -395,7 +406,7 @@ class Tail:
             size = self.path.stat().st_size
         except OSError:
             size = 0
-        self.cleared_file.write_text(str(size), encoding="utf-8")
+        self.cleared_file.write_text(f"{self._epoch()} {size}", encoding="utf-8")
         self.history.clear()
 
     @staticmethod

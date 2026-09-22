@@ -398,6 +398,12 @@ case "$cmd" in
     # It does not use the mic, so it can run with the daemon. Drop the output.
     "$0" viewer >/dev/null
     ;;
+  unlisten)
+    # This session is done listening for now (the skill decided not to re-arm
+    # its watch). Its chip and any hold on the destination go right away.
+    _sid="${CLAUDE_CODE_SESSION_ID:-${CODEX_THREAD_ID:-${CODEX_SESSION_ID:-}}}"
+    [[ -n "$_sid" ]] && "$PY" "$APP" --unlisten "$_sid"
+    ;;
   stop)
     # Stopping on purpose: this session's listen, when it goes, should leave no
     # place behind for a re-arm to take up (see leave_listener).

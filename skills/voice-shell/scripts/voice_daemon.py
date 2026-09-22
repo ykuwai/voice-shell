@@ -915,6 +915,9 @@ COMMAND_WORDS = {
             # 「てなおし」 easily comes out as 「出直し」 (measured)
             "出直し", "でなおし", "出直して",
             "直してから", "なおしてから", "あとで直す", "ちょっと直す",
+            # A bare katakana noun, the same reasoning that lets 「キャンセル」
+            # stand alone: it almost never closes a real Japanese sentence.
+            "エディット", "えでぃっと",
         ],
         "en": ["edit this", "let me edit", "hold this"],
         # Bare "edit" is in no column either, for the same reason as bare "cancel".
@@ -1945,6 +1948,9 @@ def parse_args():
                    help="Print 'pid order offset' of SESSION's fresh "
                         "tombstone, if any, or BLOCKED when the session was "
                         "disconnected from the screen. Does not remove it")
+    p.add_argument("--unlisten", metavar="SESSION", default=None,
+                   help="SESSION is done listening for now: drop its place "
+                        "and any hold it has on the destination")
     p.add_argument("--forget", metavar="SESSION", default=None,
                    help="Remove SESSION's tombstone once its place is taken")
     p.add_argument("--progress-of", metavar="PID", default=None,
@@ -2115,6 +2121,16 @@ def resolve_target(log_path):
     # and handed to its next listen, instead of landing on some other desk.
     if raw and raw in _fresh_tombstone_pids(log_path):
         return raw         # only fresh within AWAY_HOLD, see _tombstones
+
+    # Chosen, but it left longer ago than the hold and nothing took its place.
+    # Let the choice go, rather than let a PID Windows may have handed to some
+    # unrelated process pass the live-PID check below.
+    if raw and raw in _departed_pids(log_path):
+        try:
+            write_atomic(route_file(log_path), "")
+        except OSError:
+            pass
+        raw = ""
 
     # The registration file can go missing (a stray cleanup, a bug in whatever
     # else touches that folder) while the process behind it is still running.
@@ -2467,6 +2483,33 @@ def adopt_tombstone(log_path, session):
             "offset": offset}
 
 
+def _departed_pids(log_path):
+    """PIDs of every tombstone still on disk, held or not."""
+    d = gone_dir(log_path)
+    if not d.is_dir():
+        return set()
+    out = set()
+    for f in d.iterdir():
+        if f.suffix:
+            continue
+        data = _read_json(f) or {}
+        if "left" in data:
+            out.add(str(data.get("pid")))
+    return out
+
+
+def unlisten(log_path, session):
+    """Done listening on purpose, from the agent's side."""
+    tomb = _read_json(_gone_file(log_path, session)) or {}
+    pid = str(tomb.get("pid") or "")
+    try:
+        if pid and route_file(log_path).read_text(encoding="utf-8").strip() == pid:
+            write_atomic(route_file(log_path), "")
+    except OSError:
+        pass
+    mark_stopped(log_path, session)
+
+
 def forget_tombstone(log_path, session):
     tomb = _gone_file(log_path, session)
     data = _read_json(tomb)
@@ -2815,6 +2858,10 @@ def main():
 
     if args.forget is not None:
         forget_tombstone(args.log_file, args.forget)
+        return
+
+    if args.unlisten is not None:
+        unlisten(args.log_file, args.unlisten)
         return
 
     if args.progress_of is not None:
