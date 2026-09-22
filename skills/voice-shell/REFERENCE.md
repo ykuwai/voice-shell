@@ -22,9 +22,11 @@ supports. The seven kinds, with English examples:
   - Unmute tolerates only a couple of characters, and only wordings that name
     the mic ("えーとミュート解除"; a bare 解除 must be exact).
   - Everyday loanwords and English names (エディット, ドラフト, インスタント,
-    draft, hold, instant, live) switch only when said alone or after fillers
-    only ("えーとドラフト", "um, live mode"). "PRをドラフトにして" is sent as a prompt.
-  - Native instant words (即時) must be exact.
+    draft, hold, instant, live), and the draft and instant words of the other
+    languages (borrador, directo, en direct, Sofortmodus, 即时模式, 즉시 모드, ...)
+    switch only when said alone or after fillers only ("えーとドラフト",
+    "um, live mode"). "PRをドラフトにして" is sent as a prompt.
+  - Japanese native instant words (即時) must be exact.
 - Destination phrases work only with two or more listeners, follow the chip
   order, and work while the mic is off. Spoken number variants are absorbed.
 - A short sound plays when a command takes effect.
