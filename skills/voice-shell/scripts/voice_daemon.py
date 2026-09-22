@@ -1144,11 +1144,15 @@ _MODE_LEAD_FILLERS = tuple(sorted(
     key=len, reverse=True,
 ))
 _MODE_LEAD_TRIM = " \t　。、．，・！？!?.,…ー~〜"
+# Only punctuation comes off the front and back. The long vowel mark and the
+# waves are let go only after a filler has matched (「えーーー」), never before,
+# or 「えー」 is cut down to 「え」 ahead of the comparison and matches nothing.
+_MODE_EDGE_TRIM = " \t　。、．，・！？!?.,…"
 
 
 def only_fillers(text: str) -> bool:
     """Whether what is left is nothing but fillers (or nothing at all)."""
-    rest = text.lower().strip(_MODE_LEAD_TRIM)
+    rest = text.lower().strip(_MODE_EDGE_TRIM)
     while rest:
         for f in _MODE_LEAD_FILLERS:
             if rest.startswith(f):

@@ -106,6 +106,13 @@ class CommonWordsNeedAWholeUtteranceTest(unittest.TestCase):
         for s in ("um live", "uh, live mode", "okay instant", "yeah, send live"):
             self.assertEqual(mode_command_shape(s), "live", s)
 
+    def test_fillers_ending_in_a_long_vowel(self):
+        # 「えー」 had its ー trimmed before the comparison and matched nothing
+        for s in ("えードラフト", "そのードラフト", "えーーードラフト", "えー、エディット"):
+            self.assertEqual(mode_command_shape(s), "hold", s)
+        self.assertEqual(mode_command_shape("あーインスタント"), "live")
+        self.assertIsNone(mode_command_shape("え、ドラフト"))
+
     def test_anything_else_ahead_stays_text(self):
         for s in ("記事をエディット", "写真をえでぃっと", "このページをエディットモード",
                   "save a draft", "a draft", "the draft", "write a draft mode",
