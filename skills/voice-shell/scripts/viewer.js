@@ -3583,7 +3583,7 @@ function newRecognition(generation) {
     recStarting = false;
     // A refused microphone needs a person to act. Roll the setting back and say so.
     if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
-      if (autoResumed && !vizArmed) {
+      if (autoResumed) {
         autoResumed = false;
         armPending = true;
         route = 'off';

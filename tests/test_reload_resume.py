@@ -115,7 +115,7 @@ assert(el2.draft.value === '' && h2.state().seeded === false,
         self.assertIn("refreshState()", arm)
         # A refusal of the unattended start falls back to touch-to-start
         denied = source.split("ev.error === 'not-allowed'", 1)[1].split("disableBrowserASR", 1)[0]
-        self.assertIn("if (autoResumed && !vizArmed)", denied)
+        self.assertIn("if (autoResumed)", denied)
         self.assertIn("armPending = true", denied)
 
 
