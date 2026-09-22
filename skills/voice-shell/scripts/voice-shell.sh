@@ -613,7 +613,19 @@ REG
     # Slot in the addressee filter. Drop a line that is not addressed to us,
     # including one with no addressee at all (#73, not arriving beats arriving
     # at the wrong desk).
-    tail -F -n 0 "$LOG_FILE" | "$PY" -u "$HERE/listen_filter.py" "$reg_pid" &
+    #
+    # --pid ties tail's life to this listen. On Windows, listen_filter.py quits
+    # once Monitor stops reading, and this listen then exits through its trap,
+    # but tail itself only notices a closed pipe on its next write, which for a
+    # session nobody routes to may never come. GNU tail (Linux, Git Bash) has
+    # --pid. BSD tail on macOS does not, and does not need it.
+    tail_opts=(-F -n 0)
+    tail --help 2>&1 | grep -q -- '--pid' && tail_opts+=("--pid=$$")
+    # Fed by process substitution rather than a pipe so that $! and the wait
+    # below are about the filter alone. Under Git Bash, waiting on a
+    # background pipeline waits for tail too, and tail (held to this listen by
+    # --pid) waits right back, so the filter quitting never let listen go.
+    "$PY" -u "$HERE/listen_filter.py" "$reg_pid" < <(tail "${tail_opts[@]}" "$LOG_FILE") &
     tail_pid=$!
 
     # A registration missing while its process is still running used to turn
@@ -636,6 +648,16 @@ REG
     reg_bytes="$(cat "$reg" 2>/dev/null || true)"
     ( while kill -0 "$tail_pid" 2>/dev/null; do
         sleep 30
+        # The listen process itself is gone (a forceful kill on Windows can
+        # take it and leave this loop and the pipeline behind). Without this
+        # the loop keeps touching and rewriting the registration of a session
+        # that no longer exists, so it never leaves the destination row. In a
+        # subshell $$ is still the parent listen's own PID.
+        if ! kill -0 "$$" 2>/dev/null; then
+          rm -f "$reg"
+          kill "$tail_pid" 2>/dev/null || true
+          exit 0
+        fi
         # #105: retire_pid above is meant to have stopped this process
         # outright before it ever gets here again, on a reattach elsewhere
         # for the same session. If that ever missed (taskkill unavailable,

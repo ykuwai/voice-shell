@@ -23,7 +23,10 @@ what vanishes. Only this path splits. utterances.jsonl and the viewer history
 keep one line per utterance.
 """
 import json
+import os
 import sys
+import threading
+import time
 
 # How much Monitor carries on one line. Measured, a JSON line was cut off past
 # 500 characters. Not bytes (Japanese and ASCII both cut at the same 490th
@@ -129,8 +132,74 @@ def split_line(rec, line):
     return out or [line]
 
 
+# How the reader side's state reads back through NtQueryInformationFile
+# (FilePipeLocalInformation). CLOSING means whoever was reading our stdout,
+# Monitor, has gone away.
+_FILE_PIPE_LOCAL_INFORMATION = 24
+_FILE_PIPE_CLOSING_STATE = 4
+
+
+def _exit_when_reader_gone(every=5.0):
+    """On Windows, quit once nobody reads our stdout any more.
+
+    When a Monitor watch expires on Windows, Claude Code does not always take
+    down the whole listen tree. The part left behind never notices, because
+    it only writes when an utterance is addressed to it, and one addressed to
+    a session that has ended never comes. Meanwhile its heal loop keeps
+    touching the registration, so the ended session sits in the destination
+    row for good. Measured: a closed reader flips the pipe state from
+    CONNECTED (3) to CLOSING (4), while an empty write still succeeds and a
+    PeekNamedPipe on the write end is refused, so the pipe state is the one
+    reliable signal. Exiting ends the pipeline `listen` waits on, and its
+    EXIT trap removes the registration.
+
+    POSIX needs none of this (a closed reader and SIGPIPE, or the process
+    group going down with the watch, already take care of it).
+    """
+    if not sys.platform.startswith("win"):
+        return
+    try:
+        import ctypes
+        import msvcrt
+        from ctypes import wintypes
+
+        class _IoStatus(ctypes.Structure):
+            _fields_ = [("Status", ctypes.c_void_p), ("Information", ctypes.c_void_p)]
+
+        class _PipeLocalInfo(ctypes.Structure):
+            _fields_ = [(n, wintypes.ULONG) for n in (
+                "NamedPipeType", "NamedPipeConfiguration", "MaximumInstances",
+                "CurrentInstances", "InboundQuota", "ReadDataAvailable",
+                "OutboundQuota", "WriteQuotaAvailable", "NamedPipeState",
+                "NamedPipeEnd")]
+
+        handle = wintypes.HANDLE(msvcrt.get_osfhandle(sys.stdout.fileno()))
+        query = ctypes.windll.ntdll.NtQueryInformationFile
+    except Exception:
+        return
+
+    def state():
+        io, info = _IoStatus(), _PipeLocalInfo()
+        status = query(handle, ctypes.byref(io), ctypes.byref(info),
+                       ctypes.sizeof(info), _FILE_PIPE_LOCAL_INFORMATION)
+        return info.NamedPipeState if status == 0 else None
+
+    # Not a pipe at all (a console, a file): there is no reader to lose.
+    if state() is None:
+        return
+
+    def watch():
+        while True:
+            time.sleep(every)
+            if state() == _FILE_PIPE_CLOSING_STATE:
+                os._exit(0)
+
+    threading.Thread(target=watch, daemon=True).start()
+
+
 def main():
     me = sys.argv[1] if len(sys.argv) > 1 else ""
+    _exit_when_reader_gone()
     for line in sys.stdin:
         line = line.strip()
         if not line:

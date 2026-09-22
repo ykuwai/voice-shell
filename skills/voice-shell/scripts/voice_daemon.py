@@ -1966,12 +1966,23 @@ def _pid_alive(pid):
         # Whether a handle can be taken stands in for it.
         import ctypes
         PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-        handle = ctypes.windll.kernel32.OpenProcess(
-            PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-        if handle:
-            ctypes.windll.kernel32.CloseHandle(handle)
-            return True
-        return False
+        STILL_ACTIVE = 259
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return False
+        # A handle can still be opened on a process that has already exited,
+        # for as long as anything else holds one (MSYS children keep one on
+        # their parent). Measured: a `listen` gone from the task list still
+        # passed here, so its registration was never cleared. The exit code
+        # is what tells the two apart.
+        try:
+            code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return True
+            return code.value == STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
     try:
         os.kill(pid, 0)
         return True
