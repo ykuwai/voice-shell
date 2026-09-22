@@ -96,6 +96,8 @@ LEVEL_FILE = STATE_DIR / "level.txt"
 # While this file exists, utterances are held. Recognition keeps going but nothing
 # goes to Claude. It piles up in the hold tray so you can fix it before sending.
 PAUSE_FILE = STATE_DIR / "paused"
+# How long draft mode waits for quiet before a chunk lands in the box.
+DRAFT_WAIT_SEC = 2.0
 # Where utterances that settled while held are kept.
 HOLD_FILE = STATE_DIR / "held.jsonl"
 # While this file exists the mic counts as off. Results are thrown away, kept nowhere.
@@ -3030,7 +3032,22 @@ def main():
         except (OSError, ValueError):
             return None      # Just read mid-write. Picked up again on the next cycle
 
-    args.want_tuning = want_tuning
+    # In draft mode a settled chunk only lands in the box on screen, so a long
+    # "pause to send" (5 or 10 seconds) would just make the box lag. While
+    # drafting, the wait is capped at DRAFT_WAIT_SEC (viewer.js does the same
+    # for browser recognition). Only the live re-read is capped, never what
+    # is saved.
+    def want_tuning_live():
+        tuned = want_tuning()
+        if tuned is None:
+            return None
+        if (Path(args.log_file).parent / PAUSE_FILE.name).exists():
+            wait = tuned.get("silence_duration")
+            if isinstance(wait, (int, float)) and wait > DRAFT_WAIT_SEC:
+                tuned = dict(tuned, silence_duration=DRAFT_WAIT_SEC)
+        return tuned
+
+    args.want_tuning = want_tuning_live
 
     # When saved values exist, apply them from startup onward
     saved = want_tuning() or {}

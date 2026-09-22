@@ -1528,7 +1528,7 @@ function paintBrowserSendCue(now) {
     el.sendOne.style.setProperty('--r', '0');
     return;
   }
-  const wait = (Number(tuning.silence_duration) || 0) * 1000;
+  const wait = sendWaitMs();
   const target = wait > 0 ? Math.max(0, Math.min(1, (now - lastLoudAt) / wait)) : 1;
   // Checked against the whole queue joined together, the shape it actually
   // goes out in (browserGateTick), not just the oldest item alone. A short
@@ -3584,6 +3584,16 @@ const BROWSER_SEND_GATE_MS = 100;
 let lastLoudAt = 0;
 let pendingBrowserSends = [];   // [{text, queuedAt}], oldest first
 
+/* How long to wait for quiet before a finished clause moves on. In draft mode
+   it only lands in the box on screen, nothing goes to Claude yet, so a long
+   "pause to send" (5 or 10 seconds, set for thinking out loud) would just
+   leave the box lagging behind. There the wait is capped at DRAFT_WAIT_MS. */
+const DRAFT_WAIT_MS = 2000;
+function sendWaitMs() {
+  const wait = Math.max(0, (Number(tuning.silence_duration) || 0) * 1000);
+  return route === 'hold' ? Math.min(wait, DRAFT_WAIT_MS) : wait;
+}
+
 function browserGateTick() {
   browserRmsNow = computeBrowserRms();
   if (engine === 'off' || asrActive()) paintGauge();
@@ -3595,7 +3605,7 @@ function browserGateTick() {
   if (browserRmsNow >= tuning.silence_threshold) lastLoudAt = now;
   if (!pendingBrowserSends.length) return;
   const quietFor = now - lastLoudAt;
-  const waitMs = Math.max(0, (Number(tuning.silence_duration) || 0) * 1000);
+  const waitMs = sendWaitMs();
   // A cap against a rising noise floor. Some machines' getUserMedia runs
   // automatic gain control that climbs through a real pause and never dips
   // back under a fixed mark on its own, and a wait with no ceiling then
