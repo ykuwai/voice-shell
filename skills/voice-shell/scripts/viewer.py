@@ -1233,12 +1233,13 @@ async def main_async(args):
             return web.json_response({"dropped": "muted"})
 
         # a trailing 「キャンセル」 or 「手直し」 gets the same treatment.
-        # active_tail hands back nothing for a signal the user switched off, and
-        # then the phrase travels on as ordinary speech, the same as in the daemon.
-        if vd.take_tail(text, vd.active_tail("cancel_tail")) is not None:
+        # take_active_tail hands back nothing for a signal (or the wording at the
+        # tail) the user switched off, and then the phrase travels on as ordinary
+        # speech, the same as in the daemon.
+        if vd.take_active_tail(text, "cancel_tail") is not None:
             vd.note_voice_cmd(args.log_file, "cancelled", "", text)
             return web.json_response({"dropped": "cancelled"})
-        body_text = vd.take_tail(text, vd.active_tail("hold_tail"))
+        body_text = vd.take_active_tail(text, "hold_tail")
         force_hold = body_text is not None
         if force_hold:
             if not body_text:

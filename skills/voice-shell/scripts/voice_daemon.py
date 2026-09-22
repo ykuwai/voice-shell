@@ -527,11 +527,12 @@ def apply_replacements(text: str, replace: dict) -> str:
 # apart from a real word go in (「あのー」 is in, the demonstrative 「あの」 is not,
 # or 「あのファイルを開いて」 loses what it points at).
 FILLERS = {
-    "ja": ["えーと", "えっと", "ええと", "あのー", "そのー", "うーん", "んー"],
-    "en": ["um", "uh"],
-    "es": ["eh"],
-    "fr": ["euh"],
-    "de": ["ähm", "äh"],
+    "ja": ["えーと", "えーっと", "えっと", "ええと", "ええっと", "あのー", "そのー",
+           "うーん", "んー"],
+    "en": ["um", "umm", "uh", "ah", "oh"],
+    "es": ["eh", "pues", "o sea"],
+    "fr": ["euh", "heu", "bah"],
+    "de": ["ähm", "äh", "öhm", "öh"],
     "zh": ["呃", "嗯"],
     "zh-TW": ["呃", "嗯"],
     "ko": ["음", "어"],
@@ -938,8 +939,8 @@ COMMAND_WORDS = {
     # close. 「取消」 sat in the Japanese column and took 「把会议取消」 whole, and the
     # speaker never got that sentence back.
     #
-    # The order matters. Matching runs from the tail and strips the first hit, so they
-    # are checked in written order (so a long phrasing is not eaten by a short one).
+    # The order does not decide anything. Matching takes the longest wording at the
+    # tail (take_tail_word), so a long phrasing is not eaten by a short one inside it.
     "cancel_tail": {
         # Single-verb forms (cancel / cancelar / annuler / abbrechen / 取消 / 취소)
         # are in no column. This command matches the end of a sentence, so an ordinary
@@ -1045,9 +1046,9 @@ def command_key(text: str) -> str:
 # happens here. Write 「mutethemic」 in the table and the list on screen shows exactly
 # that, and the English becomes unreadable.
 #
-# Commands that attach to the end of a sentence are not folded. Those are compared
-# raw against the tail of an utterance (「cancel that」 is needed with its space), so
-# they stay a tuple in written order. The order they are matched in matters too.
+# Commands that attach to the end of a sentence are kept as written, a tuple in
+# written order. take_tail_word folds them at the comparison, the same shape as
+# here, and takes the longest one at the tail whatever order they sit in.
 MUTE_WORDS = {command_key(w) for w in builtin_words("mute")}
 UNMUTE_WORDS = {command_key(w) for w in builtin_words("unmute")}
 LIVE_WORDS = {command_key(w) for w in builtin_words("live")}
@@ -1099,6 +1100,11 @@ UNMUTE_TAIL_NOISE_MAX = 3
 # and so they do with nothing but a filler ahead of them (MODE_LOANWORD_TAIL below).
 # Native Japanese words like 手直し and 即時 are not in here. Nobody says them about
 # anything but this tool, so hold keeps its lead-in tolerance for them.
+#
+# The live side carries every other language's instant words as well (directo, en
+# direct, Sofortmodus, 即时模式, 즉시 모드 and the rest). Live has no lead-in
+# tolerance of its own, so without them here 「eh, directo」 went nowhere while
+# 「eh, borrador」 switched. Being here only lets a filler ahead of them.
 MODE_COMMON_WORDS = {
     "hold": {
         "エディット", "えでぃっと", "エディットモード",
@@ -1115,6 +1121,8 @@ MODE_COMMON_WORDS = {
     "live": {
         "インスタント", "いんすたんと", "インスタントモード",
         "live", "live mode", "instant", "instant mode", "send live",
+        *(w for lang, ws in COMMAND_WORDS["live"].items() if lang not in ("ja", "en")
+          for w in ws),
     },
 }
 # Kept under its old name, the draft words are what it was made for.
@@ -1135,20 +1143,29 @@ MODE_LOANWORD_TAIL = {
 }
 # The fillers of every language, plus the short replies that open a sentence out
 # of habit. 「あの」 goes in here though it is kept out of FILLERS, since nothing is
-# being deleted, only let ahead of the word.
+# being deleted, only let ahead of the word. The same goes for the fillers that are
+# real words too ("well", 「este」 and 「bueno」, 「那个」, 「also」, 「그러니까」).
+# In FILLERS they would be cut out of the middle of a sentence ("it works well"
+# down to "it works", 「este archivo」 down to 「archivo」).
 _MODE_LEAD_FILLERS = tuple(sorted(
     {w.lower() for ws in FILLERS.values() for w in ws}
     | {w.lower() for ws in NOISE_ONLY.values() for w in ws}
     | {"はい", "うん", "ええ", "えー", "あー", "あの", "ん", "네", "예", "응", "그", "저",
-       "yes", "yeah", "ok", "okay", "sí", "vale", "oui", "ja", "好", "好的"},
+       "yes", "yeah", "ok", "okay", "sí", "vale", "oui", "ja", "好", "好的",
+       "well", "este", "bueno", "那个", "那個", "ben", "bon", "alors", "enfin",
+       "also", "naja", "na ja", "아", "저기", "그러니까", "그니까"},
     key=len, reverse=True,
 ))
 _MODE_LEAD_TRIM = " \t　。、．，・！？!?.,…ー~〜"
+# Only punctuation comes off the front and back. The long vowel mark and the
+# waves are let go only after a filler has matched (「えーーー」), never before,
+# or 「えー」 is cut down to 「え」 ahead of the comparison and matches nothing.
+_MODE_EDGE_TRIM = " \t　。、．，・！？!?.,…"
 
 
 def only_fillers(text: str) -> bool:
     """Whether what is left is nothing but fillers (or nothing at all)."""
-    rest = text.lower().strip(_MODE_LEAD_TRIM)
+    rest = text.lower().strip(_MODE_EDGE_TRIM)
     while rest:
         for f in _MODE_LEAD_FILLERS:
             if rest.startswith(f):
@@ -1196,13 +1213,11 @@ def clean_user_phrase(kind: str, phrase) -> str:
     if kind not in USER_COMMAND_KINDS or not isinstance(phrase, str):
         return ""
     if kind in TAIL_KINDS:
-        # active_tail hands these straight to take_tail, which matches the
-        # raw tail of an utterance (trimmed and lowercased, see _TAIL_TRIM),
-        # never through command_key the way mute/live/hold/route are. Folding
-        # a multi-word addition through command_key here, as the fallthrough
-        # below does, would drop its internal spaces ("forget this one" ->
-        # "forgetthisone"), a shape nothing actually said aloud ever ends in,
-        # so the phrase would sit in the list looking saved and never fire.
+        # Kept as typed (trimmed and lowercased, see _TAIL_TRIM) rather than
+        # folded through command_key the way mute/live/hold/route are, so the
+        # list on screen still reads "forget this one" and not "forgetthisone".
+        # take_tail_word folds both sides at the comparison, so spacing does
+        # not decide whether it fires.
         key = phrase.strip().rstrip(_TAIL_TRIM).lower()
         return key if _USER_PHRASE_MIN <= len(key) <= _USER_PHRASE_MAX else ""
     key = command_key(phrase)
@@ -1277,8 +1292,8 @@ def clean_off_kinds(data) -> list:
 # What is stored is the wording as it stands in the table, not the folded key. It is
 # read by a person in a file, and 「マイクをオフにして」 is readable where
 # 「マイクをオフにして」 folded down is not. Folding happens where the comparison
-# happens, one place per kind, since the four spoken-alone kinds compare on
-# command_key and the two tail kinds compare on a lowercased tail.
+# happens. Every kind compares in the command_key shape, the tails included, since
+# take_tail_word folds the tail the same way an exact match folds the whole.
 OFF_WORDS_KEY = "off_words"
 
 
@@ -1341,16 +1356,12 @@ def keep_off_words(sent, prev: dict, shown: dict) -> dict:
     return out
 
 
-# The two that attach to the end of a sentence. They are compared against a tail as
-# written, so their switched-off wordings fold with lower() and the rest with
-# command_key.
+# The two that attach to the end of a sentence.
 TAIL_KINDS = ("cancel_tail", "hold_tail")
 
 
 def _fold_off(kind: str, words) -> frozenset:
-    """Put the switched-off wordings into the shape that kind gets compared in."""
-    if kind in TAIL_KINDS:
-        return frozenset(w.lower() for w in words)
+    """Put the switched-off wordings into the shape every kind gets compared in."""
     return frozenset(command_key(w) for w in words)
 
 
@@ -1441,26 +1452,41 @@ def word_enabled(kind: str, text: str) -> bool:
 
 
 def active_tail(kind: str) -> tuple:
-    """The tail wordings that still bite, empty when that signal is switched off.
+    """The tail wordings to match against, empty when that signal is switched off.
 
     The tables themselves (CANCEL_TAIL / HOLD_TAIL) are left whole. Emptying them
     would mean the list on screen loses the wordings too, and the reader could no
     longer see what they are switching back on.
 
-    Wordings struck one at a time drop out here, in written order, because take_tail
-    takes the first that matches and that order is what decides which of two
-    overlapping tails wins. Added ones come after the built-ins, longest first among
-    themselves so one that happens to end in another does not swallow the longer,
-    more specific one first.
+    **Wordings struck one at a time stay in here.** take_tail_word takes the longest
+    wording at the tail, and only then is that wording asked about (take_active_tail
+    below), the same as mute. Dropped before matching, a struck 「全部キャンセル」
+    would leave the shorter 「キャンセル」 inside it to fire in its place.
     """
     if not command_enabled(kind):
         return ()
     table = CANCEL_TAIL if kind == "cancel_tail" else HOLD_TAIL
-    off = load_commands()[OFF_WORDS_KEY].get(kind)
-    if off:
-        table = tuple(w for w in table if w.lower() not in off)
-    mine = sorted(load_commands().get(kind) or (), key=len, reverse=True)
-    return table + tuple(mine) if mine else table
+    mine = tuple(load_commands().get(kind) or ())
+    return table + mine
+
+
+def take_active_tail(text: str, kind: str):
+    """The body with that tail signal taken off, or None when it does not bite.
+
+    The longest wording at the tail decides, struck or not, and a struck one then
+    lets the whole utterance through as ordinary speech. A wording the user typed
+    in by hand wins over the strike, as in word_enabled.
+    """
+    hit = take_tail_word(text, active_tail(kind))
+    if hit is None:
+        return None
+    body, word = hit
+    key = command_key(word)
+    if key in load_commands()[OFF_WORDS_KEY].get(kind, ()):
+        mine = {command_key(w) for w in load_commands().get(kind) or ()}
+        if key not in mine:
+            return None
+    return body
 
 
 def clean_user_commands(data) -> dict:
@@ -1895,28 +1921,54 @@ _TAIL_PREFIX = ("コマンド", "こまんど", "command")
 _TAIL_TRIM = " \t\u3000。、．，・！？!?.,"
 
 
+def _folded_chars(text: str) -> list:
+    """text in the command_key shape, one (character, where it came from) at a time.
+
+    Where it came from is what lets the body be cut at the spoken wording once the
+    folded tail has matched, since the two no longer line up character for character.
+    """
+    out = []
+    for i, c in enumerate(text):
+        for f in c.translate(_CMD_DROP).lower():
+            out.append((f, i))
+    return out
+
+
 def take_tail_word(text: str, tails):
     """Like take_tail, but hand back (body, the wording that matched), or None.
 
     The wording is what a switch-off is checked against. Checked against the
     whole utterance instead, 「はいミュート」 is not the struck 「ミュート」 and
     the lead-in slips a switched-off wording straight past the check.
+
+    The tail is compared in the command_key shape, the same as an exact match, so
+    spaces and symbols do not decide it. Compared raw, 「음 마이크음소거」 missed the
+    table's 「마이크 음소거」 and fell to the shorter 「음소거」 inside it, which is
+    exactly the bypass a strike on the long wording has to close.
+
+    The longest wording at the tail wins, whatever order tails comes in (ties go
+    to the one written first), so a long phrasing is never eaten by a short one
+    inside it.
     """
     body = text.strip().rstrip(_TAIL_TRIM)
-    low = body.lower()
+    folded = _folded_chars(body)
+    key = "".join(f for f, _ in folded)
+    best = None
     for w in tails:
-        # The table side is lowercased for the comparison too. In a language that
-        # capitalizes nouns, like German, comparing against the form as written in
-        # the table would never match.
-        if not low.endswith(w.lower()):
-            continue
-        rest = body[: len(body) - len(w)].rstrip(_TAIL_TRIM)
-        for pre in _TAIL_PREFIX:          # The lead-in in 「〜。コマンド手直し」
-            if rest.lower().endswith(pre):
-                rest = rest[: len(rest) - len(pre)].rstrip(_TAIL_TRIM)
-                break
-        return rest, w
-    return None
+        # Lowercased on the table side too. In a language that capitalizes nouns,
+        # like German, the form as written in the table would never match.
+        wk = command_key(w)
+        if wk and key.endswith(wk) and (best is None or len(wk) > len(best[1])):
+            best = (w, wk)
+    if best is None:
+        return None
+    w, wk = best
+    rest = body[: folded[len(folded) - len(wk)][1]].rstrip(_TAIL_TRIM)
+    for pre in _TAIL_PREFIX:          # The lead-in in 「〜。コマンド手直し」
+        if rest.lower().endswith(pre):
+            rest = rest[: len(rest) - len(pre)].rstrip(_TAIL_TRIM)
+            break
+    return rest, w
 
 
 def take_tail(text: str, tails):
@@ -3464,14 +3516,15 @@ def main():
                     continue
 
                 # When 「キャンセル」 lands at the end, throw the whole phrase away.
-                # active_tail hands back nothing when the user switched that signal
-                # off, and then the phrase travels on as ordinary speech.
+                # take_active_tail hands back nothing when the user switched that
+                # signal (or the wording at the tail) off, and then the phrase
+                # travels on as ordinary speech.
                 # A press skips the test outright and the word rides along in the
                 # body. Reaching for send is the opposite of meaning to throw it
                 # away, and 「さっきの予約をキャンセル」 has to survive being asked
                 # for. Saying nothing still throws it away, which is what the
                 # signal was always for.
-                if not forced and take_tail(text, active_tail("cancel_tail")) is not None:
+                if not forced and take_active_tail(text, "cancel_tail") is not None:
                     note_voice_cmd(log_path, "cancelled", "", text)
                     print(f"(cancelled) {text[:40]}", file=sys.stderr, flush=True)
                     continue
@@ -3482,7 +3535,7 @@ def main():
                 # above. That one throws the words away and a press means the
                 # opposite, while this one only decides where they land, and the
                 # person said the word after all.
-                body = take_tail(text, active_tail("hold_tail"))
+                body = take_active_tail(text, "hold_tail")
                 force_hold = body is not None
                 if force_hold:
                     if not body:

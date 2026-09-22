@@ -1412,15 +1412,21 @@ function isBackchannel(text, words) {
    those two, mute only counts with a short noise prefix ahead of the word, not a
    whole clause ahead of it, so TAIL_NOISE_MAX below keeps that ceiling in step
    with MUTE_TAIL_NOISE_MAX in voice_daemon.py. unmute is left out, nothing is on
-   screen to highlight while the mic is off. */
+   screen to highlight while the mic is off.
+   Wordings added by hand sit apart in userWords, because the daemon reads them
+   differently by kind. The two tail kinds match them at the tail like the
+   built-ins, mute only when the whole utterance is that wording
+   (voice_daemon.mic_command_match), so 「はい」 ahead of one leaves it as speech. */
 const TAIL_IDS = ['cancel_tail', 'hold_tail', 'mute'];
 let tailWords = {cancel_tail: new Set(), hold_tail: new Set(), mute: new Set()};
+let userWords = {cancel_tail: new Set(), hold_tail: new Set(), mute: new Set()};
 const TAIL_NOISE_MAX = {mute: 7};
 async function loadTailWords() {
   try {
     const all = await Promise.all(UI_LANGS.map(
       ([code]) => fetch('/api/commands?lang=' + code).then(r => r.json())));
     const out = {cancel_tail: new Set(), hold_tail: new Set(), mute: new Set()};
+    const mine = {cancel_tail: new Set(), hold_tail: new Set(), mute: new Set()};
     for (const d of all) {
       for (const g of d.groups || [])
         if (out[g.id])
@@ -1432,10 +1438,11 @@ async function loadTailWords() {
       // translated), so adding it again on every pass through this loop only
       // repeats work, it does not double anything up (a Set).
       for (const id of TAIL_IDS)
-        for (const w of (d.user || {})[id] || []) if (w) out[id].add(w.toLowerCase());
+        for (const w of (d.user || {})[id] || []) if (w) mine[id].add(w.toLowerCase());
       takeCmdOff(d);
     }
     tailWords = out;
+    userWords = mine;
   } catch { /* an older server has no such endpoint. Leave the drawing as it was */ }
 }
 
@@ -1453,48 +1460,97 @@ function takeCmdOff(d) {
   if (!d || typeof d !== 'object') return;
   const words = {};
   for (const id of TAIL_IDS)
-    words[id] = new Set(((d.off_words || {})[id] || []).map(w => w.toLowerCase()));
+    words[id] = new Set(((d.off_words || {})[id] || []).map(cmdKey).filter(Boolean));
   cmdOff = {kinds: new Set(d.off || []), words};
 }
 
-/* The same test voice_daemon.take_tail runs, against the same wordings
-   voice_daemon.active_tail hands it. All that is wanted here is whether the tail
-   matched, so the body it hands back is not rebuilt. The 「コマンド」 lead-in that
-   one strips only shortens that body, it never decides the match, so leaving it
-   out cannot read the utterance differently.
+/* The same test voice_daemon.take_tail_word runs, against the same wordings
+   voice_daemon.active_tail hands it, and then the same strike check
+   voice_daemon.take_active_tail and word_enabled make.
    Both ways of switching off are asked about, because both change what the daemon
    will do with the utterance. Miss either one and the drawing goes dark for a
    wording that is going to be sent after all, which is the promise this drawing
    exists to keep. */
 const TAIL_TRIM = /[ \t　。、．，・！？!?.,]+$/;
+// voice_daemon._TAIL_PREFIX, the 「コマンド」 lead-in in 「〜。コマンド手直し」
+const TAIL_PREFIX = ['コマンド', 'こまんど', 'command'];
 
-/* The longest wording that matches at the tail, and which kind it belongs to,
-   or null. Longest first across every id together, the same reason
-   voice_daemon.py sorts MUTE_TAIL by length, a long phrasing must not be eaten
-   by a short one that sits inside it. mute's ceiling (TAIL_NOISE_MAX) is
-   checked here too, so a sentence that only happens to end in the word after a
-   real clause is not read as "about to fire" when the daemon would not read it
-   that way either. */
+/* voice_daemon.command_key, one character at a time. Spaces and symbols drop
+   out, full-width digits fold to half-width and the rest is lowercased. Each
+   folded character keeps where it came from, so once a folded tail matches,
+   the text can be cut at the spoken wording even though the two no longer line
+   up character for character. */
+const FOLD_DROP = new Set(' \t\u3000。、．，・…！？!?.,-~〜"\'「」『』()（）');
+const FOLD_WIDE = '１２３４５６７８９０';
+function foldChars(s) {
+  const chars = [], at = [];
+  let i = 0;
+  for (const c of s) {
+    const d = FOLD_WIDE.indexOf(c);
+    const f = d >= 0 ? '1234567890'[d] : FOLD_DROP.has(c) ? '' : c.toLowerCase();
+    for (const x of f) { chars.push(x); at.push(i); }
+    i += c.length;
+  }
+  return {chars, at};
+}
+const cmdKey = s => foldChars(String(s).trim()).chars.join('');
+
+/* The longest wording that matches at the tail, which kind it belongs to and
+   where in text it starts, or null.
+
+   Compared in the command_key shape, the same as the daemon, so spacing does
+   not decide it (「음 마이크음소거」 is the table's 「마이크 음소거」, not the
+   shorter 「음소거」 inside it). Within a kind the longest wording at the tail
+   decides, struck or not, and a struck one then takes the whole kind out for
+   this utterance, for every kind alike, the same as voice_daemon.take_tail_word
+   followed by take_active_tail (the tails) or word_enabled (mute). Skipping
+   struck wordings before choosing would let a shorter one inside it fire
+   instead (「静音」 inside a struck 「麦克风静音」). A wording typed back in by
+   hand wins over its strike, as it does there. Across kinds the longest wins.
+
+   mute's ceiling (TAIL_NOISE_MAX) is measured the way the daemon measures it,
+   on what is left ahead of the word once the 「コマンド」 lead-in is off, so a
+   sentence that only happens to end in the word after a real clause is not
+   read as "about to fire", and 「えーと、コマンドミュート」 is. Words added
+   by hand for mute count only as the whole utterance, as in the daemon. */
 function matchingTailWord(text) {
-  const body = text.trim().replace(TAIL_TRIM, '').toLowerCase();
+  const body = text.trim().replace(TAIL_TRIM, '');
   if (!body) return null;
+  const lead = text.length - text.trimStart().length;
+  const {chars, at} = foldChars(body);
+  const key = chars.join('');
+  if (!key) return null;
   let best = null;
   for (const id of TAIL_IDS) {
     if (cmdOff.kinds.has(id)) continue;
     const off = cmdOff.words[id] || new Set();
+    const mine = userWords[id] || new Set();
     const ceiling = TAIL_NOISE_MAX[id];
-    // The longest wording at the tail decides, struck or not, and a struck one
-    // then takes the whole kind out for this utterance. Skipping struck wordings
-    // before choosing would let a shorter one inside it fire instead (「静音」
-    // inside a struck 「麦克风静音」), which the daemon does not do.
     let hit = null;
-    for (const w of tailWords[id]) {
-      if (!body.endsWith(w)) continue;
-      if (ceiling !== undefined && body.length - w.length > ceiling) continue;
-      if (!hit || w.length > hit.length) hit = w;
+    const consider = (w, wk) => {
+      if (!wk || !key.endsWith(wk)) return;
+      const n = [...wk].length;
+      if (hit && n <= hit.n) return;
+      hit = {w, wk, n};
+    };
+    for (const w of tailWords[id]) consider(w, cmdKey(w));
+    if (id === 'mute') {
+      for (const w of mine) if (cmdKey(w) === key) consider(w, key);
+    } else {
+      for (const w of mine) consider(w, cmdKey(w));
     }
-    if (hit === null || off.has(hit)) continue;
-    if (!best || hit.length > best.word.length) best = {id, word: hit};
+    if (hit === null) continue;
+    const cut = at[chars.length - hit.n];
+    if (ceiling !== undefined && hit.wk !== key) {
+      let rest = body.slice(0, cut).replace(TAIL_TRIM, '');
+      const low = rest.toLowerCase();
+      const pre = TAIL_PREFIX.find(p => low.endsWith(p));
+      if (pre) rest = rest.slice(0, rest.length - pre.length).replace(TAIL_TRIM, '');
+      if ([...rest].length > ceiling) continue;
+    }
+    if (off.has(hit.wk) && ![...mine].some(w => cmdKey(w) === hit.wk)) continue;
+    if (!best || hit.n > best.n)
+      best = {id, word: hit.w, start: lead + cut, n: hit.n};
   }
   return best;
 }
@@ -1920,7 +1976,7 @@ function showTailMark() {
 
 function renderTailMark(s, match) {
   const trimmed = s.replace(TAIL_TRIM, '');
-  const cut = trimmed.length - match.word.length;
+  const cut = match.start;
   const mark = document.createElement('mark');
   mark.className = 'tailcmd ' + (TAIL_PREVIEW_CLASS[match.id] || 'warn');
   mark.textContent = s.slice(cut, trimmed.length);

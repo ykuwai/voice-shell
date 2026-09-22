@@ -149,19 +149,19 @@ class TailSwitchOffTest(SwitchOffCase):
     def test_kind_off(self):
         self.switch_off(kinds=["cancel_tail", "hold_tail"])
         for s in ("キャンセル", "えーとキャンセル", "これを直して、キャンセル"):
-            self.assertIsNone(vd.take_tail(s, vd.active_tail("cancel_tail")), s)
+            self.assertIsNone(vd.take_active_tail(s, "cancel_tail"), s)
         for s in ("手直し", "えーと手直し", "これを直して、手直し"):
-            self.assertIsNone(vd.take_tail(s, vd.active_tail("hold_tail")), s)
+            self.assertIsNone(vd.take_active_tail(s, "hold_tail"), s)
 
     def test_word_off(self):
         self.switch_off(words={"cancel_tail": ["キャンセル"],
                                "hold_tail": ["手直し"]})
         for s in ("キャンセル", "えーとキャンセル", "これを直して、キャンセル"):
-            self.assertIsNone(vd.take_tail(s, vd.active_tail("cancel_tail")), s)
+            self.assertIsNone(vd.take_active_tail(s, "cancel_tail"), s)
         for s in ("手直し", "えーと手直し", "これを直して、手直し"):
-            self.assertIsNone(vd.take_tail(s, vd.active_tail("hold_tail")), s)
-        self.assertEqual(vd.take_tail("これを直して、取り消し",
-                                      vd.active_tail("cancel_tail")), "これを直して")
+            self.assertIsNone(vd.take_active_tail(s, "hold_tail"), s)
+        self.assertEqual(vd.take_active_tail("これを直して、取り消し", "cancel_tail"),
+                         "これを直して")
 
 
 class MachineNameSwitchOffTest(SwitchOffCase):
@@ -224,6 +224,109 @@ assert(m('えーとキャンセル') === null, 'tail word off');
 class ViewerJsSwitchOffTest(unittest.TestCase):
     def test_matching_tail_word_honors_switch_offs(self):
         subprocess.run(["node", "-e", HARNESS, str(VIEWER_JS)], check=True)
+
+
+class SpacingInsensitiveTailTest(SwitchOffCase):
+    """The tail is compared in the command_key shape, the same as an exact match.
+
+    「마이크 음소거」 was switched off and said without its space, 「음 마이크음소거」.
+    The exact match drops spaces and caught that, but the tail compared raw, missed the
+    long wording and muted through the shorter 「음소거」 at its end.
+    """
+
+    def test_struck_korean_wording_said_without_its_space(self):
+        self.switch_off(words={"mute": ["마이크 음소거"]})
+        for s in ("마이크음소거", "음 마이크음소거", "음 마이크 음소거"):
+            self.assertIsNone(vd.voice_command(s, False), s)
+        self.assertEqual(vd.voice_command("음소거", False), "mute")
+
+    def test_unstruck_wording_without_its_space_still_bites(self):
+        self.assertEqual(vd.voice_command("음 마이크음소거", False), "mute")
+        self.assertEqual(vd.mic_command_match("음 마이크음소거", False),
+                         ("mute", "마이크 음소거"))
+
+    def test_tail_body_is_cut_at_the_spoken_wording(self):
+        self.assertEqual(vd.take_tail("これを直して。cancelthat", vd.CANCEL_TAIL),
+                         "これを直して")
+
+
+class TailLongestThenStruckTest(SwitchOffCase):
+    """cancel_tail and hold_tail take the longest wording at the tail and only then
+    ask whether it was struck, the same as mute. Dropping struck wordings first let
+    a shorter one inside it fire in its place."""
+
+    def test_longest_added_wording_wins(self):
+        self.switch_off(hold_tail=["全部手直し"])
+        self.assertEqual(vd.take_active_tail("これを直して、全部手直し", "hold_tail"),
+                         "これを直して")
+
+    def test_struck_long_wording_does_not_fall_to_a_short_one_inside(self):
+        table = ("キャンセル", "全部キャンセル")
+        with mock.patch.object(vd, "CANCEL_TAIL", table):
+            self.switch_off(words={"cancel_tail": ["全部キャンセル"]})
+            self.assertIsNone(vd.take_active_tail("これを直して、全部キャンセル",
+                                                  "cancel_tail"))
+            self.assertEqual(vd.take_active_tail("これを直して、キャンセル",
+                                                 "cancel_tail"), "これを直して")
+
+    def test_typed_back_in_by_hand_wins(self):
+        self.switch_off(words={"cancel_tail": ["キャンセル"]},
+                        cancel_tail=["キャンセル"])
+        self.assertEqual(vd.take_active_tail("これを直して、キャンセル", "cancel_tail"),
+                         "これを直して")
+
+
+HARNESS2 = r"""
+const fs = require('fs');
+const source = fs.readFileSync(process.argv[1], 'utf8');
+const start = source.indexOf("const TAIL_IDS = ");
+const end = source.indexOf("function endsWithTailCmd", start);
+if (start < 0 || end < 0) process.exit(2);
+const body = source.slice(start, end).replace(/async function loadTailWords[\s\S]*?\n}\n/, '');
+const make = new Function('words', 'off', 'user', `
+  ${body}
+  tailWords = words;
+  if (user) userWords = user;
+  takeCmdOff(off);
+  return matchingTailWord;
+`);
+const assert = (cond, what) => { if (!cond) { console.error(what); process.exit(1); } };
+const none = () => ({cancel_tail: new Set(), hold_tail: new Set(), mute: new Set()});
+const words = {cancel_tail: new Set(['キャンセル', '全部キャンセル']),
+               hold_tail: new Set(['手直し']),
+               mute: new Set(['ミュート', '음소거', '마이크 음소거'])};
+// 1. Spacing does not decide the tail
+let m = make(words, {off_words: {mute: ['마이크 음소거']}});
+for (const s of ['마이크음소거', '음 마이크음소거', '음 마이크 음소거'])
+  assert(m(s) === null, 'struck, spacing: ' + s);
+assert(m('음소거')?.id === 'mute', 'the short one alone still bites');
+m = make(words, {});
+assert(m('음 마이크음소거')?.word === '마이크 음소거', 'longest across spacing');
+// 2. Longest first, then the strike, for the tail kinds too
+m = make(words, {off_words: {cancel_tail: ['全部キャンセル']}});
+assert(m('これを直して、全部キャンセル') === null, 'struck long tail');
+assert(m('これを直して、キャンセル')?.id === 'cancel_tail', 'short tail still bites');
+// 3. The コマンド lead-in comes off before the 7-character ceiling
+m = make(words, {});
+assert(m('えーと、コマンドミュート')?.id === 'mute', 'コマンド lead-in');
+assert(m('これはとても長い前置きのミュート') === null, 'ceiling still holds');
+// 6. A word the user added for mute bites only said alone
+const user = none(); user.mute.add('micoff');
+m = make(words, {}, user);
+assert(m('mic off')?.id === 'mute', 'user word alone');
+assert(m('Mic off.')?.id === 'mute', 'user word alone, punctuation');
+for (const s of ['はい mic off', 'はいmicoff', 'はい、mic off'])
+  assert(m(s) === null, 'user word with a lead-in: ' + s);
+// A struck built-in typed back in by hand bites again
+const back = none(); back.mute.add('ミュート');
+m = make(words, {off_words: {mute: ['ミュート']}}, back);
+assert(m('はいミュート')?.id === 'mute', 'typed back in wins');
+"""
+
+
+class ViewerJsTailMatchTest(unittest.TestCase):
+    def test_matches_the_daemon(self):
+        subprocess.run(["node", "-e", HARNESS2, str(VIEWER_JS)], check=True)
 
 
 if __name__ == "__main__":
