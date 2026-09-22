@@ -123,6 +123,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'wakeLockField','wakeLockOn','wakeLockNote',
                   'engineGroup','enginePick','engineNote','whisperModel','whisperModelField','whisperModelNote',
                   'browserAsrWarn','asrConflict','browserMic','micSettingsLink','asrLang','asrLangField',
+                  'onDeviceField','onDeviceStatus','onDeviceRow','onDeviceDownload',
                   'idleMute','idleMuteVal','idleMuteField','idleMinsField','idleMuteOn','idleMuteNote',
                   'browserGestureField','browserGestureOn','browserGesturePeaks','browserGesturePeaksVal',
                   'browserGestureWindow','browserGestureWindowVal','browserGestureThreshold','browserGestureThresholdVal',
@@ -1203,6 +1204,7 @@ function paint() {
            t(off ? 'statusOff' : shown === 'hold' ? 'statusHold' : 'statusLive'));
   if (!oneShot && performance.now() > hintHoldUntil) {
     el.hint.textContent = armPending ? t('hintArm')
+      : !off && onDeviceHeld() ? t('onDeviceHold')
       : t(off ? 'hintOff' : shown === 'hold' ? 'hintHold' : 'hintLive');
   }
   // While you are working elsewhere, the tab title is the only cue left
@@ -3396,6 +3398,155 @@ const ASR_LANGS = [
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 const canBrowserASR = !!SR;
 
+/* ── Browser recognition that stays on this device ──
+   Chrome 139 and later can run the very same Web Speech API recognition on
+   this machine instead of sending the audio to Google, once it holds a model
+   for the language being spoken (processLocally). The model is a one-time
+   download per Chrome profile, shared by every site, and Chrome only lets a
+   page start that download from inside a press (SR.install).
+
+   It is offered as a second browser entry in the engine dropdown. The server
+   never hears about it: to the server both entries are 'browser', and which
+   of the two it is lives in this browser (localStorage), which is also where
+   the model it needs lives. Another browser pointed at the same viewer has
+   models of its own, or none. The 5 second loadEngines poll keeps putting the
+   server's 'browser' back into chosenEngine, so what the dropdown shows is
+   worked out from both (engineShown). Read off chosenEngine alone, it would
+   snap back to the plain entry every 5 seconds.
+
+   Nothing here ever falls back to the cloud. Whoever picked this entry picked
+   it so their voice stays on the machine. When the model is missing, or
+   Chrome refuses, recognition simply does not start, and the settings say why
+   and what to do (download it, or pick the plain entry on purpose). A quiet
+   fallback would send exactly the audio they chose to keep.
+
+   The pieces with no page in them come first, together, so a test can lift
+   them out and run them on their own (tests/test_on_device.py). */
+const BROWSER_LOCAL = 'browser-local';
+const ON_DEVICE_FLAG = 'asrLocal';
+
+// Through store, which already swallows a storage that throws (a private
+// window, blocked site data). Losing it only puts the plain entry back, which
+// recognizes nothing until someone presses the mic anyway.
+const readOnDeviceFlag = s => s.get(ON_DEVICE_FLAG, '') === '1';
+const writeOnDeviceFlag = (s, on) => s.set(ON_DEVICE_FLAG, on ? '1' : '');
+
+// The dropdown's value, from the server's engine and this browser's flag
+const engineShown = (chosen, local) => chosen === BROWSER_ENGINE && local ? BROWSER_LOCAL : chosen;
+// And back again: what the server is told, and whether it is the local one
+const enginePicked = value => value === BROWSER_LOCAL
+  ? {engine: BROWSER_ENGINE, local: true}
+  : {engine: value, local: false};
+
+/* What the settings say for each answer SR.available() can give. '' is not
+   asked yet (or asked for a language no longer chosen), and a refusal from
+   Chrome itself outranks whatever available() last said, since it is Chrome
+   saying no to the real thing. */
+const ON_DEVICE_KEYS = {
+  available: 'onDeviceReady', downloadable: 'onDeviceNeedsDownload',
+  downloading: 'onDeviceDownloading', unavailable: 'onDeviceUnavailable',
+};
+const onDeviceStatusKey = (status, refused) =>
+  refused ? 'onDeviceRefused' : ON_DEVICE_KEYS[status] || 'onDeviceChecking';
+
+// Whether recognition may start at all. Off the local entry nothing is held
+// here. On it, only a model Chrome says is on this machine lets it through,
+// and every other answer holds it off rather than letting it go to the cloud.
+const onDeviceMayStart = (local, status, refused) =>
+  !local || (status === 'available' && !refused);
+
+/* What Chrome says when processLocally is on and it has no model to use.
+   Chromium says language-not-supported, the spec says service-not-allowed.
+   Only the second is also what a refused microphone can look like, and only
+   while starting on its own after a reload (autoResumed) is that the likelier
+   reading, so there it is left to the path that already handles it. */
+const onDeviceRefusal = (error, autoResumed) =>
+  error === 'language-not-supported' || (error === 'service-not-allowed' && !autoResumed);
+
+// Whether the local entry can be offered here at all. Chrome 139 and later.
+const canLocalASR = canBrowserASR && typeof SR.available === 'function'
+  && typeof SR.install === 'function';
+let onDeviceLocal = canLocalASR && readOnDeviceFlag(store);
+let onDeviceStatus = '';      // what available() last said, for onDeviceLang
+let onDeviceLang = '';
+let onDeviceRefused = false;  // Chrome refused a start after available() said yes
+let onDeviceInstalling = false;
+let onDeviceProblem = '';     // a download that did not go through, until the next try
+let onDeviceAsk = null;       // the available() call under way, {lang, promise}
+let onDevicePoll = null;
+
+// The answer for the language chosen now, or '' if it was for another one
+const onDeviceNow = () => onDeviceLang === browserLang() ? onDeviceStatus : '';
+// Held off on purpose, and known to be (an answer still on its way is not a hold yet)
+const onDeviceHeld = () => asrActive() && onDeviceLocal
+  && (onDeviceRefused || (onDeviceNow() !== '' && onDeviceNow() !== 'available'));
+
+/* Ask Chrome whether the chosen language can be recognized here. One call at
+   a time per language: the 5 second poll, a start, and the download's own
+   polling all end up here and would otherwise pile up. An answer that comes
+   back for a language no longer chosen is dropped. */
+function askOnDevice() {
+  const lang = browserLang();
+  if (onDeviceAsk && onDeviceAsk.lang === lang) return onDeviceAsk.promise;
+  const promise = (async () => {
+    let status;
+    try {
+      status = await SR.available({langs: [lang], processLocally: true});
+    } catch {
+      status = 'unavailable';
+    }
+    if (onDeviceAsk && onDeviceAsk.promise === promise) onDeviceAsk = null;
+    if (browserLang() !== lang) return '';
+    const was = onDeviceNow();
+    onDeviceStatus = status;
+    onDeviceLang = lang;
+    paintOnDevice();
+    // No progress events come out of a download, so it is watched by asking again
+    if (status === 'downloading' || onDeviceInstalling) keepPollingOnDevice();
+    // Came in just now (the download finished, here or anywhere else in this
+    // Chrome). Start what was being held for it. A start already under way is
+    // the one that asked, and carries on by itself.
+    if (status === 'available' && was !== 'available') {
+      paint();
+      if (onDeviceLocal && !onDeviceRefused && recWanted && !rec && !recStarting) startRecognition();
+    }
+    return status;
+  })();
+  onDeviceAsk = {lang, promise};
+  return promise;
+}
+
+function keepPollingOnDevice() {
+  if (onDevicePoll) return;
+  onDevicePoll = setTimeout(() => {
+    onDevicePoll = null;
+    if (onDeviceLocal && asrChosen) askOnDevice();
+  }, 2000);
+}
+
+// The status line and the download button, under the spoken language
+function paintOnDevice() {
+  const show = asrChosen && onDeviceLocal;
+  el.onDeviceField.hidden = !show;
+  if (!show) return;
+  let status = onDeviceNow();
+  // Between the press and Chrome saying downloading, it still says downloadable
+  if (onDeviceInstalling && status !== 'available' && status !== 'unavailable') status = 'downloading';
+  el.onDeviceStatus.textContent = onDeviceProblem
+    ? t(onDeviceProblem, {back: t('unfloatBtn')})
+    : t(onDeviceStatusKey(status, onDeviceRefused), {plain: t('engineBrowser')});
+  el.onDeviceRow.hidden = onDeviceRefused || status !== 'downloadable';
+  el.onDeviceDownload.disabled = onDeviceInstalling;
+}
+
+// Say on the main screen too why nothing is being listened to. Settings
+// carries the detail, the screen you are looking at only has to point there.
+function holdOnDevice() {
+  paintOnDevice();
+  say(t('onDeviceHold'), 10);
+  paint();
+}
+
 let rec = null;              // the current SpeechRecognition
 let recRunning = false;      // start() has been called and end has not come yet
 let recWanted = false;       // whether the setting says to use it
@@ -3584,6 +3735,11 @@ function paintInterimThrottled(interim) {
 function newRecognition(generation) {
   const r = new SR();
   r.lang = browserLang();
+  // Only ever reached with a model Chrome says is here (the hold in
+  // startRecognition), so this never asks for one that would have to be
+  // fetched. quality is left at its default on purpose: 'command' is the one
+  // Chrome 153 has models for, and asking for any other makes it unavailable.
+  if (onDeviceLocal) r.processLocally = true;
   r.continuous = true;
   r.interimResults = true;
   r.maxAlternatives = 1;
@@ -3645,6 +3801,20 @@ function newRecognition(generation) {
   r.onerror = ev => {
     if (!mine()) return;
     recStarting = false;
+    // Kept on this device and Chrome would not do it there. Nothing is
+    // counted as a failure, since trying again would only bring the same
+    // answer with growing waits in between and end in "check your
+    // connection". It is held instead (startRecognition reads
+    // onDeviceRefused), and available() is asked again so the settings show
+    // what Chrome now says. Read as a refused microphone below, it would
+    // switch browser recognition off altogether.
+    if (r.processLocally === true && onDeviceRefusal(ev.error, autoResumed)) {
+      onDeviceRefused = true;
+      onDeviceStatus = '';
+      askOnDevice();
+      holdOnDevice();
+      return;
+    }
     // A refused microphone needs a person to act. Roll the setting back and say so.
     if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
       if (autoResumed) {
@@ -3701,6 +3871,20 @@ async function startRecognition() {
   const generation = recGeneration;
   recStarting = true;
   try {
+    // On the local entry nothing starts until Chrome says the model is here.
+    // Asked before the heartbeat, so a start held off here never claims
+    // browser recognition for a tab that is not listening. Nothing is counted
+    // as a failure either: no session opens, so no end comes back to retry,
+    // and it is the answer turning to available (askOnDevice) that starts it.
+    if (onDeviceLocal) {
+      if (onDeviceNow() !== 'available') await askOnDevice();
+      if (generation !== recGeneration || !recWanted) { autoResumed = false; return; }
+      if (!onDeviceMayStart(onDeviceLocal, onDeviceNow(), onDeviceRefused)) {
+        autoResumed = false;
+        holdOnDevice();
+        return;
+      }
+    }
     if (!await beat('listening') || generation !== recGeneration || !recWanted || route === 'off' || rec) {
       autoResumed = false;
       return;
@@ -4450,6 +4634,7 @@ const engineLabel = e => ENGINE_KEYS[e.id] ? t(ENGINE_KEYS[e.id]) : (e.label || 
 function paintEnginePick() {
   const opts = [];
   if (canBrowserASR) opts.push([BROWSER_ENGINE, engineLabel({id: BROWSER_ENGINE}), false]);
+  if (canLocalASR) opts.push([BROWSER_LOCAL, t('engineBrowserLocal'), false]);
   /* An engine the server marked not ready is shown, not hidden. It cannot be
      picked yet, so the row carries the one command that makes it pickable
      (`apple` on a Mac without the Command Line Tools is the case this is for).
@@ -4466,14 +4651,17 @@ function paintEnginePick() {
   if (!opts.some(([, , off]) => !off)) opts.push(['', t('engineNone'), false]);
   el.enginePick.replaceChildren(...opts.map(([id, label, off]) => {
     const o = document.createElement('option');
-    o.value = id; o.textContent = label; o.selected = id === chosenEngine;
+    o.value = id; o.textContent = label;
+    o.selected = id === engineShown(chosenEngine, onDeviceLocal);
     o.disabled = off;
     return o;
   }));
 }
 
 function paintBrowserAsr() {
-  el.browserAsrWarn.hidden = !asrChosen;
+  // "Keep this off if everything must stay on this machine" is the wrong
+  // thing to say to someone who picked the entry that does exactly that.
+  el.browserAsrWarn.hidden = !asrChosen || onDeviceLocal;
   el.asrConflict.hidden = !asrChosen || !asrConflict;
   el.asrConflict.textContent = t('asrConflict');
   el.browserMic.hidden = !asrChosen;
@@ -4487,7 +4675,11 @@ function paintBrowserAsr() {
   // governs, on both engines now, is how long it waits after that before
   // actually sending it (queueOrSendFinal), so the slider stays live here too.
   el.silenceNote.textContent = t(asrChosen ? 'silenceNoteBrowser' : 'silenceNote');
-  el.engineNote.textContent = t(asrChosen ? 'browserAsrNote' : 'localAsrNote');
+  el.engineNote.textContent = t(asrChosen && !onDeviceLocal ? 'browserAsrNote' : 'localAsrNote');
+  // Asked again with every paint, the 5 second poll included, so a model that
+  // arrives some other way (another site, chrome://components) is noticed too
+  paintOnDevice();
+  if (asrChosen && onDeviceLocal) askOnDevice();
   // For turning listening on and off, paintPower() decides both whether it
   // shows and what it says (it changes with more than the engine, it changes
   // with whether anything is running).
@@ -4540,7 +4732,16 @@ async function loadEngines() {
 }
 
 el.enginePick.onchange = async () => {
-  const pick = el.enginePick.value;
+  // Both browser entries are 'browser' to the server. Which one it is stays here.
+  const {engine: pick, local} = enginePicked(el.enginePick.value);
+  const localChanged = pick === BROWSER_ENGINE && local !== onDeviceLocal;
+  if (pick === BROWSER_ENGINE) {
+    onDeviceLocal = local && canLocalASR;
+    writeOnDeviceFlag(store, onDeviceLocal);
+    // Picking it again is also how a refusal gets another try
+    onDeviceRefused = false;
+    onDeviceProblem = '';
+  }
   // Do not wait for the loadEngines every 5 seconds. Line up what shows from the moment it is chosen
   chosenEngine = pick;
   el.enginePick.disabled = true;
@@ -4571,6 +4772,10 @@ el.enginePick.onchange = async () => {
       // started down with it (was && !asrChosen in loadEngines), leaving
       // neither engine actually listening.
       await post('/api/engine', {running: false, engine: BROWSER_ENGINE});
+      // Moving between the two browser entries with recognition running. The
+      // session open now was built for the other one, so it is closed and the
+      // one that follows is built afresh (through the hold, if local).
+      if (localChanged && rec) { try { rec.stop(); } catch {} }
       if (recWanted) startRecognition();
     } else {
       asrChosen = false;
@@ -4601,6 +4806,10 @@ el.enginePick.onchange = async () => {
 
 el.asrLang.onchange = () => {
   store.set('asrLang', el.asrLang.value);
+  // A model is per language, so what was known is for the old one
+  onDeviceRefused = false;
+  onDeviceProblem = '';
+  if (onDeviceLocal) paintBrowserAsr();
   // The language takes effect on the next reconnect. If it is in use, reconnect right now.
   if (recWanted && rec) { try { rec.stop(); } catch {} }
   // The words ignored out of the box are matched against what the recognizer
@@ -4608,6 +4817,41 @@ el.asrLang.onchange = () => {
   // the old language before reading the new one back, or a chip pressed just
   // now would be weighed against a list it was never drawn from.
   saveDict().then(loadDict);
+};
+
+/* The download button. SR.install() has to be the very first thing the press
+   does: Chrome only starts a download from inside a press, and even one await
+   before it can let that go. It hands back no progress, so the status line
+   shows downloading and available() is asked every 2 seconds until it says
+   otherwise (askOnDevice starts listening when it does).
+
+   The button sits in the settings sheet, which moves into the floating window.
+   Whether a press there counts for this page's SR is Chrome's call, and if it
+   says no (NotAllowedError) the line says to bring the window back and press
+   it in the tab. */
+el.onDeviceDownload.onclick = () => {
+  const lang = browserLang();
+  let asked;
+  try {
+    asked = SR.install({langs: [lang], processLocally: true});
+  } catch (e) {
+    asked = Promise.reject(e);
+  }
+  onDeviceInstalling = true;
+  onDeviceRefused = false;
+  onDeviceProblem = '';
+  paintOnDevice();
+  keepPollingOnDevice();
+  Promise.resolve(asked).then(ok => {
+    if (!ok) onDeviceProblem = 'onDeviceDownloadFailed';
+  }, e => {
+    onDeviceProblem = e && e.name === 'NotAllowedError' ? 'onDevicePressMain' : 'onDeviceDownloadFailed';
+  }).finally(() => {
+    onDeviceInstalling = false;
+    if (browserLang() !== lang) onDeviceProblem = '';
+    paintOnDevice();
+    askOnDevice();
+  });
 };
 
 /* ── Floating on top ─────────────────────
