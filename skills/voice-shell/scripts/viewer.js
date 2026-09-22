@@ -3705,10 +3705,12 @@ function browserGateTick() {
   // the level never drops below, not for someone who simply talks for longer
   // than the cap: cutting them off there split one long thought in two.
   const stillTalking = now - lastInterimChangeAt < waitMs;
-  // Still with an outer limit: background speech (a TV, a meeting) keeps the
-  // interim changing too, and must not hold a clause back forever.
-  const capTripped = pendingBrowserSends.some(item =>
-    now - item.queuedAt >= (stillTalking ? cap * 3 : cap));
+  // No outer limit while words keep coming in: people do talk for minutes on
+  // end, and cutting them off at any fixed length split the thought. A noisy
+  // room keeping recognition busy is not a place anyone dictates from, and
+  // the send button is always there.
+  const capTripped = !stillTalking &&
+    pendingBrowserSends.some(item => now - item.queuedAt >= cap);
   // Tripping the cap, like clearing the wait, releases everything currently
   // pending together, not only the one item old enough to trip it.
   // Releasing that one item alone was fragmentation by another name: three
