@@ -122,26 +122,25 @@ Click one, or say "number two" or "session 2", to choose where your words go.
 
 The buttons next to the microphone switch between two send modes.
 
-- **Instant** (the default) → Everything you say is sent right away.
-- **Draft** → What you say builds up on screen. Touch it up with the keyboard if you need to, and send it when you're ready.
+- **Instant mode** (the default) — Everything you say is sent right away.
+- **Draft mode** — What you say builds up on screen. Touch it up with the keyboard if you need to, and send it when you're ready.
 
-To draft just the last thing you said, end it with "edit this". Voice Shell switches to Draft just for that, so you can fix it before it goes out.
+To draft just the last thing you said, end it with "edit this". Voice Shell switches to Draft mode just for that, so you can fix it before it goes out.
 
 ## 🗣️ Voice commands
 
 | Voice command | Action |
 |---|---|
 | "mute" | Turns the microphone off |
-| "unmute" | Turns the microphone back on (local recognizers only). With browser recognition, click the on-screen microphone instead |
+| "unmute" | Turns the microphone back on (local recognizers only).<br>With browser recognition, click the on-screen microphone instead |
 | "number two", "session 2" | Switches to that session when you have more than one |
 | "cancel that" at the end | Discards what you just said |
-| "edit this" at the end | Switches to Draft just for that |
+| "edit this" at the end | Switches to Draft mode just for that |
 | "draft", "instant" | Switches the send mode |
 
 > [!TIP]
-> **See every command**
->
-> Click the lightbulb icon on screen for the full list. You can add your own phrases there, or turn off the ones you never use.
+> Click the lightbulb icon on screen for the full list.
+> You can add your own phrases there, or turn off the ones you never use.
 
 ### Using more than one computer
 
@@ -157,7 +156,7 @@ The marker under the microphone sets how quiet counts as "done talking." In a no
 
 ### 2. Stray chatter goes on hold
 
-Forgot to mute, and a few unrelated remarks slipped through? Claude Code notices, switches to Draft, and holds them for you.
+Forgot to mute, and a few unrelated remarks slipped through? Claude Code notices, switches to Draft mode, and holds them for you.
 Everything you said stays on screen, so nothing is lost.
 
 ### 3. Fix the destination afterward
@@ -174,9 +173,9 @@ It'll be recognized correctly from then on.
 | Key | Action |
 |---|---|
 | `Shift` + `M` | Turns the microphone on or off |
-| `Shift` + `L` | Switches to Instant |
-| `Shift` + `H` | Switches to Draft |
-| `Shift` + `E` | Sends just the last thing you said to Draft |
+| `Shift` + `L` | Switches to Instant mode |
+| `Shift` + `H` | Switches to Draft mode |
+| `Shift` + `E` | Switches to Draft mode just for the last thing you said |
 | `Shift` + `1` to `9` | Picks a session by number |
 | `Shift` + `Backspace` | Discards anything not yet sent |
 | `Ctrl` + `Enter` (`Cmd` + `Enter` on a Mac) | Sends the draft |
