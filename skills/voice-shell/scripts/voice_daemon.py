@@ -1873,7 +1873,7 @@ def apply_voice_command(text: str, log_path, muted: bool, user_dict=None):
     n = route_command(cmd_text) or route_command(fixed)
     if n:
         live = list_active_listeners(log_path)
-        if len(live) > 1:
+        if sum(1 for e in live if not e.get("away")) > 1:
             if 1 <= n <= len(live):
                 write_atomic(route_file(log_path), str(live[n - 1]["pid"]))
                 note_voice_cmd(log_path, "route",
@@ -1943,7 +1943,13 @@ def parse_args():
                         "can take its place (voice-shell.sh's EXIT trap)")
     p.add_argument("--adopt", metavar="SESSION", default=None,
                    help="Print 'pid order offset' of SESSION's fresh "
-                        "tombstone, if any, and remove it")
+                        "tombstone, if any, or BLOCKED when the session was "
+                        "disconnected from the screen. Does not remove it")
+    p.add_argument("--forget", metavar="SESSION", default=None,
+                   help="Remove SESSION's tombstone once its place is taken")
+    p.add_argument("--progress-of", metavar="PID", default=None,
+                   help="Print how far PID's listen got through the current "
+                        "log, if that is still meaningful")
     p.add_argument("--mark-stopped", metavar="SESSION", default=None,
                    help="SESSION stopped listening on purpose; do not keep "
                         "its place when its listen exits")
@@ -2108,7 +2114,7 @@ def resolve_target(log_path):
     # leave_listener). Keep it chosen. What is said meanwhile is tagged to it
     # and handed to its next listen, instead of landing on some other desk.
     if raw and raw in _fresh_tombstone_pids(log_path):
-        return raw
+        return raw         # only fresh within AWAY_HOLD, see _tombstones
 
     # The registration file can go missing (a stray cleanup, a bug in whatever
     # else touches that folder) while the process behind it is still running.
@@ -2312,6 +2318,12 @@ def listeners_dir(log_path):
 # nobody was listening. Stopping on purpose (voice-shell.sh stop, the x on a
 # chip) marks the session stopped first, so none of that happens then.
 
+# How long a departed session keeps its chip, its number and its place as
+# destination. Short: a session that really ended (the conversation closed,
+# a plain TaskStop) should not keep swallowing speech for long.
+AWAY_HOLD = 120
+# How long its tombstone can still be adopted. A re-arm that comes later than
+# AWAY_HOLD (the agent was busy) still gets its old place in the row back.
 LEAVE_GRACE = 600
 
 
@@ -2320,7 +2332,35 @@ def gone_dir(log_path):
 
 
 def _gone_file(log_path, session):
-    return gone_dir(log_path) / re.sub(r"[^A-Za-z0-9_.-]", "_", str(session))
+    name = re.sub(r"[^A-Za-z0-9_.-]", "_", str(session))
+    if name.strip(".") == "":
+        name = "_" + name
+    return gone_dir(log_path) / name
+
+
+def log_epoch(log_path):
+    try:
+        return (Path(log_path).parent / "log_epoch").read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def progress_of(log_path, pid):
+    """How far pid's listen got, as long as that still points into this log."""
+    try:
+        epoch, offset = (gone_dir(log_path) / f"{pid}.progress").read_text(
+            encoding="utf-8").split()
+        offset = int(offset)
+    except (OSError, ValueError):
+        return None
+    if epoch != (log_epoch(log_path) or "-"):
+        return None
+    try:
+        if offset > Path(log_path).stat().st_size:
+            return None
+    except OSError:
+        return None
+    return offset
 
 
 def _order_of(entry):
@@ -2338,13 +2378,18 @@ def _read_json(path):
         return None
 
 
-def mark_stopped(log_path, session):
+def mark_stopped(log_path, session, disconnected=False):
+    """disconnected: stopped from the screen (the x on a chip). The agent does
+    not know, and re-arms as usual when its watch runs out; that one re-arm
+    is turned away once instead of quietly listening again."""
     if not session:
         return
     try:
         gone_dir(log_path).mkdir(parents=True, exist_ok=True)
-        write_atomic(_gone_file(log_path, session),
-                     json.dumps({"session": session, "stopped": time.time()}))
+        mark = {"session": session, "stopped": time.time()}
+        if disconnected:
+            mark["disconnected"] = True
+        write_atomic(_gone_file(log_path, session), json.dumps(mark))
     except OSError:
         pass
 
@@ -2353,6 +2398,16 @@ def leave_listener(log_path, reg_path):
     """Turn a departing listen's registration into a tombstone."""
     reg_path = Path(reg_path)
     info = _read_json(reg_path)
+    # Was this the one speech was going to by default (nothing chosen)? Then
+    # choose it now, so the gap until its next watch keeps its speech rather
+    # than handing it to whichever session is left. Asked before the
+    # registration goes, while the answer still includes it.
+    by_default = False
+    try:
+        by_default = (not route_file(log_path).read_text(encoding="utf-8").strip()
+                      and resolve_target(log_path) == reg_path.name)
+    except OSError:
+        by_default = resolve_target(log_path) == reg_path.name
     try:
         reg_path.unlink(missing_ok=True)
     except OSError:
@@ -2366,10 +2421,8 @@ def leave_listener(log_path, reg_path):
         return                      # stopped on purpose, keep no place
     # Where to pick up from: how far this listen actually got, or failing
     # that, the end of the log as it stands.
-    try:
-        offset = int((gone_dir(log_path) / f"{reg_path.name}.progress")
-                     .read_text(encoding="utf-8").strip())
-    except (OSError, ValueError):
+    offset = progress_of(log_path, reg_path.name)
+    if offset is None:
         try:
             offset = Path(log_path).stat().st_size
         except OSError:
@@ -2378,27 +2431,50 @@ def leave_listener(log_path, reg_path):
         gone_dir(log_path).mkdir(parents=True, exist_ok=True)
         write_atomic(tomb, json.dumps({
             "session": session, "pid": reg_path.name, "left": time.time(),
-            "offset": offset, "reg": info}, ensure_ascii=False))
+            "offset": offset, "epoch": log_epoch(log_path) or "-",
+            "reg": info}, ensure_ascii=False))
+        if by_default:
+            write_atomic(route_file(log_path), reg_path.name)
     except OSError:
         pass
 
 
 def adopt_tombstone(log_path, session):
-    """Hand a re-armed listen its session's place, once."""
+    """What a re-armed listen takes over. Left in place until forget_tombstone,
+    so the session never drops out of the row while the new one registers."""
     if not session:
         return None
     tomb = _gone_file(log_path, session)
     data = _read_json(tomb)
-    try:
-        tomb.unlink(missing_ok=True)
-    except OSError:
-        pass
-    if not data or "stopped" in data or "left" not in data:
+    if not data:
         return None
-    if time.time() - data["left"] > LEAVE_GRACE:
+    if "stopped" in data:
+        # Stopped on purpose. A plain stop means a fresh start is fine now.
+        # A disconnect from the screen turns away the one re-arm it causes.
+        try:
+            tomb.unlink(missing_ok=True)
+        except OSError:
+            pass
+        if data.get("disconnected") and time.time() - data["stopped"] < LEAVE_GRACE:
+            return "blocked"
         return None
+    if "left" not in data or time.time() - data["left"] > LEAVE_GRACE:
+        return None
+    offset = int(data.get("offset") or 0)
+    if data.get("epoch", "-") != (log_epoch(log_path) or "-"):
+        offset = ""                 # the log was emptied since, start at its end
     return {"pid": data.get("pid", ""), "order": _order_of(data.get("reg") or {}),
-            "offset": int(data.get("offset") or 0)}
+            "offset": offset}
+
+
+def forget_tombstone(log_path, session):
+    tomb = _gone_file(log_path, session)
+    data = _read_json(tomb)
+    if data and "left" in data:
+        try:
+            tomb.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _tombstones(log_path):
@@ -2427,7 +2503,7 @@ def _tombstones(log_path):
             except OSError:
                 pass
             continue
-        if "left" in data:
+        if "left" in data and now - data["left"] <= AWAY_HOLD:
             out.append(data)
     return out
 
@@ -2591,8 +2667,9 @@ def list_active_listeners(log_path):
 
     # Sessions between two watches keep their chip and their number.
     present = {info.get("session") for info in deduped if info.get("session")}
+    present_pids = {str(info.get("pid")) for info in deduped}
     for tomb in _tombstones(log_path):
-        if tomb.get("session") in present:
+        if tomb.get("session") in present or str(tomb.get("pid")) in present_pids:
             continue
         info = dict(tomb.get("reg") or {})
         info["pid"] = tomb.get("pid")
@@ -2730,8 +2807,20 @@ def main():
 
     if args.adopt is not None:
         found = adopt_tombstone(args.log_file, args.adopt)
-        if found:
+        if found == "blocked":
+            print("BLOCKED")
+        elif found:
             print(f"{found['pid']} {found['order']} {found['offset']}")
+        return
+
+    if args.forget is not None:
+        forget_tombstone(args.log_file, args.forget)
+        return
+
+    if args.progress_of is not None:
+        offset = progress_of(args.log_file, args.progress_of)
+        if offset is not None:
+            print(offset)
         return
 
     if args.mark_stopped is not None:
@@ -2788,6 +2877,12 @@ def main():
     log_path.parent.mkdir(parents=True, exist_ok=True)
     # Emptied on every startup (so last time's utterances are not picked up)
     log_path.write_text("", encoding="utf-8")
+    # A new epoch for the emptied log. Byte offsets a listen recorded against
+    # the old one must not be used against this one (listen_filter.py).
+    try:
+        write_atomic(log_path.parent / "log_epoch", str(time.time_ns()))
+    except OSError:
+        pass
 
     save_default_dictionary()
 

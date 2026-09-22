@@ -553,7 +553,7 @@ case "$cmd" in
     # carrying this same one is always a leftover, safe to retire outright
     # rather than merely warn about.
     reattached=0
-    old_pid=""; inherit_order=""; replay_offset=""
+    old_pid=""; inherit_order=""; replay_offset=""; adopted=""; old_regs=()
     if [[ -n "$session" && -d "$STATE_DIR/listeners" ]]; then
       for f in "$STATE_DIR/listeners"/*; do
         [[ -f "$f" ]] || continue
@@ -571,7 +571,9 @@ except Exception:
         if [[ -n "$other_session" && "$other_session" == "$session" ]]; then
           old_pid="$other_pid"; inherit_order="${other_line#* }"
           retire_pid "$other_pid"
-          rm -f "$f"
+          # Removed only once this listen's own registration is written
+          # (below), so the session never drops out of the row in between.
+          old_regs+=("$f")
           reattached=1
         fi
       done
@@ -582,7 +584,12 @@ except Exception:
     # was said to it in between (voice_daemon.py, leave_listener).
     if [[ -n "$session" && "$reattached" == 0 ]]; then
       adopted="$("$PY" "$APP" --adopt "$session" 2>/dev/null || true)"
-      if [[ -n "$adopted" ]]; then
+      if [[ "$adopted" == "BLOCKED" ]]; then
+        # Disconnected from the screen while between two watches. This is the
+        # re-arm that follows; say so instead of quietly listening again.
+        printf '%s\n' '{"system_warning": "This session was disconnected from the voice screen, so listening was not restarted. Do not re-arm the watch. If the user asks for voice mode again, start listen again."}'
+        exit 0
+      elif [[ -n "$adopted" ]]; then
         read -r old_pid inherit_order replay_offset <<< "$adopted"
         reattached=1
       fi
@@ -635,6 +642,9 @@ REG
     if [[ -n "$old_pid" && "$(cat "$STATE_DIR/route" 2>/dev/null)" == "$old_pid" ]]; then
       printf '%s' "$reg_pid" > "$STATE_DIR/route"
     fi
+    # Only now, with this registration and the destination in place.
+    for f in "${old_regs[@]}"; do rm -f "$f"; done
+    [[ -n "$adopted" ]] && "$PY" "$APP" --forget "$session" >/dev/null 2>&1 || true
     # With exec the trap is not carried over (process replacement makes bash
     # itself disappear), so the automatic cleanup on exit stops working.
     #
@@ -657,7 +667,7 @@ REG
     # has no tombstone yet, so its progress file is read directly.
     mkdir -p "$STATE_DIR/listeners-gone"
     if [[ -n "$old_pid" && -s "$STATE_DIR/listeners-gone/$old_pid.progress" ]]; then
-      replay_offset="$(cat "$STATE_DIR/listeners-gone/$old_pid.progress" 2>/dev/null)"
+      replay_offset="$("$PY" "$APP" --progress-of "$old_pid" 2>/dev/null || true)"
     fi
     [[ -n "$old_pid" ]] && rm -f "$STATE_DIR/listeners-gone/$old_pid.progress"
     log_size="$(wc -c < "$LOG_FILE" 2>/dev/null | tr -d ' ')"
@@ -677,7 +687,10 @@ REG
     progress="$STATE_DIR/listeners-gone/$reg_pid.progress"
     progress_native="$progress"
     command -v cygpath >/dev/null 2>&1 && progress_native="$(cygpath -w "$progress")"
+    epoch_native="$STATE_DIR/log_epoch"
+    command -v cygpath >/dev/null 2>&1 && epoch_native="$(cygpath -w "$epoch_native")"
     VOICE_SHELL_PROGRESS="$progress_native" VOICE_SHELL_START_OFFSET="$start_offset" \
+    VOICE_SHELL_EPOCH_FILE="$epoch_native" VOICE_SHELL_ALIAS_UNTIL="$log_size" \
       "$PY" -u "$HERE/listen_filter.py" "$reg_pid" $old_pid < <(tail "${tail_opts[@]}" "$LOG_FILE") &
     tail_pid=$!
 

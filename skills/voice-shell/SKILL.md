@@ -142,8 +142,11 @@ picked last time (`~/.config/voice-shell/config.json`), and the first time it is
    Monitor again with the exact same command.** A plain re-arm is enough,
    nothing needs stopping first. The new `listen` takes the old one's place:
    same number in the row, still the destination if it was, and anything said
-   to it in between is delivered as it starts (the old one leaves a tombstone
-   for 10 minutes for exactly this).
+   to it in between is delivered as it starts (the old one keeps its chip and
+   destination for 2 minutes, and its place in the row for 10, for exactly
+   this). If the screen disconnected this session in the meantime, the re-arm
+   is turned away with a `system_warning` saying so. Pass that on and do not
+   re-arm again.
 
 **Keep only one Monitor of your own.** Re-arming on a deadline or "source
 ended" notification (above) is always safe on its own. Re-attaching for some
