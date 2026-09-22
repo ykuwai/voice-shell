@@ -527,11 +527,12 @@ def apply_replacements(text: str, replace: dict) -> str:
 # apart from a real word go in (「あのー」 is in, the demonstrative 「あの」 is not,
 # or 「あのファイルを開いて」 loses what it points at).
 FILLERS = {
-    "ja": ["えーと", "えっと", "ええと", "あのー", "そのー", "うーん", "んー"],
-    "en": ["um", "uh"],
-    "es": ["eh"],
-    "fr": ["euh"],
-    "de": ["ähm", "äh"],
+    "ja": ["えーと", "えーっと", "えっと", "ええと", "ええっと", "あのー", "そのー",
+           "うーん", "んー"],
+    "en": ["um", "umm", "uh", "ah", "oh"],
+    "es": ["eh", "pues", "o sea"],
+    "fr": ["euh", "heu", "bah"],
+    "de": ["ähm", "äh", "öhm", "öh"],
     "zh": ["呃", "嗯"],
     "zh-TW": ["呃", "嗯"],
     "ko": ["음", "어"],
@@ -1099,6 +1100,11 @@ UNMUTE_TAIL_NOISE_MAX = 3
 # and so they do with nothing but a filler ahead of them (MODE_LOANWORD_TAIL below).
 # Native Japanese words like 手直し and 即時 are not in here. Nobody says them about
 # anything but this tool, so hold keeps its lead-in tolerance for them.
+#
+# The live side carries every other language's instant words as well (directo, en
+# direct, Sofortmodus, 即时模式, 즉시 모드 and the rest). Live has no lead-in
+# tolerance of its own, so without them here 「eh, directo」 went nowhere while
+# 「eh, borrador」 switched. Being here only lets a filler ahead of them.
 MODE_COMMON_WORDS = {
     "hold": {
         "エディット", "えでぃっと", "エディットモード",
@@ -1115,6 +1121,8 @@ MODE_COMMON_WORDS = {
     "live": {
         "インスタント", "いんすたんと", "インスタントモード",
         "live", "live mode", "instant", "instant mode", "send live",
+        *(w for lang, ws in COMMAND_WORDS["live"].items() if lang not in ("ja", "en")
+          for w in ws),
     },
 }
 # Kept under its old name, the draft words are what it was made for.
@@ -1135,12 +1143,17 @@ MODE_LOANWORD_TAIL = {
 }
 # The fillers of every language, plus the short replies that open a sentence out
 # of habit. 「あの」 goes in here though it is kept out of FILLERS, since nothing is
-# being deleted, only let ahead of the word.
+# being deleted, only let ahead of the word. The same goes for the fillers that are
+# real words too ("well", 「este」 and 「bueno」, 「那个」, 「also」, 「그러니까」).
+# In FILLERS they would be cut out of the middle of a sentence ("it works well"
+# down to "it works", 「este archivo」 down to 「archivo」).
 _MODE_LEAD_FILLERS = tuple(sorted(
     {w.lower() for ws in FILLERS.values() for w in ws}
     | {w.lower() for ws in NOISE_ONLY.values() for w in ws}
     | {"はい", "うん", "ええ", "えー", "あー", "あの", "ん", "네", "예", "응", "그", "저",
-       "yes", "yeah", "ok", "okay", "sí", "vale", "oui", "ja", "好", "好的"},
+       "yes", "yeah", "ok", "okay", "sí", "vale", "oui", "ja", "好", "好的",
+       "well", "este", "bueno", "那个", "那個", "ben", "bon", "alors", "enfin",
+       "also", "naja", "na ja", "아", "저기", "그러니까", "그니까"},
     key=len, reverse=True,
 ))
 _MODE_LEAD_TRIM = " \t　。、．，・！？!?.,…ー~〜"

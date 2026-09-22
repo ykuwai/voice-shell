@@ -140,5 +140,43 @@ class CommonWordsNeedAWholeUtteranceTest(unittest.TestCase):
         self.assertEqual(take_tail("記事を直して、手直し", HOLD_TAIL), "記事を直して")
 
 
+class MoreFillersAheadTest(unittest.TestCase):
+    """Fillers that were missing, so the mode word after them went nowhere."""
+
+    def test_hold_after_a_filler(self):
+        for s in ("えーっとドラフト", "ええっと、ドラフト", "umm, draft", "ah draft mode",
+                  "oh, draft", "well, draft mode", "那个草稿模式", "este borrador",
+                  "pues, borrador", "bueno, borrador", "o sea, borrador",
+                  "ben, brouillon", "bah brouillon", "alors, brouillon", "heu brouillon",
+                  "also, Entwurf", "naja Entwurf", "öhm Entwurf",
+                  "저기 초안 모드", "그러니까 초안 모드", "아 초안 모드"):
+            self.assertEqual(mode_command_shape(s), "hold", s)
+
+    def test_real_words_are_not_deleted_from_a_sentence(self):
+        from voice_daemon import strip_fillers
+        self.assertEqual(strip_fillers("ええっと、これを開いて", "ja"), "これを開いて")
+        self.assertEqual(strip_fillers("えーっと、これを開いて", "ja"), "これを開いて")
+        self.assertEqual(strip_fillers("umm, open it", "en"), "open it")
+        self.assertEqual(strip_fillers("it works well", "en"), "it works well")
+        self.assertEqual(strip_fillers("abre este archivo", "es"), "abre este archivo")
+        self.assertEqual(strip_fillers("打开那个文件", "zh"), "打开那个文件")
+
+
+class InstantWordsInOtherLanguagesTest(unittest.TestCase):
+    """The live words of every language take a filler-only lead-in, like Draft."""
+
+    def test_after_a_filler(self):
+        for s in ("eh directo", "eh, modo directo", "este, en directo", "euh en direct",
+                  "euh, mode direct", "ähm Sofortmodus", "äh, Direkt senden",
+                  "呃即时模式", "嗯，直接发送", "嗯，即時模式", "음 즉시 모드",
+                  "어, 바로 전달"):
+            self.assertEqual(mode_command_shape(s), "live", s)
+
+    def test_anything_else_ahead_stays_text(self):
+        for s in ("el partido en directo", "je suis en direct", "bitte Direkt senden",
+                  "请直接发送", "지금 바로 전달"):
+            self.assertIsNone(mode_command_shape(s), s)
+
+
 if __name__ == "__main__":
     unittest.main()
