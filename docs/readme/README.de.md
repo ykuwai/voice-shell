@@ -147,7 +147,7 @@ Willst du nur das eben Gesagte korrigieren, sag am Ende „das ändere ich“. D
 ### Mehrere Rechner
 
 Hören zwei Rechner gleichzeitig zu, schaltet „Stumm“ beide stumm.\
-Aktiviere in den Einstellungen „Mehrere Rechner“ und gib jedem Rechner einen Namen, etwa „Arbeit“ oder „Privat“. Dann schaltet „Arbeit stumm“ nur diesen einen stumm.
+Öffne das Glühbirnen-Symbol, aktiviere unter der Befehlsliste „Mehrere Rechner“ und gib jedem Rechner einen Namen, etwa „Arbeit“ oder „Privat“. Dann schaltet „Arbeit stumm“ nur diesen einen stumm.
 
 ## ✨ Praktische Funktionen und Einstellungen
 

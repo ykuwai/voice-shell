@@ -147,7 +147,7 @@ To draft just the last thing you said, end it with "edit this". Voice Shell swit
 ### Using more than one computer
 
 If two computers are listening at the same time, saying "mute" mutes both.\
-Turn on "Several machines" in the settings and give each computer a name, like "work" or "home". Then "work mute" mutes only that one.
+Open the lightbulb icon, turn on "Several machines" below the list of commands and give each computer a name, like "work" or "home". Then "work mute" mutes only that one.
 
 ## ✨ Handy features and settings
 

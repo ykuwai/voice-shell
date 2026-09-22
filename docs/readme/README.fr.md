@@ -147,7 +147,7 @@ Pour corriger seulement ce que vous venez de dire, terminez par « je corrige »
 ### Utiliser plusieurs ordinateurs
 
 Si deux ordinateurs écoutent en même temps, dire « couper le micro » coupe les deux.\
-Activez « Plusieurs machines » dans les réglages et donnez un nom à chacun, comme « boulot » ou « perso ». Dire « boulot couper le micro » ne coupe alors que celui-là.
+Ouvrez l'icône de l'ampoule, activez « Plusieurs machines » sous la liste des commandes et donnez un nom à chacun, comme « boulot » ou « perso ». Dire « boulot couper le micro » ne coupe alors que celui-là.
 
 ## ✨ Fonctions et réglages pratiques
 

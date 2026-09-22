@@ -147,7 +147,7 @@ Para corregir solo lo último que has dicho, termina con «lo edito yo». Pasa a
 ### Varias máquinas
 
 Si usas dos ordenadores a la vez, decir «silenciar» silencia los dos.\
-Activa «Varias máquinas» en los ajustes y ponle a cada uno un nombre, como «trabajo» o «casa». Así «trabajo silenciar» silencia solo ese.
+Abre el icono de la bombilla, activa «Varias máquinas» debajo de la lista de comandos y ponle a cada uno un nombre, como «trabajo» o «casa». Así «trabajo silenciar» silencia solo ese.
 
 ## ✨ Funciones y ajustes útiles
 
