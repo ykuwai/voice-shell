@@ -258,6 +258,10 @@ class OnDeviceWiringTest(unittest.TestCase):
         self.assertNotIn("await", head)
         self.assertNotIn(".then", head)
         self.assertIn("NotAllowedError", click)
+        # A download Chrome never starts gives the button back instead of
+        # leaving it greyed out on "downloading" for good
+        self.assertIn("if (!onDeviceSawDownloading && onDeviceNow() !== 'available') settle('onDeviceDownloadFailed');", click)
+        self.assertIn("if (id !== onDeviceInstallId || !onDeviceInstalling) return;", click)
 
     def test_server_still_hears_browser(self):
         pick = self.section("el.enginePick.onchange = async () => {", "\n};\n")

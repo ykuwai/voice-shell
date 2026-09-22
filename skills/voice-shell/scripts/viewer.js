@@ -3471,6 +3471,8 @@ let onDeviceStatus = '';      // what available() last said, for onDeviceLang
 let onDeviceLang = '';
 let onDeviceRefused = false;  // Chrome refused a start after available() said yes
 let onDeviceInstalling = false;
+let onDeviceInstallId = 0;    // which press the current download belongs to
+let onDeviceSawDownloading = false;
 let onDeviceProblem = '';     // a download that did not go through, until the next try
 let onDeviceAsk = null;       // the available() call under way, {lang, promise}
 let onDevicePoll = null;
@@ -3502,6 +3504,7 @@ function askOnDevice() {
     onDeviceLang = lang;
     paintOnDevice();
     // No progress events come out of a download, so it is watched by asking again
+    if (status === 'downloading') onDeviceSawDownloading = true;
     if (status === 'downloading' || onDeviceInstalling) keepPollingOnDevice();
     // Came in just now (the download finished, here or anywhere else in this
     // Chrome). Start what was being held for it. A start already under way is
@@ -4837,21 +4840,31 @@ el.onDeviceDownload.onclick = () => {
   } catch (e) {
     asked = Promise.reject(e);
   }
+  const id = ++onDeviceInstallId;
   onDeviceInstalling = true;
+  onDeviceSawDownloading = false;
   onDeviceRefused = false;
   onDeviceProblem = '';
   paintOnDevice();
   keepPollingOnDevice();
-  Promise.resolve(asked).then(ok => {
-    if (!ok) onDeviceProblem = 'onDeviceDownloadFailed';
-  }, e => {
-    onDeviceProblem = e && e.name === 'NotAllowedError' ? 'onDevicePressMain' : 'onDeviceDownloadFailed';
-  }).finally(() => {
+  const settle = problem => {
+    if (id !== onDeviceInstallId || !onDeviceInstalling) return;
     onDeviceInstalling = false;
-    if (browserLang() !== lang) onDeviceProblem = '';
+    onDeviceProblem = browserLang() === lang ? problem : '';
     paintOnDevice();
     askOnDevice();
-  });
+  };
+  Promise.resolve(asked).then(
+    ok => settle(ok ? '' : 'onDeviceDownloadFailed'),
+    e => settle(e && e.name === 'NotAllowedError' ? 'onDevicePressMain' : 'onDeviceDownloadFailed'));
+  /* Seen on Chrome 153 after a restart: install() neither resolves nor starts
+     anything, and available() keeps saying downloadable. Left waiting, the
+     line would say downloading forever with the button greyed out and no way
+     on short of a reload. If Chrome has not so much as begun after a while,
+     the button comes back with the line saying it did not go through. */
+  setTimeout(() => {
+    if (!onDeviceSawDownloading && onDeviceNow() !== 'available') settle('onDeviceDownloadFailed');
+  }, 45000);
 };
 
 /* ── Floating on top ─────────────────────
