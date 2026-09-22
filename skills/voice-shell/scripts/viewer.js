@@ -2138,6 +2138,13 @@ async function handleWsMessage({ev, message, number, discardInProgress: wasDisca
       // clearing it here is only to be safe.
       clearSendCountdown();
       appendHeld(m.held);
+      // It is in the box now, so take it out of the live line above, the same
+      // as a sent one is. Left there, it sat in both places until the next
+      // repaint came round, a few seconds later. Whatever is being said right
+      // now (browser recognition's current interim) stays.
+      const still = asrActive() ? browserStreamText() : '';
+      el.stream.textContent = still;
+      el.tray.classList.toggle('idle', !still);
 
     } else if (m.text != null) {
       clearSendCountdown();   // that is one utterance done. Counting starts again with the next voice
