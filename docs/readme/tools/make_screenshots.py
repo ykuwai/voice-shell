@@ -51,6 +51,18 @@ LANGS = ["en", "ja", "es", "fr", "de", "zh", "zh-TW", "ko"]
 # unsent card and a few sent cards all fit in one frame.
 WIDTH, HEIGHT, SCALE = 380, 640, 2
 
+# How far the send button's countdown ring has filled in every picture, the
+# look it has just before an utterance goes out on its own. The viewer draws
+# the ring itself, from the seconds of silence the daemon counts toward the
+# pause to send (the third number in level.txt, relayed as silence_run). The
+# first SEND_CUE_DEAD of that silence draws nothing, so the count that fills it
+# this far is worked out the same way paintSendCue does, against the default
+# 3 second pause (nothing here writes a tuning.json, so the page keeps its own
+# default).
+RING = 0.8
+PAUSE_TO_SEND, SEND_CUE_DEAD = 3.0, 0.4
+SILENCE_RUN = SEND_CUE_DEAD + RING * (PAUSE_TO_SEND - SEND_CUE_DEAD)
+
 
 # Sample content. Each language gets its own, written the way someone would
 # actually talk to Claude Code in it, rather than a word-for-word copy of the
@@ -271,8 +283,21 @@ class Stage:
                     [{"time": at, "text": text, "to": chip_pids[chip], **({"edited": True} if edited else {})}
                      for at, chip, edited, text in sample["sent"]])
         (self.state / "partial.txt").write_text(sample["partial"], encoding="utf-8")
+        # Quiet and nothing counted yet, the same first line the daemon writes.
+        (self.state / "level.txt").write_text("0 0 0", encoding="utf-8")
         for name in ("muted", "history_cleared_at", "draft_carry"):
             (self.state / name).unlink(missing_ok=True)
+
+    def run_silence(self):
+        """Let the silence run most of the way to the pause to send.
+
+        The volume (under the reference, so it reads as quiet), whether anyone
+        is speaking, and how long the silence has run, written the way the
+        daemon writes it, so the ring is the viewer's own drawing. The viewer
+        passes level.txt on only when it changes and a page that connects
+        later is not told the last one, so this goes in once the page is up
+        and listening, the way the daemon's next block would."""
+        (self.state / "level.txt").write_text(f"0.004 0 {SILENCE_RUN:.3f}", encoding="utf-8")
 
     def start_viewer(self):
         """Start (or restart) the viewer. It reads the sent history once, as it
@@ -439,8 +464,8 @@ class Chrome:
 
 # The page is ready to photograph once the language took, both chips are in,
 # every sent card is on screen with its destination named, the unsent card
-# holds the recognized text, Instant mode is the one selected and the fonts
-# are loaded.
+# holds the recognized text (so the page is connected and hearing the
+# viewer), Instant mode is the one selected and the fonts are loaded.
 READY = """
 (async () => {
   const q = s => [...document.querySelectorAll(s)];
@@ -451,6 +476,17 @@ READY = """
   if (document.getElementById('segLive').getAttribute('aria-checked') !== 'true') return false;
   await document.fonts.ready;
   return true;
+})()
+"""
+
+# Then the send ring, once the silence has run, has eased up to its fill and
+# wears the face of an utterance that is going out rather than being dropped.
+RING_READY = """
+(() => {
+  const ring = document.getElementById('sendOne');
+  const r = parseFloat(ring.style.getPropertyValue('--r'));
+  return ring.classList.contains('on') && !ring.classList.contains('drop')
+    && Math.abs(r - %(ring)s) < 0.01;
 })()
 """
 
@@ -470,6 +506,8 @@ async def capture_all(langs, out_dir, python, keep):
             await chrome.open(url, PAGE_PRELUDE % {"lang": json.dumps(lang)})
             await chrome.wait_for(READY % {"lang": json.dumps(lang), "sent": len(SAMPLES[lang]["sent"])},
                                   f"the {lang} screen")
+            stage.run_silence()
+            await chrome.wait_for(RING_READY % {"ring": RING}, f"the send ring on the {lang} screen")
             # An ordinary tab asks "Keep this window on top" in a bubble
             # every time it loads, and any click outside it puts it away.
             # Put it away the same way here, so it does not cover the

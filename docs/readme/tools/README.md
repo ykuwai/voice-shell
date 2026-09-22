@@ -14,7 +14,8 @@ whenever the viewer's look changes.
 It writes one PNG per language into `docs/readme/images/`, `screen-<lang>.png`,
 at 380x640 CSS pixels and twice that in real pixels, dark theme: Instant mode,
 two listening sessions with the first one chosen, text being recognized in the
-Unsent card, and three sent cards (one of them marked as edited).
+Unsent card with its send ring nearly full, and three sent cards (one of them
+marked as edited).
 
 Options: `--lang ja` (repeatable) to do only some languages, `--out DIR` to
 write somewhere else, `--keep-temp` to keep the temp folder (state, config and
@@ -57,5 +58,10 @@ or not:
 - The text being recognized is written to `partial.txt`, which the viewer
   shows exactly as it shows a real partial result.
 - The level meter is therefore flat.
+- The send button's countdown ring is filled about 80 percent, the look it
+  has just before an utterance goes out on its own. The viewer draws it
+  itself, from a `level.txt` written the way the daemon writes one: a quiet
+  volume and a silence already run most of the way to the 3 second pause to
+  send (`RING` at the top of the script).
 - The "Keep this window on top" bubble, which an ordinary tab shows on every
   load, is put away before each shot, as a click elsewhere would.
