@@ -42,6 +42,7 @@
 
 - Claude Code
 - Python 3
+- Node.js
 - Google Chrome
 
 ### インストール
@@ -87,11 +88,11 @@ Windows や Linux で NVIDIA の GPU を積んでいるなら、[Faster Whisper]
 
 ## 🚀 普段の使い方
 
-`/voice-shell` を起動すれば、音声モードが始まります。
+Claude Code で `/voice-shell` を起動すれば、音声モードが始まります。
 気になることを声に出してつぶやくだけで、作業が進んでいきます。
 設定は保存されるので、2回目からは前回と同じ状態ですぐに使えます。
 
-### 1. `/voice-shell` と入力して起動する
+### 1. Claude Code で `/voice-shell` と入力して起動する
 
 Chrome に Voice Shell の画面が開きます。
 「このウィンドウを手前に固定する」を押すと、いつも最前面に出しておけます。
