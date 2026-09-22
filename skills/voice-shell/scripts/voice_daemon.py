@@ -842,6 +842,8 @@ COMMAND_WORDS = {
             "そくじ", "そくじもーど", "即時に",
             # 「そくじ」 easily becomes 「食事」 (measured). Alone, same command.
             "食事", "しょくじ", "食事モード", "速時", "則時",
+            # The English screen's name for it, as a loanword.
+            "インスタント", "いんすたんと", "インスタントモード",
         ],
         "en": ["live", "live mode", "instant", "instant mode", "send live"],
         "es": ["directo", "modo directo", "en directo", "enviar directo"],
@@ -860,6 +862,9 @@ COMMAND_WORDS = {
             # The English loanword comes out as readily as the native word here.
             # Left out, somebody who reaches for it gets no answer and no reason.
             "エディット", "えでぃっと", "エディットモード",
+            # The mode is called Draft on the English screen, and people who
+            # read that say the loanword too.
+            "ドラフト", "どらふと", "ドラフトモード", "ドラフトにして",
         ],
         # Not bare "edit". It ends ordinary sentences, which is why it was taken
         # out of the trailing signals, and a whole utterance of just that word is
@@ -872,7 +877,8 @@ COMMAND_WORDS = {
         "fr": ["relecture", "mode relecture", "brouillon", "mode brouillon"],
         "de": ["Entwurf", "Entwurfsmodus", "Sammelmodus", "Zum Ändern sammeln"],
         "zh": ["草稿模式", "暂存模式", "先存着改", "改完再发"],
-        "ko": ["모아 두기", "초안 모드", "모으기 모드", "고쳐서 보내기"],
+        "ko": ["모아 두기", "초안 모드", "모으기 모드", "고쳐서 보내기",
+               "드래프트 모드"],
     },
     # After finishing a sentence you sometimes think 「やっぱりなし」 or "I want to
     # fix this before it goes". When the command lands at the **end** of an utterance,
