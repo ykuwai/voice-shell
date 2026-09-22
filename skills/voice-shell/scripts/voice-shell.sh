@@ -399,6 +399,10 @@ case "$cmd" in
     "$0" viewer >/dev/null
     ;;
   stop)
+    # Stopping on purpose: this session's listen, when it goes, should leave no
+    # place behind for a re-arm to take up (see leave_listener).
+    _sid="${CLAUDE_CODE_SESSION_ID:-${CODEX_THREAD_ID:-${CODEX_SESSION_ID:-}}}"
+    [[ -n "$_sid" ]] && "$PY" "$APP" --mark-stopped "$_sid" 2>/dev/null || true
     "$PY" "$APP" --stop
     "$0" viewer-stop
     ;;
@@ -549,19 +553,23 @@ case "$cmd" in
     # carrying this same one is always a leftover, safe to retire outright
     # rather than merely warn about.
     reattached=0
+    old_pid=""; inherit_order=""; replay_offset=""
     if [[ -n "$session" && -d "$STATE_DIR/listeners" ]]; then
       for f in "$STATE_DIR/listeners"/*; do
         [[ -f "$f" ]] || continue
         other_pid="$(basename "$f")"
         [[ "$other_pid" == "$reg_pid" ]] && continue
-        other_session="$("$PY" -c '
+        other_line="$("$PY" -c '
 import json, sys
 try:
-    print(json.load(open(sys.argv[1])).get("session", ""))
+    d = json.load(open(sys.argv[1]))
+    print(d.get("session", ""), d.get("order", d.get("since", "")))
 except Exception:
     pass
 ' "$f" 2>/dev/null || true)"
+        other_session="${other_line%% *}"
         if [[ -n "$other_session" && "$other_session" == "$session" ]]; then
+          old_pid="$other_pid"; inherit_order="${other_line#* }"
           retire_pid "$other_pid"
           rm -f "$f"
           reattached=1
@@ -569,17 +577,35 @@ except Exception:
       done
     fi
 
+    # A re-arm after the old listen already went (a Monitor deadline): take up
+    # the place it left, its order in the row, its destination, and whatever
+    # was said to it in between (voice_daemon.py, leave_listener).
+    if [[ -n "$session" && "$reattached" == 0 ]]; then
+      adopted="$("$PY" "$APP" --adopt "$session" 2>/dev/null || true)"
+      if [[ -n "$adopted" ]]; then
+        read -r old_pid inherit_order replay_offset <<< "$adopted"
+        reattached=1
+      fi
+    fi
+
     # An escape hatch so any tool can name itself. VOICE_SHELL_NAME wins outright.
-    "$PY" - "$reg" "$agent" "$session" "${VOICE_SHELL_NAME:-}" <<'REG' || true
+    "$PY" - "$reg" "$agent" "$session" "${VOICE_SHELL_NAME:-}" "$inherit_order" <<'REG' || true
 import json, os, sys, time
 from pathlib import Path
-reg, agent, session, name = sys.argv[1:5]
+reg, agent, session, name, order = sys.argv[1:6]
 now = time.time()
+try:
+    order = float(order)
+except ValueError:
+    order = now
 
 # The order on screen comes from this moment, when the skill started listening
 # just now. A session that sat quiet for days does not keep a claim on an
 # early spot from back then (#74).
-json.dump({"started": time.strftime("%Y-%m-%d %H:%M:%S"), "since": now,
+# "order" is the place in the row. It is carried over when the same session
+# re-arms (a new watch, not a new arrival), while "since" always means when
+# this process registered, which the stale-PID checks rely on.
+json.dump({"started": time.strftime("%Y-%m-%d %H:%M:%S"), "since": now, "order": order,
            "cwd": os.getcwd(), "agent": agent, "session": session, "name": name},
           open(reg, "w", encoding="utf-8"), ensure_ascii=False)
 REG
@@ -604,6 +630,11 @@ REG
     if [[ -n "$session" && "$reattached" == 0 ]]; then
       : > "$STATE_DIR/route"
     fi
+    # Taking over from an earlier listen of this same session: if that one was
+    # the chosen destination, this one is now.
+    if [[ -n "$old_pid" && "$(cat "$STATE_DIR/route" 2>/dev/null)" == "$old_pid" ]]; then
+      printf '%s' "$reg_pid" > "$STATE_DIR/route"
+    fi
     # With exec the trap is not carried over (process replacement makes bash
     # itself disappear), so the automatic cleanup on exit stops working.
     #
@@ -619,13 +650,35 @@ REG
     # but tail itself only notices a closed pipe on its next write, which for a
     # session nobody routes to may never come. GNU tail (Linux, Git Bash) has
     # --pid. BSD tail on macOS does not, and does not need it.
-    tail_opts=(-F -n 0)
+    # Where to start reading. Normally the end of the log as it is now. When
+    # this takes over from an earlier listen of the same session, from how far
+    # that one actually got (listen_filter.py records it), so what was said to
+    # it between the two watches still arrives. An old listen still running
+    # has no tombstone yet, so its progress file is read directly.
+    mkdir -p "$STATE_DIR/listeners-gone"
+    if [[ -n "$old_pid" && -s "$STATE_DIR/listeners-gone/$old_pid.progress" ]]; then
+      replay_offset="$(cat "$STATE_DIR/listeners-gone/$old_pid.progress" 2>/dev/null)"
+    fi
+    [[ -n "$old_pid" ]] && rm -f "$STATE_DIR/listeners-gone/$old_pid.progress"
+    log_size="$(wc -c < "$LOG_FILE" 2>/dev/null | tr -d ' ')"
+    [[ "$log_size" =~ ^[0-9]+$ ]] || log_size=0
+    start_offset="$log_size"
+    if [[ "$replay_offset" =~ ^[0-9]+$ ]] && (( replay_offset <= log_size )); then
+      start_offset="$replay_offset"
+    fi
+    # By byte position rather than -n 0, so it starts exactly where the
+    # progress count starts.
+    tail_opts=(-F -c "+$((start_offset + 1))")
     tail --help 2>&1 | grep -q -- '--pid' && tail_opts+=("--pid=$$")
     # Fed by process substitution rather than a pipe so that $! and the wait
     # below are about the filter alone. Under Git Bash, waiting on a
     # background pipeline waits for tail too, and tail (held to this listen by
     # --pid) waits right back, so the filter quitting never let listen go.
-    "$PY" -u "$HERE/listen_filter.py" "$reg_pid" < <(tail "${tail_opts[@]}" "$LOG_FILE") &
+    progress="$STATE_DIR/listeners-gone/$reg_pid.progress"
+    progress_native="$progress"
+    command -v cygpath >/dev/null 2>&1 && progress_native="$(cygpath -w "$progress")"
+    VOICE_SHELL_PROGRESS="$progress_native" VOICE_SHELL_START_OFFSET="$start_offset" \
+      "$PY" -u "$HERE/listen_filter.py" "$reg_pid" $old_pid < <(tail "${tail_opts[@]}" "$LOG_FILE") &
     tail_pid=$!
 
     # A registration missing while its process is still running used to turn
@@ -654,7 +707,7 @@ REG
         # that no longer exists, so it never leaves the destination row. In a
         # subshell $$ is still the parent listen's own PID.
         if ! kill -0 "$$" 2>/dev/null; then
-          rm -f "$reg"
+          "$PY" "$APP" --leave "$reg" >/dev/null 2>&1 || rm -f "$reg"
           kill "$tail_pid" 2>/dev/null || true
           exit 0
         fi
@@ -676,7 +729,7 @@ REG
       done ) &
     heal_pid=$!
 
-    trap 'rm -f "$reg"; kill "$tail_pid" "$heal_pid" 2>/dev/null || true' EXIT INT TERM HUP
+    trap '"$PY" "$APP" --leave "$reg" >/dev/null 2>&1 || rm -f "$reg"; kill "$tail_pid" "$heal_pid" 2>/dev/null || true' EXIT INT TERM HUP
     wait "$tail_pid"
     ;;
   name)

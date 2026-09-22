@@ -1937,6 +1937,16 @@ def parse_args():
                    help="Stop the resident process and exit")
     p.add_argument("--listeners", action="store_true",
                    help="List the sessions listening to the utterance log and exit")
+    p.add_argument("--leave", metavar="REG", default=None,
+                   help="A listen is going away: keep REG as a short-lived "
+                        "tombstone so a re-armed listen for the same session "
+                        "can take its place (voice-shell.sh's EXIT trap)")
+    p.add_argument("--adopt", metavar="SESSION", default=None,
+                   help="Print 'pid order offset' of SESSION's fresh "
+                        "tombstone, if any, and remove it")
+    p.add_argument("--mark-stopped", metavar="SESSION", default=None,
+                   help="SESSION stopped listening on purpose; do not keep "
+                        "its place when its listen exits")
     p.add_argument("--newer-same-session", metavar="REG", default=None,
                    help="Exit 0 if some other registration shares REG's "
                         "session and was written more recently, 1 "
@@ -2094,6 +2104,12 @@ def resolve_target(log_path):
     if raw and (listeners_dir(log_path) / raw).exists():
         return raw
 
+    # The chosen session is between two watches (a Monitor deadline, see
+    # leave_listener). Keep it chosen. What is said meanwhile is tagged to it
+    # and handed to its next listen, instead of landing on some other desk.
+    if raw and raw in _fresh_tombstone_pids(log_path):
+        return raw
+
     # The registration file can go missing (a stray cleanup, a bug in whatever
     # else touches that folder) while the process behind it is still running.
     # A live PID outweighs a missing file, so trust it before giving up on the
@@ -2115,7 +2131,8 @@ def resolve_target(log_path):
     live = list_active_listeners(log_path)
     if not live:
         return None
-    return str(max(live, key=lambda e: e.get("since", 0))["pid"])
+    present = [e for e in live if not e.get("away")] or live
+    return str(max(present, key=_order_of)["pid"])
 
 
 # ── Listener names ─────────────────────────
@@ -2250,7 +2267,7 @@ def label_listeners(entries):
     """
     # When the times tie, the PID decides. Leave this undecided and the numbers swap
     # around with the order the registration files get read (left to the OS).
-    entries = sorted(entries, key=lambda e: (e.get("since", 0), e.get("pid", 0)))
+    entries = sorted(entries, key=lambda e: (_order_of(e), e.get("pid", 0)))
     seen = {}
     for e in entries:
         hand = custom_name(e)
@@ -2280,6 +2297,143 @@ def my_session_id():
 
 def listeners_dir(log_path):
     return Path(log_path).parent / "listeners"
+
+
+# -- Between two watches --------------------
+#
+# Claude Code ends a Monitor watch after at most 30 minutes, and the skill
+# re-arms it right away. Each watch is a new `listen` with a new PID, so on its
+# own a re-arm looked like one session leaving and a brand new one arriving:
+# the chip vanished, came back at the end of the row with a different number,
+# and a new arrival clears the chosen destination. A `listen` that goes away
+# now leaves a tombstone for a while instead. The next `listen` of the same
+# session adopts it: it keeps the old place in the row ("order"), takes over
+# the destination if it was chosen, and replays what was said to it while
+# nobody was listening. Stopping on purpose (voice-shell.sh stop, the x on a
+# chip) marks the session stopped first, so none of that happens then.
+
+LEAVE_GRACE = 600
+
+
+def gone_dir(log_path):
+    return Path(log_path).parent / "listeners-gone"
+
+
+def _gone_file(log_path, session):
+    return gone_dir(log_path) / re.sub(r"[^A-Za-z0-9_.-]", "_", str(session))
+
+
+def _order_of(entry):
+    order = entry.get("order")
+    if isinstance(order, (int, float)):
+        return order
+    return entry.get("since", 0)
+
+
+def _read_json(path):
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def mark_stopped(log_path, session):
+    if not session:
+        return
+    try:
+        gone_dir(log_path).mkdir(parents=True, exist_ok=True)
+        write_atomic(_gone_file(log_path, session),
+                     json.dumps({"session": session, "stopped": time.time()}))
+    except OSError:
+        pass
+
+
+def leave_listener(log_path, reg_path):
+    """Turn a departing listen's registration into a tombstone."""
+    reg_path = Path(reg_path)
+    info = _read_json(reg_path)
+    try:
+        reg_path.unlink(missing_ok=True)
+    except OSError:
+        pass
+    if not info or not info.get("session"):
+        return
+    session = info["session"]
+    tomb = _gone_file(log_path, session)
+    prior = _read_json(tomb)
+    if prior and "stopped" in prior and time.time() - prior["stopped"] < LEAVE_GRACE:
+        return                      # stopped on purpose, keep no place
+    # Where to pick up from: how far this listen actually got, or failing
+    # that, the end of the log as it stands.
+    try:
+        offset = int((gone_dir(log_path) / f"{reg_path.name}.progress")
+                     .read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        try:
+            offset = Path(log_path).stat().st_size
+        except OSError:
+            offset = 0
+    try:
+        gone_dir(log_path).mkdir(parents=True, exist_ok=True)
+        write_atomic(tomb, json.dumps({
+            "session": session, "pid": reg_path.name, "left": time.time(),
+            "offset": offset, "reg": info}, ensure_ascii=False))
+    except OSError:
+        pass
+
+
+def adopt_tombstone(log_path, session):
+    """Hand a re-armed listen its session's place, once."""
+    if not session:
+        return None
+    tomb = _gone_file(log_path, session)
+    data = _read_json(tomb)
+    try:
+        tomb.unlink(missing_ok=True)
+    except OSError:
+        pass
+    if not data or "stopped" in data or "left" not in data:
+        return None
+    if time.time() - data["left"] > LEAVE_GRACE:
+        return None
+    return {"pid": data.get("pid", ""), "order": _order_of(data.get("reg") or {}),
+            "offset": int(data.get("offset") or 0)}
+
+
+def _tombstones(log_path):
+    """Fresh tombstones, clearing the expired ones along the way."""
+    d = gone_dir(log_path)
+    if not d.is_dir():
+        return []
+    now = time.time()
+    out = []
+    for f in d.iterdir():
+        if f.suffix == ".progress":
+            # How far a listen got through the log (listen_filter.py). The
+            # next listen of that session reads it. Unclaimed, it goes with
+            # the grace.
+            try:
+                if now - f.stat().st_mtime > LEAVE_GRACE:
+                    f.unlink(missing_ok=True)
+            except OSError:
+                pass
+            continue
+        data = _read_json(f) or {}
+        at = data.get("left", data.get("stopped", 0))
+        if not data or now - at > LEAVE_GRACE:
+            try:
+                f.unlink(missing_ok=True)
+            except OSError:
+                pass
+            continue
+        if "left" in data:
+            out.append(data)
+    return out
+
+
+def _fresh_tombstone_pids(log_path):
+    return {str(t.get("pid")): t for t in _tombstones(log_path)}
 
 
 def _has_newer_same_session(log_path, reg_path):
@@ -2435,6 +2589,19 @@ def list_active_listeners(log_path):
             continue
         deduped.append(info)
 
+    # Sessions between two watches keep their chip and their number.
+    present = {info.get("session") for info in deduped if info.get("session")}
+    for tomb in _tombstones(log_path):
+        if tomb.get("session") in present:
+            continue
+        info = dict(tomb.get("reg") or {})
+        info["pid"] = tomb.get("pid")
+        info["away"] = True
+        info.setdefault("cwd", "unknown")
+        info.setdefault("started", "unknown")
+        info.setdefault("since", tomb.get("left", 0))
+        deduped.append(info)
+
     return label_listeners(deduped)
 
 
@@ -2556,6 +2723,20 @@ def main():
 
     if args.newer_same_session is not None:
         sys.exit(0 if _has_newer_same_session(args.log_file, args.newer_same_session) else 1)
+
+    if args.leave is not None:
+        leave_listener(args.log_file, args.leave)
+        return
+
+    if args.adopt is not None:
+        found = adopt_tombstone(args.log_file, args.adopt)
+        if found:
+            print(f"{found['pid']} {found['order']} {found['offset']}")
+        return
+
+    if args.mark_stopped is not None:
+        mark_stopped(args.log_file, args.mark_stopped)
+        return
 
     if args.status:
         pid = read_pid()

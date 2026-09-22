@@ -1091,6 +1091,11 @@ async def main_async(args):
         live = {str(l["pid"]): l for l in vd.list_active_listeners(args.log_file)}
         if pid not in live:
             return web.json_response({"error": "unknown"}, status=404)
+        # Stopped on purpose, so its listen leaves no place behind to be
+        # taken up again. One between two watches has nothing left to stop.
+        vd.mark_stopped(args.log_file, live[pid].get("session"))
+        if live[pid].get("away"):
+            return web.json_response({"ok": True, "label": live[pid].get("label", pid)})
         # Tell them first. Cut it quietly and that session sits there never
         # noticing that talking to it gets no response. Wait just long enough
         # for tail to read, then stop it.

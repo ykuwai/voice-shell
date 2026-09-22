@@ -197,19 +197,68 @@ def _exit_when_reader_gone(every=5.0):
     threading.Thread(target=watch, daemon=True).start()
 
 
+class _Progress:
+    """How far into the log this listen has handled, in bytes.
+
+    Written after every line that was either delivered or not meant for us,
+    never after one whose write failed. When a Monitor watch expires, the
+    next listen of this session starts reading from here, so an utterance
+    that arrived while nobody was reading is handed on instead of lost.
+    """
+
+    def __init__(self):
+        self.path = os.environ.get("VOICE_SHELL_PROGRESS") or None
+        try:
+            self.offset = int(os.environ.get("VOICE_SHELL_START_OFFSET", ""))
+        except ValueError:
+            self.path = None
+            self.offset = 0
+        self.advance(0)             # on record from the start, before any line
+
+    def advance(self, n):
+        self.offset += n
+        if not self.path:
+            return
+        tmp = self.path + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(str(self.offset))
+            os.replace(tmp, self.path)
+        except OSError:
+            pass
+
+
+def _emit(lines):
+    """Write the lines out. If the reader is already gone, stop here, with
+    the progress left pointing at this line so the next listen replays it."""
+    for out in lines:
+        try:
+            print(out, flush=True)
+        except (OSError, ValueError):
+            os._exit(0)
+
+
 def main():
-    me = sys.argv[1] if len(sys.argv) > 1 else ""
+    # The first id is this listen's own. Any after it are earlier PIDs of the
+    # same session, whose utterances it picks up on a re-arm.
+    mine = set(sys.argv[1:]) or {""}
     _exit_when_reader_gone()
-    for line in sys.stdin:
-        line = line.strip()
+    progress = _Progress()
+    for raw in sys.stdin.buffer:
+        size = len(raw)
+        if not raw.endswith(b"\n"):
+            break                   # a half-written last line, read again next time
+        line = raw.decode("utf-8", errors="replace").strip()
         if not line:
+            progress.advance(size)
             continue
         try:
             rec = json.loads(line)
         except ValueError:
             rec = None
         if not isinstance(rec, dict):
-            print(line, flush=True)   # keep unreadable lines, never drop one silently
+            _emit([line])   # keep unreadable lines, never drop one silently
+            progress.advance(size)
             continue
         # A "to" on a system_warning means it is about one session in
         # particular, so it is filtered exactly like any other line. Left off,
@@ -217,16 +266,18 @@ def main():
         # listening at once, say), and every session sees it.
         to = rec.get("to")
         if to is not None:
-            if str(to) != me:
+            if str(to) not in mine:
+                progress.advance(size)
                 continue
         elif "system_warning" not in rec:
+            progress.advance(size)
             continue
         # Write the split pieces back to back. Monitor bundles lines emitted
         # close in time into one notification, and bundling only caps each
         # line, so no gap is needed. Landing in the same notification is
         # better anyway, the reader sees all of it before acting.
-        for out in split_line(rec, line):
-            print(out, flush=True)
+        _emit(split_line(rec, line))
+        progress.advance(size)
 
 
 if __name__ == "__main__":

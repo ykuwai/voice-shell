@@ -139,10 +139,11 @@ picked last time (`~/.config/voice-shell/config.json`), and the first time it is
    not something to build around, a later Claude Code update could just as
    easily change it back, so nothing here leans on it. If a deadline
    notification does arrive, **treat it the same as starting fresh: call
-   Monitor again with the exact same command.** `listen`'s own registration
-   only disappears once the process itself actually stops (TaskStop or the
-   session ending, same as ever), so a plain re-arm is enough, nothing needs
-   stopping first.
+   Monitor again with the exact same command.** A plain re-arm is enough,
+   nothing needs stopping first. The new `listen` takes the old one's place:
+   same number in the row, still the destination if it was, and anything said
+   to it in between is delivered as it starts (the old one leaves a tombstone
+   for 10 minutes for exactly this).
 
 **Keep only one Monitor of your own.** Re-arming on a deadline or "source
 ended" notification (above) is always safe on its own. Re-attaching for some
