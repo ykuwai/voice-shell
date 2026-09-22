@@ -34,16 +34,23 @@ class HoldModeTailTest(unittest.TestCase):
 
 
 class DraftLoanwordIsExactOnlyTest(unittest.TestCase):
-    """The Draft loanword switches only when said alone. A draft is something
-    people talk about, and a sentence that ends on it has to go through."""
+    """The Draft loanword switches only when said alone, or with nothing but a
+    filler ahead of it. A draft is something people talk about, and a sentence
+    that ends on it has to go through."""
 
     def test_alone_switches(self):
         for w in ("ドラフト", "どらふと", "ドラフトモード", "드래프트 모드"):
             self.assertEqual(mode_command_shape(w), "hold", w)
 
+    def test_only_a_filler_ahead_still_switches(self):
+        for s in ("えーとドラフト", "あのドラフト", "うんドラフトモード", "はい、ドラフト",
+                  "えーと、あのー、ドラフト。", "음 드래프트 모드", "어, 드래프트 모드"):
+            self.assertEqual(mode_command_shape(s), "hold", s)
+
     def test_sentences_ending_on_it_go_through(self):
         for s in ("PRをドラフトにして", "このメールをドラフトにして", "今年のドラフト",
-                  "PR을 드래프트 모드", "ドラフトにして", "はいドラフト"):
+                  "PR을 드래프트 모드", "ドラフトにして", "えーと今年のドラフト",
+                  "はいPRをドラフト", "이번 드래프트 모드"):
             self.assertIsNone(mode_command_shape(s), s)
 
     def test_not_in_the_tail(self):
@@ -66,8 +73,12 @@ class LiveModeStaysExactTest(unittest.TestCase):
         self.assertEqual(mode_command_shape("インスタント"), "live")
         self.assertEqual(mode_command_shape("インスタントモード"), "live")
         for s in ("インスタント麺", "インスタント麺を買って", "インスタンスを起動して",
-                  "インスタンスを止めて", "はいインスタント"):
+                  "インスタンスを止めて", "このカメラはインスタント", "えーとインスタント麺"):
             self.assertIsNone(mode_command_shape(s), s)
+
+    def test_instant_loanword_after_a_filler(self):
+        for s in ("はいインスタント", "えーと、インスタントモード", "うん、インスタント"):
+            self.assertEqual(mode_command_shape(s), "live", s)
 
 
 if __name__ == "__main__":

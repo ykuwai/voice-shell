@@ -896,7 +896,7 @@ COMMAND_WORDS = {
             # Left out, somebody who reaches for it gets no answer and no reason.
             "エディット", "えでぃっと", "エディットモード",
             # The mode is called Draft on the English screen, and people who
-            # read that say the loanword too. Only ever as the whole utterance
+            # read that say the loanword too. Only alone or after a filler
             # though (_HOLD_MODE_TAIL_EXCLUDE), since 「PRをドラフトにして」 and
             # 「今年のドラフト」 are ordinary sentences that end on it.
             "ドラフト", "どらふと", "ドラフトモード",
@@ -1091,13 +1091,47 @@ UNMUTE_TAIL_NOISE_MAX = 3
 # The Draft loanwords are left out of the tail, the way unmute leaves out 「解除」.
 # A draft is something people talk about (a PR, an email, the baseball draft),
 # so 「PRをドラフトにして」 or 「PR을 드래프트 모드」 would be parked instead of sent.
-# Said alone they still switch, through HOLD_WORDS.
+# Said alone they still switch, through HOLD_WORDS, and so they do with nothing
+# but a filler ahead of them (MODE_LOANWORD_TAIL below).
 _HOLD_MODE_TAIL_EXCLUDE = {"ドラフト", "どらふと", "ドラフトモード", "드래프트 모드"}
 HOLD_MODE_TAIL = tuple(sorted(
     {w for w in builtin_words("hold") if w not in _HOLD_MODE_TAIL_EXCLUDE},
     key=len, reverse=True,
 ))
 HOLD_MODE_TAIL_NOISE_MAX = 7
+
+# The screen's own names for the two modes, said as loanwords (「ドラフト」 for
+# Draft, 「インスタント」 for Instant). A few characters of anything ahead of them
+# is too loose (「今年のドラフト」, 「PR을 드래프트 모드」), but a bare filler ahead
+# of them is still the word said alone, and 「えーとドラフト」 or 「はいインスタント」
+# going nowhere is the #76 bug over again. So only fillers may come first here.
+MODE_LOANWORD_TAIL = {
+    "hold": tuple(sorted(_HOLD_MODE_TAIL_EXCLUDE, key=len, reverse=True)),
+    "live": tuple(sorted({"インスタント", "いんすたんと", "インスタントモード"},
+                         key=len, reverse=True)),
+}
+# The fillers of the two languages these loanwords are said in, plus the short
+# replies that open a sentence out of habit. 「あの」 goes in here though it is
+# kept out of FILLERS, since nothing is being deleted, only let ahead of the word.
+_MODE_LEAD_FILLERS = tuple(sorted(
+    set(FILLERS["ja"]) | NOISE_ONLY["ja"] | set(FILLERS["ko"]) | NOISE_ONLY["ko"]
+    | {"はい", "うん", "ええ", "えー", "あー", "あの", "ん", "네", "예", "응", "그", "저"},
+    key=len, reverse=True,
+))
+_MODE_LEAD_TRIM = " \t　。、．，・！？!?.,…ー~〜"
+
+
+def only_fillers(text: str) -> bool:
+    """Whether what is left is nothing but fillers (or nothing at all)."""
+    rest = text.strip(_MODE_LEAD_TRIM)
+    while rest:
+        for f in _MODE_LEAD_FILLERS:
+            if rest.startswith(f):
+                rest = rest[len(f):].lstrip(_MODE_LEAD_TRIM)
+                break
+        else:
+            return False
+    return True
 
 
 # ── Phrasings the user adds ────────────────────
@@ -1717,7 +1751,9 @@ def mode_command_shape(text: str):
     Same split as mic_command_shape, and for the same reason. Hold also matches
     with a short noise prefix ahead of the word (HOLD_MODE_TAIL, #76 follow-up),
     live stays exact only, the same asymmetry mic_command_shape draws between
-    mute and unmute.
+    mute and unmute. The loanword names of both modes are the one exception
+    either way, they may have a filler and nothing else ahead of them
+    (MODE_LOANWORD_TAIL).
     """
     key = command_key(text)
     if key:
@@ -1728,6 +1764,11 @@ def mode_command_shape(text: str):
     body = take_tail(text, HOLD_MODE_TAIL)
     if body is not None and len(body) <= HOLD_MODE_TAIL_NOISE_MAX:
         return "hold"
+    # The loanword names, with nothing but a filler ahead of them
+    for mode, tails in MODE_LOANWORD_TAIL.items():
+        body = take_tail(text, tails)
+        if body is not None and only_fillers(body):
+            return mode
     return None
 
 
