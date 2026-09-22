@@ -210,7 +210,7 @@ beat('gone').then(() => process.exit(posts === 1 ? 0 : 1));
                       Path(SCRIPTS / "viewer.py").read_text(encoding="utf-8"))
         self.assertIn('"error": "daemon_running"',
                       Path(SCRIPTS / "viewer.py").read_text(encoding="utf-8"))
-        self.assertEqual(I18N.read_text(encoding="utf-8").count("asrConflict:"), 7)
+        self.assertEqual(I18N.read_text(encoding="utf-8").count("asrConflict:"), 8)
 
 
 if __name__ == "__main__":

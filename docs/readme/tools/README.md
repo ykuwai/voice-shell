@@ -1,7 +1,7 @@
 # README screenshots
 
 `make_screenshots.py` regenerates the viewer screenshots used by the READMEs,
-in all seven UI languages, from the code as it is right now. Run it again
+in every UI language, from the code as it is right now. Run it again
 whenever the viewer's look changes.
 
 ```sh

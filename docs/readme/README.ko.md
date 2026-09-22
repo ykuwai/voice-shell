@@ -4,7 +4,7 @@
 
 # Voice Shell
 
-[English](../../README.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [简体中文](README.zh.md) · 한국어
+[English](../../README.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [简体中文](README.zh.md) · [繁體中文](README.zh-TW.md) · 한국어
 
 <p align="center">
   <img src="https://img.shields.io/github/license/ykuwai/voice-shell" alt="라이선스">
@@ -93,7 +93,7 @@ npx skills update voice-shell -y
 
 어떤 언어를 인식할 수 있는지는 고른 방식이 정합니다. 브라우저는 Chrome이
 가진 목록, Apple은 OS에 설치된 로케일, Whisper는 모델이 다루는 범위입니다.
-창 자체는 일곱 가지 언어로 나옵니다.
+창 자체는 여덟 가지 언어로 나옵니다.
 
 ## 🗣️ 말로 할 수 있는 것
 
@@ -115,7 +115,7 @@ npx skills update voice-shell -y
 | "이건 고쳐서" | 방금 말한 문장이 나가지 않고 아래 칸으로 넘어갑니다. 보내기 전에 고칠 수 있습니다 |
 
 위에 나온 말은 모두 설정에서 끌 수 있고, 자신만의 표현을 가르칠 수도
-있습니다. 전부 창의 설정에서 할 수 있습니다. 창이 지원하는 일곱 언어 전체
+있습니다. 전부 창의 설정에서 할 수 있습니다. 창이 지원하는 여덟 언어 전체
 목록은 화면의 전구 아이콘 안에 있습니다.
 
 ## 📖 더 읽어볼 것들

@@ -44,7 +44,7 @@ OUT_DIR = REPO / "docs" / "readme" / "images"
 # this is quite possibly talking to that viewer at the same moment.
 REAL_PORT = 47865
 
-LANGS = ["en", "ja", "es", "fr", "de", "zh", "ko"]
+LANGS = ["en", "ja", "es", "fr", "de", "zh", "zh-TW", "ko"]
 
 # The CSS size of the picture. A little taller than the old hand-made
 # screenshot (355x470, which was a floating window) so the chips, the
@@ -111,6 +111,17 @@ SAMPLES = {
             ("10:46:30", 0, False, "再跑一遍测试，告诉我还有哪些没通过。"),
         ],
         "partial": "另外给加号的情况补一个回归测试",
+    },
+    # Written the way it is said in Taiwan, not the Simplified sample converted
+    # (文件 and 端點 rather than 文档 and 接口).
+    "zh-TW": {
+        "chips": ["修正登入 bug", "撰寫 API 文件"],
+        "sent": [
+            ("10:41:08", 1, False, "幫 API 文件裡的每個端點都加上一個簡短的請求和回應範例。"),
+            ("10:44:52", 0, True, "密碼裡有加號的時候登入會失敗。找出編碼的地方，然後把它修好。"),
+            ("10:46:30", 0, False, "再跑一次測試，告訴我還有哪些沒過。"),
+        ],
+        "partial": "另外幫加號的情況補一個回歸測試",
     },
     "ko": {
         "chips": ["로그인 버그 수정", "API 문서 작성"],
@@ -509,7 +520,7 @@ async def wait_http(url, stage, timeout=30):
 def main():
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--lang", action="append", choices=LANGS,
-                   help="Only this language (repeatable). Default: all seven")
+                   help="Only this language (repeatable). Default: all of them")
     p.add_argument("--out", default=str(OUT_DIR), help="Where the PNGs go")
     p.add_argument("--keep-temp", action="store_true",
                    help="Leave the temp folder (state, config, viewer.log) for a look afterwards")

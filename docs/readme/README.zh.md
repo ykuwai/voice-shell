@@ -4,7 +4,7 @@
 
 # Voice Shell
 
-[English](../../README.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · 简体中文 · [한국어](README.ko.md)
+[English](../../README.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · 简体中文 · [繁體中文](README.zh-TW.md) · [한국어](README.ko.md)
 
 <p align="center">
   <img src="https://img.shields.io/github/license/ykuwai/voice-shell" alt="许可证">
@@ -83,7 +83,7 @@ npx skills update voice-shell -y
 [SETUP.md](../../skills/voice-shell/SETUP.md) 里。
 
 选的方式决定能识别哪些语言。浏览器给的是 Chrome 自带的那些，Apple 给的是
-系统里装了的区域设置，Whisper 给的是模型覆盖的范围。窗口本身有七种语言。
+系统里装了的区域设置，Whisper 给的是模型覆盖的范围。窗口本身有八种语言。
 
 ## 🗣️ 说话能做到的事
 
@@ -105,7 +105,7 @@ npx skills update voice-shell -y
 | 「这句我来改」 | 刚说的那一句不发出去，转到下面的框里，发送前可以修改 |
 
 以上每一种说法都能在设置里关掉，也能教它您自己的说法，都在窗口的设置里。
-窗口支持的全部七种语言的完整列表，在屏幕上的灯泡图标里。
+窗口支持的全部八种语言的完整列表，在屏幕上的灯泡图标里。
 
 ## 📖 延伸阅读
 

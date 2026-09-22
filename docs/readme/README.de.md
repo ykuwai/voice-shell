@@ -4,7 +4,7 @@
 
 # Voice Shell
 
-[English](../../README.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · Deutsch · [简体中文](README.zh.md) · [한국어](README.ko.md)
+[English](../../README.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · Deutsch · [简体中文](README.zh.md) · [繁體中文](README.zh-TW.md) · [한국어](README.ko.md)
 
 <p align="center">
   <img src="https://img.shields.io/github/license/ykuwai/voice-shell" alt="License">
@@ -100,7 +100,7 @@ Arten, die alles lokal halten, stehen in
 
 Die gewählte Art entscheidet, welche Sprachen erkannt werden. Der Browser bietet, was
 Chrome mitbringt, Apple die im System installierten Locales, Whisper das, was das
-Modell abdeckt. Das Fenster selbst gibt es in sieben Sprachen.
+Modell abdeckt. Das Fenster selbst gibt es in acht Sprachen.
 
 ## 🗣️ Was Sie sagen können
 
@@ -124,7 +124,7 @@ für diesen einen Satz.
 
 Jedes der oben genannten Worte lässt sich in den Einstellungen abschalten,
 und Sie können ihm Ihre eigene Formulierung beibringen, alles im Fenster.
-Die vollständige Liste, in allen sieben Sprachen des Fensters, steckt hinter
+Die vollständige Liste, in allen acht Sprachen des Fensters, steckt hinter
 dem Glühbirnen-Symbol auf dem Bildschirm.
 
 ## 📖 Zum Weiterlesen

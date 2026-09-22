@@ -152,17 +152,26 @@ def _secure_dir(path: Path) -> None:
 
 # The languages the backchannel and filler lists are written for. Speech in any
 # other language falls back to English, the way the voice signals do (#4).
-NOISE_LANGS = ("ja", "en", "es", "fr", "de", "zh", "ko")
+# Chinese is two columns, "zh" for the Simplified script and "zh-TW" for the
+# Traditional one (Taiwan, Hong Kong), since the characters themselves differ
+# (静音 and 靜音 never meet in a comparison).
+NOISE_LANGS = ("ja", "en", "es", "fr", "de", "zh", "zh-TW", "ko")
 FALLBACK_LANG = "en"
 
 # The spelled-out form --language takes (voice-shell.sh passes "Japanese")
 _LANG_NAMES = {"japanese": "ja", "english": "en", "spanish": "es",
                "french": "fr", "german": "de", "chinese": "zh",
-               "mandarin": "zh", "korean": "ko"}
+               "mandarin": "zh", "korean": "ko",
+               "traditional chinese": "zh-TW", "taiwanese mandarin": "zh-TW"}
+
+# The regions and the script subtag that write Chinese in Traditional characters.
+# zh-CN, zh-SG, zh-Hans and a bare zh (Whisper says only that) stay Simplified,
+# and so does zh-Hans-TW, where the script is named outright.
+_ZH_TRADITIONAL = {"tw", "hk", "mo", "hant"}
 
 
 def lang_code(*values) -> str:
-    """The two-letter code of the language being listened to.
+    """The code of the language being listened to, two letters or "zh-TW".
 
     Each engine holds that in a shape of its own. Browser recognition keeps the
     speak-language setting ("ja-JP"), Apple keeps a locale ("ja-JP"), Whisper
@@ -177,12 +186,19 @@ def lang_code(*values) -> str:
     silently turn both tests below off for that speaker. It does not read on
     through to the next value either, since the utterance really was in that
     language and the list behind it would be the wrong one.
+
+    Chinese is the one language split further, by script rather than by region.
+    zh-HK and zh-Hant land on "zh-TW" with Taiwan, because the lists compare
+    characters and those write the same ones.
     """
     for value in values:
         if not value:
             continue
         s = str(value).strip().lower().replace("_", "-")
         code = _LANG_NAMES.get(s) or s.split("-")[0][:2]
+        subtags = set(s.split("-")[1:])
+        if code == "zh" and "hans" not in subtags and _ZH_TRADITIONAL & subtags:
+            code = "zh-TW"
         return code if code in NOISE_LANGS else FALLBACK_LANG
     return FALLBACK_LANG
 
@@ -201,6 +217,7 @@ NOISE_ONLY = {
     "fr": {"euh"},
     "de": {"ähm", "äh"},
     "zh": {"呃", "嗯"},
+    "zh-TW": {"呃", "嗯"},
     "ko": {"음", "어"},
 }
 
@@ -510,6 +527,7 @@ FILLERS = {
     "fr": ["euh"],
     "de": ["ähm", "äh"],
     "zh": ["呃", "嗯"],
+    "zh-TW": ["呃", "嗯"],
     "ko": ["음", "어"],
 }
 
@@ -774,6 +792,12 @@ COMMAND_WORDS = {
         "zh": [
             "静音", "开启静音", "关闭麦克风", "关掉麦克风", "麦克风静音",
         ],
+        # The same wordings in Traditional characters, as Chrome's zh-TW writes
+        # them. None of them is a Japanese word either (靜 and 麥 are not used
+        # there), so no Japanese sentence closes on one.
+        "zh-TW": [
+            "靜音", "開啟靜音", "關閉麥克風", "關掉麥克風", "麥克風靜音",
+        ],
         # Forms said to a person, like 「마이크 꺼」, are left out. Noun forms only.
         "ko": [
             "음소거", "음소거 켜기", "마이크 끄기", "마이크 음소거",
@@ -830,6 +854,7 @@ COMMAND_WORDS = {
         # What people actually say on an everyday call has not been checked, so
         # widening can wait until someone really uses them.
         "zh": ["解除静音", "取消静音"],
+        "zh-TW": ["解除靜音", "取消靜音"],
         "ko": ["음소거 해제", "음소거 풀기"],
     },
     # Back to the side where speech goes straight through. Switching between live and
@@ -852,6 +877,8 @@ COMMAND_WORDS = {
         # out of a mouth as a reply (「Sofort.」 means "right away").
         "de": ["Sofortmodus", "Direktmodus", "Direkt senden", "Sofort senden"],
         "zh": ["即时模式", "直接发送", "实时发送", "立刻发送"],
+        # 傳送 is the word Taiwan puts on a send button where the mainland puts 发送.
+        "zh-TW": ["即時模式", "直接傳送", "即時傳送", "立刻傳送"],
         "ko": ["바로 전달", "바로 보내기", "즉시 모드", "바로 전달 모드"],
     },
     # Send it over to the side that piles up for editing.
@@ -877,6 +904,13 @@ COMMAND_WORDS = {
         "fr": ["relecture", "mode relecture", "brouillon", "mode brouillon"],
         "de": ["Entwurf", "Entwurfsmodus", "Sammelmodus", "Zum Ändern sammeln"],
         "zh": ["草稿模式", "暂存模式", "先存着改", "改完再发"],
+        # 草稿模式 is written the same in both scripts and already sits in the
+        # column above. It is repeated so the "?" list shows it to this reader.
+        # The two spoken-out forms in the column above (「先存着改」 「改完再发」)
+        # are not carried over. This list is also matched as a tail with a few
+        # characters ahead of it, and 「這個檔案改完再傳」 is an ordinary
+        # instruction that would be parked instead of sent.
+        "zh-TW": ["草稿模式", "暫存模式"],
         "ko": ["모아 두기", "초안 모드", "모으기 모드", "고쳐서 보내기",
                "드래프트 모드"],
     },
@@ -916,6 +950,7 @@ COMMAND_WORDS = {
         "fr": ["annule ça", "annuler ça", "oublie ça"],
         "de": ["streich das", "vergiss das", "vergiss es"],
         "zh": ["刚才那句取消", "取消刚才那句", "取消这句", "这句不要了"],
+        "zh-TW": ["剛才那句取消", "取消剛才那句", "取消這句", "這句不要了"],
         "ko": ["방금 말 취소", "방금 건 취소", "지금 말 취소", "이건 취소"],
     },
     # This one is not thrown away, it goes to the draft on screen (fix it, then send)
@@ -942,6 +977,11 @@ COMMAND_WORDS = {
         "fr": ["je corrige", "je le corrige", "laisse-moi corriger"],
         "de": ["das ändere ich", "lass mich das ändern"],
         "zh": ["这句我来改", "这句留着改", "先留着改"],
+        # 「先留著改」 is left out here. 「那個 bug 先留著改」 closes an ordinary
+        # Taiwanese sentence meaning "leave that bug for later", and it would
+        # land in the draft instead of going out. Both kept forms point back at
+        # 這句, the sentence just said.
+        "zh-TW": ["這句我來改", "這句留著改"],
         "ko": ["고쳐서 보낼게", "내가 고칠게", "이건 고쳐서"],
     },
 }
@@ -1464,6 +1504,9 @@ NUMBER_WORDS = {
            "zehn": 10},
     "zh": {"零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
            "六": 6, "七": 7, "八": 8, "九": 9, "十": 10},
+    # Only 兩 is written apart from the Simplified table.
+    "zh-TW": {"零": 0, "一": 1, "二": 2, "兩": 2, "三": 3, "四": 4, "五": 5,
+              "六": 6, "七": 7, "八": 8, "九": 9, "十": 10},
     # 이번 (2번 written with the native reading instead of a digit) is also the
     # everyday word for "this time", so this does turn that word into a routing
     # switch. What holds it back is the same guard every routing phrase has,
@@ -1525,6 +1568,15 @@ ROUTE_PARTS = {
                    "发给", "会话", "目标", "第"],
         "tail": ["个", "号", "会话", "吧"],
     },
+    "zh-TW": {
+        # 「切換到2」 「工作階段2」 「第二個」. 工作階段 is what Taiwan's software
+        # calls a session. As with Simplified, a number with only a word after
+        # it (「兩個」 「2號」) is not held, both are ordinary words there too.
+        # 「第2號」 and 「切換到2號」 work.
+        "prefix": ["切換到", "切換成", "切到", "換到", "傳送到", "傳到",
+                   "傳給", "會話", "工作階段", "目標", "第"],
+        "tail": ["個", "號", "會話", "工作階段", "吧"],
+    },
     "ko": {
         # 「2번」 「세션 2」 「2번으로 보내」, and 「이번」 too now (see the Korean
         # column in NUMBER_WORDS for why that one is safe to read as a number).
@@ -1547,6 +1599,7 @@ ROUTE_EXAMPLES = {
     "fr": ["session 2", "numéro deux", "passe à 2", "destination 2"],
     "de": ["Sitzung 2", "Nummer zwei", "wechsle zu 2", "Ziel 2"],
     "zh": ["切换到2", "会话2", "第2个", "发送到2"],
+    "zh-TW": ["切換到2", "工作階段2", "第2個", "傳送到2"],
     "ko": ["2번", "세션 2", "2번으로 보내", "번호 2"],
 }
 

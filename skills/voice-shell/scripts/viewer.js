@@ -10,15 +10,17 @@ window.addEventListener('error', e => {
    you cannot pick, so this is the one place we do not translate.
    Only languages recognition can handle (ASR_LANGS below) are listed. Translate
    the screen and then offer a language your voice cannot get through in, and it
-   looks usable when it is not. */
+   looks usable when it is not.
+   Chinese comes twice, once per script, and each name is written in its own
+   script, so the two can be told apart by whoever reads either one. */
 const UI_LANGS = [
   ['en', 'English'], ['ja', '日本語'], ['es', 'Español'], ['fr', 'Français'],
-  ['de', 'Deutsch'], ['zh', '中文（简体）'], ['ko', '한국어'],
+  ['de', 'Deutsch'], ['zh', '简体中文'], ['zh-TW', '繁體中文'], ['ko', '한국어'],
 ];
 
 /* How the time is written. We pass hour12:false, so all of them come out on a 24 hour clock. */
 const TIME_LOCALE = {en:'en-GB', ja:'ja-JP', es:'es-ES', fr:'fr-FR',
-                     de:'de-DE', zh:'zh-CN', ko:'ko-KR'};
+                     de:'de-DE', zh:'zh-CN', 'zh-TW':'zh-TW', ko:'ko-KR'};
 const timeLocale = () => TIME_LOCALE[lang] || 'en-GB';
 
 const store = {
@@ -42,11 +44,22 @@ let langPref = store.get('lang', 'auto');
 let lang = 'en';
 /* The browser announces itself with the region attached, like ja-JP or zh-TW.
    Match the whole thing first, then match again on just the front half, and if
-   both miss, fall back to English. zh-TW ends up on a simplified Chinese
-   screen, which is still closer than falling back to English. */
+   both miss, fall back to English.
+   Chinese is the one language where the front half is not enough, because the
+   two scripts are two screens. Taiwan, Hong Kong and Macau write Traditional
+   characters, and so does a tag that names Hant outright. Everything else that
+   starts with zh (zh-CN, zh-SG, zh-Hans, a bare zh) stays Simplified, and a tag
+   that names Hans outright wins over its region. */
+const ZH_TRADITIONAL = new Set(['tw', 'hk', 'mo', 'hant']);
+function isTraditionalZh(tag) {
+  const [head, ...rest] = (tag || '').toLowerCase().replace(/_/g, '-').split('-');
+  return head === 'zh' && !rest.includes('hans') && rest.some(p => ZH_TRADITIONAL.has(p));
+}
 function pickLang(tag) {
   const want = (tag || '').toLowerCase();
-  if (I18N[want]) return want;
+  if (isTraditionalZh(want)) return 'zh-TW';
+  const hit = Object.keys(I18N).find(k => k.toLowerCase() === want);
+  if (hit) return hit;
   const head = want.split('-')[0];
   return I18N[head] ? head : 'en';
 }
@@ -672,8 +685,8 @@ function setState(kind, text) {
      It presses now, so what pressing does has to come first. A screen reader
      announcing nothing but the state would leave a button whose name never says
      what it is for. The two are split by a newline rather than any punctuation,
-     because the mark between two sentences is not the same in all seven
-     languages and there is nothing here that has to be spelled. */
+     because the mark between two sentences is not the same in every
+     language and there is nothing here that has to be spelled. */
   for (const m of minis) {
     const s = t(route === 'off' ? 'resumeTitle' : 'pauseTitle') + '\n' + text;
     m.box.title = s;
@@ -1431,7 +1444,7 @@ async function loadTailWords() {
 
    Kinds and single wordings both live here. **The wordings arrive whole, every
    language, not just the one being laid out**, because the tables above are
-   gathered across all seven languages and a wording struck while the screen was
+   gathered across every screen language and a wording struck while the screen was
    in Japanese still has to stop filling the drawing when the screen is English. */
 let cmdOff = {kinds: new Set(), words: {}};
 function takeCmdOff(d) {
@@ -3336,7 +3349,7 @@ for (const ev of ['pointerup', 'pointercancel']) {
 // The spoken language choices. Chrome takes BCP-47 tags, so the common ones are listed.
 const ASR_LANGS = [
   ['ja-JP', '日本語'], ['en-US', 'English (US)'], ['en-GB', 'English (UK)'],
-  ['zh-CN', '中文（简体）'], ['zh-TW', '中文（繁體）'], ['ko-KR', '한국어'],
+  ['zh-CN', '中文（简体）'], ['zh-TW', '中文（台灣）'], ['ko-KR', '한국어'],
   ['es-ES', 'Español'], ['fr-FR', 'Français'], ['de-DE', 'Deutsch'],
   ['it-IT', 'Italiano'], ['pt-BR', 'Português (BR)'], ['ru-RU', 'Русский'],
   ['hi-IN', 'हिन्दी'], ['id-ID', 'Indonesia'], ['th-TH', 'ไทย'],
@@ -3419,6 +3432,9 @@ function browserLang() {
   // sitting among the choices.
   const want = (navigator.language || 'en-US');
   if (ASR_LANGS.some(([c]) => c === want)) return want;
+  // zh-HK or zh-Hant would otherwise land on the first zh in the list, which is
+  // the mainland one, and come back written in Simplified characters.
+  if (isTraditionalZh(want)) return 'zh-TW';
   const head = want.split('-')[0].toLowerCase();
   const hit = ASR_LANGS.find(([c]) => c.split('-')[0].toLowerCase() === head);
   return hit ? hit[0] : 'en-US';

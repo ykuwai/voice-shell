@@ -36,7 +36,7 @@ class BrowserUnmuteGestureTuningTest(unittest.TestCase):
     def test_settings_and_each_translation_are_present(self):
         self.assertIn('id="browserGestureField"', HTML.read_text(encoding="utf-8"))
         text = I18N.read_text(encoding="utf-8")
-        self.assertEqual(text.count("browserGestureNote:"), 7)
+        self.assertEqual(text.count("browserGestureNote:"), 8)
 
     def test_gesture_detection(self):
         script = """

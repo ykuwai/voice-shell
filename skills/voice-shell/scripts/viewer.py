@@ -1444,7 +1444,7 @@ async def main_async(args):
         wording. **It goes back whole, every kind and every language, not just
         the language being laid out.** The page needs the ones it cannot draw
         too, because the tail wordings it tests the send drawing against are
-        gathered across all seven languages, and a wording struck while the
+        gathered across every screen language, and a wording struck while the
         screen was in another language still has to stop filling that drawing.
         """
         import voice_daemon as vd
