@@ -3477,6 +3477,7 @@ let onDeviceLang = '';
 let onDeviceRefused = false;  // Chrome refused a start after available() said yes
 let onDeviceInstalling = false;
 let onDeviceInstallId = 0;    // which press the current download belongs to
+let onDeviceInstallLang = '';  // and the language it was pressed for
 let onDeviceSawDownloading = false;
 let onDeviceProblem = '';     // a download that did not go through, until the next try
 let onDeviceAsk = null;       // the available() call under way, {lang, promise}
@@ -3509,7 +3510,7 @@ function askOnDevice() {
     onDeviceLang = lang;
     paintOnDevice();
     // No progress events come out of a download, so it is watched by asking again
-    if (status === 'downloading') onDeviceSawDownloading = true;
+    if (status === 'downloading' && lang === onDeviceInstallLang) onDeviceSawDownloading = true;
     if (status === 'downloading' || onDeviceInstalling) keepPollingOnDevice();
     // Came in just now (the download finished, here or anywhere else in this
     // Chrome). Start what was being held for it. A start already under way is
@@ -3538,13 +3539,17 @@ function paintOnDevice() {
   el.onDeviceField.hidden = !show;
   if (!show) return;
   let status = onDeviceNow();
-  // Between the press and Chrome saying downloading, it still says downloadable
-  if (onDeviceInstalling && status !== 'available' && status !== 'unavailable') status = 'downloading';
+  // Between the press and Chrome saying downloading, it still says downloadable.
+  // Only for the language the press was for: switched to another one while it
+  // downloads, that one has not been asked for, and reading it as downloading
+  // would grey its button out until the first one is done, minutes later.
+  const installing = onDeviceInstalling && onDeviceInstallLang === browserLang();
+  if (installing && status !== 'available' && status !== 'unavailable') status = 'downloading';
   el.onDeviceStatus.textContent = onDeviceProblem
     ? t(onDeviceProblem, {back: t('unfloatBtn')})
     : t(onDeviceStatusKey(status, onDeviceRefused), {plain: t('engineBrowser')});
   el.onDeviceRow.hidden = onDeviceRefused || status !== 'downloadable';
-  el.onDeviceDownload.disabled = onDeviceInstalling;
+  el.onDeviceDownload.disabled = installing;
 }
 
 // Say on the main screen too why nothing is being listened to. Settings
@@ -4830,6 +4835,27 @@ el.asrLang.onchange = () => {
   saveDict().then(loadDict);
 };
 
+/* Another tab in this browser moved between the two browser entries. The
+   flag is shared by every tab of this browser (localStorage), and a tab that
+   kept the answer it read at load would go on with the old one. Left on the
+   plain entry, it is the tab that takes over listening (the 5 second
+   heartbeat) once the one where local was picked closes, and it would send
+   the audio to Google while this browser's choice says it stays here. A
+   session already open was built for the other entry, so it is closed and the
+   next one goes through the hold. */
+addEventListener('storage', ev => {
+  if (!canLocalASR || (ev.key !== null && ev.key !== 'vs.' + ON_DEVICE_FLAG)) return;
+  const local = readOnDeviceFlag(store);
+  if (local === onDeviceLocal) return;
+  onDeviceLocal = local;
+  onDeviceRefused = false;
+  onDeviceProblem = '';
+  if (rec) { try { rec.stop(); } catch {} }
+  paintEnginePick();
+  paintBrowserAsr();
+  paint();
+});
+
 /* The download button. SR.install() has to be the very first thing the press
    does: Chrome only starts a download from inside a press, and even one await
    before it can let that go. It hands back no progress, so the status line
@@ -4852,6 +4878,7 @@ function startOnDeviceInstall() {
   }
   const id = ++onDeviceInstallId;
   onDeviceInstalling = true;
+  onDeviceInstallLang = lang;
   onDeviceSawDownloading = false;
   onDeviceRefused = false;
   onDeviceProblem = '';

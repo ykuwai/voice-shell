@@ -217,6 +217,69 @@ class OnDeviceStartTest(unittest.TestCase):
 })().then(() => process.exit(0), e => { console.error(e); process.exit(1); });
 """)
 
+# The download button and the status line, run for real with the page around
+# them stood in for, to watch what a language switched mid download shows.
+INSTALL_HARNESS = r"""
+const fs = require('fs');
+const source = fs.readFileSync(process.argv[1], 'utf8');
+const pureFrom = source.indexOf("const BROWSER_LOCAL = 'browser-local';");
+const pureTo = source.indexOf("// Whether the local entry can be offered here at all.", pureFrom);
+const stateFrom = source.indexOf('let onDeviceLocal = canLocalASR');
+const stateTo = source.indexOf('\nlet rec = null;', stateFrom);
+const clickFrom = source.indexOf('function startOnDeviceInstall() {');
+const clickTo = source.indexOf('\n/* ── Floating on top', clickFrom);
+if ([pureFrom, pureTo, stateFrom, stateTo, clickFrom, clickTo].some(i => i < 0)) process.exit(2);
+const make = new Function('env', `
+  const BROWSER_ENGINE = 'browser';
+  ${source.slice(pureFrom, pureTo)}
+  const SR = env.SR, canLocalASR = true, store = {get: () => '1', set() {}};
+  const browserLang = () => env.lang;
+  let asrChosen = true, recWanted = false, rec = null, recStarting = false;
+  const asrActive = () => true;
+  const el = env.el, t = key => key, say = () => {}, paint = () => {};
+  const startRecognition = () => {};
+  const setTimeout = () => 0;
+  ${source.slice(stateFrom, stateTo)}
+  ${source.slice(clickFrom, clickTo)}
+  return {startOnDeviceInstall, paintOnDevice, askOnDevice};
+`);
+const assert = (cond, what) => { if (!cond) { console.error(what); process.exit(1); } };
+const tick = () => new Promise(resolve => global.setTimeout(resolve, 0));
+"""
+
+
+def run_install(script):
+    subprocess.run(["node", "-e", INSTALL_HARNESS + script, str(VIEWER_JS)], check=True)
+
+
+class OnDeviceInstallTest(unittest.TestCase):
+    def test_a_language_switched_mid_download_is_not_greyed_out(self):
+        run_install(r"""
+(async () => {
+  const answers = {'ja-JP': 'downloading', 'en-US': 'downloadable'};
+  const el = {onDeviceField: {}, onDeviceStatus: {}, onDeviceRow: {}, onDeviceDownload: {}};
+  const env = {lang: 'ja-JP', el, SR: {
+    available: async ({langs}) => answers[langs[0]],
+    install: () => new Promise(() => {}),   // a download that goes on for minutes
+  }};
+  const h = make(env);
+  h.startOnDeviceInstall();
+  await h.askOnDevice(); await tick();
+  assert(el.onDeviceDownload.disabled === true, 'greyed out while its own language downloads');
+  assert(el.onDeviceStatus.textContent === 'onDeviceDownloading', 'says downloading');
+  env.lang = 'en-US';
+  await h.askOnDevice(); await tick();
+  assert(el.onDeviceStatus.textContent === 'onDeviceNeedsDownload',
+         'the other language says it needs a download, got ' + el.onDeviceStatus.textContent);
+  assert(el.onDeviceRow.hidden === false, 'with the button shown');
+  assert(el.onDeviceDownload.disabled === false, 'and pressable');
+  env.lang = 'ja-JP';
+  await h.askOnDevice(); await tick();
+  assert(el.onDeviceDownload.disabled === true, 'back on the first one, still downloading');
+})().then(() => process.exit(0), e => { console.error(e); process.exit(1); });
+""")
+
+
 class OnDeviceWiringTest(unittest.TestCase):
     source = VIEWER_JS.read_text(encoding="utf-8").replace("\r\n", "\n")
 
@@ -270,6 +333,17 @@ class OnDeviceWiringTest(unittest.TestCase):
         self.assertIn("{running: false, engine: BROWSER_ENGINE}", pick)
         self.assertNotIn("engine: BROWSER_LOCAL", self.source)
         self.assertIn("o.selected = id === engineShown(chosenEngine, onDeviceLocal);", self.source)
+
+    def test_another_tab_switching_entries_is_followed(self):
+        # The flag is per browser. A tab that kept what it read at load would
+        # take over listening later on the plain entry, sending to Google.
+        listener = self.section("addEventListener('storage', ev => {", "\n});\n")
+        self.assertIn("'vs.' + ON_DEVICE_FLAG", listener)
+        self.assertIn("onDeviceLocal = local;", listener)
+        # A session built for the other entry is closed, so the next one goes
+        # through the hold in startRecognition
+        self.assertIn("if (rec) { try { rec.stop(); } catch {} }", listener)
+        self.assertIn("paintEnginePick();", listener)
 
     def test_every_language_has_every_string(self):
         i18n = I18N_JS.read_text(encoding="utf-8").replace("\r\n", "\n")
