@@ -121,6 +121,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'dictNote','dictExport','dictImport','dictFile',
                   'paneBasic','paneDict',
                   'openHelp','helpSheet','closeHelp','helpMini','helpMiniViz',
+                  'clearHistory','clearHistoryLabel',
                   'cmdGroups','cmdNote','floatStand','floatStandBack'])
   el[id] = $(id);
 
@@ -679,6 +680,24 @@ function setState(kind, text) {
     m.box.setAttribute('aria-label', s);
   }
 }
+
+/* Clear history takes two presses, the same as the × on a destination chip.
+   It cannot be undone, and it sits in settings where a stray click is easy. */
+let clearHistoryAsking = 0;
+function resetClearHistory() {
+  clearTimeout(clearHistoryAsking);
+  clearHistoryAsking = 0;
+  el.clearHistoryLabel.textContent = t('clearHistory');
+}
+el.clearHistory.onclick = async () => {
+  if (!clearHistoryAsking) {
+    el.clearHistoryLabel.textContent = t('clearHistoryAsk');
+    clearHistoryAsking = setTimeout(resetClearHistory, 3000);
+    return;
+  }
+  resetClearHistory();
+  try { await post('/api/history/clear'); } catch {}
+};
 
 function retally() {
   el.none.hidden = el.log.children.length > 0;
@@ -2008,6 +2027,12 @@ async function handleWsMessage({ev, message, number, discardInProgress: wasDisca
     await routeQueue;
     const m = message || JSON.parse(ev.data);
     if (m.drop_done) return;
+    if (m.history_cleared) {
+      el.log.replaceChildren();
+      el.logJumpWrap.hidden = true;
+      retally();
+      return;
+    }
     const result = 'partial' in m || 'held' in m || m.text != null;
     if (result && (wasDiscarding || number <= discardResultCutoff || dropBarriers.size)) return;
 

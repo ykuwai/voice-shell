@@ -359,6 +359,10 @@ class Tail:
         self.path = path
         self.clients: set[web.WebSocketResponse] = set()
         self.history: list[dict] = []
+        # Where "clear history" on the screen drew the line, as a byte offset
+        # into the log. Only the screen forgets. The log itself is what
+        # Monitor follows, so it is never cut.
+        self.cleared_file = path.parent / "history_cleared_at"
         self.broadcast_lock = asyncio.Lock()
         self.drop_pending = None
 
@@ -367,10 +371,32 @@ class Tail:
         if not self.path.exists():
             return
         with open(self.path) as f:
+            f.seek(self._cleared_offset())
             for line in f:
                 rec = self._parse(line)
                 if rec and "system_warning" not in rec:
                     self.history.append(rec)
+
+    def _cleared_offset(self) -> int:
+        try:
+            offset = int(self.cleared_file.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            return 0
+        # A log smaller than the mark was rebuilt since, so the mark no
+        # longer points at a line boundary. Show all of the new one.
+        try:
+            size = self.path.stat().st_size
+        except OSError:
+            return 0
+        return offset if 0 <= offset <= size else 0
+
+    def clear_history(self):
+        try:
+            size = self.path.stat().st_size
+        except OSError:
+            size = 0
+        self.cleared_file.write_text(str(size), encoding="utf-8")
+        self.history.clear()
 
     @staticmethod
     def _parse(line: str):
@@ -1243,6 +1269,12 @@ async def main_async(args):
                                       "owner": owner or None}, status=409)
         return web.json_response({"time": stamp, "text": text})
 
+    async def handle_history_clear(_req):
+        """Forget the sent history on every open screen. The log is untouched."""
+        tail.clear_history()
+        await tail.broadcast({"history_cleared": True})
+        return web.json_response({"ok": True})
+
     async def handle_drop_current(_req):
         """Throw away the line being recognized right now.
 
@@ -1562,6 +1594,7 @@ async def main_async(args):
     app.router.add_post("/api/discard", handle_discard)
     app.router.add_post("/api/drop-current", handle_drop_current)
     app.router.add_post("/api/send-current", handle_send_current)
+    app.router.add_post("/api/history/clear", handle_history_clear)
 
     runner = web.AppRunner(app)
     await runner.setup()
