@@ -264,14 +264,6 @@ class OnDeviceWiringTest(unittest.TestCase):
         self.assertIn("if (id !== onDeviceInstallId || !onDeviceInstalling) return;", click)
         self.assertIn("el.onDeviceDownload.onclick = () => startOnDeviceInstall();", self.source)
 
-    def test_a_press_reloads_only_a_model_this_browser_had_before(self):
-        again = self.section("function reloadOnDeviceModel() {")
-        self.assertIn("onDeviceNow() !== 'downloadable' || !onDeviceHadBefore(browserLang())", again)
-        self.assertIn("addEventListener('pointerdown', reloadOnDeviceModel, true);", self.source)
-        # Remembered only once Chrome said it was ready
-        ask = self.section("function askOnDevice() {")
-        self.assertIn("if (status === 'available') noteOnDeviceHad(lang);", ask)
-
     def test_server_still_hears_browser(self):
         pick = self.section("el.enginePick.onchange = async () => {", "\n};\n")
         self.assertIn("enginePicked(el.enginePick.value)", pick)
@@ -284,7 +276,7 @@ class OnDeviceWiringTest(unittest.TestCase):
         keys = ["engineBrowserLocal", "onDeviceChecking", "onDeviceReady",
                 "onDeviceNeedsDownload", "onDeviceDownloading", "onDeviceUnavailable",
                 "onDeviceRefused", "onDeviceDownload", "onDeviceDownloadFailed",
-                "onDevicePressMain", "onDeviceHold", "onDeviceReload", "onDeviceLoad",
+                "onDevicePressMain", "onDeviceHold",
                 "idleMuteNoteLocal"]
         for key in keys:
             self.assertEqual(i18n.count(f"\n    {key}:'"), 8, key)
