@@ -499,7 +499,12 @@ async def capture_all(langs, out_dir, python, keep):
                 await chrome.screenshot(out)
                 print(f"wrote {out.relative_to(REPO) if out.is_relative_to(REPO) else out}")
     finally:
-        await chrome.close()
+        # Chrome going down badly must not keep the viewer and the dummies
+        # from being stopped after it.
+        try:
+            await chrome.close()
+        except Exception as error:
+            print(f"closing Chrome failed: {error}", file=sys.stderr)
         stage.teardown()
         if keep:
             print(f"kept {root}")
