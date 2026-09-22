@@ -3911,7 +3911,9 @@ function paintRoutes() {
     // see where it goes.
     const on = pick(l);
     const b = document.createElement('button');
-    b.className = 'route-chip' + (on ? ' on' : '');
+    // Between two watches (a Monitor deadline): it keeps its number and its
+    // place as destination, shown faded until its next watch picks it up.
+    b.className = 'route-chip' + (on ? ' on' : '') + (l.away ? ' away' : '');
     b.dataset.pid = String(l.pid);
     // The number is the same one used in the spoken signal (「2番」). Even when
     // a narrow window folds the name away, this part always stays.
@@ -3922,8 +3924,8 @@ function paintRoutes() {
     nm.className = 'nm';
     nm.textContent = l.label;
     b.append(no, nm);
-    b.title = [`${l.no}. ${l.label}`, l.cwd || '', t('renameHint')]
-                .filter(Boolean).join('\n');
+    b.title = [`${l.no}. ${l.label}`, l.away ? t('listenerAway') : '', l.cwd || '',
+               t('renameHint')].filter(Boolean).join('\n');
 
     /* Double click the chip to change its name. A long press does the same, for
        screens where a double tap is either awkward or already spoken for by the
