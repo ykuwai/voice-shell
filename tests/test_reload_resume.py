@@ -23,6 +23,7 @@ const body = source.slice(start, end);
 const make = new Function('env', `
   let {route, recWanted, draftTouched, seeded} = env;
   let sendingDraft = !!env.sendingDraft;
+  let discardingDraft = !!env.discardingDraft;
   const el = env.el;
   const browserStreamText = () => env.stream;
   const paintDraft = () => {}, grow = () => {};
@@ -105,6 +106,20 @@ assert(s.draft === '' && s.touched === false, 'sent box left out: ' + s.draft);
 assert(s.pending === 'next words', 'what is still being said stays');
 ''')
 
+    def test_box_being_discarded_is_not_carried_across(self):
+        run(r'''
+const env = {route: 'live', recWanted: true, draftTouched: true,
+             el: {draft: {value: 'thrown away'}}, stream: 'next words',
+             discardingDraft: true};
+const s = make(env).resumeSnapshot();
+assert(s.draft === '' && s.touched === false, 'discarded box left out: ' + s.draft);
+assert(s.pending === 'next words', 'what is still being said stays');
+// And the reload after it has nothing of the discarded box to put back
+const el = {draft: {value: ''}};
+make({el, draftTouched: false, seeded: false}).restoreDraft(s);
+assert(el.draft.value === 'next words', 'only the pending words: ' + el.draft.value);
+''')
+
     def test_held_lines_merge_without_doubling(self):
         run(r'''
 const el = {draft: {value: 'a\nb'}};
@@ -139,6 +154,13 @@ assert(el2.draft.value === 'x\ny', 'empty box takes them all');
         send = source.split("async function sendDraft(", 1)[1].split("\n}\n", 1)[0]
         self.assertLess(send.index("sendingDraft = true"), send.index("await post('/api/send'"))
         self.assertIn("finally {\n    sendingDraft = false;", send)
+        # Discard marks the box as on its way out for the whole POST too
+        discard = source.split("el.discard.onclick = async () => {", 1)[1].split("\n};\n", 1)[0]
+        self.assertLess(discard.index("discardingDraft = true"),
+                        discard.index("await post('/api/discard')"))
+        self.assertIn("finally {\n    discardingDraft = false;", discard)
+        self.assertLess(discard.index("discardingDraft = false"),
+                        discard.index("el.draft.value = ''"))
         # The touch asks the server rather than starting against a local off
         arm = source.split("const arm = ev => {", 1)[1].split("};", 1)[0]
         self.assertIn("refreshState()", arm)

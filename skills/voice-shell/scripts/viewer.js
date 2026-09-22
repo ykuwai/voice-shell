@@ -2342,12 +2342,15 @@ const RESUME_MAX_AGE_MS = 30000;   // older than this is some other visit, not t
 
 /* A box already on its way out (sendDraft waiting on the server) is left
    out. It is emptied only once the send answers, and put back after the
-   reload it would go out a second time with the next utterance. */
+   reload it would go out a second time with the next utterance. A box being
+   discarded (discard waiting on the server) is left out the same way, or
+   what was just thrown away would come back after the reload. */
 function resumeSnapshot() {
+  const leaving = sendingDraft || discardingDraft;
   return {
     live: route !== 'off' && recWanted,
-    draft: sendingDraft ? '' : el.draft.value,
-    touched: sendingDraft ? false : draftTouched,
+    draft: leaving ? '' : el.draft.value,
+    touched: leaving ? false : draftTouched,
     pending: browserStreamText(),
     at: Date.now(),
   };
@@ -2499,6 +2502,8 @@ async function refreshState() {
 /* ── Send and discard ───────────────────── */
 // Raised while the box is on its way to the server (resumeSnapshot leaves it out)
 let sendingDraft = false;
+// Same for a discard waiting on the server
+let discardingDraft = false;
 async function sendDraft({carry = false} = {}) {
   carryDraft = false;
   const text = el.draft.value.trim();
@@ -2527,7 +2532,12 @@ el.discard.onclick = async () => {
   if (carryDraft) { carryDraft = false; endOneShot(); }
   lastDiscarded = el.draft.value;
   lastDiscardedTouched = draftTouched;
-  await post('/api/discard');
+  discardingDraft = true;
+  try {
+    await post('/api/discard');
+  } finally {
+    discardingDraft = false;
+  }
   el.draft.value = '';
   draftTouched = false;
   grow();
