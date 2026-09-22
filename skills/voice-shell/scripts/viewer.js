@@ -2329,20 +2329,19 @@ let wayland = false;  // whether the daemon's own session is Wayland (floating c
    their quiet stretch, or the words being recognized (#118). It is written on
    the main window's pagehide, so the "Updated" button and an ordinary F5
    both go through it. The small window closing fires pagehide on its own
-   window, never this one, so that is not mistaken for a reload. But the
-   button closes the small window before reloading, and by pagehide nothing
-   is floating any more, so the button notes it first (floatAtReload). */
+   window, never this one, so that is not mistaken for a reload. */
 const RESUME_KEY = 'vs.resume';
 const RESUME_MAX_AGE_MS = 30000;   // older than this is some other visit, not this reload
-let floatAtReload = null;
 
+/* A box already on its way out (sendDraft waiting on the server) is left
+   out. It is emptied only once the send answers, and put back after the
+   reload it would go out a second time with the next utterance. */
 function resumeSnapshot() {
   return {
     live: route !== 'off' && recWanted,
-    draft: el.draft.value,
-    touched: draftTouched,
+    draft: sendingDraft ? '' : el.draft.value,
+    touched: sendingDraft ? false : draftTouched,
     pending: browserStreamText(),
-    float: floatAtReload ?? !!floatingWindow(),
     at: Date.now(),
   };
 }
@@ -2364,8 +2363,7 @@ function takeResume(storage, now) {
 /* The box comes back as it was, with whatever had not gone out yet added at
    the end rather than queued again. It may already have reached Claude in the
    instant the page went away, so it waits for a look and a press instead of
-   going out twice. seeded is raised so the held lines from the server do not
-   go in on top of the same text. */
+   going out twice. */
 function restoreDraft(r) {
   const text = [r.draft, r.pending]
     .map(s => (typeof s === 'string' ? s.trim() : ''))
@@ -2373,7 +2371,22 @@ function restoreDraft(r) {
   if (!text) return;
   el.draft.value = text;
   draftTouched = !!r.touched;
-  seeded = true;
+  paintDraft();
+  grow();
+}
+
+/* The held lines the server keeps, added once on the first look after a
+   load. Only the ones the box does not already have go in, so the ones it
+   got back from before the reload are not doubled, while the ones held
+   during the reload itself still turn up. Left out, they stayed out of
+   sight and were wiped along with the list when the box was sent. */
+function mergeHeld(held) {
+  const have = new Set(el.draft.value.split('\n').map(l => l.trim()).filter(Boolean));
+  const add = held.map(r => (r && typeof r.text === 'string' ? r.text.trim() : ''))
+    .filter(x => x && !have.has(x));
+  if (!add.length) return;
+  const cur = el.draft.value.replace(/\s*$/, '');
+  el.draft.value = cur ? cur + '\n' + add.join('\n') : add.join('\n');
   paintDraft();
   grow();
 }
@@ -2384,7 +2397,6 @@ addEventListener('pagehide', () => {
 
 el.fresh.onclick = () => {
   const w = floatingWindow();
-  floatAtReload = !!w;
   if (w) {
     try { w.close(); } catch { disableFloat(); }
   }
@@ -2462,13 +2474,13 @@ async function refreshState() {
     // idle mute then really muted a few minutes later (#118, after a reload
     // whose first touch was not the mic).
     if (prevRoute === 'off' && route !== 'off') applyRouteSideEffects(route);
+    // And into off the same way. Muted from another screen while this one was
+    // reloading, the display went to off with recognition still running.
+    else if (prevRoute !== 'off' && route === 'off') applyRouteSideEffects('off');
 
-    // Restore what was collected so a reload does not lose it (never touched while you are typing)
-    if (!seeded && Array.isArray(s.held) && s.held.length && !el.draft.value.trim()) {
-      el.draft.value = s.held.map(r => r.text).join('\n');
-      paintDraft();
-      grow();
-    }
+    // Restore what was collected so a reload does not lose it. Only what the
+    // box lacks goes in, at the end, so nothing being typed is overwritten.
+    if (!seeded && Array.isArray(s.held) && s.held.length) mergeHeld(s.held);
     seeded = true;
     paintDraft();
     if (!el.draft.hidden) grow();
@@ -2478,11 +2490,18 @@ async function refreshState() {
 }
 
 /* ── Send and discard ───────────────────── */
+// Raised while the box is on its way to the server (resumeSnapshot leaves it out)
+let sendingDraft = false;
 async function sendDraft({carry = false} = {}) {
   carryDraft = false;
   const text = el.draft.value.trim();
   if (!text) return;
-  await post('/api/send', {text, edited: draftTouched, carry});
+  sendingDraft = true;
+  try {
+    await post('/api/send', {text, edited: draftTouched, carry});
+  } finally {
+    sendingDraft = false;
+  }
   el.draft.value = '';
   draftTouched = false;
   grow();
@@ -3641,13 +3660,22 @@ function newRecognition(generation) {
 }
 
 async function startRecognition() {
-  if (!canBrowserASR || !recWanted || rec || recRunning || recStarting) return;
+  // A start that gives up before recognition opens also ends the unattended
+  // one after a reload (autoResumed). Left raised, a refusal much later, to
+  // someone who has since touched the page, would be taken for Chrome wanting
+  // a touch and would not say it was refused. A call that bounces off one
+  // already under way leaves it alone.
+  if (!canBrowserASR || !recWanted) { autoResumed = false; return; }
+  if (rec || recRunning || recStarting) return;
   const generation = recGeneration;
   recStarting = true;
   try {
-    if (!await beat('listening') || generation !== recGeneration || !recWanted || route === 'off' || rec) return;
+    if (!await beat('listening') || generation !== recGeneration || !recWanted || route === 'off' || rec) {
+      autoResumed = false;
+      return;
+    }
     const r = newRecognition(generation);
-    if (generation !== recGeneration || rec) return;
+    if (generation !== recGeneration || rec) { autoResumed = false; return; }
     rec = r;
     try {
       r.start();
@@ -5726,6 +5754,8 @@ if (canBrowserASR) {
   // answer come back first, that click would read live and switch it off.
   const arm = ev => {
     vizArmed = true;
+    // Touched now, so a refusal from here on is a real one (autoResumed)
+    autoResumed = false;
     if (armPending) {
       armPending = false;
       const onMic = [el.segOff, el.miniMic, el.helpMini]
@@ -5743,7 +5773,7 @@ try { resume = takeResume(sessionStorage, Date.now()); } catch {}
 if (resume) restoreDraft(resume);
 // A floating window cannot be reopened without a press. The bubble that asks
 // to float it shows on every load anyway (paintFloatAsk), so that press is one
-// click away and resume.float needs nothing more here.
+// click away and the snapshot does not need to note it.
 loadEngines().then(() => {
   if (!recWanted) return;
   if (vizArmed) { startRecognition(); return; }
