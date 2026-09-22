@@ -890,8 +890,10 @@ COMMAND_WORDS = {
             # Left out, somebody who reaches for it gets no answer and no reason.
             "エディット", "えでぃっと", "エディットモード",
             # The mode is called Draft on the English screen, and people who
-            # read that say the loanword too.
-            "ドラフト", "どらふと", "ドラフトモード", "ドラフトにして",
+            # read that say the loanword too. Only ever as the whole utterance
+            # though (_HOLD_MODE_TAIL_EXCLUDE), since 「PRをドラフトにして」 and
+            # 「今年のドラフト」 are ordinary sentences that end on it.
+            "ドラフト", "どらふと", "ドラフトモード",
         ],
         # Not bare "edit". It ends ordinary sentences, which is why it was taken
         # out of the trailing signals, and a whole utterance of just that word is
@@ -1079,7 +1081,16 @@ UNMUTE_TAIL_NOISE_MAX = 3
 # review, nothing is lost and live undoes it. Switching the other way, back to
 # live, stays exact only, that is the direction a false hit actually costs
 # something (speech during a call going straight through again).
-HOLD_MODE_TAIL = tuple(sorted(set(builtin_words("hold")), key=len, reverse=True))
+#
+# The Draft loanwords are left out of the tail, the way unmute leaves out 「解除」.
+# A draft is something people talk about (a PR, an email, the baseball draft),
+# so 「PRをドラフトにして」 or 「PR을 드래프트 모드」 would be parked instead of sent.
+# Said alone they still switch, through HOLD_WORDS.
+_HOLD_MODE_TAIL_EXCLUDE = {"ドラフト", "どらふと", "ドラフトモード", "드래프트 모드"}
+HOLD_MODE_TAIL = tuple(sorted(
+    {w for w in builtin_words("hold") if w not in _HOLD_MODE_TAIL_EXCLUDE},
+    key=len, reverse=True,
+))
 HOLD_MODE_TAIL_NOISE_MAX = 7
 
 
