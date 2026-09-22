@@ -22,6 +22,7 @@ if (start < 0 || end < 0) process.exit(2);
 const body = source.slice(start, end);
 const make = new Function('env', `
   let {route, recWanted, draftTouched, seeded} = env;
+  let oneShot = !!env.oneShot;
   const el = env.el;
   const browserStreamText = () => env.stream;
   const floatingWindow = () => env.floating;
@@ -101,7 +102,7 @@ assert(el2.draft.value === '' && h2.state().seeded === false,
     def test_startup_and_route_paths_share_side_effects(self):
         source = VIEWER_JS.read_text(encoding="utf-8")
         # Held off at startup is a real off, not only on screen
-        startup = source.split("loadEngines().then(() => {", 1)[1].split("});", 1)[0]
+        startup = source.split("loadEngines().then(() => {", 1)[1].split("\n});\n", 1)[0]
         self.assertIn("if (resume?.live)", startup)
         self.assertIn("autoResumed = true", startup)
         held = startup.split("armPending = true;", 1)[1]

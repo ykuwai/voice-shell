@@ -5752,7 +5752,28 @@ loadEngines().then(() => {
   // to the held-off start below (autoResumed, in onerror).
   if (resume?.live) {
     autoResumed = true;
-    startRecognition();
+    // Text put back in the box while in instant mode was left sitting there,
+    // and what was said next went straight out ahead of it: the second half
+    // of a sentence arrived before the first. It rides along with the next
+    // utterance instead, the same as switching back from draft with text
+    // still in the box (carryIntoNext).
+    // Whether it was instant is read from the server (not paused), not from
+    // anything the old page wrote down, so it holds even for a page that
+    // predates this.
+    // Recognition starts only once that is settled. Started alongside it, a
+    // quick first word could beat the switch and go out ahead of the box, or
+    // land before the carry and not count as the one that sends it.
+    if (el.draft.value.trim()) {
+      fetch('/api/state').then(r => r.json()).then(st => {
+        if (st.paused || route === 'off' || carryDraft || !el.draft.value.trim()) return;
+        const rev = routeRevision + 1;
+        return setRoute('hold').then(() => {
+          if (routeRevision === rev && route === 'hold' && el.draft.value.trim()) carryIntoNext();
+        });
+      }).catch(() => {}).finally(() => startRecognition());
+    } else {
+      startRecognition();
+    }
     return;
   }
   // By browser rule the microphone cannot open until the screen has been
