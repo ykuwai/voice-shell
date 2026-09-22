@@ -2,148 +2,195 @@
   <img src="images/logo.svg" alt="Voice Shell" width="88">
 </p>
 
-# Voice Shell
+<h1 align="center">Voice Shell</h1>
 
-[English](../../README.md) · [日本語](README.ja.md) · [Español](README.es.md) · Français · [Deutsch](README.de.md) · [简体中文](README.zh.md) · [繁體中文](README.zh-TW.md) · [한국어](README.ko.md)
+<p align="center">
+  <a href="../../README.md">English</a> · <a href="README.ja.md">日本語</a> · <a href="README.es.md">Español</a> · Français · <a href="README.de.md">Deutsch</a> · <a href="README.zh.md">简体中文</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.ko.md">한국어</a>
+</p>
 
 <p align="center">
   <img src="https://img.shields.io/github/license/ykuwai/voice-shell" alt="Licence">
   <img src="https://img.shields.io/github/last-commit/ykuwai/voice-shell" alt="Dernier commit">
 </p>
 
-La version d'origine est [README.md](../../README.md), en anglais. En cas de désaccord,
-c'est l'anglais qui fait foi.
+<h3 align="center">Dites ce que vous voulez faire, et Claude Code s'en occupe !</h3>
 
-**Parlez à Claude Code. Sans clavier.**
-
-Vous pensez tout haut en travaillant, et la phrase arrive telle quelle comme
-instruction, sans toucher à la touche Entrée. Ce n'est pas de la dictée
-collée sur un champ de texte. Couper le micro, se relire, annuler, choisir
-quelle session vous écoute, tout cela se fait à la voix, pendant que vos
-mains restent sur ce que vous étiez en train de faire.
+<p align="center">Voice Shell est une Agent Skill qui permet de donner vos instructions à Claude Code à la voix.</p>
 
 <p align="center">
-  <img src="images/screen-fr.png" alt="La fenêtre de Voice Shell, une fenêtre flottante affichant la transcription en direct, le choix de la session et le mode d'envoi" width="380">
+  <img src="images/screen-fr.png" alt="La fenêtre de Voice Shell, avec le micro, le mode d'envoi, les destinations et la transcription en direct" width="380">
 </p>
 
 ## 💡 Points forts
 
-- **Rien à cliquer pour l'envoyer.** La plupart des outils vocaux remplissent
-  un champ de texte et attendent que vous cliquiez sur envoyer. Ici, la
-  phrase passe directement au moment où elle est entendue, sans bouton, sans
-  étape de confirmation, sans fenêtre où cliquer.
-- **Gratuit à essayer, rien de plus à installer.** La reconnaissance par
-  défaut se fait dans le navigateur. Aucun modèle à télécharger, aucune
-  attente, aucune clé API. Le jour où vous voulez que tout reste privé,
-  un seul réglage suffit pour passer à la reconnaissance sur l'appareil
-  (Apple, ou Whisper), sans rien réapprendre.
-- **Une véritable interface vocale, pas une icône de micro.** Couper le
-  micro, passer de direct à relecture, annuler ce que vous venez de dire,
-  choisir quelle session vous écoute, tout cela fonctionne aussi à la voix.
-  Voir « Ce que vous pouvez dire » plus bas. La fenêtre flottante affiche
-  exactement ce qu'elle entend, au fil de la parole.
-- **Utilisable sur plusieurs chantiers à la fois.** Gardez le mode vocal actif
-  dans plusieurs sessions Claude Code et choisissez laquelle reçoit vos mots,
-  depuis la fenêtre ou à la voix.
-- **Les noms mal entendus se corrigent tout seuls.** Enregistrez-le une fois
-  dans le dictionnaire (« cloud code → Claude Code ») et la correction
-  s'applique dès lors, même au texte encore en cours de reconnaissance.
+### 1. Piloter Claude Code à la voix, sans les mains
 
-## 📦 Installer Voice Shell
+Pas besoin de bouton d'envoi. Trois secondes après la fin de votre phrase, elle part toute seule vers Claude Code.\
+Couper le micro, annuler ou changer de destination, tout se fait aussi à la voix.
+
+### 2. Un dictionnaire pour vos mots à vous
+
+Les mots souvent mal reconnus se corrigent automatiquement, par exemple « cloud code » devient « Claude Code ».\
+Noms de personnes, d'entreprises ou de services, tout s'ajoute facilement.
+
+### 3. Entièrement gratuit, et sûr
+
+Une reconnaissance vocale de qualité, gratuite, sans aucun abonnement.\
+Sur un portable, elle passe par la reconnaissance du navigateur. Sur un Mac ou un PC puissant, tout peut rester en local.
+
+## 📦 Installation
+
+### Prérequis
+
+- Claude Code
+- Python 3
+- Node.js
+- Google Chrome
+
+### Installer
+
+Collez ces commandes dans votre terminal.
 
 ```bash
 pip install numpy aiohttp "sounddevice>=0.5.6"
 npx skills add ykuwai/voice-shell -g -a claude-code -y
 ```
 
-Si vous avez Chrome, il n'en faut pas plus. `-g` le met dans
-`~/.claude/skills/`, disponible depuis tous vos projets. Juste envie de
-l'essayer dans un seul projet ? Enlevez `-g` et il reste dans le
-`.claude/skills/` de ce projet-là. `-a claude-code` nomme Claude Code
-directement plutôt que de laisser `npx` deviner, et `-y` saute la
-confirmation qu'il demanderait sinon.
+Tapez ensuite `/voice-shell` dans Claude Code. Il vérifie ce qui manque et se lance tout seul.
 
-Tapez `/voice-shell` dans Claude Code, ou dites « mode vocal », pour démarrer.
-Les étapes que suit l'agent à partir de là sont dans
-[SKILL.md](../../skills/voice-shell/SKILL.md).
+### Mettre à jour
 
-### 🔄 Mettre à jour
+De nouvelles fonctions arrivent souvent. Pensez à mettre à jour de temps en temps.
 
 ```bash
 npx skills update voice-shell -y
 ```
 
-Sans `-y`, il demande d'abord. Sans le nom, il met à jour toutes les skills
-installées, celle-ci comprise.
+## 🎙️ Choisir la reconnaissance vocale
 
-## 🔒 Où va votre voix
+Voice Shell propose trois moteurs de reconnaissance. Choisissez celui qui convient à votre machine.\
+Le changement se fait dans les réglages de la fenêtre. Si une installation est nécessaire, demandez simplement à Claude Code.
 
-Par défaut, c'est la Web Speech API du navigateur, la façon la plus
-rapide de commencer, et la seule à laisser votre voix quitter la
-machine. Les deux autres gardent tout en local, et passer à l'une
-d'elles ne prend qu'un seul réglage. La fenêtre montre toujours
-laquelle écoute.
+### 1. Portables - la reconnaissance du navigateur
+
+Rien à installer, ça marche tout de suite.\
+C'est la reconnaissance vocale gratuite intégrée à Chrome (Web Speech API).\
+L'audio est traité sur les serveurs de Google.
+
+### 2. Mac - la reconnaissance locale d'Apple
+
+Si vous ne voulez pas que votre voix quitte votre ordinateur, utilisez une reconnaissance qui tourne en local.\
+Sur Mac (macOS 26 ou plus récent), celle d'Apple est rapide et consomme peu d'énergie.\
+Le premier lancement télécharge un modèle de reconnaissance, ce qui prend un peu de temps.
+
+### 3. PC puissants (Windows / Linux) - Faster Whisper
+
+Avec un GPU NVIDIA sous Windows ou Linux, [Faster Whisper](https://github.com/SYSTRAN/faster-whisper) fait tout en local.\
+Le premier lancement prépare l'environnement et télécharge un modèle, ce qui prend un peu de temps.
+
+## 🚀 Utilisation
+
+Lancez `/voice-shell` dans Claude Code et le mode vocal démarre.\
+Dites simplement ce qui vous passe par la tête, et le travail avance.\
+Vos réglages sont enregistrés, et la fois suivante vous retrouvez tout comme vous l'avez laissé.
+
+### 1. Tapez `/voice-shell` dans Claude Code
+
+La fenêtre de Voice Shell s'ouvre dans Chrome.\
+Cliquez sur « Garder cette fenêtre au-dessus » pour qu'elle reste toujours au premier plan.
+
+### 2. Réactivez le micro et parlez
+
+Ce que vous dites est envoyé tel quel à Claude Code.\
+Les phrases très courtes (environ trois mots ou moins, comme « oui » ou « d'accord ») sont considérées comme du bruit et ne partent pas. La longueur minimale se change dans les réglages.\
+Pour arrêter de parler, dites « couper le micro » et le micro s'éteint.
+
+### 3. Pour ne pas envoyer, finissez par « annule ça »
+
+Terminez votre phrase par « annule ça », et ce que vous venez de dire est annulé au lieu d'être envoyé.\
+Pour corriger un peu avant l'envoi, cliquez sur le texte à l'écran et modifiez-le au clavier.
+
+### 4. Utilisable depuis plusieurs sessions
+
+Lancez `/voice-shell` dans plusieurs sessions Claude Code, et elles s'affichent numérotées en haut de la fenêtre.\
+Cliquez sur une destination, ou dites « session 2 » ou « numéro deux », pour changer de destination.
 
 > [!NOTE]
-> Par défaut c'est le navigateur qui reconnaît, donc l'audio part vers les
-> serveurs de Google. Si vous voulez qu'il reste sur votre machine, choisissez
-> une autre façon dans les réglages de la fenêtre. Le même avertissement y
-> figure sur place.
+> **Quitter le mode vocal**
+>
+> Dites à Claude Code « arrête le mode vocal », ou tapez `/voice-shell stop`.
 
-| Façon | Ce qu'il faut | Où va l'audio |
-|---|---|---|
-| **Ce navigateur** (par défaut) | Chrome. Ne marche que fenêtre ouverte | **Serveurs de Google** |
-| Apple sur l'appareil | macOS 26 ou plus récent. Rien à installer en plus | Reste sur la machine |
-| Whisper | `faster-whisper`. Solide sur les noms propres | Reste sur la machine |
+## 📨 Modes d'envoi
 
-La façon choisie est retenue, donc au démarrage suivant c'est la même. Les
-deux façons qui gardent tout en local sont dans
-[SETUP.md](../../skills/voice-shell/SETUP.md).
+Les boutons à côté du micro permettent de changer de mode d'envoi.
 
-Les langues reconnues dépendent de la façon choisie. Le navigateur propose
-celles que Chrome embarque, Apple les locales installées dans le système,
-Whisper celles que couvre le modèle. La fenêtre elle-même existe en huit
-langues.
+- **Direct** (par défaut) → ce que vous dites part aussitôt.
+- **Relecture** → ce que vous dites s'accumule à l'écran. Retouchez-le au clavier si besoin, et envoyez-le quand vous voulez.
 
-## 🗣️ Ce que vous pouvez dire
+Pour corriger seulement ce que vous venez de dire, terminez par « je corrige ». Voice Shell passe en mode Relecture juste pour cette phrase, pour que vous puissiez la corriger avant de l'envoyer.
 
-Dites l'une de ces phrases seule et ça s'applique tout de suite.
+## 🗣️ Commandes vocales utiles
 
-| Dites ceci | Ce qui se passe |
+| Commande vocale | Action |
 |---|---|
-| « couper le micro » | Le micro s'éteint |
-| « réactiver le micro » | Le micro revient (les façons sur l'appareil restent à l'écoute pour ça, pas le navigateur) |
-| « relecture » ou « brouillon » | Ce que vous dites s'accumule au lieu de partir, pour pouvoir le corriger avant l'envoi |
-| « direct » | Retour à l'envoi direct |
-| « session 2 » ou « numéro deux » | Choisit quelle session reçoit vos mots, quand plus d'une session écoute |
+| « couper le micro » | Coupe le micro |
+| « réactiver le micro » | Réactive le micro (reconnaissance locale uniquement).<br>Avec la reconnaissance du navigateur, cliquez sur le micro à l'écran |
+| « session 2 », « numéro deux » | Change de destination quand plusieurs sessions sont ouvertes |
+| « annule ça » en fin de phrase | Annule ce que vous venez de dire |
+| « je corrige » en fin de phrase | Passe en mode Relecture juste pour cette phrase |
+| « relecture », « direct » | Change de mode d'envoi |
 
-Ajoutez l'une de celles-ci à la fin de ce que vous dites et ça s'applique
-seulement à cette phrase-là.
+> [!TIP]
+> L'icône de l'ampoule à l'écran affiche toutes les commandes vocales.\
+> Vous pouvez aussi y ajouter vos propres commandes, ou désactiver celles qui ne vous servent pas.
 
-| Dites ceci | Ce qui se passe |
+### Utiliser plusieurs ordinateurs
+
+Si deux ordinateurs écoutent en même temps, dire « couper le micro » coupe les deux.\
+Activez « Plusieurs machines » dans les réglages et donnez un nom à chacun, comme « boulot » ou « perso ». Dire « boulot couper le micro » ne coupe alors que celui-là.
+
+## ✨ Fonctions et réglages pratiques
+
+### 1. Régler le délai d'envoi
+
+Par défaut, l'envoi se fait trois secondes après la fin de votre phrase. Si vous aimez prendre votre temps, passez à 5 ou 10 secondes.\
+Le repère sous le micro règle le niveau sonore en dessous duquel vous êtes considéré comme ayant fini de parler. Dans un endroit bruyant, montez-le un peu.
+
+### 2. Les propos hors sujet sont mis de côté
+
+Vous avez oublié de couper le micro et plusieurs remarques sans rapport sont parties d'affilée ? Claude Code s'en aperçoit, passe en mode Relecture et les met de côté.\
+Tout ce que vous avez dit reste affiché à l'écran, rien n'est perdu.
+
+### 3. Changer de destination après coup
+
+Envoyé par erreur à une autre session ? Choisissez simplement la bonne à la souris.
+
+### 4. Ajouter au dictionnaire en faisant glisser
+
+Quand un mot est mal reconnu, faites glisser la souris dessus pour l'ajouter au dictionnaire.\
+Il sera bien reconnu la fois suivante.
+
+## ⌨️ Raccourcis clavier
+
+| Touche | Action |
 |---|---|
-| « annule ça » | La phrase que vous venez de dire est jetée |
-| « je corrige » | La phrase atterrit dans la case au lieu de partir, pour pouvoir la corriger d'abord |
+| `Shift` + `M` | Active ou coupe le micro |
+| `Shift` + `L` | Passe en mode Direct |
+| `Shift` + `H` | Passe en mode Relecture |
+| `Shift` + `E` | Passe en mode Relecture juste pour ce que vous venez de dire |
+| `Shift` + `1` à `9` | Choisit la destination par son numéro |
+| `Shift` + `Backspace` | Supprime ce qui n'a pas encore été envoyé |
+| `Ctrl` + `Enter` (`Cmd` + `Enter` sur Mac) | Envoie le texte en cours de relecture |
+| `,` | Ouvre les réglages |
+| `.` | Ouvre le dictionnaire |
+| `?` | Affiche tous les raccourcis et commandes vocales |
 
-Chacune de ces phrases peut être désactivée dans les réglages, et vous pouvez
-y enseigner votre propre formulation, le tout depuis la fenêtre. La liste
-complète, dans les huit langues de la fenêtre, se trouve derrière l'icône de
-l'ampoule à l'écran.
+## 📖 Pour les agents IA
 
-## 📖 Pour aller plus loin
+Ces documents sont lus par Claude Code et les autres agents IA qui font tourner Voice Shell.
 
-Les deux ci-dessous sont en anglais uniquement. L'essentiel pour la plupart
-des gens est déjà au-dessus.
-
-| À lire | Ce qu'on y trouve |
-|---|---|
-| [SETUP.md](../../skills/voice-shell/SETUP.md) | L'installation selon l'environnement, et quoi faire quand ça bloque |
-| [SKILL.md](../../skills/voice-shell/SKILL.md) | Les étapes que lit l'agent. Le comportement fin est là |
-
-## 🔗 Références
-
-- [Web Speech API (MDN)](https://developer.mozilla.org/docs/Web/API/SpeechRecognition)
-- [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
+- [SKILL.md](../../skills/voice-shell/SKILL.md) explique l'utilisation et le comportement
+- [SETUP.md](../../skills/voice-shell/SETUP.md) couvre l'installation selon l'environnement et les solutions en cas de problème
 
 ## 📄 Licence
 
