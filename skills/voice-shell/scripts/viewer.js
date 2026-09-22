@@ -3475,6 +3475,13 @@ let onDeviceInstallId = 0;    // which press the current download belongs to
 let onDeviceSawDownloading = false;
 let onDeviceProblem = '';     // a download that did not go through, until the next try
 let onDeviceAsk = null;       // the available() call under way, {lang, promise}
+// Languages this browser has seen ready, so a restart's "downloadable" can be told apart
+// from a model that was never fetched (reloadOnDeviceModel)
+const ON_DEVICE_HAD = 'asrLocalHad';
+const onDeviceHadBefore = lang => store.get(ON_DEVICE_HAD, '').split(' ').includes(lang);
+function noteOnDeviceHad(lang) {
+  if (!onDeviceHadBefore(lang)) store.set(ON_DEVICE_HAD, (store.get(ON_DEVICE_HAD, '') + ' ' + lang).trim());
+}
 let onDevicePoll = null;
 
 // The answer for the language chosen now, or '' if it was for another one
@@ -3505,6 +3512,7 @@ function askOnDevice() {
     paintOnDevice();
     // No progress events come out of a download, so it is watched by asking again
     if (status === 'downloading') onDeviceSawDownloading = true;
+    if (status === 'available') noteOnDeviceHad(lang);
     if (status === 'downloading' || onDeviceInstalling) keepPollingOnDevice();
     // Came in just now (the download finished, here or anywhere else in this
     // Chrome). Start what was being held for it. A start already under way is
@@ -3535,9 +3543,14 @@ function paintOnDevice() {
   let status = onDeviceNow();
   // Between the press and Chrome saying downloading, it still says downloadable
   if (onDeviceInstalling && status !== 'available' && status !== 'unavailable') status = 'downloading';
+  // Downloadable for a language that was ready here before is Chrome having
+  // restarted, not a model that is missing (reloadOnDeviceModel)
+  const again = status === 'downloadable' && onDeviceHadBefore(browserLang());
   el.onDeviceStatus.textContent = onDeviceProblem
     ? t(onDeviceProblem, {back: t('unfloatBtn')})
+    : again ? t('onDeviceReload')
     : t(onDeviceStatusKey(status, onDeviceRefused), {plain: t('engineBrowser')});
+  el.onDeviceDownload.lastChild.nodeValue = t(again ? 'onDeviceLoad' : 'onDeviceDownload');
   el.onDeviceRow.hidden = onDeviceRefused || status !== 'downloadable';
   el.onDeviceDownload.disabled = onDeviceInstalling;
 }
@@ -4832,7 +4845,29 @@ el.asrLang.onchange = () => {
    Whether a press there counts for this page's SR is Chrome's call, and if it
    says no (NotAllowedError) the line says to bring the window back and press
    it in the tab. */
-el.onDeviceDownload.onclick = () => {
+el.onDeviceDownload.onclick = () => startOnDeviceInstall();
+
+/* After Chrome restarts, available() says downloadable again even for a
+   language whose model is still sitting on disk (seen on Chrome 153: the
+   files stay, Chrome only loads them once a page asks through install()).
+   Going through install() again then takes a couple of seconds and fetches
+   nothing. Asking everyone to press the download button after every restart,
+   under a line saying the model is not here, would be both a chore and
+   untrue, so for a language this browser has had ready before, any press on
+   the page does it. A press is needed either way (install() only works inside
+   one), and the first press after a load is usually the mic anyway.
+   Captured, so it runs before anything the press itself goes on to do. */
+function reloadOnDeviceModel() {
+  if (!asrChosen || !onDeviceLocal || onDeviceInstalling || onDeviceRefused) return;
+  if (onDeviceNow() !== 'downloadable' || !onDeviceHadBefore(browserLang())) return;
+  startOnDeviceInstall();
+}
+if (canLocalASR) {
+  addEventListener('pointerdown', reloadOnDeviceModel, true);
+  addEventListener('keydown', reloadOnDeviceModel, true);
+}
+
+function startOnDeviceInstall() {
   const lang = browserLang();
   let asked;
   try {
@@ -4857,15 +4892,14 @@ el.onDeviceDownload.onclick = () => {
   Promise.resolve(asked).then(
     ok => settle(ok ? '' : 'onDeviceDownloadFailed'),
     e => settle(e && e.name === 'NotAllowedError' ? 'onDevicePressMain' : 'onDeviceDownloadFailed'));
-  /* Seen on Chrome 153 after a restart: install() neither resolves nor starts
-     anything, and available() keeps saying downloadable. Left waiting, the
-     line would say downloading forever with the button greyed out and no way
-     on short of a reload. If Chrome has not so much as begun after a while,
-     the button comes back with the line saying it did not go through. */
+  /* Nothing promises install() ever settles. Left waiting on one that never
+     does, the line would say downloading forever with the button greyed out
+     and no way on short of a reload. If Chrome has not so much as begun after
+     a while, the button comes back with the line saying it did not go through. */
   setTimeout(() => {
     if (!onDeviceSawDownloading && onDeviceNow() !== 'available') settle('onDeviceDownloadFailed');
   }, 45000);
-};
+}
 
 /* ── Floating on top ─────────────────────
    So you never have to line browsers up side by side, it moves into a small

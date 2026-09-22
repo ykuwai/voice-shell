@@ -252,7 +252,7 @@ class OnDeviceWiringTest(unittest.TestCase):
         self.assertNotIn("disableBrowserASR", branch)
 
     def test_install_is_the_first_thing_the_press_does(self):
-        click = self.section("el.onDeviceDownload.onclick = () => {", "\n};\n")
+        click = self.section("function startOnDeviceInstall() {")
         self.assertIn("SR.install({langs: [lang], processLocally: true})", click)
         head = click.split("SR.install(", 1)[0]
         self.assertNotIn("await", head)
@@ -262,6 +262,15 @@ class OnDeviceWiringTest(unittest.TestCase):
         # leaving it greyed out on "downloading" for good
         self.assertIn("if (!onDeviceSawDownloading && onDeviceNow() !== 'available') settle('onDeviceDownloadFailed');", click)
         self.assertIn("if (id !== onDeviceInstallId || !onDeviceInstalling) return;", click)
+        self.assertIn("el.onDeviceDownload.onclick = () => startOnDeviceInstall();", self.source)
+
+    def test_a_press_reloads_only_a_model_this_browser_had_before(self):
+        again = self.section("function reloadOnDeviceModel() {")
+        self.assertIn("onDeviceNow() !== 'downloadable' || !onDeviceHadBefore(browserLang())", again)
+        self.assertIn("addEventListener('pointerdown', reloadOnDeviceModel, true);", self.source)
+        # Remembered only once Chrome said it was ready
+        ask = self.section("function askOnDevice() {")
+        self.assertIn("if (status === 'available') noteOnDeviceHad(lang);", ask)
 
     def test_server_still_hears_browser(self):
         pick = self.section("el.enginePick.onchange = async () => {", "\n};\n")
@@ -275,7 +284,7 @@ class OnDeviceWiringTest(unittest.TestCase):
         keys = ["engineBrowserLocal", "onDeviceChecking", "onDeviceReady",
                 "onDeviceNeedsDownload", "onDeviceDownloading", "onDeviceUnavailable",
                 "onDeviceRefused", "onDeviceDownload", "onDeviceDownloadFailed",
-                "onDevicePressMain", "onDeviceHold"]
+                "onDevicePressMain", "onDeviceHold", "onDeviceReload", "onDeviceLoad"]
         for key in keys:
             self.assertEqual(i18n.count(f"\n    {key}:'"), 8, key)
 
