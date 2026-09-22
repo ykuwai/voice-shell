@@ -2,9 +2,11 @@
   <img src="images/logo.svg" alt="Voice Shell" width="88">
 </p>
 
-# Voice Shell
+<h1 align="center">Voice Shell</h1>
 
-[English](../../README.md) · 日本語 · [Español](README.es.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [简体中文](README.zh.md) · [한국어](README.ko.md)
+<p align="center">
+  <a href="../../README.md">English</a> · 日本語 · <a href="README.es.md">Español</a> · <a href="README.fr.md">Français</a> · <a href="README.de.md">Deutsch</a> · <a href="README.zh.md">简体中文</a> · <a href="README.ko.md">한국어</a>
+</p>
 
 <p align="center">
   <img src="https://img.shields.io/github/license/ykuwai/voice-shell" alt="ライセンス">
