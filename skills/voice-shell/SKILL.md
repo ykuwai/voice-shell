@@ -148,6 +148,16 @@ picked last time (`~/.config/voice-shell/config.json`), and the first time it is
    is turned away with a `system_warning` saying so. Pass that on and do not
    re-arm again.
 
+   **Stop re-arming once the user has plainly walked away.** Every deadline
+   wakes this session up, so a machine left open overnight would call it
+   again and again for nothing. When **three watches in a row end on their
+   deadline with no utterance at all** (about an hour and a half of silence),
+   do not re-arm the fourth. Say in one line that voice mode stopped
+   listening because nothing was said for a while, and that `/voice-shell`
+   brings it back. Any utterance resets the count. The same goes when the
+   work is clearly finished and the user has said so (a goodbye, "that is all
+   for today"): finish up and let the next deadline end it without re-arming.
+
 **Keep only one Monitor of your own.** Re-arming on a deadline or "source
 ended" notification (above) is always safe on its own. Re-attaching for some
 other reason, compacting included, when the old one might still actually be
