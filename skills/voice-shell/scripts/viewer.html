@@ -80,7 +80,7 @@
       </button>
       <button class="mode" id="segHold" role="radio" aria-checked="false">
         <span class="ring" data-icon="edit" data-icon-size="28"></span>
-        <span data-i18n="modeHold">Review</span>
+        <span data-i18n="modeHold">Draft</span>
       </button>
     </div>
   </div>
@@ -381,6 +381,18 @@
         <option value="auto" data-i18n="themeAuto">Auto</option>
       </select>
     </div>
+  </div>
+
+  <!-- History. Rarely used, so it sits here rather than on the main screen.
+       Clearing only forgets what the screens show. The log Claude Code
+       follows is left alone. -->
+  <div class="group">
+    <h3 data-icon="list_alt" data-icon-size="16" data-i18n="grpHistory">History</h3>
+    <div class="btn-row">
+      <button class="btn" id="clearHistory" data-icon="delete"
+              data-icon-size="17"><span id="clearHistoryLabel" data-i18n="clearHistory">Clear history</span></button>
+    </div>
+    <p class="range-note" data-i18n="clearHistoryNote"></p>
   </div>
 
   </div><!-- /paneBasic -->

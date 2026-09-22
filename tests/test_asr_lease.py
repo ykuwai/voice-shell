@@ -132,6 +132,8 @@ const makeHarness = new Function('SR', 'beat', `
   const el = {stream: {textContent: ''}, tray: {classList: {toggle: () => {}}}, hint: {textContent: ''}};
   const withDict = value => value;
   const streamTail = () => {};
+  const browserStreamText = () => '';
+  let latestInterimForPaint = '', lastInterimHeard = '';
   const paintTinyButtons = () => {};
   const disableBrowserASR = () => {};
   const t = () => '';

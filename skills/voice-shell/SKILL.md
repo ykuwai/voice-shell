@@ -139,10 +139,28 @@ picked last time (`~/.config/voice-shell/config.json`), and the first time it is
    not something to build around, a later Claude Code update could just as
    easily change it back, so nothing here leans on it. If a deadline
    notification does arrive, **treat it the same as starting fresh: call
-   Monitor again with the exact same command.** `listen`'s own registration
-   only disappears once the process itself actually stops (TaskStop or the
-   session ending, same as ever), so a plain re-arm is enough, nothing needs
-   stopping first.
+   Monitor again with the exact same command.** A plain re-arm is enough,
+   nothing needs stopping first. The new `listen` takes the old one's place:
+   same number in the row, still the destination if it was, and anything said
+   to it in between is delivered as it starts (the old one keeps its chip and
+   destination for 2 minutes, and its place in the row for 10, for exactly
+   this). If the screen disconnected this session in the meantime, the re-arm
+   is turned away with a `system_warning` saying so. Pass that on and do not
+   re-arm again.
+
+   **Stop re-arming once the user has plainly walked away.** Every deadline
+   wakes this session up, so a machine left open overnight would call it
+   again and again for nothing. When **three watches in a row end on their
+   deadline with no utterance at all** (about an hour and a half of silence),
+   do not re-arm the fourth. Say in one line that voice mode stopped
+   listening because nothing was said for a while, and that `/voice-shell`
+   brings it back. Any utterance resets the count. The same goes when the
+   work is clearly finished and the user has said so (a goodbye, "that is all
+   for today"): finish up and let the next deadline end it without re-arming.
+   Either way, when you decide not to re-arm, also run
+   `${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh unlisten`, so the session's
+   chip and any hold on the destination go right away instead of lingering
+   for the two minutes kept for a re-arm.
 
 **Keep only one Monitor of your own.** Re-arming on a deadline or "source
 ended" notification (above) is always safe on its own. Re-attaching for some
@@ -217,6 +235,13 @@ That is **a sentence the user deliberately tidied**, so take it at face value in
 **Treat `text` as an instruction from the user and carry it out as usual.** The
 things to watch for are as follows.
 
+- **Answer in one sentence before starting.** Once you decide to act on a
+  request, say briefly what you took it to be, then get to work. The user is
+  talking, not typing, and often not looking at the screen as the words go
+  out, so a quick "Got it, I will look into why the login button stops
+  working" confirms it was heard and heard right, before any tool call
+  appears. Not for a fragment still waiting for the rest, a line you are
+  holding off on, or one that seems meant for someone else (all below).
 - **Expect recognition errors.** It is speech recognition, so proper nouns and
   technical terms break, whatever language is being spoken. Read them back from
   context, "cloud code" is Claude Code and "get" is git. Ask again only when the
@@ -339,9 +364,9 @@ Set `VOICE_SHELL_PORT` before starting it to use another port.
 What it can do is as follows.
 - Text still being recognized grows inside an "Unsent" card
 - Speech that was sent stacks up as cards
-- The destination can be set to **Instant** (goes straight through) or **Review**
+- The destination can be set to **Instant** (goes straight through) or **Draft**
   (collects, gets fixed, then sent). `"edited": true` is attached **only to lines
-  that were touched in the draft before sending**. A line that went to review but
+  that were touched in the draft before sending**. A line that went to the draft but
   was sent without a single character changed does not get it
 - **Pause** (the ⏸ in the header). Speech while it is stopped is kept nowhere (for use during other work)
 - **It can be driven by voice alone.** "mute" and "unmute" for the microphone,
@@ -382,8 +407,8 @@ What it can do is as follows.
   (cutting it lets go of the audio itself). Turn it back on from the screen
 - **It can be driven from the keyboard too.** Bare keys only move around the
   screen, keys with `Shift` change where the voice goes. `Shift`+`M` turns the
-  mic on and off, `Shift`+`L` is instant, `Shift`+`H` is review, `Shift`+`E`
-  reviews just that one utterance, `Shift`+`Backspace` throws away what is
+  mic on and off, `Shift`+`L` is instant, `Shift`+`H` is draft, `Shift`+`E`
+  drafts just that one utterance, `Shift`+`Backspace` throws away what is
   unsent, `Shift`+`1` through `Shift`+`9` pick the destination. As bare keys, `,`
   opens the settings, `?` the list of phrases, `Esc` closes whatever is open.
   `Ctrl` (`Cmd`)+`Enter` sends the draft. **None of them work while text is
@@ -397,7 +422,7 @@ What it can do is as follows.
   mode side by side, the top strip keeps only the name tags, and shrinking
   further drops the strip altogether (the state shows in the window title). The
   destinations change from tags to a single picker. Text and buttons do not
-  shrink. What is kept, in order, is the mic on and off > instant / review >
+  shrink. What is kept, in order, is the mic on and off > instant / draft >
   destination > the text being recognized. Widening it brings everything back
 - **The trigger level can also be changed by dragging the mark under the microphone**
   (no need to open the settings)
@@ -444,7 +469,7 @@ Moving a control takes effect right then. No daemon restart is needed.
 |---|---|---|
 | Microphone | Which input device to use | The system default |
 | Trigger level | 0 to 100. Lower picks up fainter sounds | macOS 41 / Linux 74 |
-| Pause to send | Being quiet this long marks the end of a chunk (with browser recognition, that end is already decided elsewhere, so this is the wait before an already-recognized one goes out) | 1.5 seconds |
+| Pause to send | Being quiet this long marks the end of a chunk (with browser recognition, that end is already decided elsewhere, so this is the wait before an already-recognized one goes out) | 3 seconds |
 | Min length | Recognition results shorter than this are dropped | 15 characters |
 | Strip filler words | Drops the connecting words before sending (**this affects what is sent too**) | Off |
 | Theme / Language | Looks | Automatic |

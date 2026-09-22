@@ -498,6 +498,8 @@
   }
   .route-chip .x:hover { opacity:1; background:color-mix(in srgb, var(--danger) 30%, transparent); }
   .route-chip.asking { border-color:var(--danger); color:var(--danger); background:none; }
+  /* A session between two watches. It comes back on its own in a moment. */
+  .route-chip.away { opacity:.45; }
   .route-chip.asking .x { opacity:1; }
   .route-chip.on {
     border-color:transparent; color:var(--panel); font-weight:600;

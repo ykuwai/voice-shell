@@ -359,6 +359,10 @@ class Tail:
         self.path = path
         self.clients: set[web.WebSocketResponse] = set()
         self.history: list[dict] = []
+        # Where "clear history" on the screen drew the line, as a byte offset
+        # into the log. Only the screen forgets. The log itself is what
+        # Monitor follows, so it is never cut.
+        self.cleared_file = path.parent / "history_cleared_at"
         self.broadcast_lock = asyncio.Lock()
         self.drop_pending = None
 
@@ -367,10 +371,43 @@ class Tail:
         if not self.path.exists():
             return
         with open(self.path) as f:
+            f.seek(self._cleared_offset())
             for line in f:
                 rec = self._parse(line)
                 if rec and "system_warning" not in rec:
                     self.history.append(rec)
+
+    def _epoch(self) -> str:
+        try:
+            return (self.path.parent / "log_epoch").read_text(encoding="utf-8").strip() or "-"
+        except OSError:
+            return "-"
+
+    def _cleared_offset(self) -> int:
+        # The daemon empties the log every time it starts (and writes a new
+        # log_epoch), so a mark from before that points into a different file.
+        try:
+            epoch, offset = self.cleared_file.read_text(encoding="utf-8").split()
+            offset = int(offset)
+        except (OSError, ValueError):
+            return 0
+        if epoch != self._epoch():
+            return 0
+        # A log smaller than the mark was rebuilt since, so the mark no
+        # longer points at a line boundary. Show all of the new one.
+        try:
+            size = self.path.stat().st_size
+        except OSError:
+            return 0
+        return offset if 0 <= offset <= size else 0
+
+    def clear_history(self):
+        try:
+            size = self.path.stat().st_size
+        except OSError:
+            size = 0
+        self.cleared_file.write_text(f"{self._epoch()} {size}", encoding="utf-8")
+        self.history.clear()
 
     @staticmethod
     def _parse(line: str):
@@ -684,6 +721,9 @@ async def main_async(args):
     tail.read_existing()
 
     async def handle_index(_req):
+        # A page (re)loading starts with no carry of its own, so the daemon's
+        # draft cap goes back to normal rather than staying lifted for good.
+        carry_file.unlink(missing_ok=True)
         # It gets edited during development, so let the browser cache nothing
         # (which heads off the accident where an old page's buttons do nothing)
         return web.FileResponse(page, headers={
@@ -733,6 +773,8 @@ async def main_async(args):
 
     state = Path(args.log_file).parent
     pause_file = state / "paused"
+    carry_file = state / "draft_carry"
+    last_send = {"text": "", "at": 0.0}
     hold_file = state / "held.jsonl"
     mute_file = state / "muted"
     partial_file = state / "partial.txt"
@@ -916,6 +958,13 @@ async def main_async(args):
         else:
             pause_file.unlink(missing_ok=True)
             note_file.unlink(missing_ok=True)
+        # Holding only so the draft can go out with the next utterance (the
+        # page's carry). That one is really being sent, so the daemon waits
+        # the full quiet for it rather than the draft mode's 2s.
+        if body.get("carry"):
+            carry_file.touch()
+        else:
+            carry_file.unlink(missing_ok=True)
         return web.json_response({"paused": pause_file.exists(), "note": note})
 
     async def handle_send(req):
@@ -924,6 +973,14 @@ async def main_async(args):
         text = (body.get("text") or "").strip()
         if not text:
             return web.json_response({"error": "empty"}, status=400)
+        # Two open screens can both send the same box for one carry (each
+        # hears the same switch). Only sends made by a carry are compared, so
+        # someone sending the same words twice on purpose is never stopped.
+        now = time.time()
+        if body.get("carry"):
+            if text == last_send["text"] and now - last_send["at"] < 5:
+                return web.json_response({"duplicate": True})
+            last_send.update(text=text, at=now)
 
         # The line reaching Claude is the body alone. A mark goes on only when
         # it was edited. Hardcode it here and the mark lands on anything that
@@ -1065,6 +1122,11 @@ async def main_async(args):
         live = {str(l["pid"]): l for l in vd.list_active_listeners(args.log_file)}
         if pid not in live:
             return web.json_response({"error": "unknown"}, status=404)
+        # Stopped on purpose, so its listen leaves no place behind to be
+        # taken up again. One between two watches has nothing left to stop.
+        vd.mark_stopped(args.log_file, live[pid].get("session"), disconnected=True)
+        if live[pid].get("away"):
+            return web.json_response({"ok": True, "label": live[pid].get("label", pid)})
         # Tell them first. Cut it quietly and that session sits there never
         # noticing that talking to it gets no response. Wait just long enough
         # for tail to read, then stop it.
@@ -1242,6 +1304,12 @@ async def main_async(args):
             return web.json_response({"error": "asr_owner_conflict",
                                       "owner": owner or None}, status=409)
         return web.json_response({"time": stamp, "text": text})
+
+    async def handle_history_clear(_req):
+        """Forget the sent history on every open screen. The log is untouched."""
+        tail.clear_history()
+        await tail.broadcast({"history_cleared": True})
+        return web.json_response({"ok": True})
 
     async def handle_drop_current(_req):
         """Throw away the line being recognized right now.
@@ -1562,6 +1630,7 @@ async def main_async(args):
     app.router.add_post("/api/discard", handle_discard)
     app.router.add_post("/api/drop-current", handle_drop_current)
     app.router.add_post("/api/send-current", handle_send_current)
+    app.router.add_post("/api/history/clear", handle_history_clear)
 
     runner = web.AppRunner(app)
     await runner.setup()

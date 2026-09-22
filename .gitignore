@@ -14,3 +14,6 @@ build/
 
 # Private development notes. Kept here, never pushed to GitHub
 docs/dev-notes/
+
+# Screen recordings the README GIFs are cut from. Too big for the repo
+docs/readme/recordings/
