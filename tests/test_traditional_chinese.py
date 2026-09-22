@@ -22,6 +22,12 @@ class LangCodeTest(unittest.TestCase):
                     "Traditional Chinese"):
             self.assertEqual(vd.lang_code(tag), "zh-TW", tag)
 
+    def test_cantonese_reads_the_traditional_column(self):
+        # Chrome's Cantonese is zh-HK, Whisper names it yue
+        for tag in ("zh-HK", "yue", "yue-HK", "yue-Hant-HK", "Cantonese"):
+            self.assertEqual(vd.lang_code(tag), "zh-TW", tag)
+        self.assertEqual(vd.lang_code("yue-Hans"), "zh")
+
     def test_simplified(self):
         for tag in ("zh", "zh-CN", "zh-SG", "zh-Hans", "zh-Hans-TW", "Chinese"):
             self.assertEqual(vd.lang_code(tag), "zh", tag)
@@ -110,6 +116,32 @@ class ScreenTest(unittest.TestCase):
                 "zh", "ja-JP"]
         got = self.node(f"console.log(JSON.stringify({json.dumps(tags)}.map(pickLang)));")
         self.assertEqual(got, ["zh-TW", "zh-TW", "zh-TW", "zh-TW", "zh", "zh", "zh", "ja"])
+
+    def test_spoken_language_for_hong_kong_is_cantonese(self):
+        # The screen is Traditional for them (above), but what they speak is
+        # mostly Cantonese, so recognition starts there rather than on Taiwan's
+        # Mandarin. A choice already saved always wins.
+        script = (
+            "const fs = require('fs');"
+            "const v = fs.readFileSync(process.argv[1], 'utf8');"
+            "const cut = (a, b) => v.slice(v.indexOf(a), v.indexOf(b, v.indexOf(a)));"
+            "const src = cut('const ZH_TRADITIONAL', 'function pickLang')"
+            " + cut('const ASR_LANGS', 'const SR =')"
+            " + cut('// A browser set to Hong Kong', '/* Which language is being spoken');"
+            "const make = new Function('navigator', 'store', src + ';return {browserLang, ASR_LANGS};');"
+            "const tags = ['zh-HK', 'zh-MO', 'zh-Hant-HK', 'yue', 'zh-TW', 'zh-Hant',"
+            " 'zh-CN', 'zh-Hans-HK', 'ja'];"
+            "const none = {get: () => ''};"
+            "const out = tags.map(t => make({language: t}, none).browserLang());"
+            "out.push(make({language: 'zh-HK'}, {get: () => 'zh-TW'}).browserLang());"
+            "const labels = Object.fromEntries(make({}, none).ASR_LANGS);"
+            "console.log(JSON.stringify({out, hk: labels['zh-HK'] || null}));")
+        got = json.loads(subprocess.run(
+            ["node", "-e", script, str(SCRIPTS / "viewer.js")],
+            capture_output=True, text=True, encoding="utf-8", check=True).stdout)
+        self.assertEqual(got["out"], ["zh-HK", "zh-HK", "zh-HK", "zh-HK", "zh-TW",
+                                      "zh-TW", "zh-CN", "zh-CN", "ja-JP", "zh-TW"])
+        self.assertEqual(got["hk"], "粵語（香港）")
 
 
 if __name__ == "__main__":

@@ -162,7 +162,8 @@ FALLBACK_LANG = "en"
 _LANG_NAMES = {"japanese": "ja", "english": "en", "spanish": "es",
                "french": "fr", "german": "de", "chinese": "zh",
                "mandarin": "zh", "korean": "ko",
-               "traditional chinese": "zh-TW", "taiwanese mandarin": "zh-TW"}
+               "traditional chinese": "zh-TW", "taiwanese mandarin": "zh-TW",
+               "cantonese": "zh-TW"}
 
 # The regions and the script subtag that write Chinese in Traditional characters.
 # zh-CN, zh-SG, zh-Hans and a bare zh (Whisper says only that) stay Simplified,
@@ -189,7 +190,8 @@ def lang_code(*values) -> str:
 
     Chinese is the one language split further, by script rather than by region.
     zh-HK and zh-Hant land on "zh-TW" with Taiwan, because the lists compare
-    characters and those write the same ones.
+    characters and those write the same ones. So does Cantonese (zh-HK is what
+    Chrome calls Cantonese, yue is what Whisper does), so 靜音 still mutes.
     """
     for value in values:
         if not value:
@@ -199,6 +201,10 @@ def lang_code(*values) -> str:
         subtags = set(s.split("-")[1:])
         if code == "zh" and "hans" not in subtags and _ZH_TRADITIONAL & subtags:
             code = "zh-TW"
+        # Cantonese by name, as Whisper says it ("yue"). Hong Kong writes it
+        # in Traditional characters, so it reads the same column as zh-HK.
+        elif s.split("-")[0] == "yue":
+            code = "zh" if "hans" in subtags else "zh-TW"
         return code if code in NOISE_LANGS else FALLBACK_LANG
     return FALLBACK_LANG
 

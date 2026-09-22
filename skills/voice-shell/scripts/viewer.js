@@ -3368,7 +3368,8 @@ for (const ev of ['pointerup', 'pointercancel']) {
 // The spoken language choices. Chrome takes BCP-47 tags, so the common ones are listed.
 const ASR_LANGS = [
   ['ja-JP', '日本語'], ['en-US', 'English (US)'], ['en-GB', 'English (UK)'],
-  ['zh-CN', '中文（简体）'], ['zh-TW', '中文（台灣）'], ['ko-KR', '한국어'],
+  ['zh-CN', '中文（简体）'], ['zh-TW', '中文（台灣）'], ['zh-HK', '粵語（香港）'],
+  ['ko-KR', '한국어'],
   ['es-ES', 'Español'], ['fr-FR', 'Français'], ['de-DE', 'Deutsch'],
   ['it-IT', 'Italiano'], ['pt-BR', 'Português (BR)'], ['ru-RU', 'Русский'],
   ['hi-IN', 'हिन्दी'], ['id-ID', 'Indonesia'], ['th-TH', 'ไทย'],
@@ -3442,6 +3443,13 @@ function watchBrowserGesture(level, now) {
   setRoute(lastMode);
 }
 
+// A browser set to Hong Kong or Macau Chinese, or to Cantonese by name (yue)
+function speaksCantonese(tag) {
+  const [head, ...rest] = (tag || '').toLowerCase().replace(/_/g, '-').split('-');
+  if (head === 'yue') return true;
+  return head === 'zh' && !rest.includes('hans') && (rest.includes('hk') || rest.includes('mo'));
+}
+
 function browserLang() {
   // The language to recognize. Not the language the screen is in, the language you speak.
   const saved = store.get('asrLang', '');
@@ -3451,8 +3459,12 @@ function browserLang() {
   // sitting among the choices.
   const want = (navigator.language || 'en-US');
   if (ASR_LANGS.some(([c]) => c === want)) return want;
-  // zh-HK or zh-Hant would otherwise land on the first zh in the list, which is
-  // the mainland one, and come back written in Simplified characters.
+  // Hong Kong and Macau read the Traditional screen but mostly speak
+  // Cantonese, which Chrome hears as zh-HK. Taiwan's Mandarin would turn it
+  // into the wrong words.
+  if (speaksCantonese(want)) return 'zh-HK';
+  // zh-Hant would otherwise land on the first zh in the list, which is the
+  // mainland one, and come back written in Simplified characters.
   if (isTraditionalZh(want)) return 'zh-TW';
   const head = want.split('-')[0].toLowerCase();
   const hit = ASR_LANGS.find(([c]) => c.split('-')[0].toLowerCase() === head);
