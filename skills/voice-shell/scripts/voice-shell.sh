@@ -676,6 +676,13 @@ REG
       replay_offset="$("$PY" "$APP" --progress-of "$old_pid" 2>/dev/null || true)"
     fi
     [[ -n "$old_pid" ]] && rm -f "$STATE_DIR/listeners-gone/$old_pid.progress"
+    # Coming back after days rather than between two watches. --adopt says so
+    # by handing back "-" for the order. There is nothing worth replaying then
+    # (nothing has been addressed to this session since it went), and a whole
+    # day of log read back at once would bury whatever is said next. The
+    # progress file is normally cleared long before this, but it outlives the
+    # sweep whenever nothing was running to do the sweeping.
+    [[ "$inherit_order" == "-" ]] && replay_offset=""
     log_size="$(wc -c < "$LOG_FILE" 2>/dev/null | tr -d ' ')"
     [[ "$log_size" =~ ^[0-9]+$ ]] || log_size=0
     start_offset="$log_size"

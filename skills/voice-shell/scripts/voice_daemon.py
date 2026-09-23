@@ -2600,13 +2600,24 @@ AWAY_HOLD = 120
 # AWAY_HOLD (the agent was busy) still gets its old place in the row back.
 LEAVE_GRACE = 600
 # How long one that is gone stays in the row after that, greyed out, unusable
-# and saying how to start it again. It has no claim on anything by then: it
-# cannot be adopted, chosen or routed to, it is only still on screen so that
-# coming back to the machine after a while shows what happened rather than an
-# empty row. Half a day covers a night away, which is exactly the stretch that
-# lost an utterance (#110), and stops well short of yesterday's work piling up
-# in front of today's.
-GONE_SHOW = 12 * 3600
+# and saying how to start it again. It is not a destination while it sits
+# there: nothing is routed to it and it cannot be chosen. It stays so that
+# coming back to the machine shows what happened rather than an empty row, and
+# so that the same session can pick its entry back up (ADOPT_GRACE below).
+# A week, because a machine left alone over a long weekend is the ordinary
+# case, not the strange one, and half a day meant a session that was still
+# perfectly resumable had dropped out of sight by the time anyone looked
+# (measured on a Mac mini left for three days). GONE_KEEP is what keeps the
+# row short, not this.
+GONE_SHOW = 7 * 24 * 3600
+# How long the same session id can still take its own entry back. The same
+# stretch, since an entry that is no longer on disk cannot be adopted anyway.
+# Safe to make this long because the tombstone is filed under the session id
+# itself, so only that same conversation can ever reach it, never a neighbour
+# and never a reused PID. What it does not carry over past LEAVE_GRACE is the
+# old place in the row and the replay of what was said in between: see
+# adopt_tombstone.
+ADOPT_GRACE = GONE_SHOW
 # And no more than this many of them at once, the most recent first. The row
 # has to stay readable, and past a few the older ones say nothing the newest
 # does not.
@@ -2744,13 +2755,33 @@ def adopt_tombstone(log_path, session):
         if data.get("disconnected") and time.time() - data["stopped"] < LEAVE_GRACE:
             return "blocked"
         return None
-    if "left" not in data or time.time() - data["left"] > LEAVE_GRACE:
+    if "left" not in data:
         return None
+    gap = time.time() - data["left"]
+    if gap > ADOPT_GRACE:
+        return None
+    # Past LEAVE_GRACE this is no longer a re-arm between two watches, it is the
+    # same conversation coming back after a while (a machine left alone for
+    # days, #110). It still takes its own entry back, so the chip does not
+    # double up and the session is one thing on screen from beginning to end.
+    # Two things it does not take back:
+    stale = gap > LEAVE_GRACE
     offset = int(data.get("offset") or 0)
-    if data.get("epoch", "-") != (log_epoch(log_path) or "-"):
-        offset = ""                 # the log was emptied since, start at its end
-    return {"pid": data.get("pid", ""), "order": _order_of(data.get("reg") or {}),
-            "offset": offset}
+    if stale or data.get("epoch", "-") != (log_epoch(log_path) or "-"):
+        # What was said in between. Nothing has been addressed to it since it
+        # went (resolve_target stops naming one that is gone), and reading days
+        # of log back at once would bury whatever is said next. Start at the
+        # end of the log as it stands, the same as the log having been emptied.
+        offset = ""
+    # And the old place in the row. While it is gone the chip sits at the end
+    # (label_listeners), so coming back to an order from days ago would jump it
+    # to the front and renumber every live one under the person. It lines up as
+    # of this moment instead, which is where it already was on screen (#74).
+    # "-" rather than an empty field: the three values are read back as words,
+    # so a blank one in the middle would be swallowed and the offset read as
+    # the order. voice-shell.sh falls back to now for anything unreadable.
+    order = "-" if stale else _order_of(data.get("reg") or {})
+    return {"pid": data.get("pid", ""), "order": order, "offset": offset}
 
 
 def _departed_pids(log_path):

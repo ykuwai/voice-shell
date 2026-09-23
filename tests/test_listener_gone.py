@@ -21,7 +21,9 @@ sys.path.insert(0, str(SCRIPTS))
 import voice_daemon as vd
 
 
-class ListenerGoneTest(unittest.TestCase):
+class _Row:
+    """A state folder with a log, a listeners folder and a tombstone folder."""
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         state = Path(self.tmp.name)
@@ -53,6 +55,8 @@ class ListenerGoneTest(unittest.TestCase):
         }))
         return pid
 
+
+class ListenerGoneTest(_Row, unittest.TestCase):
     def test_between_two_watches_is_away_and_still_chosen(self):
         # Inside the hold nothing has changed. The chip stays, speech is kept
         # for it, and its next watch replays what it missed.
@@ -126,6 +130,76 @@ class ListenerGoneTest(unittest.TestCase):
         mine = self.live()
         order = [str(e["pid"]) for e in vd.list_active_listeners(self.log)]
         self.assertEqual(order, ["40856", mine])
+
+    def test_it_is_still_there_days_later(self):
+        # A machine left alone over a long weekend. Half a day used to drop the
+        # session out of sight while it was still perfectly resumable.
+        self.tomb(3 * 24 * 3600)
+        entry, = vd.list_active_listeners(self.log)
+        self.assertTrue(entry.get("gone"))
+
+
+class AdoptAfterDaysTest(_Row, unittest.TestCase):
+    """The same conversation coming back after a while takes its own entry
+    back, so it is one thing on screen from beginning to end rather than a
+    stranger arriving beside its own greyed out chip."""
+
+    def test_the_same_session_can_still_take_its_entry_back_days_later(self):
+        self.tomb(3 * 24 * 3600, session="s1")
+        found = vd.adopt_tombstone(self.log, "s1")
+        self.assertIsInstance(found, dict)
+        self.assertEqual(found["pid"], "40856")
+
+    def test_a_stranger_gets_nothing(self):
+        self.tomb(3 * 24 * 3600, session="s1")
+        self.assertIsNone(vd.adopt_tombstone(self.log, "somebody-else"))
+
+    def test_past_the_showing_there_is_nothing_left_to_take_back(self):
+        self.tomb(vd.ADOPT_GRACE + 60, session="s1")
+        self.assertIsNone(vd.adopt_tombstone(self.log, "s1"))
+
+    def test_nothing_is_replayed_after_a_long_gap(self):
+        # Reading days of log back at once would bury whatever is said next,
+        # and nothing has been addressed to it since it went anyway.
+        self.tomb(3 * 24 * 3600, session="s1")
+        self.assertEqual(vd.adopt_tombstone(self.log, "s1")["offset"], "")
+
+    def test_a_re_arm_between_two_watches_still_replays(self):
+        self.tomb(30, session="s1")
+        found = vd.adopt_tombstone(self.log, "s1")
+        self.assertEqual(found["offset"], 0)
+        self.assertNotEqual(found["order"], "-")
+
+    def test_a_long_gap_does_not_take_the_old_place_in_the_row_back(self):
+        # While it was gone the chip sat at the end. An order from days ago
+        # would jump it to the front and renumber every live one under the
+        # person, which is the shuffle the row is arranged to avoid.
+        self.tomb(3 * 24 * 3600, session="s1")
+        self.assertEqual(vd.adopt_tombstone(self.log, "s1")["order"], "-")
+
+    def test_the_three_values_survive_being_read_back_as_words(self):
+        # voice-shell.sh reads them with `read -r pid order offset`, which
+        # swallows a blank field in the middle. "-" is what keeps the offset
+        # from being read as the order.
+        self.tomb(3 * 24 * 3600, session="s1")
+        f = vd.adopt_tombstone(self.log, "s1")
+        line = f"{f['pid']} {f['order']} {f['offset']}"
+        self.assertEqual(line.split(), ["40856", "-"])
+
+    def test_a_deliberate_stop_still_goes_quickly(self):
+        # unlisten and the x on a chip are unchanged. Nothing is kept for them
+        # beyond long enough to turn away the one re-arm a disconnect causes.
+        vd.write_atomic(vd._gone_file(self.log, "s1"), json.dumps({
+            "session": "s1", "pid": "40856",
+            "stopped": time.time() - (vd.LEAVE_GRACE + 60)}))
+        self.assertEqual(vd.list_active_listeners(self.log), [])
+        self.assertFalse(vd._gone_file(self.log, "s1").exists())
+
+    def test_a_disconnect_still_blocks_the_one_re_arm_it_causes(self):
+        vd.write_atomic(vd._gone_file(self.log, "s1"), json.dumps({
+            "session": "s1", "pid": "40856", "disconnected": True,
+            "stopped": time.time() - 5}))
+        self.assertEqual(vd.adopt_tombstone(self.log, "s1"), "blocked")
 
 
 if __name__ == "__main__":
