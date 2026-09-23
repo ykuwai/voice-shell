@@ -204,7 +204,9 @@ class AdoptAfterDaysTest(_Row, unittest.TestCase):
         vd.mark_stopped(self.log, "s1", disconnected=True)
         data = json.loads(vd._gone_file(self.log, "s1").read_text(encoding="utf-8"))
         self.assertNotIn("left", data)
-        self.assertTrue(vd.list_active_listeners(self.log))   # held for the re-arm
+        # Off the row at once, the way a deliberate stop always has been. What
+        # is kept for LEAVE_GRACE is only enough to turn away the one re-arm.
+        self.assertEqual(vd.list_active_listeners(self.log), [])
         data["stopped"] -= vd.LEAVE_GRACE + 60
         vd.write_atomic(vd._gone_file(self.log, "s1"), json.dumps(data))
         self.assertEqual(vd.list_active_listeners(self.log), [])
