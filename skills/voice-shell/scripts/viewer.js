@@ -4845,14 +4845,39 @@ function queueOrSendFinal(text) {
      acts on the mute and keeps nothing of what came before it in that same
      utterance (voice_daemon.mic_command_match). Split in two by Chrome's own
      endpointing, the very same sentence used to send 「内容」 on. Dropped here,
-     both roads end in the same place, and so do both ways of muting. */
+     both roads end in the same place, and so do both ways of muting.
+
+     Only for a mute this machine is actually going to act on, though
+     (muteMeantForHere). Sending the wording on regardless costs nothing, the
+     server is the one that decides; throwing the queue away for a mute that
+     never happens costs the words themselves, on a screen that stays live. */
   if (matchingTailWord(text)?.id === 'mute') {
-    if (dropPendingBrowserSends()) say(muteHint());
+    if (muteMeantForHere(text) && dropPendingBrowserSends()) say(muteHint());
     sendUtterance(text);
     return;
   }
+  /* More speech queued is the microphone plainly still being live. A note
+     left from a mute that was said but never landed (the wording went out
+     and the server did not act on it, the lease having moved on or the send
+     having failed) has nothing left to be about, and left standing it tells the
+     next mute that something was thrown away when nothing was. A mute that
+     does land sets it again through dropPendingBrowserSends. */
+  mutedDropNote = false;
   pendingBrowserSends.push({text, queuedAt: performance.now()});
   paintPendingBrowserSends();
+}
+
+/* Whether a mute wording heard here is one this machine answers to. With
+   several machines listening at once the name at the front is what picks the
+   one that moves: the daemon strips it first and a wording carrying no name
+   moves nothing at all (voice_daemon.apply_voice_command, _strip_name).
+   matchingTailWord knows the wordings but not the names, so a mute meant for
+   the machine across the room, and a bare one meant for none, both read as a
+   mute up there. Asked the same question the server asks, the queue is only
+   thrown away for the mute that really is about to cut this microphone. */
+function muteMeantForHere(text) {
+  if (!el.multiOn.checked) return true;
+  return stripMachineName(text, machineNames()) !== null;
 }
 
 /* Why an utterance the server took in went nowhere, in words for the person

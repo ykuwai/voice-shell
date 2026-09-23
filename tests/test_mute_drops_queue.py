@@ -70,11 +70,24 @@ const make = new Function(`
     route === 'off' ? '' : pendingBrowserSends.map(p => p.text).join(' ');
   // Word for word, as the page does it: an unmute wording at the end is not a
   // mute. The real matchingTailWord is tested in test_muted_unmute.py.
-  const matchingTailWord = text => (/(^|\s)mute$/.test(text) ? {id: 'mute'} : null);
+  const matchingTailWord = text => (/(^| )mute$/.test(text) ? {id: 'mute'} : null);
   const sendUtterance = text => sent.push(text);
   const say = text => said.push(text);
   const muteHint = () => (mutedDropNote ? 'threw it away. muted' : 'muted');
-  const el = {stream: {textContent: ''}, tray: {classList: {remove() {}, add() {}}}};
+  const el = {stream: {textContent: ''}, tray: {classList: {remove() {}, add() {}}},
+              multiOn: {checked: false}};
+  // Several machines listening at once. The real pair is tested against the
+  // daemon's own in test_machine_name.py; here they only have to pick the
+  // name off the front the way _strip_name does.
+  let names = [];
+  const machineNames = () => names;
+  const stripMachineName = (text, list) => {
+    for (const n of list) {
+      if (!text.startsWith(n)) continue;
+      return text.slice(n.length).replace(/^[ ,]*/, '');
+    }
+    return null;
+  };
   const streamTail = () => {};
   const listensWhileMuted = () => onDevice;
   const stopRecognition = () => { recRunning = false; };
@@ -96,6 +109,7 @@ const make = new Function(`
     },
     final(text) { queueOrSendFinal(text); },
     pressed() { route = 'off'; },
+    multi(on, list) { el.multiOn.checked = on; names = list || []; },
     mute() { route = 'off'; el.stream.textContent = ''; applyRouteSideEffects('off'); },
     unmute() { route = 'live'; applyRouteSideEffects('live'); },
     drop: () => dropPendingBrowserSends(),
@@ -259,6 +273,71 @@ assert(h.said.length === 1 && /threw it away/.test(h.said[0]), 'said: ' + JSON.s
 h.run(20000);
 assert(h.sent.length === 1, 'and nothing follows it out, got ' + JSON.stringify(h.sent));
 ''')
+
+    def test_a_mute_for_another_machine_leaves_the_queue_alone(self):
+        """With several machines listening, the name at the front is what picks
+        the one that moves. matchingTailWord knows the wordings and not the
+        names, so a mute said to the machine across the room reads as a mute
+        here as well, and throwing the queue away on it loses the words for a
+        mute that never happens on this screen."""
+        run(r'''
+h.multi(true, ['dev']);
+h.run(2000, {loud: true});
+h.final('the part before it');
+h.final('other mute');                 // a name that is not ours
+assert(h.pending().length === 1, 'the queue is untouched, got ' + JSON.stringify(h.pending()));
+assert(h.note() === false, 'and nothing says anything was thrown away');
+h.run(4000);
+assert(h.sent.includes('the part before it'), 'and it still goes out, got ' + JSON.stringify(h.sent));
+''')
+
+    def test_a_bare_mute_with_several_machines_leaves_the_queue_alone(self):
+        """A wording carrying no name moves nothing at all over there
+        (apply_voice_command leaves cmd_text empty), so it must move nothing
+        here either."""
+        run(r'''
+h.multi(true, ['dev']);
+h.run(2000, {loud: true});
+h.final('the part before it');
+h.final('mute');
+assert(h.pending().length === 1, 'the queue is untouched, got ' + JSON.stringify(h.pending()));
+h.run(4000);
+assert(h.sent.includes('the part before it'), 'and it still goes out, got ' + JSON.stringify(h.sent));
+''')
+
+    def test_a_mute_carrying_this_machines_name_still_drops(self):
+        """The one that really is about to cut this microphone."""
+        run(r'''
+h.multi(true, ['dev']);
+h.run(2000, {loud: true});
+h.final('the part before it');
+h.final('dev mute');
+assert(h.pending().length === 0, 'thrown away, got ' + JSON.stringify(h.pending()));
+assert(h.sent.length === 1 && h.sent[0] === 'dev mute', 'sent: ' + JSON.stringify(h.sent));
+assert(h.note() === true, 'and it is said');
+''')
+
+    def test_the_note_does_not_outlive_a_mute_that_never_landed(self):
+        """The wording goes out before anything is known about it, so the note
+        is set for a mute the server may never act on (the lease had moved on,
+        the send failed). More speech queued afterwards is the mic plainly
+        still being live, and a later mute with nothing waiting would otherwise
+        say that something was thrown away when nothing was."""
+        run(r'''
+h.multi(true, ['dev']);
+h.run(2000, {loud: true});
+h.final('the part before it');
+h.final('dev mute');                   // dropped, and the note goes up
+assert(h.note() === true, 'the note is up');
+h.final('still talking');              // nothing muted, so this queues as usual
+assert(h.note() === false, 'and the note is gone again');
+h.run(4000);
+assert(h.sent.includes('still talking'), 'sent: ' + JSON.stringify(h.sent));
+h.mute();                              // a real mute now, with nothing waiting
+assert(h.said.filter(s => /threw it away/.test(s)).length === 1,
+       'only the first one said it, got ' + JSON.stringify(h.said));
+''')
+
 
 
 class MutedScreenTest(unittest.TestCase):
