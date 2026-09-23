@@ -133,6 +133,28 @@ make({el: el2}).mergeHeld([{text: 'x'}, {text: 'y'}]);
 assert(el2.draft.value === 'x\ny', 'empty box takes them all');
 ''')
 
+    def test_what_comes_back_into_the_box_comes_back_as_written(self):
+        """The box is posted to /api/send word for word, so nothing rewrites it.
+
+        Most of what sits there was typed by hand, and the held lines have
+        already been through the server's fold and then its dictionary, which
+        leaves a replacement at the width it was typed in on purpose. Narrowing
+        either one on the way back in would send Claude words nobody wrote.
+        """
+        run(r'''
+const el = {draft: {value: ''}};
+const h = make({el, draftTouched: false, seeded: false});
+h.restoreDraft({draft: 'ＡＢＣ', pending: 'ＰＲ ｔｅｓｔ', touched: false});
+assert(el.draft.value === 'ＡＢＣ\nＰＲ ｔｅｓｔ', 'restored as written: ' + el.draft.value);
+
+// Both sides of the comparison are the line as written, so a held line already
+// in the box is recognised as itself and does not go in twice.
+const el2 = {draft: {value: 'ＡＷＳ'}};
+const h2 = make({el: el2});
+h2.mergeHeld([{text: 'ＡＷＳ'}, {text: 'ＰＲ'}]);
+assert(el2.draft.value === 'ＡＷＳ\nＰＲ', 'merged once, as written: ' + el2.draft.value);
+''')
+
     def test_startup_and_route_paths_share_side_effects(self):
         source = VIEWER_JS.read_text(encoding="utf-8")
         # Held off at startup is a real off, not only on screen
