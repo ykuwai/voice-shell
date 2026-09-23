@@ -1519,7 +1519,14 @@
   }
   .btn.busy { opacity:.6; }
   .btn:disabled { opacity:.45; }
-  .btn-row { display:flex; align-items:center; gap:.4rem; flex-wrap:wrap; }
+  /* Same standing as a field, so what comes under a row of buttons is set off
+     from it by the same .6rem the fields further up the sheet keep between
+     them. Clear history and the line explaining what it clears were pressed
+     together with nothing in between, and read as one lump rather than a
+     control and a note about it. Nothing is added under the last row in a
+     group, where the group's own padding already does that job. */
+  .btn-row { display:flex; align-items:center; gap:.4rem; flex-wrap:wrap; margin-bottom:.6rem; }
+  .btn-row:last-child { margin-bottom:0; }
   .btn-row .spacer { flex:1; }
 
   /* Dictionary */
