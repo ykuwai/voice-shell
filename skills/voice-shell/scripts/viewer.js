@@ -136,7 +136,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'dictNote','dictExport','dictImport','dictFile',
                   'paneBasic','paneDict',
                   'openHelp','helpSheet','closeHelp','helpMini','helpMiniViz',
-                  'clearHistory','clearHistoryLabel',
+                  'clearHistory','clearHistoryLabel','clearHistoryDone',
                   'cmdGroups','cmdNote','floatStand','floatStandBack'])
   el[id] = $(id);
 
@@ -724,6 +724,17 @@ el.clearHistory.onclick = async () => {
   resetClearHistory();
   try { await post('/api/history/clear'); } catch {}
 };
+
+/* Say it is done, in the note under the button. The clearing itself is the
+   server's answer coming back to every open screen (history_cleared below),
+   so this is said there rather than here, and every screen that just lost its
+   list says so rather than only the one that was pressed. */
+let clearedNoteTimer = 0;
+function flashHistoryCleared() {
+  clearTimeout(clearedNoteTimer);
+  el.clearHistoryDone.textContent = t('historyCleared');
+  clearedNoteTimer = setTimeout(() => { el.clearHistoryDone.textContent = ''; }, 2600);
+}
 
 function retally() {
   el.none.hidden = el.log.children.length > 0;
@@ -2232,6 +2243,7 @@ async function handleWsMessage({ev, message, number, discardInProgress: wasDisca
       el.log.replaceChildren();
       el.logJumpWrap.hidden = true;
       retally();
+      flashHistoryCleared();
       return;
     }
     const result = 'partial' in m || 'held' in m || m.text != null;
