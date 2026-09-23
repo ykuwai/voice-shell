@@ -80,18 +80,19 @@ const t = (key, vars) => {
 // The default target is whichever document the contents are living in right
 // now. Search document while it floats and not a single [data-i18n] turns up,
 // so changing the language changes no text at all.
+// For an element holding an icon, replace only the text part (do not wipe out
+// the svg). Anything repainting such a label goes through here, not
+// textContent, which would take the drawing with it.
+function setLabel(n, text) {
+  const svg = n.querySelector(':scope > svg');
+  if (!svg) { n.textContent = text; return; }
+  const last = n.lastChild;
+  if (last && last.nodeType === 3) last.nodeValue = text;
+  else n.append(text);
+}
+
 function applyI18n(root = uiDoc()) {
-  for (const n of root.querySelectorAll('[data-i18n]')) {
-    // For an element holding an icon, replace only the text part (do not wipe out the svg)
-    const svg = n.querySelector(':scope > svg');
-    if (svg) {
-      const last = n.lastChild;
-      if (last && last.nodeType === 3) last.nodeValue = t(n.dataset.i18n);
-      else n.append(t(n.dataset.i18n));
-    } else {
-      n.textContent = t(n.dataset.i18n);
-    }
-  }
+  for (const n of root.querySelectorAll('[data-i18n]')) setLabel(n, t(n.dataset.i18n));
   for (const n of root.querySelectorAll('[data-i18n-ph]')) n.placeholder = t(n.dataset.i18nPh);
   // The text shown when the live transcript box is empty (CSS reads it through content)
   for (const n of root.querySelectorAll('[data-i18n-quiet]')) n.dataset.quiet = t(n.dataset.i18nQuiet);
@@ -173,6 +174,17 @@ function decorateIcons(root = document) {
     n.dataset.iconed = '1';
     n.prepend(iconSvg(n.dataset.icon, Number(n.dataset.iconSize) || 18));
   }
+}
+
+// Swap the drawing on one element whose meaning changed under it. Same
+// machinery as decorateIcons, only pointed at a single node, and it does
+// nothing when the drawing is already the one wanted.
+function setIcon(n, name) {
+  if (!n || n.dataset.icon === name) return;
+  n.dataset.icon = name;
+  const svg = n.querySelector(':scope > svg');
+  if (svg) svg.remove();
+  n.prepend(iconSvg(name, Number(n.dataset.iconSize) || 18));
 }
 
 /* Cleaning up the text is the daemon's job. Fixing only the look here does
@@ -3676,8 +3688,12 @@ function paintOnDevice() {
   el.onDeviceRow.hidden = onDeviceRefused || status !== 'downloadable';
   // The button says what pressing it really does. Nothing is fetched when
   // Chrome already holds the model, and calling that a download is the very
-  // thing this whole look at the disk is here to stop saying.
-  el.onDeviceDownload.textContent = t(onDeviceHasModel(disk) ? 'onDeviceEnableBtn' : 'onDeviceDownload');
+  // thing this whole look at the disk is here to stop saying. The drawing
+  // says it too: a download arrow over something that downloads nothing is
+  // the same untruth in a picture.
+  const here = onDeviceHasModel(disk);
+  setLabel(el.onDeviceDownload, t(here ? 'onDeviceEnableBtn' : 'onDeviceDownload'));
+  setIcon(el.onDeviceDownload, here ? 'bolt' : 'download');
   el.onDeviceDownload.disabled = installing;
   // Every path that changes any of this comes through here (the engine
   // dropdown, the language dropdown, another tab's switch, each answer from
@@ -5008,6 +5024,13 @@ el.onDeviceDownload.onclick = () => startOnDeviceInstall();
 
 function startOnDeviceInstall() {
   const lang = browserLang();
+  // Armed, the press that lands on the button itself gets here twice: once
+  // through the capture listener on pointerdown, once through the button's own
+  // click. The second would take the id the first is waiting on (settle drops
+  // anything but the newest), leaving the line saying downloading for good.
+  // A plain read of two variables, so install() is still the first thing the
+  // press that does get through does.
+  if (onDeviceInstalling && onDeviceInstallLang === lang) return;
   let asked;
   try {
     asked = SR.install({langs: [lang], processLocally: true});
@@ -5060,6 +5083,14 @@ function startOnDeviceInstall() {
 function armOnDeviceInstall() {
   if (onDeviceArmed) return;
   const fire = () => {
+    // Not every keypress is a press as Chrome counts it. Escape (which closes
+    // the settings sheet) and the modifiers on their own hand out no
+    // activation, and install() would throw NotAllowedError, which the line
+    // reads as the floating window and tells you to go back to the tab, which
+    // is nonsense for a key. Stay armed for a press that really is one.
+    try {
+      if (navigator.userActivation && !navigator.userActivation.isActive) return;
+    } catch {}
     disarmOnDeviceInstall();
     if (!onDeviceMayAutoInstall(onDeviceLocal, asrChosen, onDeviceNow(), onDeviceRefused,
                                 onDeviceInstalling, onDeviceDiskNow())) return;

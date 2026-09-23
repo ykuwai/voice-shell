@@ -311,6 +311,10 @@ const make = new Function('env', `
     if (at >= 0) env.listeners.splice(at, 1);
   };
   const fetch = url => env.fetch ? env.fetch(url) : new Promise(() => {});
+  // The page's own, which live outside the slices taken here
+  const setLabel = (n, text) => { n.textContent = text; };
+  const setIcon = (n, name) => { n.icon = name; };
+  const navigator = env.navigator || {userActivation: {isActive: true}};
   ${source.slice(stateFrom, stateTo)}
   ${source.slice(clickFrom, clickTo)}
   return {startOnDeviceInstall, paintOnDevice, askOnDevice,
@@ -389,6 +393,7 @@ class OnDeviceInstallTest(unittest.TestCase):
   assert(env.el.onDeviceStatus.textContent === 'onDeviceEnable',
          'says it only has to be turned on, got ' + env.el.onDeviceStatus.textContent);
   assert(env.el.onDeviceDownload.textContent === 'onDeviceEnableBtn', 'and so does the button');
+  assert(env.el.onDeviceDownload.icon === 'bolt', 'and a download arrow over nothing downloading is gone');
   assert(env.el.onDeviceRow.hidden === false, 'the button is still there');
   assert(h.state().armed === true, 'armed');
   assert(env.installs.length === 0, 'nothing has been pressed yet');
@@ -413,6 +418,7 @@ class OnDeviceInstallTest(unittest.TestCase):
   await h.askOnDevice(); await tick(); await tick();
   assert(env.el.onDeviceStatus.textContent === 'onDeviceNeedsDownload', 'says it downloads');
   assert(env.el.onDeviceDownload.textContent === 'onDeviceDownload', 'and the button says download');
+  assert(env.el.onDeviceDownload.icon === 'download', 'with the download arrow');
   assert(h.state().armed === false, 'no press rides along');
   assert(env.press('pointerdown') === 0, 'nothing is listening');
   assert(env.installs.length === 0, 'so a press somewhere else fetches nothing');
@@ -485,6 +491,43 @@ class OnDeviceInstallTest(unittest.TestCase):
 """)
 
 
+    def test_the_press_that_lands_on_the_button_does_not_install_twice(self):
+        run_install(r"""
+(async () => {
+  const env = freshEnv({'ja-JP': 'downloadable'}, {engine: true, pack: true, packBytes: 1});
+  const h = make(env);
+  await h.askOnDevice(); await tick(); await tick();
+  // Armed, a press on the button itself arrives twice: the capture listener
+  // on pointerdown, then the button's own click. The second would take over
+  // the id the first is waiting on and strand the line on downloading.
+  env.press('pointerdown');
+  h.startOnDeviceInstall();
+  assert(env.installs.length === 1, 'installed once, got ' + env.installs.length);
+  assert(h.state().onDeviceInstalling === true, 'and the first one is still the one running');
+})().then(() => process.exit(0), e => { console.error(e); process.exit(1); });
+""")
+
+    def test_a_key_that_hands_out_no_activation_leaves_it_armed(self):
+        run_install(r"""
+(async () => {
+  // Escape closing the settings sheet, a modifier on its own. Chrome hands
+  // out no activation for those, install() would throw, and the line would
+  // tell you to go back to the tab and press again, about a keypress.
+  const env = freshEnv({'ja-JP': 'downloadable'}, {engine: true, pack: true, packBytes: 1});
+  env.navigator = {userActivation: {isActive: false}};
+  const h = make(env);
+  await h.askOnDevice(); await tick(); await tick();
+  assert(h.state().armed === true, 'armed');
+  env.press('keydown');
+  assert(env.installs.length === 0, 'nothing tried');
+  assert(h.state().armed === true, 'and still waiting for a press that really is one');
+  env.navigator.userActivation.isActive = true;
+  env.press('pointerdown');
+  assert(env.installs.length === 1, 'which then does it');
+})().then(() => process.exit(0), e => { console.error(e); process.exit(1); });
+""")
+
+
 class OnDeviceWiringTest(unittest.TestCase):
     source = VIEWER_JS.read_text(encoding="utf-8").replace("\r\n", "\n")
 
@@ -525,6 +568,8 @@ class OnDeviceWiringTest(unittest.TestCase):
         head = click.split("SR.install(", 1)[0]
         self.assertNotIn("await", head)
         self.assertNotIn(".then", head)
+        # The armed press landing on the button itself gets here twice
+        self.assertIn("if (onDeviceInstalling && onDeviceInstallLang === lang) return;", head)
         self.assertIn("NotAllowedError", click)
         # A download Chrome never starts gives the button back instead of
         # leaving it greyed out on "downloading" for good
@@ -543,6 +588,7 @@ class OnDeviceWiringTest(unittest.TestCase):
         head = arm.split("startOnDeviceInstall()", 1)[0]
         self.assertNotIn("await", head)
         self.assertNotIn(".then", head)
+        self.assertIn("navigator.userActivation && !navigator.userActivation.isActive", arm)
         off = self.section("function disarmOnDeviceInstall() {")
         self.assertIn("removeEventListener('pointerdown', fire, true);", off)
         self.assertIn("removeEventListener('keydown', fire, true);", off)
@@ -645,6 +691,13 @@ class OnDeviceDiskTest(unittest.TestCase):
             self.assertIs(viewer.on_device_model(lang, [root])["pack"], True, lang)
         for lang in ("en-US", "jv-ID", ""):
             self.assertIs(viewer.on_device_model(lang, [root])["pack"], False, lang)
+        # One region of a language is not another. Chrome ships a pack each,
+        # and the dropdown offers both, so a loose read here would have the
+        # page promise en-GB is already here and then really download it.
+        for folder, asked in (("en-US", "en-GB"), ("en-GB", "en-US"),
+                              ("zh-CN", "zh-TW"), ("zh-TW", "zh-HK")):
+            got = viewer.on_device_model(asked, [self.tree(packs=((folder, 10),))])
+            self.assertIs(got["pack"], False, folder + " is not " + asked)
         # And the other way round, a folder named without the region
         bare = self.tree(packs=(("ja", 10),))
         self.assertIs(viewer.on_device_model("ja-JP", [bare])["pack"], True)

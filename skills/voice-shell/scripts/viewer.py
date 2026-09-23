@@ -170,9 +170,21 @@ def _lang_matches(folder: str, lang: str) -> bool:
     Case is ignored, and ja matches ja-JP either way round: the page asks with
     whatever BCP-47 tag the dropdown holds, and the folder is named however
     Chrome named it.
+
+    Two regions of one language never stand in for each other, though. Chrome
+    ships a pack per region (SODA en-GB Models is not SODA en-US Models), and
+    the dropdown offers en-US beside en-GB, zh-CN beside zh-TW and zh-HK. Read
+    loosely, an en-US pack on the disk would have the page promise en-GB is
+    already here, and the very next press anywhere would quietly start a real
+    download it said would not happen.
     """
-    a, b = folder.casefold().replace("_", "-"), lang.casefold().replace("_", "-")
-    return a == b or a.split("-")[0] == b.split("-")[0]
+    a = folder.casefold().replace("_", "-").split("-")
+    b = lang.casefold().replace("_", "-").split("-")
+    if not a[0] or not b[0] or a[0] != b[0]:
+        return False
+    # Same language. Either it is the same region, or one of the two never
+    # named a region at all and takes whatever this one is.
+    return len(a) < 2 or len(b) < 2 or a[1] == b[1]
 
 
 def on_device_model(lang: str, roots=None) -> dict:
