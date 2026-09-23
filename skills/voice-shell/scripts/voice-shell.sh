@@ -601,6 +601,17 @@ except Exception:
       fi
     fi
 
+    # Where the reading starts, measured before this registration exists.
+    #
+    # Taken after it instead, anything written in between (the viewer telling
+    # this very session it was disconnected, say, which it can do the moment
+    # the registration appears) landed behind the point tail is told to start
+    # from, so it was never read and never printed. Measured from before,
+    # nothing addressed to this listen can fall in the gap: it did not exist
+    # yet, so nothing earlier can be meant for it.
+    log_size="$(wc -c < "$LOG_FILE" 2>/dev/null | tr -d ' ')"
+    [[ "$log_size" =~ ^[0-9]+$ ]] || log_size=0
+
     # An escape hatch so any tool can name itself. VOICE_SHELL_NAME wins outright.
     "$PY" - "$reg" "$agent" "$session" "${VOICE_SHELL_NAME:-}" "$inherit_order" <<'REG' || true
 import json, os, sys, time
@@ -683,8 +694,6 @@ REG
     # progress file is normally cleared long before this, but it outlives the
     # sweep whenever nothing was running to do the sweeping.
     [[ "$inherit_order" == "-" ]] && replay_offset=""
-    log_size="$(wc -c < "$LOG_FILE" 2>/dev/null | tr -d ' ')"
-    [[ "$log_size" =~ ^[0-9]+$ ]] || log_size=0
     start_offset="$log_size"
     if [[ "$replay_offset" =~ ^[0-9]+$ ]] && (( replay_offset <= log_size )); then
       start_offset="$replay_offset"

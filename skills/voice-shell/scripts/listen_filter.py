@@ -389,6 +389,19 @@ def main():
         # better anyway, the reader sees all of it before acting.
         _emit(split_line(rec, line))
         progress.advance(size)
+        # A "stop" on a warning meant for us: this listen is being ended from
+        # the screen. Quitting right here, with the line already printed and
+        # flushed, makes the telling and the ending one thing. The old way
+        # round (write the line, then signal the listen from outside) could
+        # end the process while the line was still sitting unread in the log.
+        # Ending here also lets `listen` go through its own EXIT trap, so the
+        # registration is tidied away rather than swept as a dead PID.
+        if to is not None and "system_warning" in rec and rec.get("stop"):
+            try:
+                sys.stdout.flush()
+            except (OSError, ValueError):
+                pass
+            os._exit(0)
 
 
 if __name__ == "__main__":
