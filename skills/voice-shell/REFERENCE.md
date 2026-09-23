@@ -30,6 +30,7 @@ supports. The seven kinds, with English examples:
 - Destination phrases work only with two or more listeners, follow the chip
   order, and work while the mic is off. Spoken number variants are absorbed.
 - A short sound plays when a command takes effect.
+- Muting throws away whatever had been recognized but not yet sent, whichever way it was muted (the button, the key, or the spoken word), and the screen says so. Nothing spoken before a mute reaches Claude.
 - Users can add wordings for every kind except unmute
   (`~/.config/voice-shell/commands.json`, edited from the lightbulb).
 - **Each kind, and each single wording, can be switched off there.** A switched

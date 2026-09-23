@@ -2026,6 +2026,21 @@ function applyRouteSideEffects(next) {
   // the screen says nothing is being recorded while the audio alone keeps going
   // out.
   if (next === 'off') {
+    /* Muting means the words already in flight do not go out. Clauses that had
+       finalized before the mute were left sitting in the queue, and the send
+       gate flushed them a few seconds later, after the person had deliberately
+       cut the mic. The server threw them away as muted, but only after running
+       apply_voice_command on them first, so a clause that happened to end in an
+       unmute wording opened the mic again from inside the mute. Dropped here,
+       at the one place every mute passes through (a press, the keyboard, Claude
+       switching it, another screen), there is nothing left to flush and nothing
+       left to reopen it with. */
+    if (dropPendingBrowserSends()) say(muteHint());
+    /* A throttled paint already waiting its turn is dropped with the rest, or
+       it would fire a moment later and put those same words back. Cleared for
+       both entries: the plain one below lets go of the microphone, but
+       stopRecognition's own onend is asynchronous and the timer outlives it. */
+    if (interimThrottleTimer) { clearTimeout(interimThrottleTimer); interimThrottleTimer = null; }
     // Except on the on-device entry, where there is no audio going anywhere to
     // let go of and the word that brings it back has to stay audible.
     if (recWanted && !listensWhileMuted()) { asrPausedByRoute = true; stopRecognition(); }
@@ -2036,7 +2051,6 @@ function applyRouteSideEffects(next) {
     // (paintInterimThrottled), or it would fire a moment later and put those
     // same words back.
     else if (recWanted) {
-      if (interimThrottleTimer) { clearTimeout(interimThrottleTimer); interimThrottleTimer = null; }
       latestInterimForPaint = lastInterimHeard = '';
       el.stream.textContent = browserStreamText();
       /* The sentence that was being spoken as the mic was cut is written off with
@@ -2048,6 +2062,7 @@ function applyRouteSideEffects(next) {
     }
   } else {
     resetBrowserGesture();
+    mutedDropNote = false;
     // Coming back from off (by hand or by voice) always counts as a voice just
     // heard. Otherwise the idle-mute clock, still holding the timestamp from
     // before the mute, finds itself already past its own deadline and mutes
@@ -2095,9 +2110,22 @@ function say(text, sec = 6) {
 // line is the one thing the person carries into a stretch they are not
 // watching the screen for, so it has to be true of right now, not of the
 // entry in the dropdown.
-const muteHint = () =>
-  t(asrChosen && !(listensWhileMuted() && !onDeviceHeld())
+/* Set when muting threw away clauses that were still waiting for quiet
+   (dropPendingBrowserSends), cleared when the mic comes back. Read here rather
+   than said on its own, because the two things are one piece of news and the
+   lines for them are written by different callers at different moments: the
+   keyboard says muteHint the instant the key is pressed, the voice_cmd handler
+   says it when the server answers, and a plain click says nothing at all. A
+   notice of its own would be overwritten by whichever of those ran last, and
+   the way back would be overwritten by it. Folded into the one line, the order
+   they run in stops mattering. */
+let mutedDropNote = false;
+
+const muteHint = () => {
+  const base = t(asrChosen && !(listensWhileMuted() && !onDeviceHeld())
     ? 'voiceMutedBrowser' : 'voiceMuted');
+  return mutedDropNote ? t('mutedDropped', {hint: base}) : base;
+};
 
 /* The line under the unmute switch in the lightbulb, where it cannot be heard.
    The plain entry is the one that cuts the mic; the entry that recognizes on
@@ -4192,6 +4220,16 @@ const stripInventedSpaces = text =>
    again: there is only one string, so there is nothing left for them to
    disagree about. */
 function browserStreamText() {
+  /* Muted is an empty line, whatever these two still hold. paint() clears
+     el.stream the moment the mic is cut, and the writers that run between
+     paints (paintPendingBrowserSends every 100ms, onend when Chrome ends the
+     session) built their string from the same state and wrote the pre-mute
+     text straight back, so it flashed up on a screen that says muted every few
+     seconds until the next paint wiped it again. Answered here, at the one
+     string both of them read, rather than at each writer. resumeSnapshot reads
+     it too, so a reload made while muted no longer carries that same text into
+     the draft box either. */
+  if (route === 'off') return '';
   const join = clauseJoin();
   const queued = pendingBrowserSends.map(p => p.text).join(join);
   const interim = latestInterimForPaint;
@@ -4737,11 +4775,16 @@ function browserGateTick() {
 }
 setInterval(browserGateTick, BROWSER_SEND_GATE_MS);
 
-function flushPendingBrowserSends() {
-  const items = pendingBrowserSends;
+/* Throw away whatever is still waiting for quiet, and say so. Hands back
+   whether there was anything to throw away, so a mute that arrives twice (the
+   spoken one drops the queue here, then the server's answer mutes the screen
+   and asks again) only says it once. */
+function dropPendingBrowserSends() {
+  if (!pendingBrowserSends.length) return false;
   pendingBrowserSends = [];
-  if (items.length) sendUtterance(items.map(i => i.text).join(clauseJoin()));
+  mutedDropNote = true;
   paintPendingBrowserSends();
+  return true;
 }
 
 // Called right after pendingBrowserSends itself changes (queued or
@@ -4751,7 +4794,13 @@ function flushPendingBrowserSends() {
 // what belongs on screen rather than each painting their own half of it.
 function paintPendingBrowserSends() {
   const s = browserStreamText();
-  if (!s) return;
+  // Nothing to show. Dropping the queue at a mute empties this line, and an
+  // early return with the last string still up would leave exactly the words
+  // that were just thrown away sitting on screen.
+  if (!s) {
+    if (el.stream.textContent) el.stream.textContent = '';
+    return;
+  }
   if (el.stream.textContent !== s) el.stream.textContent = s;   // see paintStream
   el.tray.classList.remove('idle');
   streamTail();
@@ -4773,13 +4822,22 @@ function queueOrSendFinal(text) {
   // the point of queuing, since sendUtterance's own copy of this same check
   // never gets a turn to run until whatever the queue eventually flushes.
   if (dropNextLocal) { dropNextLocal = false; return; }
-  // A closing mute must not sit behind whatever else is already waiting for
-  // quiet, or the room stays live for however long that wait runs, exactly
-  // the cost #76 exists to avoid. Send everything already finalized ahead of
-  // it first (those were always going regardless), then let mute through
-  // this instant, ungated.
+  /* A closing mute must not sit behind whatever else is already waiting for
+     quiet, or the room stays live for however long that wait runs, exactly the
+     cost #76 exists to avoid, so it goes out this instant, ungated.
+
+     What was already finalized ahead of it used to be flushed out first, on
+     the reasoning that those words were going out regardless. That reasoning
+     is gone now that the pressed mute drops them: the same queue, in the same
+     state, would go out or not depending only on how the mute was made. Which
+     way Chrome happened to split the speech cannot decide it either. Said in
+     one breath, 「内容、ミュート」 arrives as a single utterance, and the server
+     acts on the mute and keeps nothing of what came before it in that same
+     utterance (voice_daemon.mic_command_match). Split in two by Chrome's own
+     endpointing, the very same sentence used to send 「内容」 on. Dropped here,
+     both roads end in the same place, and so do both ways of muting. */
   if (matchingTailWord(text)?.id === 'mute') {
-    flushPendingBrowserSends();
+    if (dropPendingBrowserSends()) say(muteHint());
     sendUtterance(text);
     return;
   }
