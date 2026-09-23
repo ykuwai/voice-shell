@@ -193,7 +193,7 @@ class MachineNameSwitchOffTest(SwitchOffCase):
 HARNESS = r'''
 const fs = require('fs');
 const source = fs.readFileSync(process.argv[1], 'utf8');
-const start = source.indexOf("const TAIL_IDS = ");
+const start = source.indexOf("// Full-width Latin letters and digits");
 const end = source.indexOf("function endsWithTailCmd", start);
 if (start < 0 || end < 0) process.exit(2);
 const body = source.slice(start, end).replace(/async function loadTailWords[\s\S]*?\n}\n/, '');
@@ -279,7 +279,7 @@ class TailLongestThenStruckTest(SwitchOffCase):
 HARNESS2 = r"""
 const fs = require('fs');
 const source = fs.readFileSync(process.argv[1], 'utf8');
-const start = source.indexOf("const TAIL_IDS = ");
+const start = source.indexOf("// Full-width Latin letters and digits");
 const end = source.indexOf("function endsWithTailCmd", start);
 if (start < 0 || end < 0) process.exit(2);
 const body = source.slice(start, end).replace(/async function loadTailWords[\s\S]*?\n}\n/, '');

@@ -1337,7 +1337,15 @@ async def main_async(args):
         the way it was recognized.
         """
         body = await req.json()
-        text = (body.get("text") or "").strip()
+        # Imported up here, above the first use. A name imported anywhere in a
+        # function is local to the whole of it, so with the import further down
+        # the fold below reads an unbound local and every utterance 500s.
+        import voice_daemon as vd
+        # Folded before anything is decided about it, the same as in the daemon.
+        # Chrome's on-device Japanese recognition writes Latin letters and digits
+        # full-width, and the page folds them for what it shows, so the two roads
+        # have to agree or the card would flip when the words were sent.
+        text = vd.to_halfwidth((body.get("text") or "")).strip()
         if not text:
             return web.json_response({"error": "empty"}, status=400)
         tab = str(body.get("tab") or "")[:40]
@@ -1349,8 +1357,6 @@ async def main_async(args):
         if not owns:
             return web.json_response({"error": "asr_owner_conflict",
                                       "owner": owner or None}, status=409)
-
-        import voice_daemon as vd
 
         # If the daemon is recognizing too, take nothing. Both write to the same
         # utterance log, so taking it sends one instruction to Claude twice.

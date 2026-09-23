@@ -1429,6 +1429,26 @@ function isBackchannel(text, words) {
    differently by kind. The two tail kinds match them at the tail like the
    built-ins, mute only when the whole utterance is that wording
    (voice_daemon.mic_command_match), so 「はい」 ahead of one leaves it as speech. */
+// Full-width Latin letters and digits, folded down to half-width.
+//
+// Chrome's on-device Japanese recognition writes them full-width (「ＰＲ」,
+// 「２０２６」), and nobody means that when they say a word of code or a year.
+// The server folds the same set the same way (to_halfwidth in voice_daemon.py),
+// so the words on screen while you are still speaking are the words that get
+// sent. Fold it only there and the card would show 「ＰＲ」 and then flip to PR
+// the moment it went out.
+//
+// Letters, digits and the symbols that only ever mean code when spoken. Japanese
+// punctuation (、。「」・？！), the full-width parentheses, the long vowel mark ー,
+// kana and the full-width space are all left as they are, since each carries
+// meaning at the width it is written in. Half-width katakana goes the other way,
+// a whole run at a time so ｷﾞ comes back as ギ rather than ｷ + ﾞ.
+const FULLWIDTH_CODE_RE = /[Ａ-Ｚａ-ｚ０-９＠＃＆％＋＝／＼＿＜＞＄＊＾｜｀［］｛｝]/g;
+const HALFWIDTH_KANA_RE = /[\uFF61-\uFF9F]+/g;
+const toHalfWidth = text => text
+  .replace(FULLWIDTH_CODE_RE, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+  .replace(HALFWIDTH_KANA_RE, run => run.normalize('NFKC'));
+
 const TAIL_IDS = ['cancel_tail', 'hold_tail', 'mute'];
 let tailWords = {cancel_tail: new Set(), hold_tail: new Set(), mute: new Set()};
 let userWords = {cancel_tail: new Set(), hold_tail: new Set(), mute: new Set()};
@@ -1493,15 +1513,27 @@ const TAIL_PREFIX = ['コマンド', 'こまんど', 'command'];
    the text can be cut at the spoken wording even though the two no longer line
    up character for character. */
 const FOLD_DROP = new Set(' \t\u3000。、．，・…！？!?.,-~〜"\'「」『』()（）');
-const FOLD_WIDE = '１２３４５６７８９０';
 function foldChars(s) {
   const chars = [], at = [];
+  const cs = [...s];
   let i = 0;
-  for (const c of s) {
-    const d = FOLD_WIDE.indexOf(c);
-    const f = d >= 0 ? '1234567890'[d] : FOLD_DROP.has(c) ? '' : c.toLowerCase();
+  for (let k = 0; k < cs.length; k++) {
+    // toHalfWidth the same as the server's _folded_chars, and folded before the
+    // drop test rather than after, so 「｡」 goes out as the 「。」 it means the way
+    // it does there. One character at a time, except for the one fold that is
+    // not one for one: half-width katakana carries its dakuten as a character of
+    // its own, so ｷ and ﾞ are taken together and come back as ギ. Both characters
+    // of the pair hang on the base, so cutting there takes the whole pair off.
+    let unit = cs[k];
+    if (unit >= '｡' && unit <= 'ﾟ'
+        && (cs[k + 1] === 'ﾞ' || cs[k + 1] === 'ﾟ')) {
+      unit += cs[k + 1];
+      k++;
+    }
+    let f = '';
+    for (const x of toHalfWidth(unit)) if (!FOLD_DROP.has(x)) f += x.toLowerCase();
     for (const x of f) { chars.push(x); at.push(i); }
-    i += c.length;
+    i += unit.length;
   }
   return {chars, at};
 }
@@ -1926,8 +1958,12 @@ let dictUnignore = new Set();   // taken off the built in ignore list, so short 
 async function loadDictPairs() {
   try {
     const d = await (await fetch('/api/dictionary?scope=effective')).json();
+    // The side that is matched folds the way the recognized text does, so an
+    // entry saved as 「ＡＷＳ」 lights up on the half-width AWS on screen, exactly as
+    // apply_replacements does it on the server. What it becomes is left as typed.
     dictPairs = Object.entries(d.replace || {})
       .filter(([k, v]) => k && v)
+      .map(([k, v]) => [toHalfWidth(k), v])
       .sort((a, b) => b[0].length - a[0].length);   // match the longer words first
     // The same read already carries both lists the drawing in the corner needs,
     // so it costs no second request and there is no second thing to keep fresh.
@@ -1937,8 +1973,10 @@ async function loadDictPairs() {
     // the utterance really is sent. Trimming it here would go dark on a word
     // that goes out. is_allowed_short does strip the punctuation off its list,
     // so that one gets the same treatment here.
-    dictIgnore = new Set((d.ignore || []).map(w => w.trim().toLowerCase()).filter(Boolean));
-    dictUnignore = new Set((d.unignore || []).map(cueCore).filter(Boolean));
+    dictIgnore = new Set((d.ignore || []).map(w => toHalfWidth(w).trim().toLowerCase())
+                                        .filter(Boolean));
+    dictUnignore = new Set((d.unignore || []).map(w => cueCore(toHalfWidth(w)))
+                                             .filter(Boolean));
   } catch { /* if it cannot be fetched, show the text plain */ }
 }
 function withDict(text) {
@@ -3935,7 +3973,11 @@ function newRecognition(generation) {
     let interim = '';
     for (let i = ev.resultIndex; i < ev.results.length; i++) {
       const res = ev.results[i];
-      const transcript = stripInventedSpaces(res[0].transcript);
+      // Folded first, then the invented spaces. INVENTED_SPACE_RE only strips a
+      // space with a non-ASCII character on either side, and on-device Japanese
+      // writes Latin full-width, so the other order ate the space in 「ＰＲ ｔｅｓｔ」
+      // and sent PRtest, where cloud recognition of the same words kept it.
+      const transcript = stripInventedSpaces(toHalfWidth(res[0].transcript));
       if (res.isFinal) queueOrSendFinal(transcript);
       else interim += transcript;
     }
@@ -5825,11 +5867,8 @@ const cmdI18nBase = id =>
    copy kept on the screen. Keep a copy and, the day the accepted kinds change
    over there, one side is left stale. */
 let cmdEditable = new Set();
-const CMD_WIDE = '１２３４５６７８９０';
 const CMD_DROP = /[ \t　。、．，・…！？!?.,\-~〜"'「」『』()（）]/g;
-const cmdNormal = s => s.trim()
-  .replace(/[１２３４５６７８９０]/g, c => '1234567890'[CMD_WIDE.indexOf(c)])
-  .replace(CMD_DROP, '').toLowerCase();
+const cmdNormal = s => toHalfWidth(s.trim()).replace(CMD_DROP, '').toLowerCase();
 
 function cleanPhrase(kind, s) {
   if (!cmdEditable.has(kind)) return '';

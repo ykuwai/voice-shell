@@ -23,6 +23,7 @@ import subprocess
 import sys
 import threading
 import time
+import unicodedata
 from pathlib import Path
 
 # fcntl is POSIX only (Windows does not have it). The only use here is the lock
@@ -469,6 +470,45 @@ def kanji_numbers_to_arabic(text: str) -> str:
     return _KANJI_NUM_RE.sub(sub, text)
 
 
+# ── Full-width letters and digits ─────────────────
+#
+# Chrome's on-device Japanese recognition writes Latin letters and digits full-width
+# (「ＰＲ」, 「２０２６」). Nobody means that when they say a word of code or a year, and
+# a full-width 「ＰＲ」 read as a filename or a branch name is simply wrong. So it is
+# folded here, at the one point every engine's text comes in.
+#
+# What folds is Latin letters, digits, and the symbols that only ever mean code when
+# they are spoken (@ # & % + = / \ _ < > $ * ^ | ` and the bracket pairs). What
+# does not fold is everything that is punctuation in Japanese prose: 、。「」・？！：；，．
+# and the full-width parentheses, which Japanese writes full-width on purpose. The
+# long vowel mark ー, kana and the full-width space 　 stay as they are too, since all
+# three carry meaning at their own width.
+#
+# Half-width katakana (ｱｲｳ) goes the other way, to full-width, which is the shape
+# Japanese is written in. A whole run at a time, because the dakuten is its own
+# character half-width and ｷﾞ has to come back as ギ rather than ｷ + ﾞ.
+#
+# Not unicodedata.normalize("NFKC") over the whole text: that also swallows the
+# full-width space, rewrites 〜 as ~, opens ① out to 1 and ㎠ to cm, and leaves no
+# say in any of it.
+_FULLWIDTH_CODE_SYMBOLS = "＠＃＆％＋＝／＼＿＜＞＄＊＾｜｀［］｛｝"
+_HALFWIDTH_TABLE = str.maketrans({
+    c: chr(ord(c) - 0xFEE0)
+    for c in ([chr(n) for n in range(0xFF21, 0xFF3B)]      # Ａ-Ｚ
+              + [chr(n) for n in range(0xFF41, 0xFF5B)]    # ａ-ｚ
+              + [chr(n) for n in range(0xFF10, 0xFF1A)]    # ０-９
+              + list(_FULLWIDTH_CODE_SYMBOLS))})
+_HALFWIDTH_KANA_RE = re.compile(r"[\uFF61-\uFF9F]+")
+
+
+def to_halfwidth(text: str) -> str:
+    """Fold full-width Latin letters, digits and code symbols down to half-width,
+    and write half-width katakana out full-width."""
+    text = text.translate(_HALFWIDTH_TABLE)
+    return _HALFWIDTH_KANA_RE.sub(
+        lambda m: unicodedata.normalize("NFKC", m.group(0)), text)
+
+
 # Written in caps and still not an acronym. Do not turn "A vs B" into "A VS B".
 # Lowercase shorthand like e.g. / i.e. / a.m. is already rejected by the uppercase
 # test, so it is not listed here.
@@ -513,10 +553,19 @@ def collapse_letter_acronyms(text: str) -> str:
 
 
 def apply_replacements(text: str, replace: dict) -> str:
-    """Apply the dictionary replacements. Longest first, to catch partial matches."""
-    for src in sorted(replace, key=len, reverse=True):
+    """Apply the dictionary replacements. Longest first, to catch partial matches.
+
+    The side that is matched is folded the same way the incoming text is, so an entry
+    somebody registered as 「ＡＷＳ」 still finds the AWS that arrives half-width. What
+    it becomes is left exactly as it was typed, because a replacement written
+    full-width was written that way on purpose.
+    """
+    folded = {}
+    for src, dst in replace.items():
         if src:
-            text = text.replace(src, replace[src])
+            folded.setdefault(to_halfwidth(src), dst)
+    for src in sorted(folded, key=len, reverse=True):
+        text = text.replace(src, folded[src])
     return text
 
 
@@ -691,9 +740,9 @@ def is_noise(text: str, extra=(), allow=(), lang: str = "") -> bool:
     is in, since it is matched against what the recognizer wrote down. The user's own
     two lists follow neither, they are the user's.
     """
-    off = {w.strip().lower() for w in allow}
+    off = {to_halfwidth(w).strip().lower() for w in allow}
     words = ({w for w in noise_words(lang) if w.lower() not in off}
-             | {w.lower() for w in extra})
+             | {to_halfwidth(w).lower() for w in extra})
     core = text.strip().strip(_TRIM)
     if core.lower() in words:
         return True
@@ -720,7 +769,7 @@ def is_allowed_short(text: str, allow=()) -> bool:
     does not widen. The test matches the shape of is_noise (compare with symbols
     stripped, and treat a repeat like 「了解、了解」 the same way).
     """
-    off = {w.strip().strip(_TRIM).lower() for w in allow}
+    off = {to_halfwidth(w).strip().strip(_TRIM).lower() for w in allow}
     off.discard("")
     if not off:
         return False
@@ -1021,10 +1070,10 @@ def builtin_words(kind: str, lang: str = None) -> list:
 
 
 # Compare after dropping symbols and the spaces in between. 「ミュート。」, 「mute me」
-# and 「マイク、オン」 should all land on the same key. Full-width digits fold to
-# half-width here. The long vowel mark ー is not dropped. Drop it and 「ミュート」
-# becomes 「ミュト」 and never matches.
-_CMD_DROP = str.maketrans("１２３４５６７８９０", "1234567890",
+# and 「マイク、オン」 should all land on the same key. Full-width letters and
+# digits fold to half-width first, through to_halfwidth. The long vowel mark ー is
+# not dropped. Drop it and 「ミュート」 becomes 「ミュト」 and never matches.
+_CMD_DROP = str.maketrans("", "",
                           " \t\u3000。、．，・…！？!?.,-~〜\"'「」『』()（）")
 
 
@@ -1035,8 +1084,12 @@ def command_key(text: str) -> str:
     Phrasings the user adds are remembered in this same shape. Remember them without
     going through here and a word registered with a comma in it, like 「ミュート、して」,
     will never match.
+
+    Full-width letters and digits fold first, so 「ＰＲ」 and 「２番」 compare the same
+    as the half-width forms. A phrasing somebody registered full-width matches too,
+    since it is remembered through here.
     """
-    return text.strip().translate(_CMD_DROP).lower()
+    return to_halfwidth(text.strip()).translate(_CMD_DROP).lower()
 
 
 # Folded into the shape matching uses.
@@ -1928,9 +1981,22 @@ def _folded_chars(text: str) -> list:
     folded tail has matched, since the two no longer line up character for character.
     """
     out = []
-    for i, c in enumerate(text):
-        for f in c.translate(_CMD_DROP).lower():
+    i = 0
+    while i < len(text):
+        # to_halfwidth the same as command_key, so a tail said with full-width
+        # letters or digits matches. One character at a time, except for the one
+        # fold that is not one character for one: half-width katakana carries its
+        # dakuten as a character of its own, so ｷ and ﾞ are taken together and come
+        # back as ギ. Fold them apart and 「ｺﾞｰ」 lands on キ+゛ where command_key
+        # says ゴー, and the tail never matches. Both characters of the pair are
+        # hung on the base, so cutting at that spot takes the whole pair off.
+        unit = text[i]
+        if ("｡" <= unit <= "ﾟ"
+                and text[i + 1:i + 2] in ("ﾞ", "ﾟ")):
+            unit = text[i:i + 2]
+        for f in to_halfwidth(unit).translate(_CMD_DROP).lower():
             out.append((f, i))
+        i += len(unit)
     return out
 
 
@@ -2006,9 +2072,15 @@ def _strip_name(text: str, names):
     """When the head is this machine's name, return the rest. None otherwise."""
     body = text.strip()
     low = body.lower()
+    # The name is folded the way the utterance already is, the same as everywhere
+    # else a written-down word is matched against speech. Left raw, a name somebody
+    # typed as 「Ｍａｃ」 matched the full-width 「Ｍａｃミュート」 the recognizer used to
+    # hand over and matches nothing now that the text arrives folded. Cutting by the
+    # folded length is exact, since body has been through the same fold.
     for name in sorted(names or [], key=len, reverse=True):
-        if low.startswith(name.lower()):
-            return body[len(name):].lstrip(_NAME_SEP)
+        folded = to_halfwidth(name).lower()
+        if folded and low.startswith(folded):
+            return body[len(folded):].lstrip(_NAME_SEP)
     return None
 
 
@@ -3465,13 +3537,16 @@ def main():
 
                 if ev["type"] == "partial":
                     # Partials overwrite a separate file (the prompt log stays clean)
-                    partial_path.write_text(ev["text"], encoding="utf-8")
+                    partial_path.write_text(to_halfwidth(ev["text"]),
+                                            encoding="utf-8")
                     continue
                 if ev["type"] != "final":
                     continue
 
                 partial_path.write_text("", encoding="utf-8")
-                text = ev["text"].strip()
+                # Folded here, above every decision below, so the words that get
+                # judged are the words that get sent and shown.
+                text = to_halfwidth(ev["text"]).strip()
                 # Whether the send button on screen is what settled this one.
                 # asr_mic hangs it on the event, because by the time the line
                 # gets here the press has been spent and the file it was written
