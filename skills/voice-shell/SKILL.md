@@ -22,13 +22,17 @@ as an instruction from the user.
 
 | Name | What it is | Where the audio goes |
 |---|---|---|
-| `browser` (default) | Chrome's Web Speech API. Works with nothing installed | **Google's servers** |
+| `browser` (default) | Chrome's Web Speech API. Works with nothing installed | **Chrome's call. This machine when it has a model for the language, otherwise Google's servers** |
 | `apple` | On-device recognition that ships with macOS 26. Light | Only inside this machine |
 | `whisper` | faster-whisper. Strong on proper nouns | Only inside this machine |
 
-Never recommend `browser` to someone who wants everything to stay local. (The
-screen's own caution says "the browser's built-in speech recognition" without
-naming Google. Know that it is Google either way.)
+A page cannot ask Chrome for cloud recognition. It can only forbid it, and
+that is what the screen's second browser entry ("only on this device") does.
+The plain entry leaves the choice to Chrome, which prefers this machine once a
+language pack is installed and falls back to Google's servers when there is
+none. So never recommend the plain entry to someone who wants everything to
+stay local, because nothing there guarantees it. Recommend the on-device entry,
+`apple` or `whisper` instead.
 
 The argument is `$ARGUMENTS` (`start` / `stop` / `status` / `setup`; `start` when omitted).
 
@@ -350,8 +354,8 @@ ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh start --engine whisper --model /path/
 ```
 
 **With browser recognition, the mic is turned off after a stretch of no voice** (5 minutes by default,
-0 to 30 under "Turn off when idle", 0 = never), so it does not keep talking to
-Google while the user is away. A sound and a note mark it; pressing the
+0 to 30 under "Turn off when idle", 0 = never), so it does not keep its
+recognition connected while the user is away. A sound and a note mark it; pressing the
 microphone brings it back.
 
 ### Settings (the gear)
