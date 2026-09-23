@@ -162,6 +162,13 @@ picked last time (`~/.config/voice-shell/config.json`), and the first time it is
    chip and any hold on the destination go right away instead of lingering
    for the two minutes kept for a re-arm.
 
+   Forgetting that no longer strands anyone. `listen` watches the shell the
+   watch runs it in and ends with it, so a watch that is stopped or hits its
+   deadline takes the listen with it on Windows too (it used to keep running
+   there, still registered, still the destination, reading nothing, and what
+   was said next was lost). Past the two minutes the chip stays in the row
+   with its number but is drawn as unusable, and nothing is routed to it.
+
 **Keep only one Monitor of your own.** Re-arming on a deadline or "source
 ended" notification (above) is always safe on its own. Re-attaching for some
 other reason, compacting included, when the old one might still actually be

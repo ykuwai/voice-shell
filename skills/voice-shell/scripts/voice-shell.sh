@@ -690,6 +690,21 @@ REG
     # below are about the filter alone. Under Git Bash, waiting on a
     # background pipeline waits for tail too, and tail (held to this listen by
     # --pid) waits right back, so the filter quitting never let listen go.
+    # The shell this listen was started from. Claude Code runs the skill's
+    # command inside one, and ending a Monitor watch (stopped by hand or at
+    # its deadline) takes that shell down. On Windows it takes nothing else:
+    # measured, everything under this listen carried on for as long as it was
+    # watched, with its heal loop still touching the registration, so the
+    # session stayed on screen and stayed the destination while nobody read a
+    # word of it (#110). listen_filter.py watches this pid and quits when it
+    # goes, which ends the pipeline waited on below and runs the EXIT trap.
+    # The real Win32 pid on Windows, since Python is what checks it (the same
+    # reason reg_pid above is read out of /proc). $PPID of 1 means there is
+    # nothing above this to lose, and listen_filter.py leaves it alone.
+    parent_pid="$PPID"
+    if [[ -r "/proc/$PPID/winpid" ]]; then
+      parent_pid="$(cat "/proc/$PPID/winpid" 2>/dev/null || echo "$PPID")"
+    fi
     progress="$STATE_DIR/listeners-gone/$reg_pid.progress"
     progress_native="$progress"
     command -v cygpath >/dev/null 2>&1 && progress_native="$(cygpath -w "$progress")"
@@ -697,6 +712,7 @@ REG
     command -v cygpath >/dev/null 2>&1 && epoch_native="$(cygpath -w "$epoch_native")"
     VOICE_SHELL_PROGRESS="$progress_native" VOICE_SHELL_START_OFFSET="$start_offset" \
     VOICE_SHELL_EPOCH_FILE="$epoch_native" VOICE_SHELL_ALIAS_UNTIL="$log_size" \
+    VOICE_SHELL_PARENT_PID="$parent_pid" \
       "$PY" -u "$HERE/listen_filter.py" "$reg_pid" $old_pid < <(tail "${tail_opts[@]}" "$LOG_FILE") &
     tail_pid=$!
 
