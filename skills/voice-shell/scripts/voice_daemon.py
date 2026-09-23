@@ -2744,8 +2744,13 @@ def empty_log_for_start(log_path):
     is not last time, though: what sits in the log then is what was said a
     moment ago and has not been handed over yet, and emptying it takes that
     away with nothing said anywhere on screen. Hands back whether it emptied.
+
+    A session between two watches counts as listening: it comes back and
+    replays from where its progress file stands. One whose listen is really
+    gone does not, or a chip left over from days ago would keep the log alive
+    for good and last time's utterances would line up again after all.
     """
-    if list_active_listeners(log_path):
+    if any(not l.get("gone") for l in list_active_listeners(log_path)):
         return False
     empty_log(log_path)
     return True

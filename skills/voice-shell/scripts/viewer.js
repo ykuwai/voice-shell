@@ -4541,33 +4541,36 @@ setInterval(() => {
   });
 }, 5000);
 
-/* Recognition that was wanted and never came back.
+/* A session that was opened and never came up.
 
-   startRecognition turns away any call made while rec is still set, and
-   nothing clears rec on its own: a session that was start()ed and never
-   reached onstart, and one that went quiet without an end ever arriving,
-   both leave it set for good. The page then sits there wanting to listen
-   with nothing listening, everything said goes nowhere, nothing says so,
-   and only a reload brings it back. Nothing is being recognized in that
-   state, so there is nothing to lose by folding the dead session up and
-   beginning again.
+   startRecognition turns away any call made while rec is set or a start is
+   still under way, and both are cleared only by something arriving back from
+   the recognizer. A session that was start()ed and never reached onstart,
+   with no end and no error either, therefore leaves them set for good: the
+   page wants to listen, nothing is listening, everything said goes nowhere
+   and nothing says so, and only a reload brings it back. Nothing is being
+   recognized in that state, so there is nothing to lose by folding the dead
+   session up and beginning again.
 
    Told apart from the ordinary gap between two sessions (Chrome cuts its own
    every 7 to 10 seconds and the next takes a moment) by how long it has run. */
 const REC_STALL_MS = 30000;
 let recAliveAt = 0;
 
-/* How long recognition has been wanted with nothing actually running. Every
-   other state counts as alive: not wanted at all (stopped, paused, a local
-   engine doing the listening), held by another tab, or a microphone that was
-   refused. None of those are for this to start up again behind the person. */
+/* How long a session has been open with nothing running behind it. Every
+   other state counts as alive, and none of them are for this to start up
+   again behind the person: nothing opened at all (a page nobody has touched
+   yet, where the microphone rule holds the start until it is, a local model
+   still being waited on, a lease that could not be read), recognition
+   genuinely running, the lease held by another tab, a refused microphone. */
 function recStalledFor(now, s) {
-  if (!s.recWanted || s.recRunning || s.conflict || s.denied) return 0;
+  if (!s.held || !s.recWanted || s.recRunning || s.conflict || s.denied) return 0;
   return Math.max(0, now - s.aliveAt);
 }
 
 function recWatchdogTick(now = performance.now()) {
-  const stalled = recStalledFor(now, {recWanted, recRunning, conflict: !!asrConflict,
+  const stalled = recStalledFor(now, {held: !!rec || recStarting,
+                                      recWanted, recRunning, conflict: !!asrConflict,
                                       denied: asrDeniedFlag, aliveAt: recAliveAt});
   if (stalled < REC_STALL_MS) {
     if (!stalled) recAliveAt = now;

@@ -86,10 +86,11 @@ const reasons = {too_short: 'dropTooShort', noise: 'dropNoise',
 
 
 class RecognitionStallTest(unittest.TestCase):
-    def test_wanted_but_never_running_counts_up(self):
+    def test_a_session_that_is_open_and_never_came_up_counts_up(self):
         run(r"""
 const h = stalling();
-const s = {recWanted: true, recRunning: false, conflict: false, denied: false, aliveAt: 0};
+const s = {held: true, recWanted: true, recRunning: false, conflict: false,
+           denied: false, aliveAt: 0};
 assert(h.recStalledFor(1000, s) === 1000, 'it counts from the last time it ran');
 assert(h.recStalledFor(h.REC_STALL_MS + 1, s) > h.REC_STALL_MS, 'past the limit');
 """)
@@ -97,8 +98,13 @@ assert(h.recStalledFor(h.REC_STALL_MS + 1, s) > h.REC_STALL_MS, 'past the limit'
     def test_every_other_state_counts_as_alive(self):
         run(r"""
 const h = stalling();
-const s = {recWanted: true, recRunning: false, conflict: false, denied: false, aliveAt: 0};
+const s = {held: true, recWanted: true, recRunning: false, conflict: false,
+           denied: false, aliveAt: 0};
 const now = h.REC_STALL_MS * 10;
+// Nothing was ever opened: a page nobody has touched yet is exactly this,
+// and starting there would ask for a microphone with no gesture behind it
+// and be refused, which switches browser recognition off altogether.
+assert(h.recStalledFor(now, {...s, held: false}) === 0, 'nothing started yet');
 assert(h.recStalledFor(now, {...s, recRunning: true}) === 0, 'running');
 assert(h.recStalledFor(now, {...s, recWanted: false}) === 0, 'not wanted');
 assert(h.recStalledFor(now, {...s, conflict: true}) === 0, 'another tab holds it');

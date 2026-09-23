@@ -69,6 +69,32 @@ class EmptyLogTest(unittest.TestCase):
         vd.empty_log(self.log)
         self.assertNotEqual(vd.log_epoch(self.log), first)
 
+    def test_a_session_that_is_really_gone_does_not_hold_the_log(self):
+        # A listen that is really over (past AWAY_HOLD, so nothing is routed
+        # to it and no re-arm is waited on). Holding the log for it would
+        # line last time's utterances up again, which is the one thing
+        # emptying is for. One only between two watches does hold it, since
+        # it comes back and replays from where its progress file stands.
+        vd.write_atomic(vd._gone_file(self.log, "yesterday"), json.dumps({
+            "session": "yesterday", "pid": "40856",
+            "left": time.time() - vd.AWAY_HOLD * 2, "offset": 0, "epoch": "-",
+            "reg": {"cwd": "/work", "started": "2026-09-22 00:34:03",
+                    "since": time.time() - vd.AWAY_HOLD * 2, "session": "yesterday"}}))
+        self.assertTrue(any(l.get("gone") for l in vd.list_active_listeners(self.log)))
+        self.assertTrue(vd.empty_log_for_start(self.log))
+        self.assertEqual(self.log.read_text(encoding="utf-8"), "")
+
+    def test_a_session_between_two_watches_still_holds_it(self):
+        vd.write_atomic(vd._gone_file(self.log, "between"), json.dumps({
+            "session": "between", "pid": "40857", "left": time.time() - 5,
+            "offset": 0, "epoch": "-",
+            "reg": {"cwd": "/work", "started": "2026-09-23 00:34:03",
+                    "since": time.time() - 5, "session": "between"}}))
+        self.log.write_text('{"text": "said a moment ago", "to": "40857"}\n',
+                            encoding="utf-8")
+        self.assertFalse(vd.empty_log_for_start(self.log))
+        self.assertTrue(self.log.read_text(encoding="utf-8"))
+
     def test_a_progress_offset_from_the_old_log_is_no_longer_read(self):
         (self.state / "listeners-gone" / "4321.progress").write_text(
             f"{vd.log_epoch(self.log) or '-'} 0", encoding="utf-8")
