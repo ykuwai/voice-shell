@@ -3855,6 +3855,14 @@ let recStartedAt = 0;        // when the current session was opened
 let recFails = 0;            // failures in a row (used to decide when to give up)
 let recStarting = false;
 let recGeneration = 0;
+// When the state the stall watch measures (recWatchdogTick) last began. Set
+// where a start really begins rather than only from the watch's own tick, so
+// the count is the age of the open session itself and not the gap between two
+// ticks. The tick is a plain setInterval and a hidden tab is where this page
+// spends most of its life (it is meant to be worked beside), so those gaps
+// stretch: read off a tick alone, an ordinary start sampled once and then not
+// again for a minute reads as a minute-old stall and gets folded up mid-word.
+let recAliveAt = 0;
 // Set only while recognition is being started on its own after a reload
 // (#118), with nothing touched yet. A refusal then may be Chrome wanting a
 // touch first rather than the person saying no, so it falls back to "touch to
@@ -4174,6 +4182,9 @@ async function startRecognition() {
   }
   const generation = recGeneration;
   recStarting = true;
+  // The one way into the state the stall watch counts (rec is assigned
+  // nowhere else), so this is the moment it has been open since.
+  recAliveAt = performance.now();
   try {
     // On the local entry nothing starts until Chrome says the model is here.
     // Asked before the heartbeat, so a start held off here never claims
@@ -4531,6 +4542,15 @@ function queueOrSendFinal(text) {
   paintPendingBrowserSends();
 }
 
+/* Why an utterance the server took in went nowhere, in words for the person
+   who said it. The reasons a command or a cancel leaves behind are not here:
+   those already put their own line up (voice_cmd.json), and one the draft box
+   is holding is on screen in the box itself. These four say nothing anywhere
+   else, and speech that goes nowhere while the screen carries on as though it
+   had arrived is the one thing this must never look like. */
+const DROP_REASONS = {too_short: 'dropTooShort', noise: 'dropNoise',
+                      muted: 'dropMuted', empty: 'dropEmpty'};
+
 /* Settled utterances go to the server. The dictionary, the ignored words, the
    min length and the hold decision all run through the same path the daemon
    takes, on the server side (so the result does not change with how it was
@@ -4569,6 +4589,21 @@ function sendUtterance(text) {
         loadEngines();
       } else if (!res.ok) {
         el.hint.textContent = t('asrSendFailed', {n: res.status});
+      } else {
+        // Taken in and let go again, for a reason the server knows and the
+        // person cannot see (under the floor on length, a word on the ignore
+        // list, a cut microphone, nothing left after the dictionary). It
+        // comes back as an ordinary 200, so without this the words simply
+        // vanish off the screen and nothing is ever said about them.
+        let data = {};
+        try { data = await res.json(); } catch {}
+        // Held on screen (say), not written straight onto the line: paint()
+        // puts the ordinary "listening" wording back every 3 seconds, and the
+        // whole point of these four is to reach someone who is talking rather
+        // than watching. Written bare, the reason their words went nowhere
+        // was gone again before they looked up.
+        const why = DROP_REASONS[data.dropped];
+        if (why) say(t(why));
       }
     } catch {
       el.hint.textContent = t('asrSendFailed', {n: '?'});
@@ -4633,6 +4668,53 @@ setInterval(() => {
     if (owned && recWanted && !recRunning && !recStarting) startRecognition();
   });
 }, 5000);
+
+/* A session that was opened and never came up.
+
+   startRecognition turns away any call made while rec is set or a start is
+   still under way, and both are cleared only by something arriving back from
+   the recognizer. A session that was start()ed and never reached onstart,
+   with no end and no error either, therefore leaves them set for good: the
+   page wants to listen, nothing is listening, everything said goes nowhere
+   and nothing says so, and only a reload brings it back. Nothing is being
+   recognized in that state, so there is nothing to lose by folding the dead
+   session up and beginning again.
+
+   Told apart from the ordinary gap between two sessions (Chrome cuts its own
+   every 7 to 10 seconds and the next takes a moment) by how long it has run. */
+const REC_STALL_MS = 30000;
+
+/* How long a session has been open with nothing running behind it. Every
+   other state counts as alive, and none of them are for this to start up
+   again behind the person: nothing opened at all (a page nobody has touched
+   yet, where the microphone rule holds the start until it is, a local model
+   still being waited on, a lease that could not be read), recognition
+   genuinely running, the lease held by another tab, a refused microphone. */
+function recStalledFor(now, s) {
+  if (!s.held || !s.recWanted || s.recRunning || s.conflict || s.denied) return 0;
+  return Math.max(0, now - s.aliveAt);
+}
+
+function recWatchdogTick(now = performance.now()) {
+  const stalled = recStalledFor(now, {held: !!rec || recStarting,
+                                      recWanted, recRunning, conflict: !!asrConflict,
+                                      denied: asrDeniedFlag, aliveAt: recAliveAt});
+  if (stalled < REC_STALL_MS) {
+    if (!stalled) recAliveAt = now;
+    return false;
+  }
+  recAliveAt = now;
+  // Held (say, not a bare write to the line), since whatever was spoken into
+  // the dead session is gone and only the person can say it again. paint()
+  // rewrites that line every 3 seconds, and someone operating by voice is by
+  // definition not watching the screen, so a line written straight onto it is
+  // one nobody ever sees.
+  say(t('asrRestarted'), 10);
+  stopRecognition(true);
+  startRecognition();
+  return true;
+}
+setInterval(() => recWatchdogTick(), 5000);
 
 // On close, say that we are gone (left behind, it still looks like someone is there)
 addEventListener('pagehide', () => { if (asrChosen) beat('gone'); });
