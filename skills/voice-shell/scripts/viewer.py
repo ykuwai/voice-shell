@@ -1189,7 +1189,11 @@ async def main_async(args):
         the way it was recognized.
         """
         body = await req.json()
-        text = (body.get("text") or "").strip()
+        # Folded before anything is decided about it, the same as in the daemon.
+        # Chrome's on-device Japanese recognition writes Latin letters and digits
+        # full-width, and the page folds them for what it shows, so the two roads
+        # have to agree or the card would flip when the words were sent.
+        text = vd.to_halfwidth((body.get("text") or "")).strip()
         if not text:
             return web.json_response({"error": "empty"}, status=400)
         tab = str(body.get("tab") or "")[:40]

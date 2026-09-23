@@ -1914,8 +1914,12 @@ let dictUnignore = new Set();   // taken off the built in ignore list, so short 
 async function loadDictPairs() {
   try {
     const d = await (await fetch('/api/dictionary?scope=effective')).json();
+    // The side that is matched folds the way the recognized text does, so an
+    // entry saved as 「ＡＷＳ」 lights up on the half-width AWS on screen, exactly as
+    // apply_replacements does it on the server. What it becomes is left as typed.
     dictPairs = Object.entries(d.replace || {})
       .filter(([k, v]) => k && v)
+      .map(([k, v]) => [toHalfWidth(k), v])
       .sort((a, b) => b[0].length - a[0].length);   // match the longer words first
     // The same read already carries both lists the drawing in the corner needs,
     // so it costs no second request and there is no second thing to keep fresh.
@@ -1925,8 +1929,10 @@ async function loadDictPairs() {
     // the utterance really is sent. Trimming it here would go dark on a word
     // that goes out. is_allowed_short does strip the punctuation off its list,
     // so that one gets the same treatment here.
-    dictIgnore = new Set((d.ignore || []).map(w => w.trim().toLowerCase()).filter(Boolean));
-    dictUnignore = new Set((d.unignore || []).map(cueCore).filter(Boolean));
+    dictIgnore = new Set((d.ignore || []).map(w => toHalfWidth(w).trim().toLowerCase())
+                                        .filter(Boolean));
+    dictUnignore = new Set((d.unignore || []).map(w => cueCore(toHalfWidth(w)))
+                                             .filter(Boolean));
   } catch { /* if it cannot be fetched, show the text plain */ }
 }
 function withDict(text) {
@@ -3759,6 +3765,26 @@ const INVENTED_SPACE_RE = /(?<=[^\x00-\x7F\s])[ \t]+(?=[^\x00-\x7F\s])/g;
 const stripInventedSpaces = text =>
   speakingNoSpaceLang() ? text.replace(INVENTED_SPACE_RE, '') : text;
 
+// Full-width Latin letters and digits, folded down to half-width.
+//
+// Chrome's on-device Japanese recognition writes them full-width (「ＰＲ」,
+// 「２０２６」), and nobody means that when they say a word of code or a year.
+// The server folds the same set the same way (to_halfwidth in voice_daemon.py),
+// so the words on screen while you are still speaking are the words that get
+// sent. Fold it only there and the card would show 「ＰＲ」 and then flip to PR
+// the moment it went out.
+//
+// Letters, digits and the symbols that only ever mean code when spoken. Japanese
+// punctuation (、。「」・？！), the full-width parentheses, the long vowel mark ー,
+// kana and the full-width space are all left as they are, since each carries
+// meaning at the width it is written in. Half-width katakana goes the other way,
+// a whole run at a time so ｷﾞ comes back as ギ rather than ｷ + ﾞ.
+const FULLWIDTH_CODE_RE = /[Ａ-Ｚａ-ｚ０-９＠＃＆％＋＝／＼＿＜＞＄＊＾｜｀［］｛｝]/g;
+const HALFWIDTH_KANA_RE = /[\uFF61-\uFF9F]+/g;
+const toHalfWidth = text => text
+  .replace(FULLWIDTH_CODE_RE, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+  .replace(HALFWIDTH_KANA_RE, run => run.normalize('NFKC'));
+
 /* The one string both writers to el.stream agree on: whatever is queued,
    with whatever was last recognized after it. Two different callers used to
    build two different strings, browserGateTick's own paintPendingBrowserSends
@@ -3837,7 +3863,7 @@ function newRecognition(generation) {
     let interim = '';
     for (let i = ev.resultIndex; i < ev.results.length; i++) {
       const res = ev.results[i];
-      const transcript = stripInventedSpaces(res[0].transcript);
+      const transcript = toHalfWidth(stripInventedSpaces(res[0].transcript));
       if (res.isFinal) queueOrSendFinal(transcript);
       else interim += transcript;
     }
