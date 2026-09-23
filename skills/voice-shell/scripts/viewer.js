@@ -2045,13 +2045,16 @@ let tailMarkTimer = null, tailMarkKey = null, tailMarkPending = null;
    local-engine partial and the browser SpeechRecognition interim result, so
    the two read identically. */
 function paintStream(s) {
-  /* The last stop before the unsent card, so the fold runs here too and there
-     is no way onto that card that misses it. The browser road folds each
+  /* The last stop for every road that carries text from somewhere else onto
+     the unsent card, so the fold runs here too. The browser road folds each
      result as it arrives (onresult), and the daemon folds the partial it
      writes, so this is a no-op whenever both ends are in step. Out of step it
      is the whole of the difference, and the card is where it shows: a daemon
      or a server still running the code from before the fold hands the page
      full-width text, and it was read as the page having failed to fold. The
+     writes that do not come through here (paintPendingBrowserSends and the
+     three that put browserStreamText straight on screen) carry the browser's
+     own results, folded as each one arrived.
      word taken as a signal below is matched on the folded text as well, the
      same string the server matches on. */
   s = toHalfWidth(s || '');

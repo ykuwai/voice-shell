@@ -256,8 +256,8 @@ assert(h.toHalfWidth('＂＇') === '＂＇', 'the full-width quotes stay');
         again before it writes the log. That leaves the screen agreeing with
         what was sent only as long as every one of them is running the same
         code. Out of step, a card sat there full-width while the words above it
-        read half-width. paintStream is the one place the unsent card is
-        written, so the fold sits there too and no road can get past it.
+        read half-width. Every road that carries text written somewhere else
+        onto that card goes through paintStream, so the fold sits there too.
         """
         src = VIEWER_JS.read_text(encoding="utf-8")
         stream = src.split("function paintStream(s) {", 1)[1].split("\n}\n", 1)[0]
