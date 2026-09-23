@@ -3476,7 +3476,18 @@ def main():
     # Emptied on every startup (so last time's utterances are not picked up),
     # with a new epoch for the emptied log. Byte offsets a listen recorded
     # against the old one must not be used against this one (listen_filter.py).
-    empty_log(log_path)
+    #
+    # Not while another session is already listening, though. Starting a local
+    # engine (`start --engine whisper`, `--engine apple`, or the viewer
+    # switching engines) comes through here, and a session on browser
+    # recognition can be listening at that moment with lines in the log it has
+    # not read yet. Those are not last time's utterances, they are what was
+    # said a moment ago, and emptying them takes them away with nothing said
+    # anywhere on screen. The same rule the browser start already follows
+    # (voice-shell.sh, --empty-log). The daemon only ever appends to the log,
+    # so keeping it costs this process nothing; every reader measures by
+    # epoch plus offset, and no new epoch is stamped when nothing is emptied.
+    empty_log_for_start(log_path)
 
     save_default_dictionary()
 
