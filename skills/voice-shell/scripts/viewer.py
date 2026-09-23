@@ -110,6 +110,131 @@ def _write_json(path: Path, value) -> None:
     os.replace(temp, path)
 
 
+# ── Chrome's on-device speech models, as they sit on this disk ──
+#
+# Chrome answers SpeechRecognition.available() per site: until a site has
+# called install() itself, it is told downloadable even when the model is
+# already there, so no site can read off what you have. The page cannot tell
+# the two apart, and would say "download 167 MB" for something that is a
+# three second switch on. The viewer's own server can look, so it does.
+#
+# Read only. Nothing here starts, touches or asks Chrome anything, it lists
+# directories and adds up file sizes. Anything unreadable comes back as None
+# (unknown) rather than as an answer, so the page hedges instead of lying.
+SODA_ENGINE_DIR = "SODA"
+SODA_PACKS_DIR = "SODALanguagePacks"
+
+
+def _chrome_user_data_dirs() -> list:
+    """Where each Chrome-family browser keeps the profile root on this platform.
+
+    The SODA engine and the language packs sit in that root, beside the
+    profiles, since they are shared by every profile of that install.
+    """
+    home = Path.home()
+    if sys.platform.startswith("win"):
+        local = os.environ.get("LOCALAPPDATA") or str(home / "AppData/Local")
+        base = Path(local)
+        return [base / "Google/Chrome/User Data",
+                base / "Google/Chrome Beta/User Data",
+                base / "Google/Chrome SxS/User Data",
+                base / "Chromium/User Data"]
+    if sys.platform == "darwin":
+        base = home / "Library/Application Support"
+        return [base / "Google/Chrome",
+                base / "Google/Chrome Beta",
+                base / "Google/Chrome Canary",
+                base / "Chromium"]
+    base = Path(os.environ.get("XDG_CONFIG_HOME") or (home / ".config"))
+    return [base / "google-chrome",
+            base / "google-chrome-beta",
+            base / "google-chrome-unstable",
+            base / "chromium"]
+
+
+def _dir_bytes(path: Path) -> int:
+    """How much a directory holds, as far as it can be read."""
+    total = 0
+    for here, _dirs, files in os.walk(path, onerror=lambda _e: None):
+        for name in files:
+            try:
+                total += (Path(here) / name).stat().st_size
+            except OSError:
+                pass
+    return total
+
+
+def _lang_matches(folder: str, lang: str) -> bool:
+    """Whether a pack folder is for this language tag.
+
+    Case is ignored, and ja matches ja-JP either way round: the page asks with
+    whatever BCP-47 tag the dropdown holds, and the folder is named however
+    Chrome named it.
+    """
+    a, b = folder.casefold().replace("_", "-"), lang.casefold().replace("_", "-")
+    return a == b or a.split("-")[0] == b.split("-")[0]
+
+
+def on_device_model(lang: str, roots=None) -> dict:
+    """Whether Chrome already holds the on-device recognition model here.
+
+    engine is the SODA engine itself, pack the model for this one language.
+    Each is True, False, or None when nothing could be told (no Chrome
+    directory to look in at all, or every one of them unreadable). Sizes are
+    in bytes, and are 0 when the thing is not there.
+    """
+    out = {"lang": lang, "engine": None, "pack": None,
+           "engineBytes": 0, "packBytes": 0, "root": ""}
+    try:
+        looked = False
+        for root in (roots if roots is not None else _chrome_user_data_dirs()):
+            root = Path(root)
+            if not root.is_dir():
+                continue
+            looked = True
+            # Any SODA/<version>/SODAFiles holding something counts. The
+            # engine file is SODA.dll on Windows and libsoda.so elsewhere, so
+            # the directory having contents is what is asked, not a name.
+            engine, engine_bytes = False, 0
+            for version in sorted(_subdirs(root / SODA_ENGINE_DIR)):
+                files = version / "SODAFiles"
+                size = _dir_bytes(files) if files.is_dir() else 0
+                if size > 0:
+                    engine, engine_bytes = True, max(engine_bytes, size)
+            pack, pack_bytes = False, 0
+            for folder in _subdirs(root / SODA_PACKS_DIR):
+                if not _lang_matches(folder.name, lang):
+                    continue
+                size = _dir_bytes(folder)
+                if size > 0:
+                    pack, pack_bytes = True, max(pack_bytes, size)
+            # The first install that has both wins, so a second Chrome with
+            # the engine but not this language cannot mask the one that has it
+            if engine and pack:
+                return {"lang": lang, "engine": True, "pack": True,
+                        "engineBytes": engine_bytes, "packBytes": pack_bytes,
+                        "root": str(root)}
+            if engine and out["engine"] is not True:
+                out.update(engine=True, engineBytes=engine_bytes, root=str(root))
+            if pack and out["pack"] is not True:
+                out.update(pack=True, packBytes=pack_bytes)
+        if looked:
+            out["engine"] = bool(out["engine"])
+            out["pack"] = bool(out["pack"])
+    except Exception:
+        return {"lang": lang, "engine": None, "pack": None,
+                "engineBytes": 0, "packBytes": 0, "root": ""}
+    return out
+
+
+def _subdirs(path: Path) -> list:
+    """The directories directly inside, or nothing if it cannot be read."""
+    try:
+        return [p for p in path.iterdir() if p.is_dir()]
+    except OSError:
+        return []
+
+
 def _secure_dir(path: Path) -> None:
     """Create this directory if needed, and make sure it is really this
     account's alone.
@@ -1096,6 +1221,17 @@ async def main_async(args):
             "target": vd.resolve_target(args.log_file) or "",
         })
 
+    async def handle_ondevice(req):
+        """Whether Chrome already holds the on-device model for this language.
+
+        Chrome tells a site downloadable until that site has called install()
+        itself, even with the model on disk, so the page cannot tell a real
+        167 MB download from a switch on that takes seconds. This looks at the
+        disk and says which it is. Read only, and it never fails: unknown
+        comes back as null and the page falls back to hedging.
+        """
+        return web.json_response(on_device_model(req.query.get("lang", "")))
+
     async def handle_machine(req):
         """This machine's name, and multi-machine mode on and off.
 
@@ -1608,6 +1744,7 @@ async def main_async(args):
     app.router.add_get("/api/tuning", handle_tuning_get)
     app.router.add_put("/api/tuning", handle_tuning_put)
     app.router.add_get("/api/languages", handle_languages)
+    app.router.add_get("/api/ondevice", handle_ondevice)
     app.router.add_get("/api/whisper-model", handle_whisper_model_get)
     app.router.add_put("/api/whisper-model", handle_whisper_model_put)
     app.router.add_put("/api/mics", handle_mic_put)
