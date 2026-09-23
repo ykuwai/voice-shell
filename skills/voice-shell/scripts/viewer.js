@@ -3987,16 +3987,44 @@ const NO_SPACE_LANGS = new Set(['ja', 'zh', 'th']);
 const speakingNoSpaceLang = () => NO_SPACE_LANGS.has(browserLang().split('-')[0].toLowerCase());
 const clauseJoin = () => speakingNoSpaceLang() ? '' : ' ';
 
-// Chrome's own recognizer writes a plain space between words even in
-// Japanese, where nothing was said in that gap at all, not for any of the
-// reasons clauseJoin exists for. Stripped only between two characters that
-// are both outside plain ASCII, so a space actually separating an English
-// word dropped into the sentence ("Claude Code", "GitHub", the everyday
-// case here) is left standing, only the ones the recognizer invented on
-// its own go.
+/* Chrome's own recognizer writes a plain space between words even in
+   Japanese, where nothing was said in that gap at all, not for any of the
+   reasons clauseJoin exists for. Latin words it hears inside Japanese come
+   back the same way, full-width and spelled a letter at a time:
+   「Ｉ Ｐ ａ ｄ ｉ Ｐ ｈ ｏ ｎ ｅ」 for "iPad iPhone", every single letter with a
+   space after it. Nobody said those gaps either.
+
+   Run on the raw transcript, before the fold, which is the only place the two
+   kinds of space can still be told apart: while the letters are full-width,
+   they are the recognizer's own writing rather than anything that was
+   spoken, and how many of them stand together says which kind it is. A run of
+   one on both sides is the letter-at-a-time spelling and the space goes; a
+   run of two or more on either side is a word the recognizer wrote as a word
+   (「ＰＲ ｔｅｓｔ」, 「Ｍａｃ ｍｉｎｉ」) and the space stays, since that one really
+   does separate two words. Everything else between two non-ASCII characters
+   is the ordinary invented space and goes.
+
+   Folded first instead, every letter is plain ASCII and none of that is left
+   to read: the letter-at-a-time spaces all survived, and 「ＩＰｈｏｎｅ」 reached
+   the screen as "I P h o n e", which is what full-width looks like at a
+   glance. Stripping first without counting the runs is the other half of the
+   same mistake: 「ＰＲ ｔｅｓｔ」 went out as PRtest. */
 const INVENTED_SPACE_RE = /(?<=[^\x00-\x7F\s])[ \t]+(?=[^\x00-\x7F\s])/g;
+const WIDE_LETTER_RE = /[Ａ-Ｚａ-ｚ０-９]/;
+// How many full-width letters stand in a row from i, walking in one direction
+const wideRunFrom = (s, i, step) => {
+  let n = 0;
+  while (i >= 0 && i < s.length && WIDE_LETTER_RE.test(s[i])) { n++; i += step; }
+  return n;
+};
 const stripInventedSpaces = text =>
-  speakingNoSpaceLang() ? text.replace(INVENTED_SPACE_RE, '') : text;
+  speakingNoSpaceLang()
+    ? text.replace(INVENTED_SPACE_RE, (gap, at, whole) => {
+        const left = wideRunFrom(whole, at - 1, -1);
+        const right = wideRunFrom(whole, at + gap.length, 1);
+        return left && right && (left > 1 || right > 1) ? gap : '';
+      })
+    : text;
 
 /* The one string both writers to el.stream agree on: whatever is queued,
    with whatever was last recognized after it. Two different callers used to
@@ -4076,11 +4104,13 @@ function newRecognition(generation) {
     let interim = '';
     for (let i = ev.resultIndex; i < ev.results.length; i++) {
       const res = ev.results[i];
-      // Folded first, then the invented spaces. INVENTED_SPACE_RE only strips a
-      // space with a non-ASCII character on either side, and on-device Japanese
-      // writes Latin full-width, so the other order ate the space in 「ＰＲ ｔｅｓｔ」
-      // and sent PRtest, where cloud recognition of the same words kept it.
-      const transcript = stripInventedSpaces(toHalfWidth(res[0].transcript));
+      // The spaces first, then the fold. stripInventedSpaces has to read the
+      // transcript while the Latin in it is still full-width: that is what
+      // says the letters are the recognizer's own writing and not something
+      // anyone spoke, and it is what tells 「Ｉ Ｐ ａ ｄ」 spelled a letter at a
+      // time from the two words of 「ＰＲ ｔｅｓｔ」. Folded first, both look like
+      // ASCII words with a space between them and neither can be helped.
+      const transcript = toHalfWidth(stripInventedSpaces(res[0].transcript));
       if (res.isFinal) queueOrSendFinal(transcript);
       else interim += transcript;
     }

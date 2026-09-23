@@ -60,6 +60,32 @@ def run_fold(script):
     subprocess.run(["node", "-e", HARNESS_FOLD + script, str(VIEWER_JS)], check=True)
 
 
+# The fold and the invented-space strip together, the pair onresult runs, with
+# the spoken language it reads off browserLang stubbed so a test can move it.
+HARNESS_SPACES = r"""
+const fs = require('fs');
+const source = fs.readFileSync(process.argv[1], 'utf8');
+const cut = (from, to) => {
+  const start = source.indexOf(from), end = source.indexOf(to, start);
+  if (start < 0 || end < 0) process.exit(2);
+  return source.slice(start, end);
+};
+const h = new Function(`let spoken = 'ja-JP';
+  const browserLang = () => spoken;
+  ${cut('// Full-width Latin letters and digits', 'const TAIL_IDS = ')}
+  ${cut('const NO_SPACE_LANGS', '/* The one string both writers')}
+  return {toHalfWidth, stripInventedSpaces, speak: l => { spoken = l; }};`)();
+// What onresult itself does with one result's transcript
+const heard = t => h.toHalfWidth(h.stripInventedSpaces(t));
+const codes = s => [...s].map(c => c.codePointAt(0).toString(16)).join(' ');
+const assert = (cond, what) => { if (!cond) { console.error(what); process.exit(1); } };
+"""
+
+
+def run_spaces(script):
+    subprocess.run(["node", "-e", HARNESS_SPACES + script, str(VIEWER_JS)], check=True)
+
+
 class ToHalfWidthTest(unittest.TestCase):
     def test_latin_letters_and_digits_fold(self):
         self.assertEqual(to_halfwidth("ＰＲを２０２６年に出す"), "PRを2026年に出す")
@@ -266,7 +292,7 @@ assert(h.toHalfWidth('＂＇') === '＂＇', 'the full-width quotes stay');
         # Where it comes in. Both are read by worthSending and the send cue, so
         # they have to be the string the server judges.
         self.assertIn("livePartial = toHalfWidth(m.partial).trim();", src)
-        self.assertIn("stripInventedSpaces(toHalfWidth(res[0].transcript))", src)
+        self.assertIn("toHalfWidth(stripInventedSpaces(res[0].transcript))", src)
 
         def body_of(head):
             return src.split(head, 1)[1].split("\n}\n", 1)[0]
@@ -316,21 +342,45 @@ const f = h.foldChars('これをｺﾞｰ');
 assert(f.at[f.chars.indexOf('ゴ')] === 3, 'the cut lands on the base: ' + f.at.join(','));
 """)
 
-    def test_the_space_between_two_folded_words_survives(self):
-        # stripInventedSpaces only eats a space between two non-ASCII characters.
-        # Folded after it instead of before, 「ＰＲ ｔｅｓｔ」 went out as PRtest.
+    def test_a_word_spelled_a_letter_at_a_time_comes_back_as_one_word(self):
+        """Chrome writes Latin inside Japanese one letter at a time.
+
+        「ＩＰｈｏｎｅ」 arrives as 「Ｉ Ｐ ｈ ｏ ｎ ｅ」, every letter full-width with a
+        space after it. Folded before the spaces are read, all of that is plain
+        ASCII and the spaces survive, so the live line said "I P h o n e" and
+        the card that came back a few seconds later, from a server that folds
+        and never spaces, said iPhone. The exact line the page was caught
+        showing is below, codepoint for codepoint.
+        """
         src = VIEWER_JS.read_text(encoding="utf-8")
-        self.assertIn("stripInventedSpaces(toHalfWidth(res[0].transcript))", src)
-        run(r"""
-const RE = /(?<=[^\x00-\x7F\s])[ \t]+(?=[^\x00-\x7F\s])/g;
-assert(h.toHalfWidth('ＰＲ ｔｅｓｔ').replace(RE, '') === 'PR test', 'folded first keeps it');
-assert('ＰＲ ｔｅｓｔ'.replace(RE, '') === 'ＰＲｔｅｓｔ', 'the other way round ate it');
-assert('これは テスト'.replace(RE, '') === 'これはテスト', 'japanese still loses it');
+        self.assertIn("toHalfWidth(stripInventedSpaces(res[0].transcript))", src)
+        run_spaces(r"""
+const spelled = 'はい、こちらを。Ｉ Ｐ ａ ｄ ｉ Ｐ ｈ ｏ ｎ ｅ Ｍ ａ ｃ ｍ ｉ ｎ';
+const got = heard(spelled);
+assert(got === 'はい、こちらを。IPadiPhoneMacmin', 'one word again, got ' + got);
+// what the live page showed instead, the reading this test exists for
+const was = h.stripInventedSpaces(h.toHalfWidth(spelled));
+assert(codes(was).includes('49 20 50 20 61 20 64'), 'the old order kept every space');
+assert(!codes(got).includes('49 20 50'), 'and this one does not: ' + codes(got));
+""")
+
+    def test_the_space_between_two_folded_words_survives(self):
+        # A run of two or more letters is a word the recognizer wrote as a word,
+        # not a letter it spelled out, and the space between two of those is
+        # real. Stripped anyway, 「ＰＲ ｔｅｓｔ」 went out as PRtest.
+        run_spaces(r"""
+assert(heard('ＰＲ ｔｅｓｔ') === 'PR test', 'two words stay two words');
+assert(heard('Ｍａｃ ｍｉｎｉ') === 'Mac mini', 'and so does this one');
+assert(heard('これは テスト') === 'これはテスト', 'japanese still loses it');
+assert(heard('テスト ＰＲ') === 'テストPR', 'nothing was said in that gap either');
+h.speak('en-US');
+assert(heard('PR test') === 'PR test', 'a language that writes spaces keeps all of them');
+assert(heard('Ｉ Ｐ ａ ｄ') === 'I P a d', 'and is left alone even full-width');
 """)
 
     def test_the_interim_on_screen_is_already_folded(self):
         src = VIEWER_JS.read_text(encoding="utf-8")
-        self.assertIn("stripInventedSpaces(toHalfWidth(res[0].transcript))", src)
+        self.assertIn("toHalfWidth(stripInventedSpaces(res[0].transcript))", src)
         # The preview's own copy of the dictionary matches on the folded side too
         self.assertIn("toHalfWidth(k), v", src)
         # and so do the two screen-side copies of the server's command_key
