@@ -309,6 +309,16 @@
       <label for="asrLang" data-icon="language" data-icon-size="17" data-i18n="asrLang">Spoken language</label>
       <select id="asrLang"></select>
     </div>
+    <!-- Browser recognition kept on this device. Whether the model for the
+         spoken language above is here, and the button that fetches it. It
+         sits right under the language because the model is per language. -->
+    <div id="onDeviceField" hidden>
+      <p class="range-note" id="onDeviceStatus" role="status"></p>
+      <div class="btn-row" id="onDeviceRow" style="margin:-.3rem 0 .8rem" hidden>
+        <button class="btn" id="onDeviceDownload" data-icon="download" data-icon-size="17"
+                data-i18n="onDeviceDownload">Download the model</button>
+      </div>
+    </div>
     <p class="range-note" id="browserMic" hidden>
       <span data-i18n="browserMicNote"></span>
       <button class="link" id="micSettingsLink">chrome://settings/content/microphone</button>

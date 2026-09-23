@@ -23,6 +23,7 @@ import subprocess
 import sys
 import threading
 import time
+import unicodedata
 from pathlib import Path
 
 # fcntl is POSIX only (Windows does not have it). The only use here is the lock
@@ -152,17 +153,27 @@ def _secure_dir(path: Path) -> None:
 
 # The languages the backchannel and filler lists are written for. Speech in any
 # other language falls back to English, the way the voice signals do (#4).
-NOISE_LANGS = ("ja", "en", "es", "fr", "de", "zh", "ko")
+# Chinese is two columns, "zh" for the Simplified script and "zh-TW" for the
+# Traditional one (Taiwan, Hong Kong), since the characters themselves differ
+# (静音 and 靜音 never meet in a comparison).
+NOISE_LANGS = ("ja", "en", "es", "fr", "de", "zh", "zh-TW", "ko")
 FALLBACK_LANG = "en"
 
 # The spelled-out form --language takes (voice-shell.sh passes "Japanese")
 _LANG_NAMES = {"japanese": "ja", "english": "en", "spanish": "es",
                "french": "fr", "german": "de", "chinese": "zh",
-               "mandarin": "zh", "korean": "ko"}
+               "mandarin": "zh", "korean": "ko",
+               "traditional chinese": "zh-TW", "taiwanese mandarin": "zh-TW",
+               "cantonese": "zh-TW"}
+
+# The regions and the script subtag that write Chinese in Traditional characters.
+# zh-CN, zh-SG, zh-Hans and a bare zh (Whisper says only that) stay Simplified,
+# and so does zh-Hans-TW, where the script is named outright.
+_ZH_TRADITIONAL = {"tw", "hk", "mo", "hant"}
 
 
 def lang_code(*values) -> str:
-    """The two-letter code of the language being listened to.
+    """The code of the language being listened to, two letters or "zh-TW".
 
     Each engine holds that in a shape of its own. Browser recognition keeps the
     speak-language setting ("ja-JP"), Apple keeps a locale ("ja-JP"), Whisper
@@ -177,12 +188,24 @@ def lang_code(*values) -> str:
     silently turn both tests below off for that speaker. It does not read on
     through to the next value either, since the utterance really was in that
     language and the list behind it would be the wrong one.
+
+    Chinese is the one language split further, by script rather than by region.
+    zh-HK and zh-Hant land on "zh-TW" with Taiwan, because the lists compare
+    characters and those write the same ones. So does Cantonese (zh-HK is what
+    Chrome calls Cantonese, yue is what Whisper does), so 靜音 still mutes.
     """
     for value in values:
         if not value:
             continue
         s = str(value).strip().lower().replace("_", "-")
         code = _LANG_NAMES.get(s) or s.split("-")[0][:2]
+        subtags = set(s.split("-")[1:])
+        if code == "zh" and "hans" not in subtags and _ZH_TRADITIONAL & subtags:
+            code = "zh-TW"
+        # Cantonese by name, as Whisper says it ("yue"). Hong Kong writes it
+        # in Traditional characters, so it reads the same column as zh-HK.
+        elif s.split("-")[0] == "yue":
+            code = "zh" if "hans" in subtags else "zh-TW"
         return code if code in NOISE_LANGS else FALLBACK_LANG
     return FALLBACK_LANG
 
@@ -201,6 +224,7 @@ NOISE_ONLY = {
     "fr": {"euh"},
     "de": {"ähm", "äh"},
     "zh": {"呃", "嗯"},
+    "zh-TW": {"呃", "嗯"},
     "ko": {"음", "어"},
 }
 
@@ -446,6 +470,45 @@ def kanji_numbers_to_arabic(text: str) -> str:
     return _KANJI_NUM_RE.sub(sub, text)
 
 
+# ── Full-width letters and digits ─────────────────
+#
+# Chrome's on-device Japanese recognition writes Latin letters and digits full-width
+# (「ＰＲ」, 「２０２６」). Nobody means that when they say a word of code or a year, and
+# a full-width 「ＰＲ」 read as a filename or a branch name is simply wrong. So it is
+# folded here, at the one point every engine's text comes in.
+#
+# What folds is Latin letters, digits, and the symbols that only ever mean code when
+# they are spoken (@ # & % + = / \ _ < > $ * ^ | ` and the bracket pairs). What
+# does not fold is everything that is punctuation in Japanese prose: 、。「」・？！：；，．
+# and the full-width parentheses, which Japanese writes full-width on purpose. The
+# long vowel mark ー, kana and the full-width space 　 stay as they are too, since all
+# three carry meaning at their own width.
+#
+# Half-width katakana (ｱｲｳ) goes the other way, to full-width, which is the shape
+# Japanese is written in. A whole run at a time, because the dakuten is its own
+# character half-width and ｷﾞ has to come back as ギ rather than ｷ + ﾞ.
+#
+# Not unicodedata.normalize("NFKC") over the whole text: that also swallows the
+# full-width space, rewrites 〜 as ~, opens ① out to 1 and ㎠ to cm, and leaves no
+# say in any of it.
+_FULLWIDTH_CODE_SYMBOLS = "＠＃＆％＋＝／＼＿＜＞＄＊＾｜｀［］｛｝"
+_HALFWIDTH_TABLE = str.maketrans({
+    c: chr(ord(c) - 0xFEE0)
+    for c in ([chr(n) for n in range(0xFF21, 0xFF3B)]      # Ａ-Ｚ
+              + [chr(n) for n in range(0xFF41, 0xFF5B)]    # ａ-ｚ
+              + [chr(n) for n in range(0xFF10, 0xFF1A)]    # ０-９
+              + list(_FULLWIDTH_CODE_SYMBOLS))})
+_HALFWIDTH_KANA_RE = re.compile(r"[\uFF61-\uFF9F]+")
+
+
+def to_halfwidth(text: str) -> str:
+    """Fold full-width Latin letters, digits and code symbols down to half-width,
+    and write half-width katakana out full-width."""
+    text = text.translate(_HALFWIDTH_TABLE)
+    return _HALFWIDTH_KANA_RE.sub(
+        lambda m: unicodedata.normalize("NFKC", m.group(0)), text)
+
+
 # Written in caps and still not an acronym. Do not turn "A vs B" into "A VS B".
 # Lowercase shorthand like e.g. / i.e. / a.m. is already rejected by the uppercase
 # test, so it is not listed here.
@@ -490,10 +553,19 @@ def collapse_letter_acronyms(text: str) -> str:
 
 
 def apply_replacements(text: str, replace: dict) -> str:
-    """Apply the dictionary replacements. Longest first, to catch partial matches."""
-    for src in sorted(replace, key=len, reverse=True):
+    """Apply the dictionary replacements. Longest first, to catch partial matches.
+
+    The side that is matched is folded the same way the incoming text is, so an entry
+    somebody registered as 「ＡＷＳ」 still finds the AWS that arrives half-width. What
+    it becomes is left exactly as it was typed, because a replacement written
+    full-width was written that way on purpose.
+    """
+    folded = {}
+    for src, dst in replace.items():
         if src:
-            text = text.replace(src, replace[src])
+            folded.setdefault(to_halfwidth(src), dst)
+    for src in sorted(folded, key=len, reverse=True):
+        text = text.replace(src, folded[src])
     return text
 
 
@@ -504,12 +576,14 @@ def apply_replacements(text: str, replace: dict) -> str:
 # apart from a real word go in (「あのー」 is in, the demonstrative 「あの」 is not,
 # or 「あのファイルを開いて」 loses what it points at).
 FILLERS = {
-    "ja": ["えーと", "えっと", "ええと", "あのー", "そのー", "うーん", "んー"],
-    "en": ["um", "uh"],
-    "es": ["eh"],
-    "fr": ["euh"],
-    "de": ["ähm", "äh"],
+    "ja": ["えーと", "えーっと", "えっと", "ええと", "ええっと", "あのー", "そのー",
+           "うーん", "んー"],
+    "en": ["um", "umm", "uh", "ah", "oh"],
+    "es": ["eh", "pues", "o sea"],
+    "fr": ["euh", "heu", "bah"],
+    "de": ["ähm", "äh", "öhm", "öh"],
     "zh": ["呃", "嗯"],
+    "zh-TW": ["呃", "嗯"],
     "ko": ["음", "어"],
 }
 
@@ -666,9 +740,9 @@ def is_noise(text: str, extra=(), allow=(), lang: str = "") -> bool:
     is in, since it is matched against what the recognizer wrote down. The user's own
     two lists follow neither, they are the user's.
     """
-    off = {w.strip().lower() for w in allow}
+    off = {to_halfwidth(w).strip().lower() for w in allow}
     words = ({w for w in noise_words(lang) if w.lower() not in off}
-             | {w.lower() for w in extra})
+             | {to_halfwidth(w).lower() for w in extra})
     core = text.strip().strip(_TRIM)
     if core.lower() in words:
         return True
@@ -695,7 +769,7 @@ def is_allowed_short(text: str, allow=()) -> bool:
     does not widen. The test matches the shape of is_noise (compare with symbols
     stripped, and treat a repeat like 「了解、了解」 the same way).
     """
-    off = {w.strip().strip(_TRIM).lower() for w in allow}
+    off = {to_halfwidth(w).strip().strip(_TRIM).lower() for w in allow}
     off.discard("")
     if not off:
         return False
@@ -774,6 +848,12 @@ COMMAND_WORDS = {
         "zh": [
             "静音", "开启静音", "关闭麦克风", "关掉麦克风", "麦克风静音",
         ],
+        # The same wordings in Traditional characters, as Chrome's zh-TW writes
+        # them. None of them is a Japanese word either (靜 and 麥 are not used
+        # there), so no Japanese sentence closes on one.
+        "zh-TW": [
+            "靜音", "開啟靜音", "關閉麥克風", "關掉麥克風", "麥克風靜音",
+        ],
         # Forms said to a person, like 「마이크 꺼」, are left out. Noun forms only.
         "ko": [
             "음소거", "음소거 켜기", "마이크 끄기", "마이크 음소거",
@@ -830,6 +910,7 @@ COMMAND_WORDS = {
         # What people actually say on an everyday call has not been checked, so
         # widening can wait until someone really uses them.
         "zh": ["解除静音", "取消静音"],
+        "zh-TW": ["解除靜音", "取消靜音"],
         "ko": ["음소거 해제", "음소거 풀기"],
     },
     # Back to the side where speech goes straight through. Switching between live and
@@ -842,6 +923,8 @@ COMMAND_WORDS = {
             "そくじ", "そくじもーど", "即時に",
             # 「そくじ」 easily becomes 「食事」 (measured). Alone, same command.
             "食事", "しょくじ", "食事モード", "速時", "則時",
+            # The English screen's name for it, as a loanword.
+            "インスタント", "いんすたんと", "インスタントモード",
         ],
         "en": ["live", "live mode", "instant", "instant mode", "send live"],
         "es": ["directo", "modo directo", "en directo", "enviar directo"],
@@ -850,6 +933,8 @@ COMMAND_WORDS = {
         # out of a mouth as a reply (「Sofort.」 means "right away").
         "de": ["Sofortmodus", "Direktmodus", "Direkt senden", "Sofort senden"],
         "zh": ["即时模式", "直接发送", "实时发送", "立刻发送"],
+        # 傳送 is the word Taiwan puts on a send button where the mainland puts 发送.
+        "zh-TW": ["即時模式", "直接傳送", "即時傳送", "立刻傳送"],
         "ko": ["바로 전달", "바로 보내기", "즉시 모드", "바로 전달 모드"],
     },
     # Send it over to the side that piles up for editing.
@@ -859,7 +944,14 @@ COMMAND_WORDS = {
             "てなおし", "てなおしもーど", "手直しに", "ためて", "溜める", "ためる",
             # The English loanword comes out as readily as the native word here.
             # Left out, somebody who reaches for it gets no answer and no reason.
+            # Only alone or after a filler though, like ドラフト below, since
+            # 「記事をエディット」 is an ordinary sentence (MODE_COMMON_WORDS).
             "エディット", "えでぃっと", "エディットモード",
+            # The mode is called Draft on the English screen, and people who
+            # read that say the loanword too. Only alone or after a filler
+            # though (_HOLD_MODE_TAIL_EXCLUDE), since 「PRをドラフトにして」 and
+            # 「今年のドラフト」 are ordinary sentences that end on it.
+            "ドラフト", "どらふと", "ドラフトモード",
         ],
         # Not bare "edit". It ends ordinary sentences, which is why it was taken
         # out of the trailing signals, and a whole utterance of just that word is
@@ -872,7 +964,15 @@ COMMAND_WORDS = {
         "fr": ["relecture", "mode relecture", "brouillon", "mode brouillon"],
         "de": ["Entwurf", "Entwurfsmodus", "Sammelmodus", "Zum Ändern sammeln"],
         "zh": ["草稿模式", "暂存模式", "先存着改", "改完再发"],
-        "ko": ["모아 두기", "초안 모드", "모으기 모드", "고쳐서 보내기"],
+        # 草稿模式 is written the same in both scripts and already sits in the
+        # column above. It is repeated so the "?" list shows it to this reader.
+        # The two spoken-out forms in the column above (「先存着改」 「改完再发」)
+        # are not carried over. This list is also matched as a tail with a few
+        # characters ahead of it, and 「這個檔案改完再傳」 is an ordinary
+        # instruction that would be parked instead of sent.
+        "zh-TW": ["草稿模式", "暫存模式"],
+        "ko": ["모아 두기", "초안 모드", "모으기 모드", "고쳐서 보내기",
+               "드래프트 모드"],
     },
     # After finishing a sentence you sometimes think 「やっぱりなし」 or "I want to
     # fix this before it goes". When the command lands at the **end** of an utterance,
@@ -888,8 +988,8 @@ COMMAND_WORDS = {
     # close. 「取消」 sat in the Japanese column and took 「把会议取消」 whole, and the
     # speaker never got that sentence back.
     #
-    # The order matters. Matching runs from the tail and strips the first hit, so they
-    # are checked in written order (so a long phrasing is not eaten by a short one).
+    # The order does not decide anything. Matching takes the longest wording at the
+    # tail (take_tail_word), so a long phrasing is not eaten by a short one inside it.
     "cancel_tail": {
         # Single-verb forms (cancel / cancelar / annuler / abbrechen / 取消 / 취소)
         # are in no column. This command matches the end of a sentence, so an ordinary
@@ -910,6 +1010,7 @@ COMMAND_WORDS = {
         "fr": ["annule ça", "annuler ça", "oublie ça"],
         "de": ["streich das", "vergiss das", "vergiss es"],
         "zh": ["刚才那句取消", "取消刚才那句", "取消这句", "这句不要了"],
+        "zh-TW": ["剛才那句取消", "取消剛才那句", "取消這句", "這句不要了"],
         "ko": ["방금 말 취소", "방금 건 취소", "지금 말 취소", "이건 취소"],
     },
     # This one is not thrown away, it goes to the draft on screen (fix it, then send)
@@ -919,9 +1020,10 @@ COMMAND_WORDS = {
             # 「てなおし」 easily comes out as 「出直し」 (measured)
             "出直し", "でなおし", "出直して",
             "直してから", "なおしてから", "あとで直す", "ちょっと直す",
-            # A bare katakana noun, the same reasoning that lets 「キャンセル」
-            # stand alone: it almost never closes a real Japanese sentence.
-            "エディット", "えでぃっと",
+            # 「エディット」 is not here. It closes ordinary sentences
+            # (「記事をエディット」, 「写真をエディット」), and one that did would
+            # land in the draft cut down to 「記事を」. Said alone it still switches
+            # to hold, through the mode words.
         ],
         "en": ["edit this", "let me edit", "hold this"],
         # Bare "edit" is in no column either, for the same reason as bare "cancel".
@@ -936,6 +1038,11 @@ COMMAND_WORDS = {
         "fr": ["je corrige", "je le corrige", "laisse-moi corriger"],
         "de": ["das ändere ich", "lass mich das ändern"],
         "zh": ["这句我来改", "这句留着改", "先留着改"],
+        # 「先留著改」 is left out here. 「那個 bug 先留著改」 closes an ordinary
+        # Taiwanese sentence meaning "leave that bug for later", and it would
+        # land in the draft instead of going out. Both kept forms point back at
+        # 這句, the sentence just said.
+        "zh-TW": ["這句我來改", "這句留著改"],
         "ko": ["고쳐서 보낼게", "내가 고칠게", "이건 고쳐서"],
     },
 }
@@ -963,10 +1070,10 @@ def builtin_words(kind: str, lang: str = None) -> list:
 
 
 # Compare after dropping symbols and the spaces in between. 「ミュート。」, 「mute me」
-# and 「マイク、オン」 should all land on the same key. Full-width digits fold to
-# half-width here. The long vowel mark ー is not dropped. Drop it and 「ミュート」
-# becomes 「ミュト」 and never matches.
-_CMD_DROP = str.maketrans("１２３４５６７８９０", "1234567890",
+# and 「マイク、オン」 should all land on the same key. Full-width letters and
+# digits fold to half-width first, through to_halfwidth. The long vowel mark ー is
+# not dropped. Drop it and 「ミュート」 becomes 「ミュト」 and never matches.
+_CMD_DROP = str.maketrans("", "",
                           " \t\u3000。、．，・…！？!?.,-~〜\"'「」『』()（）")
 
 
@@ -977,8 +1084,12 @@ def command_key(text: str) -> str:
     Phrasings the user adds are remembered in this same shape. Remember them without
     going through here and a word registered with a comma in it, like 「ミュート、して」,
     will never match.
+
+    Full-width letters and digits fold first, so 「ＰＲ」 and 「２番」 compare the same
+    as the half-width forms. A phrasing somebody registered full-width matches too,
+    since it is remembered through here.
     """
-    return text.strip().translate(_CMD_DROP).lower()
+    return to_halfwidth(text.strip()).translate(_CMD_DROP).lower()
 
 
 # Folded into the shape matching uses.
@@ -988,9 +1099,9 @@ def command_key(text: str) -> str:
 # happens here. Write 「mutethemic」 in the table and the list on screen shows exactly
 # that, and the English becomes unreadable.
 #
-# Commands that attach to the end of a sentence are not folded. Those are compared
-# raw against the tail of an utterance (「cancel that」 is needed with its space), so
-# they stay a tuple in written order. The order they are matched in matters too.
+# Commands that attach to the end of a sentence are kept as written, a tuple in
+# written order. take_tail_word folds them at the comparison, the same shape as
+# here, and takes the longest one at the tail whatever order they sit in.
 MUTE_WORDS = {command_key(w) for w in builtin_words("mute")}
 UNMUTE_WORDS = {command_key(w) for w in builtin_words("unmute")}
 LIVE_WORDS = {command_key(w) for w in builtin_words("live")}
@@ -1033,8 +1144,89 @@ UNMUTE_TAIL_NOISE_MAX = 3
 # review, nothing is lost and live undoes it. Switching the other way, back to
 # live, stays exact only, that is the direction a false hit actually costs
 # something (speech during a call going straight through again).
-HOLD_MODE_TAIL = tuple(sorted(set(builtin_words("hold")), key=len, reverse=True))
+#
+# Words people also use in ordinary talk are left out of the tail, the way unmute
+# leaves out 「解除」. A draft is something people talk about (a PR, an email, the
+# baseball draft), and so are editing, holding and going live, so 「PRをドラフトに
+# して」, 「記事をエディット」, "save a draft" or 「PR을 드래프트 모드」 would be parked
+# instead of sent. Said alone they still switch, through HOLD_WORDS / LIVE_WORDS,
+# and so they do with nothing but a filler ahead of them (MODE_LOANWORD_TAIL below).
+# Native Japanese words like 手直し and 即時 are not in here. Nobody says them about
+# anything but this tool, so hold keeps its lead-in tolerance for them.
+#
+# The live side carries every other language's instant words as well (directo, en
+# direct, Sofortmodus, 即时模式, 즉시 모드 and the rest). Live has no lead-in
+# tolerance of its own, so without them here 「eh, directo」 went nowhere while
+# 「eh, borrador」 switched. Being here only lets a filler ahead of them.
+MODE_COMMON_WORDS = {
+    "hold": {
+        "エディット", "えでぃっと", "エディットモード",
+        "ドラフト", "どらふと", "ドラフトモード",
+        "hold", "hold mode", "draft", "draft mode", "edit mode",
+        # 「revisar」 and 「relecture」 are everyday verbs and nouns too
+        # ("¿puedes revisar el código?").
+        "revisar", "modo revisar", "modo revisión", "borrador", "modo borrador",
+        "relecture", "mode relecture", "brouillon", "mode brouillon",
+        "Entwurf", "Entwurfsmodus",
+        "草稿模式",
+        "초안 모드", "드래프트 모드",
+    },
+    "live": {
+        "インスタント", "いんすたんと", "インスタントモード",
+        "live", "live mode", "instant", "instant mode", "send live",
+        *(w for lang, ws in COMMAND_WORDS["live"].items() if lang not in ("ja", "en")
+          for w in ws),
+    },
+}
+# Kept under its old name, the draft words are what it was made for.
+_HOLD_MODE_TAIL_EXCLUDE = MODE_COMMON_WORDS["hold"]
+HOLD_MODE_TAIL = tuple(sorted(
+    {w for w in builtin_words("hold") if w not in _HOLD_MODE_TAIL_EXCLUDE},
+    key=len, reverse=True,
+))
 HOLD_MODE_TAIL_NOISE_MAX = 7
+
+# The words above, with a filler and nothing else ahead of them. A few characters
+# of anything ahead of them is too loose (「今年のドラフト」, "go live"), but a bare
+# filler ahead of them is still the word said alone, and 「えーとドラフト」 or
+# "um, live mode" going nowhere is the #76 bug over again.
+MODE_LOANWORD_TAIL = {
+    mode: tuple(sorted(words, key=len, reverse=True))
+    for mode, words in MODE_COMMON_WORDS.items()
+}
+# The fillers of every language, plus the short replies that open a sentence out
+# of habit. 「あの」 goes in here though it is kept out of FILLERS, since nothing is
+# being deleted, only let ahead of the word. The same goes for the fillers that are
+# real words too ("well", 「este」 and 「bueno」, 「那个」, 「also」, 「그러니까」).
+# In FILLERS they would be cut out of the middle of a sentence ("it works well"
+# down to "it works", 「este archivo」 down to 「archivo」).
+_MODE_LEAD_FILLERS = tuple(sorted(
+    {w.lower() for ws in FILLERS.values() for w in ws}
+    | {w.lower() for ws in NOISE_ONLY.values() for w in ws}
+    | {"はい", "うん", "ええ", "えー", "あー", "あの", "ん", "네", "예", "응", "그", "저",
+       "yes", "yeah", "ok", "okay", "sí", "vale", "oui", "ja", "好", "好的",
+       "well", "este", "bueno", "那个", "那個", "ben", "bon", "alors", "enfin",
+       "also", "naja", "na ja", "아", "저기", "그러니까", "그니까"},
+    key=len, reverse=True,
+))
+_MODE_LEAD_TRIM = " \t　。、．，・！？!?.,…ー~〜"
+# Only punctuation comes off the front and back. The long vowel mark and the
+# waves are let go only after a filler has matched (「えーーー」), never before,
+# or 「えー」 is cut down to 「え」 ahead of the comparison and matches nothing.
+_MODE_EDGE_TRIM = " \t　。、．，・！？!?.,…"
+
+
+def only_fillers(text: str) -> bool:
+    """Whether what is left is nothing but fillers (or nothing at all)."""
+    rest = text.lower().strip(_MODE_EDGE_TRIM)
+    while rest:
+        for f in _MODE_LEAD_FILLERS:
+            if rest.startswith(f):
+                rest = rest[len(f):].lstrip(_MODE_LEAD_TRIM)
+                break
+        else:
+            return False
+    return True
 
 
 # ── Phrasings the user adds ────────────────────
@@ -1074,13 +1266,11 @@ def clean_user_phrase(kind: str, phrase) -> str:
     if kind not in USER_COMMAND_KINDS or not isinstance(phrase, str):
         return ""
     if kind in TAIL_KINDS:
-        # active_tail hands these straight to take_tail, which matches the
-        # raw tail of an utterance (trimmed and lowercased, see _TAIL_TRIM),
-        # never through command_key the way mute/live/hold/route are. Folding
-        # a multi-word addition through command_key here, as the fallthrough
-        # below does, would drop its internal spaces ("forget this one" ->
-        # "forgetthisone"), a shape nothing actually said aloud ever ends in,
-        # so the phrase would sit in the list looking saved and never fire.
+        # Kept as typed (trimmed and lowercased, see _TAIL_TRIM) rather than
+        # folded through command_key the way mute/live/hold/route are, so the
+        # list on screen still reads "forget this one" and not "forgetthisone".
+        # take_tail_word folds both sides at the comparison, so spacing does
+        # not decide whether it fires.
         key = phrase.strip().rstrip(_TAIL_TRIM).lower()
         return key if _USER_PHRASE_MIN <= len(key) <= _USER_PHRASE_MAX else ""
     key = command_key(phrase)
@@ -1155,8 +1345,8 @@ def clean_off_kinds(data) -> list:
 # What is stored is the wording as it stands in the table, not the folded key. It is
 # read by a person in a file, and 「マイクをオフにして」 is readable where
 # 「マイクをオフにして」 folded down is not. Folding happens where the comparison
-# happens, one place per kind, since the four spoken-alone kinds compare on
-# command_key and the two tail kinds compare on a lowercased tail.
+# happens. Every kind compares in the command_key shape, the tails included, since
+# take_tail_word folds the tail the same way an exact match folds the whole.
 OFF_WORDS_KEY = "off_words"
 
 
@@ -1219,16 +1409,12 @@ def keep_off_words(sent, prev: dict, shown: dict) -> dict:
     return out
 
 
-# The two that attach to the end of a sentence. They are compared against a tail as
-# written, so their switched-off wordings fold with lower() and the rest with
-# command_key.
+# The two that attach to the end of a sentence.
 TAIL_KINDS = ("cancel_tail", "hold_tail")
 
 
 def _fold_off(kind: str, words) -> frozenset:
-    """Put the switched-off wordings into the shape that kind gets compared in."""
-    if kind in TAIL_KINDS:
-        return frozenset(w.lower() for w in words)
+    """Put the switched-off wordings into the shape every kind gets compared in."""
     return frozenset(command_key(w) for w in words)
 
 
@@ -1319,26 +1505,41 @@ def word_enabled(kind: str, text: str) -> bool:
 
 
 def active_tail(kind: str) -> tuple:
-    """The tail wordings that still bite, empty when that signal is switched off.
+    """The tail wordings to match against, empty when that signal is switched off.
 
     The tables themselves (CANCEL_TAIL / HOLD_TAIL) are left whole. Emptying them
     would mean the list on screen loses the wordings too, and the reader could no
     longer see what they are switching back on.
 
-    Wordings struck one at a time drop out here, in written order, because take_tail
-    takes the first that matches and that order is what decides which of two
-    overlapping tails wins. Added ones come after the built-ins, longest first among
-    themselves so one that happens to end in another does not swallow the longer,
-    more specific one first.
+    **Wordings struck one at a time stay in here.** take_tail_word takes the longest
+    wording at the tail, and only then is that wording asked about (take_active_tail
+    below), the same as mute. Dropped before matching, a struck 「全部キャンセル」
+    would leave the shorter 「キャンセル」 inside it to fire in its place.
     """
     if not command_enabled(kind):
         return ()
     table = CANCEL_TAIL if kind == "cancel_tail" else HOLD_TAIL
-    off = load_commands()[OFF_WORDS_KEY].get(kind)
-    if off:
-        table = tuple(w for w in table if w.lower() not in off)
-    mine = sorted(load_commands().get(kind) or (), key=len, reverse=True)
-    return table + tuple(mine) if mine else table
+    mine = tuple(load_commands().get(kind) or ())
+    return table + mine
+
+
+def take_active_tail(text: str, kind: str):
+    """The body with that tail signal taken off, or None when it does not bite.
+
+    The longest wording at the tail decides, struck or not, and a struck one then
+    lets the whole utterance through as ordinary speech. A wording the user typed
+    in by hand wins over the strike, as in word_enabled.
+    """
+    hit = take_tail_word(text, active_tail(kind))
+    if hit is None:
+        return None
+    body, word = hit
+    key = command_key(word)
+    if key in load_commands()[OFF_WORDS_KEY].get(kind, ()):
+        mine = {command_key(w) for w in load_commands().get(kind) or ()}
+        if key not in mine:
+            return None
+    return body
 
 
 def clean_user_commands(data) -> dict:
@@ -1372,8 +1573,8 @@ def user_command_phrases() -> dict:
     return clean_user_commands(data)
 
 
-def mic_command_shape(text: str, muted: bool):
-    """Return "mute" / "unmute" when the utterance has the shape of one.
+def mic_command_match(text: str, muted: bool):
+    """Return ("mute" / "unmute", the wording that matched), or None.
 
     **The switched-off list is not read here.** Two different questions get asked of
     the same phrase. "What does this look like" has one answer everywhere, and
@@ -1391,32 +1592,49 @@ def mic_command_shape(text: str, muted: bool):
     nowhere. Unmute's ceiling is tighter and its wordlist narrower
     (UNMUTE_TAIL_NOISE_MAX), a false hit there costs the whole stretch the
     speaker thought was off, not one utterance.
+
+    The wording handed back is the one the switch-offs are asked about (the whole
+    utterance on an exact match, the table wording at the tail otherwise). The
+    longest wording at the tail is the one that counts, struck or not, the same as
+    on an exact match, so striking 「麦克风静音」 does not let 「嗯麦克风静音」 through
+    on the shorter 「静音」 inside it.
     """
     key = command_key(text)
     if key:
         if muted:
             # Added unmute phrasings are not checked (they cannot be added anyway)
             if key in UNMUTE_WORDS:
-                return "unmute"
+                return "unmute", key
         elif key in MUTE_WORDS or key in load_commands()["mute"]:
-            return "mute"
+            return "mute", key
     if muted:
-        body = take_tail(text, UNMUTE_TAIL)
-        if body is not None and len(body) <= UNMUTE_TAIL_NOISE_MAX:
-            return "unmute"
+        hit = take_tail_word(text, UNMUTE_TAIL)
+        if hit is not None and len(hit[0]) <= UNMUTE_TAIL_NOISE_MAX:
+            return "unmute", hit[1]
     else:
-        body = take_tail(text, MUTE_TAIL)
-        if body is not None and len(body) <= MUTE_TAIL_NOISE_MAX:
-            return "mute"
+        hit = take_tail_word(text, MUTE_TAIL)
+        if hit is not None and len(hit[0]) <= MUTE_TAIL_NOISE_MAX:
+            return "mute", hit[1]
     return None
+
+
+def mic_command_shape(text: str, muted: bool):
+    """Return "mute" / "unmute" when the utterance has the shape of one (see mic_command_match)."""
+    hit = mic_command_match(text, muted)
+    return hit[0] if hit else None
 
 
 def voice_command(text: str, muted: bool):
     """Return "mute" / "unmute" when the utterance itself is an on or off command."""
     # Off and on are asked about one at a time. Someone who wants the mic never cut
     # by voice but still wants to bring it back that way gets exactly that.
-    cmd = mic_command_shape(text, muted)
-    return cmd if cmd and command_enabled(cmd) and word_enabled(cmd, text) else None
+    # The switched-off wording is asked about by the wording that matched, never
+    # the whole utterance, or any lead-in ahead of it would walk it past the check.
+    hit = mic_command_match(text, muted)
+    if not hit:
+        return None
+    cmd, word = hit
+    return cmd if command_enabled(cmd) and word_enabled(cmd, word) else None
 
 
 # How a number is said drifts with every recognition. Say 「2」 and out comes 「に」,
@@ -1458,6 +1676,9 @@ NUMBER_WORDS = {
            "zehn": 10},
     "zh": {"零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
            "六": 6, "七": 7, "八": 8, "九": 9, "十": 10},
+    # Only 兩 is written apart from the Simplified table.
+    "zh-TW": {"零": 0, "一": 1, "二": 2, "兩": 2, "三": 3, "四": 4, "五": 5,
+              "六": 6, "七": 7, "八": 8, "九": 9, "十": 10},
     # 이번 (2번 written with the native reading instead of a digit) is also the
     # everyday word for "this time", so this does turn that word into a routing
     # switch. What holds it back is the same guard every routing phrase has,
@@ -1519,6 +1740,15 @@ ROUTE_PARTS = {
                    "发给", "会话", "目标", "第"],
         "tail": ["个", "号", "会话", "吧"],
     },
+    "zh-TW": {
+        # 「切換到2」 「工作階段2」 「第二個」. 工作階段 is what Taiwan's software
+        # calls a session. As with Simplified, a number with only a word after
+        # it (「兩個」 「2號」) is not held, both are ordinary words there too.
+        # 「第2號」 and 「切換到2號」 work.
+        "prefix": ["切換到", "切換成", "切到", "換到", "傳送到", "傳到",
+                   "傳給", "會話", "工作階段", "目標", "第"],
+        "tail": ["個", "號", "會話", "工作階段", "吧"],
+    },
     "ko": {
         # 「2번」 「세션 2」 「2번으로 보내」, and 「이번」 too now (see the Korean
         # column in NUMBER_WORDS for why that one is safe to read as a number).
@@ -1541,6 +1771,7 @@ ROUTE_EXAMPLES = {
     "fr": ["session 2", "numéro deux", "passe à 2", "destination 2"],
     "de": ["Sitzung 2", "Nummer zwei", "wechsle zu 2", "Ziel 2"],
     "zh": ["切换到2", "会话2", "第2个", "发送到2"],
+    "zh-TW": ["切換到2", "工作階段2", "第2個", "傳送到2"],
     "ko": ["2번", "세션 2", "2번으로 보내", "번호 2"],
 }
 
@@ -1635,32 +1866,50 @@ def _route_rx(key: str):
     return re.compile(rf"^{re.escape(head)}({_NUM_ALT}){re.escape(tail)}$")
 
 
-def mode_command_shape(text: str):
-    """Return "live" / "hold" when the utterance has that shape. Switched off or not.
+def mode_command_match(text: str):
+    """Return ("live" / "hold", the wording that matched), or None. Switched off or not.
 
-    Same split as mic_command_shape, and for the same reason. Hold also matches
+    Same split as mic_command_match, and for the same reason. Hold also matches
     with a short noise prefix ahead of the word (HOLD_MODE_TAIL, #76 follow-up),
     live stays exact only, the same asymmetry mic_command_shape draws between
-    mute and unmute.
+    mute and unmute. The words that also turn up in ordinary talk
+    (MODE_COMMON_WORDS: the loanwords, the English names and the like) are
+    the exception either way, they may have a filler and nothing else ahead
+    of them (MODE_LOANWORD_TAIL).
     """
     key = command_key(text)
     if key:
         if key in LIVE_WORDS or key in load_commands()["live"]:
-            return "live"
+            return "live", key
         if key in HOLD_WORDS or key in load_commands()["hold"]:
-            return "hold"
-    body = take_tail(text, HOLD_MODE_TAIL)
-    if body is not None and len(body) <= HOLD_MODE_TAIL_NOISE_MAX:
-        return "hold"
+            return "hold", key
+    hit = take_tail_word(text, HOLD_MODE_TAIL)
+    if hit is not None and len(hit[0]) <= HOLD_MODE_TAIL_NOISE_MAX:
+        return "hold", hit[1]
+    # The loanword names, with nothing but a filler ahead of them
+    for mode, tails in MODE_LOANWORD_TAIL.items():
+        hit = take_tail_word(text, tails)
+        if hit is not None and only_fillers(hit[0]):
+            return mode, hit[1]
     return None
+
+
+def mode_command_shape(text: str):
+    """Return "live" / "hold" when the utterance has that shape (see mode_command_match)."""
+    hit = mode_command_match(text)
+    return hit[0] if hit else None
 
 
 def mode_command(text: str):
     """Return "live" / "hold" when this is a command to switch how speech gets sent."""
     # The two sides are asked about separately, the same as mute and unmute. Switching
     # off one side does not hand its wordings to the other, it just stops them biting.
-    mode = mode_command_shape(text)
-    return mode if mode and command_enabled(mode) and word_enabled(mode, text) else None
+    # The wording that matched is what gets asked about, as in voice_command.
+    hit = mode_command_match(text)
+    if not hit:
+        return None
+    mode, word = hit
+    return mode if command_enabled(mode) and word_enabled(mode, word) else None
 
 
 def route_shape(text: str):
@@ -1725,23 +1974,73 @@ _TAIL_PREFIX = ("コマンド", "こまんど", "command")
 _TAIL_TRIM = " \t\u3000。、．，・！？!?.,"
 
 
+def _folded_chars(text: str) -> list:
+    """text in the command_key shape, one (character, where it came from) at a time.
+
+    Where it came from is what lets the body be cut at the spoken wording once the
+    folded tail has matched, since the two no longer line up character for character.
+    """
+    out = []
+    i = 0
+    while i < len(text):
+        # to_halfwidth the same as command_key, so a tail said with full-width
+        # letters or digits matches. One character at a time, except for the one
+        # fold that is not one character for one: half-width katakana carries its
+        # dakuten as a character of its own, so ｷ and ﾞ are taken together and come
+        # back as ギ. Fold them apart and 「ｺﾞｰ」 lands on キ+゛ where command_key
+        # says ゴー, and the tail never matches. Both characters of the pair are
+        # hung on the base, so cutting at that spot takes the whole pair off.
+        unit = text[i]
+        if ("｡" <= unit <= "ﾟ"
+                and text[i + 1:i + 2] in ("ﾞ", "ﾟ")):
+            unit = text[i:i + 2]
+        for f in to_halfwidth(unit).translate(_CMD_DROP).lower():
+            out.append((f, i))
+        i += len(unit)
+    return out
+
+
+def take_tail_word(text: str, tails):
+    """Like take_tail, but hand back (body, the wording that matched), or None.
+
+    The wording is what a switch-off is checked against. Checked against the
+    whole utterance instead, 「はいミュート」 is not the struck 「ミュート」 and
+    the lead-in slips a switched-off wording straight past the check.
+
+    The tail is compared in the command_key shape, the same as an exact match, so
+    spaces and symbols do not decide it. Compared raw, 「음 마이크음소거」 missed the
+    table's 「마이크 음소거」 and fell to the shorter 「음소거」 inside it, which is
+    exactly the bypass a strike on the long wording has to close.
+
+    The longest wording at the tail wins, whatever order tails comes in (ties go
+    to the one written first), so a long phrasing is never eaten by a short one
+    inside it.
+    """
+    body = text.strip().rstrip(_TAIL_TRIM)
+    folded = _folded_chars(body)
+    key = "".join(f for f, _ in folded)
+    best = None
+    for w in tails:
+        # Lowercased on the table side too. In a language that capitalizes nouns,
+        # like German, the form as written in the table would never match.
+        wk = command_key(w)
+        if wk and key.endswith(wk) and (best is None or len(wk) > len(best[1])):
+            best = (w, wk)
+    if best is None:
+        return None
+    w, wk = best
+    rest = body[: folded[len(folded) - len(wk)][1]].rstrip(_TAIL_TRIM)
+    for pre in _TAIL_PREFIX:          # The lead-in in 「〜。コマンド手直し」
+        if rest.lower().endswith(pre):
+            rest = rest[: len(rest) - len(pre)].rstrip(_TAIL_TRIM)
+            break
+    return rest, w
+
+
 def take_tail(text: str, tails):
     """When the tail is a command, return the body with it removed. None when it is not."""
-    body = text.strip().rstrip(_TAIL_TRIM)
-    low = body.lower()
-    for w in tails:
-        # The table side is lowercased for the comparison too. In a language that
-        # capitalizes nouns, like German, comparing against the form as written in
-        # the table would never match.
-        if not low.endswith(w.lower()):
-            continue
-        rest = body[: len(body) - len(w)].rstrip(_TAIL_TRIM)
-        for pre in _TAIL_PREFIX:          # The lead-in in 「〜。コマンド手直し」
-            if rest.lower().endswith(pre):
-                rest = rest[: len(rest) - len(pre)].rstrip(_TAIL_TRIM)
-                break
-        return rest
-    return None
+    hit = take_tail_word(text, tails)
+    return None if hit is None else hit[0]
 
 
 # ── Using several machines at once ───────────────
@@ -1773,9 +2072,15 @@ def _strip_name(text: str, names):
     """When the head is this machine's name, return the rest. None otherwise."""
     body = text.strip()
     low = body.lower()
+    # The name is folded the way the utterance already is, the same as everywhere
+    # else a written-down word is matched against speech. Left raw, a name somebody
+    # typed as 「Ｍａｃ」 matched the full-width 「Ｍａｃミュート」 the recognizer used to
+    # hand over and matches nothing now that the text arrives folded. Cutting by the
+    # folded length is exact, since body has been through the same fold.
     for name in sorted(names or [], key=len, reverse=True):
-        if low.startswith(name.lower()):
-            return body[len(name):].lstrip(_NAME_SEP)
+        folded = to_halfwidth(name).lower()
+        if folded and low.startswith(folded):
+            return body[len(folded):].lstrip(_NAME_SEP)
     return None
 
 
@@ -1883,7 +2188,9 @@ def apply_voice_command(text: str, log_path, muted: bool, user_dict=None):
     if n:
         live = list_active_listeners(log_path)
         if sum(1 for e in live if not e.get("away")) > 1:
-            if 1 <= n <= len(live):
+            # A gone one keeps its number so the row does not renumber under
+            # the person mid-sentence, but saying that number cannot pick it.
+            if 1 <= n <= len(live) and not live[n - 1].get("gone"):
                 write_atomic(route_file(log_path), str(live[n - 1]["pid"]))
                 note_voice_cmd(log_path, "route",
                                f"{n}. {live[n - 1]['label']}", text)
@@ -2159,7 +2466,17 @@ def resolve_target(log_path):
     live = list_active_listeners(log_path)
     if not live:
         return None
-    present = [e for e in live if not e.get("away")] or live
+    present = [e for e in live if not e.get("away")]
+    if not present:
+        # Nothing here is listening. One only away is still worth choosing,
+        # its next watch replays what it missed. One gone is not: it is past
+        # the hold, nobody is coming back for it, and naming it would tag the
+        # line to a listen no one reads, which is how an utterance was lost
+        # outright (#110). Nobody named means every listener drops the line,
+        # the same as it has always meant.
+        present = [e for e in live if not e.get("gone")]
+    if not present:
+        return None
     return str(max(present, key=_order_of)["pid"])
 
 
@@ -2293,9 +2610,16 @@ def label_listeners(entries):
     for a while and comes back does not keep a claim on wherever it used to sit,
     it lines up as of this moment instead (#74).
     """
+    # A gone one is sorted to the end whatever its own order was. It keeps a
+    # number so it can still be talked about, but it must not hold one a
+    # session that is really listening should have, and the live numbers must
+    # not shift as one drops out of the row hours later. One only away keeps
+    # its place, which is the whole point of holding it (its next watch takes
+    # the same number back).
     # When the times tie, the PID decides. Leave this undecided and the numbers swap
     # around with the order the registration files get read (left to the OS).
-    entries = sorted(entries, key=lambda e: (_order_of(e), e.get("pid", 0)))
+    entries = sorted(entries, key=lambda e: (1 if e.get("gone") else 0,
+                                             _order_of(e), e.get("pid", 0)))
     seen = {}
     for e in entries:
         hand = custom_name(e)
@@ -2347,6 +2671,29 @@ AWAY_HOLD = 120
 # How long its tombstone can still be adopted. A re-arm that comes later than
 # AWAY_HOLD (the agent was busy) still gets its old place in the row back.
 LEAVE_GRACE = 600
+# How long one that is gone stays in the row after that, greyed out, unusable
+# and saying how to start it again. It is not a destination while it sits
+# there: nothing is routed to it and it cannot be chosen. It stays so that
+# coming back to the machine shows what happened rather than an empty row, and
+# so that the same session can pick its entry back up (ADOPT_GRACE below).
+# A week, because a machine left alone over a long weekend is the ordinary
+# case, not the strange one, and half a day meant a session that was still
+# perfectly resumable had dropped out of sight by the time anyone looked
+# (measured on a Mac mini left for three days). GONE_KEEP is what keeps the
+# row short, not this.
+GONE_SHOW = 7 * 24 * 3600
+# How long the same session id can still take its own entry back. The same
+# stretch, since an entry that is no longer on disk cannot be adopted anyway.
+# Safe to make this long because the tombstone is filed under the session id
+# itself, so only that same conversation can ever reach it, never a neighbour
+# and never a reused PID. What it does not carry over past LEAVE_GRACE is the
+# old place in the row and the replay of what was said in between: see
+# adopt_tombstone.
+ADOPT_GRACE = GONE_SHOW
+# And no more than this many of them at once, the most recent first. The row
+# has to stay readable, and past a few the older ones say nothing the newest
+# does not.
+GONE_KEEP = 5
 
 
 def gone_dir(log_path):
@@ -2480,13 +2827,33 @@ def adopt_tombstone(log_path, session):
         if data.get("disconnected") and time.time() - data["stopped"] < LEAVE_GRACE:
             return "blocked"
         return None
-    if "left" not in data or time.time() - data["left"] > LEAVE_GRACE:
+    if "left" not in data:
         return None
+    gap = time.time() - data["left"]
+    if gap > ADOPT_GRACE:
+        return None
+    # Past LEAVE_GRACE this is no longer a re-arm between two watches, it is the
+    # same conversation coming back after a while (a machine left alone for
+    # days, #110). It still takes its own entry back, so the chip does not
+    # double up and the session is one thing on screen from beginning to end.
+    # Two things it does not take back:
+    stale = gap > LEAVE_GRACE
     offset = int(data.get("offset") or 0)
-    if data.get("epoch", "-") != (log_epoch(log_path) or "-"):
-        offset = ""                 # the log was emptied since, start at its end
-    return {"pid": data.get("pid", ""), "order": _order_of(data.get("reg") or {}),
-            "offset": offset}
+    if stale or data.get("epoch", "-") != (log_epoch(log_path) or "-"):
+        # What was said in between. Nothing has been addressed to it since it
+        # went (resolve_target stops naming one that is gone), and reading days
+        # of log back at once would bury whatever is said next. Start at the
+        # end of the log as it stands, the same as the log having been emptied.
+        offset = ""
+    # And the old place in the row. While it is gone the chip sits at the end
+    # (label_listeners), so coming back to an order from days ago would jump it
+    # to the front and renumber every live one under the person. It lines up as
+    # of this moment instead, which is where it already was on screen (#74).
+    # "-" rather than an empty field: the three values are read back as words,
+    # so a blank one in the middle would be swallowed and the offset read as
+    # the order. voice-shell.sh falls back to now for anything unreadable.
+    order = "-" if stale else _order_of(data.get("reg") or {})
+    return {"pid": data.get("pid", ""), "order": order, "offset": offset}
 
 
 def _departed_pids(log_path):
@@ -2526,8 +2893,15 @@ def forget_tombstone(log_path, session):
             pass
 
 
-def _tombstones(log_path):
-    """Fresh tombstones, clearing the expired ones along the way."""
+def _tombstones(log_path, include_departed=False):
+    """Fresh tombstones, clearing the expired ones along the way.
+
+    include_departed also hands back the ones past AWAY_HOLD, marked
+    "departed". Those keep no claim on anything: nothing is routed to them and
+    no re-arm is waited on. They come back only so the row can go on showing
+    the session and say plainly that it is not listening (#110), instead of
+    the chip quietly vanishing while the person is still looking at it.
+    """
     d = gone_dir(log_path)
     if not d.is_dir():
         return []
@@ -2545,15 +2919,36 @@ def _tombstones(log_path):
                 pass
             continue
         data = _read_json(f) or {}
-        at = data.get("left", data.get("stopped", 0))
-        if not data or now - at > LEAVE_GRACE:
+        if "left" not in data:
+            # Stopped on purpose, or unreadable. Nothing is kept for it beyond
+            # long enough to turn away the one re-arm a disconnect causes.
+            if not data or now - data.get("stopped", 0) > LEAVE_GRACE:
+                try:
+                    f.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            continue
+        since = now - data["left"]
+        if since > GONE_SHOW:
             try:
                 f.unlink(missing_ok=True)
             except OSError:
                 pass
             continue
-        if "left" in data and now - data["left"] <= AWAY_HOLD:
+        if since <= AWAY_HOLD:
             out.append(data)
+        elif include_departed:
+            out.append(dict(data, departed=True))
+    # Only the most recent few of the gone ones. The rest go for good rather
+    # than sit in the folder unseen until GONE_SHOW runs out.
+    departed = sorted((e for e in out if e.get("departed")),
+                      key=lambda e: e["left"], reverse=True)
+    for stale in departed[GONE_KEEP:]:
+        out.remove(stale)
+        try:
+            _gone_file(log_path, stale.get("session")).unlink(missing_ok=True)
+        except OSError:
+            pass
     return out
 
 
@@ -2717,12 +3112,19 @@ def list_active_listeners(log_path):
     # Sessions between two watches keep their chip and their number.
     present = {info.get("session") for info in deduped if info.get("session")}
     present_pids = {str(info.get("pid")) for info in deduped}
-    for tomb in _tombstones(log_path):
+    for tomb in _tombstones(log_path, include_departed=True):
         if tomb.get("session") in present or str(tomb.get("pid")) in present_pids:
             continue
         info = dict(tomb.get("reg") or {})
         info["pid"] = tomb.get("pid")
         info["away"] = True
+        # Past AWAY_HOLD nothing is waiting for it any more. It still has a
+        # tombstone to adopt if that session ever listens again, but as things
+        # stand it cannot be used: no utterance goes to it and choosing it does
+        # nothing. Said plainly on screen rather than left to look merely faded
+        # (#110, an ended session sat there lit and swallowed what was said).
+        if tomb.get("departed"):
+            info["gone"] = True
         info.setdefault("cwd", "unknown")
         info.setdefault("started", "unknown")
         info.setdefault("since", tomb.get("left", 0))
@@ -2842,6 +3244,12 @@ def main():
         mine = my_session_id()
         for l in list_active_listeners(args.log_file):
             mark = "  <- this session" if mine and l.get("session") == mine else ""
+            # Printed the same as a live one, an ended session read as one
+            # still listening, and speech kept being aimed at it (#110).
+            if l.get("gone"):
+                mark = "  <- not listening, cannot be used" + mark
+            elif l.get("away"):
+                mark = "  <- between two watches" + mark
             print(f"  {l['label']}  (PID {l['pid']}){mark}")
             print(f"    started at  {l['started']}")
             print(f"    folder      {l['cwd']}")
@@ -3102,7 +3510,8 @@ def main():
         last_count = None
         while True:
             time.sleep(5)
-            count = len(list_active_listeners(log_path))
+            count = sum(1 for e in list_active_listeners(log_path)
+                        if not e.get("gone"))
             # With a target chosen, nothing arrives twice even with several
             # listening. That is the intended way to use it, so stay quiet.
             # With a target settled nothing arrives twice (the default settles one too)
@@ -3232,13 +3641,16 @@ def main():
 
                 if ev["type"] == "partial":
                     # Partials overwrite a separate file (the prompt log stays clean)
-                    partial_path.write_text(ev["text"], encoding="utf-8")
+                    partial_path.write_text(to_halfwidth(ev["text"]),
+                                            encoding="utf-8")
                     continue
                 if ev["type"] != "final":
                     continue
 
                 partial_path.write_text("", encoding="utf-8")
-                text = ev["text"].strip()
+                # Folded here, above every decision below, so the words that get
+                # judged are the words that get sent and shown.
+                text = to_halfwidth(ev["text"]).strip()
                 # Whether the send button on screen is what settled this one.
                 # asr_mic hangs it on the event, because by the time the line
                 # gets here the press has been spent and the file it was written
@@ -3283,14 +3695,15 @@ def main():
                     continue
 
                 # When 「キャンセル」 lands at the end, throw the whole phrase away.
-                # active_tail hands back nothing when the user switched that signal
-                # off, and then the phrase travels on as ordinary speech.
+                # take_active_tail hands back nothing when the user switched that
+                # signal (or the wording at the tail) off, and then the phrase
+                # travels on as ordinary speech.
                 # A press skips the test outright and the word rides along in the
                 # body. Reaching for send is the opposite of meaning to throw it
                 # away, and 「さっきの予約をキャンセル」 has to survive being asked
                 # for. Saying nothing still throws it away, which is what the
                 # signal was always for.
-                if not forced and take_tail(text, active_tail("cancel_tail")) is not None:
+                if not forced and take_active_tail(text, "cancel_tail") is not None:
                     note_voice_cmd(log_path, "cancelled", "", text)
                     print(f"(cancelled) {text[:40]}", file=sys.stderr, flush=True)
                     continue
@@ -3301,7 +3714,7 @@ def main():
                 # above. That one throws the words away and a press means the
                 # opposite, while this one only decides where they land, and the
                 # person said the word after all.
-                body = take_tail(text, active_tail("hold_tail"))
+                body = take_active_tail(text, "hold_tail")
                 force_hold = body is not None
                 if force_hold:
                     if not body:

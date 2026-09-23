@@ -10,15 +10,17 @@ window.addEventListener('error', e => {
    you cannot pick, so this is the one place we do not translate.
    Only languages recognition can handle (ASR_LANGS below) are listed. Translate
    the screen and then offer a language your voice cannot get through in, and it
-   looks usable when it is not. */
+   looks usable when it is not.
+   Chinese comes twice, once per script, and each name is written in its own
+   script, so the two can be told apart by whoever reads either one. */
 const UI_LANGS = [
   ['en', 'English'], ['ja', '日本語'], ['es', 'Español'], ['fr', 'Français'],
-  ['de', 'Deutsch'], ['zh', '中文（简体）'], ['ko', '한국어'],
+  ['de', 'Deutsch'], ['zh', '简体中文'], ['zh-TW', '繁體中文'], ['ko', '한국어'],
 ];
 
 /* How the time is written. We pass hour12:false, so all of them come out on a 24 hour clock. */
 const TIME_LOCALE = {en:'en-GB', ja:'ja-JP', es:'es-ES', fr:'fr-FR',
-                     de:'de-DE', zh:'zh-CN', ko:'ko-KR'};
+                     de:'de-DE', zh:'zh-CN', 'zh-TW':'zh-TW', ko:'ko-KR'};
 const timeLocale = () => TIME_LOCALE[lang] || 'en-GB';
 
 const store = {
@@ -42,11 +44,22 @@ let langPref = store.get('lang', 'auto');
 let lang = 'en';
 /* The browser announces itself with the region attached, like ja-JP or zh-TW.
    Match the whole thing first, then match again on just the front half, and if
-   both miss, fall back to English. zh-TW ends up on a simplified Chinese
-   screen, which is still closer than falling back to English. */
+   both miss, fall back to English.
+   Chinese is the one language where the front half is not enough, because the
+   two scripts are two screens. Taiwan, Hong Kong and Macau write Traditional
+   characters, and so does a tag that names Hant outright. Everything else that
+   starts with zh (zh-CN, zh-SG, zh-Hans, a bare zh) stays Simplified, and a tag
+   that names Hans outright wins over its region. */
+const ZH_TRADITIONAL = new Set(['tw', 'hk', 'mo', 'hant']);
+function isTraditionalZh(tag) {
+  const [head, ...rest] = (tag || '').toLowerCase().replace(/_/g, '-').split('-');
+  return head === 'zh' && !rest.includes('hans') && rest.some(p => ZH_TRADITIONAL.has(p));
+}
 function pickLang(tag) {
   const want = (tag || '').toLowerCase();
-  if (I18N[want]) return want;
+  if (isTraditionalZh(want)) return 'zh-TW';
+  const hit = Object.keys(I18N).find(k => k.toLowerCase() === want);
+  if (hit) return hit;
   const head = want.split('-')[0];
   return I18N[head] ? head : 'en';
 }
@@ -67,18 +80,19 @@ const t = (key, vars) => {
 // The default target is whichever document the contents are living in right
 // now. Search document while it floats and not a single [data-i18n] turns up,
 // so changing the language changes no text at all.
+// For an element holding an icon, replace only the text part (do not wipe out
+// the svg). Anything repainting such a label goes through here, not
+// textContent, which would take the drawing with it.
+function setLabel(n, text) {
+  const svg = n.querySelector(':scope > svg');
+  if (!svg) { n.textContent = text; return; }
+  const last = n.lastChild;
+  if (last && last.nodeType === 3) last.nodeValue = text;
+  else n.append(text);
+}
+
 function applyI18n(root = uiDoc()) {
-  for (const n of root.querySelectorAll('[data-i18n]')) {
-    // For an element holding an icon, replace only the text part (do not wipe out the svg)
-    const svg = n.querySelector(':scope > svg');
-    if (svg) {
-      const last = n.lastChild;
-      if (last && last.nodeType === 3) last.nodeValue = t(n.dataset.i18n);
-      else n.append(t(n.dataset.i18n));
-    } else {
-      n.textContent = t(n.dataset.i18n);
-    }
-  }
+  for (const n of root.querySelectorAll('[data-i18n]')) setLabel(n, t(n.dataset.i18n));
   for (const n of root.querySelectorAll('[data-i18n-ph]')) n.placeholder = t(n.dataset.i18nPh);
   // The text shown when the live transcript box is empty (CSS reads it through content)
   for (const n of root.querySelectorAll('[data-i18n-quiet]')) n.dataset.quiet = t(n.dataset.i18nQuiet);
@@ -110,6 +124,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'wakeLockField','wakeLockOn','wakeLockNote',
                   'engineGroup','enginePick','engineNote','whisperModel','whisperModelField','whisperModelNote',
                   'browserAsrWarn','asrConflict','browserMic','micSettingsLink','asrLang','asrLangField',
+                  'onDeviceField','onDeviceStatus','onDeviceRow','onDeviceDownload',
                   'idleMute','idleMuteVal','idleMuteField','idleMinsField','idleMuteOn','idleMuteNote',
                   'browserGestureField','browserGestureOn','browserGesturePeaks','browserGesturePeaksVal',
                   'browserGestureWindow','browserGestureWindowVal','browserGestureThreshold','browserGestureThresholdVal',
@@ -159,6 +174,17 @@ function decorateIcons(root = document) {
     n.dataset.iconed = '1';
     n.prepend(iconSvg(n.dataset.icon, Number(n.dataset.iconSize) || 18));
   }
+}
+
+// Swap the drawing on one element whose meaning changed under it. Same
+// machinery as decorateIcons, only pointed at a single node, and it does
+// nothing when the drawing is already the one wanted.
+function setIcon(n, name) {
+  if (!n || n.dataset.icon === name) return;
+  n.dataset.icon = name;
+  const svg = n.querySelector(':scope > svg');
+  if (svg) svg.remove();
+  n.prepend(iconSvg(name, Number(n.dataset.iconSize) || 18));
 }
 
 /* Cleaning up the text is the daemon's job. Fixing only the look here does
@@ -672,8 +698,8 @@ function setState(kind, text) {
      It presses now, so what pressing does has to come first. A screen reader
      announcing nothing but the state would leave a button whose name never says
      what it is for. The two are split by a newline rather than any punctuation,
-     because the mark between two sentences is not the same in all seven
-     languages and there is nothing here that has to be spelled. */
+     because the mark between two sentences is not the same in every
+     language and there is nothing here that has to be spelled. */
   for (const m of minis) {
     const s = t(route === 'off' ? 'resumeTitle' : 'pauseTitle') + '\n' + text;
     m.box.title = s;
@@ -1081,7 +1107,9 @@ function openPickMenu(anchor, items, currentKey, onPick, heading, onDisconnect) 
 /* The numbers are the ones said out loud (「2番に切り替え」). The chips, the
    chip menu and the roll-up picker all have to count them the same way. */
 const listenerItems = () =>
-  knownListeners.map((l, i) => ({key: String(l.pid), label: `${i + 1}. ${l.label}`, name: l.label}));
+  knownListeners.map((l, i) => ({key: String(l.pid), label: `${i + 1}. ${l.label}`,
+                                 name: l.label, gone: !!l.gone}))
+                .filter(i => !i.gone);
 
 // The chip on a sent card. Picking another name sends the same text there.
 // The chip is rebuilt right away rather than left for the five second poll,
@@ -1190,6 +1218,7 @@ function paint() {
            t(off ? 'statusOff' : shown === 'hold' ? 'statusHold' : 'statusLive'));
   if (!oneShot && performance.now() > hintHoldUntil) {
     el.hint.textContent = armPending ? t('hintArm')
+      : !off && onDeviceHeld() ? t('onDeviceHold')
       : t(off ? 'hintOff' : shown === 'hold' ? 'hintHold' : 'hintLive');
   }
   // While you are working elsewhere, the tab title is the only cue left
@@ -1397,15 +1426,41 @@ function isBackchannel(text, words) {
    those two, mute only counts with a short noise prefix ahead of the word, not a
    whole clause ahead of it, so TAIL_NOISE_MAX below keeps that ceiling in step
    with MUTE_TAIL_NOISE_MAX in voice_daemon.py. unmute is left out, nothing is on
-   screen to highlight while the mic is off. */
+   screen to highlight while the mic is off.
+   Wordings added by hand sit apart in userWords, because the daemon reads them
+   differently by kind. The two tail kinds match them at the tail like the
+   built-ins, mute only when the whole utterance is that wording
+   (voice_daemon.mic_command_match), so 「はい」 ahead of one leaves it as speech. */
+// Full-width Latin letters and digits, folded down to half-width.
+//
+// Chrome's on-device Japanese recognition writes them full-width (「ＰＲ」,
+// 「２０２６」), and nobody means that when they say a word of code or a year.
+// The server folds the same set the same way (to_halfwidth in voice_daemon.py),
+// so the words on screen while you are still speaking are the words that get
+// sent. Fold it only there and the card would show 「ＰＲ」 and then flip to PR
+// the moment it went out.
+//
+// Letters, digits and the symbols that only ever mean code when spoken. Japanese
+// punctuation (、。「」・？！), the full-width parentheses, the long vowel mark ー,
+// kana and the full-width space are all left as they are, since each carries
+// meaning at the width it is written in. Half-width katakana goes the other way,
+// a whole run at a time so ｷﾞ comes back as ギ rather than ｷ + ﾞ.
+const FULLWIDTH_CODE_RE = /[Ａ-Ｚａ-ｚ０-９＠＃＆％＋＝／＼＿＜＞＄＊＾｜｀［］｛｝]/g;
+const HALFWIDTH_KANA_RE = /[\uFF61-\uFF9F]+/g;
+const toHalfWidth = text => text
+  .replace(FULLWIDTH_CODE_RE, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+  .replace(HALFWIDTH_KANA_RE, run => run.normalize('NFKC'));
+
 const TAIL_IDS = ['cancel_tail', 'hold_tail', 'mute'];
 let tailWords = {cancel_tail: new Set(), hold_tail: new Set(), mute: new Set()};
+let userWords = {cancel_tail: new Set(), hold_tail: new Set(), mute: new Set()};
 const TAIL_NOISE_MAX = {mute: 7};
 async function loadTailWords() {
   try {
     const all = await Promise.all(UI_LANGS.map(
       ([code]) => fetch('/api/commands?lang=' + code).then(r => r.json())));
     const out = {cancel_tail: new Set(), hold_tail: new Set(), mute: new Set()};
+    const mine = {cancel_tail: new Set(), hold_tail: new Set(), mute: new Set()};
     for (const d of all) {
       for (const g of d.groups || [])
         if (out[g.id])
@@ -1417,10 +1472,11 @@ async function loadTailWords() {
       // translated), so adding it again on every pass through this loop only
       // repeats work, it does not double anything up (a Set).
       for (const id of TAIL_IDS)
-        for (const w of (d.user || {})[id] || []) if (w) out[id].add(w.toLowerCase());
+        for (const w of (d.user || {})[id] || []) if (w) mine[id].add(w.toLowerCase());
       takeCmdOff(d);
     }
     tailWords = out;
+    userWords = mine;
   } catch { /* an older server has no such endpoint. Leave the drawing as it was */ }
 }
 
@@ -1431,48 +1487,116 @@ async function loadTailWords() {
 
    Kinds and single wordings both live here. **The wordings arrive whole, every
    language, not just the one being laid out**, because the tables above are
-   gathered across all seven languages and a wording struck while the screen was
+   gathered across every screen language and a wording struck while the screen was
    in Japanese still has to stop filling the drawing when the screen is English. */
 let cmdOff = {kinds: new Set(), words: {}};
 function takeCmdOff(d) {
   if (!d || typeof d !== 'object') return;
   const words = {};
   for (const id of TAIL_IDS)
-    words[id] = new Set(((d.off_words || {})[id] || []).map(w => w.toLowerCase()));
+    words[id] = new Set(((d.off_words || {})[id] || []).map(cmdKey).filter(Boolean));
   cmdOff = {kinds: new Set(d.off || []), words};
 }
 
-/* The same test voice_daemon.take_tail runs, against the same wordings
-   voice_daemon.active_tail hands it. All that is wanted here is whether the tail
-   matched, so the body it hands back is not rebuilt. The 「コマンド」 lead-in that
-   one strips only shortens that body, it never decides the match, so leaving it
-   out cannot read the utterance differently.
+/* The same test voice_daemon.take_tail_word runs, against the same wordings
+   voice_daemon.active_tail hands it, and then the same strike check
+   voice_daemon.take_active_tail and word_enabled make.
    Both ways of switching off are asked about, because both change what the daemon
    will do with the utterance. Miss either one and the drawing goes dark for a
    wording that is going to be sent after all, which is the promise this drawing
    exists to keep. */
 const TAIL_TRIM = /[ \t　。、．，・！？!?.,]+$/;
+// voice_daemon._TAIL_PREFIX, the 「コマンド」 lead-in in 「〜。コマンド手直し」
+const TAIL_PREFIX = ['コマンド', 'こまんど', 'command'];
 
-/* The longest wording that matches at the tail, and which kind it belongs to,
-   or null. Longest first across every id together, the same reason
-   voice_daemon.py sorts MUTE_TAIL by length, a long phrasing must not be eaten
-   by a short one that sits inside it. mute's ceiling (TAIL_NOISE_MAX) is
-   checked here too, so a sentence that only happens to end in the word after a
-   real clause is not read as "about to fire" when the daemon would not read it
-   that way either. */
+/* voice_daemon.command_key, one character at a time. Spaces and symbols drop
+   out, full-width digits fold to half-width and the rest is lowercased. Each
+   folded character keeps where it came from, so once a folded tail matches,
+   the text can be cut at the spoken wording even though the two no longer line
+   up character for character. */
+const FOLD_DROP = new Set(' \t\u3000。、．，・…！？!?.,-~〜"\'「」『』()（）');
+function foldChars(s) {
+  const chars = [], at = [];
+  const cs = [...s];
+  let i = 0;
+  for (let k = 0; k < cs.length; k++) {
+    // toHalfWidth the same as the server's _folded_chars, and folded before the
+    // drop test rather than after, so 「｡」 goes out as the 「。」 it means the way
+    // it does there. One character at a time, except for the one fold that is
+    // not one for one: half-width katakana carries its dakuten as a character of
+    // its own, so ｷ and ﾞ are taken together and come back as ギ. Both characters
+    // of the pair hang on the base, so cutting there takes the whole pair off.
+    let unit = cs[k];
+    if (unit >= '｡' && unit <= 'ﾟ'
+        && (cs[k + 1] === 'ﾞ' || cs[k + 1] === 'ﾟ')) {
+      unit += cs[k + 1];
+      k++;
+    }
+    let f = '';
+    for (const x of toHalfWidth(unit)) if (!FOLD_DROP.has(x)) f += x.toLowerCase();
+    for (const x of f) { chars.push(x); at.push(i); }
+    i += unit.length;
+  }
+  return {chars, at};
+}
+const cmdKey = s => foldChars(String(s).trim()).chars.join('');
+
+/* The longest wording that matches at the tail, which kind it belongs to and
+   where in text it starts, or null.
+
+   Compared in the command_key shape, the same as the daemon, so spacing does
+   not decide it (「음 마이크음소거」 is the table's 「마이크 음소거」, not the
+   shorter 「음소거」 inside it). Within a kind the longest wording at the tail
+   decides, struck or not, and a struck one then takes the whole kind out for
+   this utterance, for every kind alike, the same as voice_daemon.take_tail_word
+   followed by take_active_tail (the tails) or word_enabled (mute). Skipping
+   struck wordings before choosing would let a shorter one inside it fire
+   instead (「静音」 inside a struck 「麦克风静音」). A wording typed back in by
+   hand wins over its strike, as it does there. Across kinds the longest wins.
+
+   mute's ceiling (TAIL_NOISE_MAX) is measured the way the daemon measures it,
+   on what is left ahead of the word once the 「コマンド」 lead-in is off, so a
+   sentence that only happens to end in the word after a real clause is not
+   read as "about to fire", and 「えーと、コマンドミュート」 is. Words added
+   by hand for mute count only as the whole utterance, as in the daemon. */
 function matchingTailWord(text) {
-  const body = text.trim().replace(TAIL_TRIM, '').toLowerCase();
+  const body = text.trim().replace(TAIL_TRIM, '');
   if (!body) return null;
+  const lead = text.length - text.trimStart().length;
+  const {chars, at} = foldChars(body);
+  const key = chars.join('');
+  if (!key) return null;
   let best = null;
   for (const id of TAIL_IDS) {
     if (cmdOff.kinds.has(id)) continue;
     const off = cmdOff.words[id] || new Set();
+    const mine = userWords[id] || new Set();
     const ceiling = TAIL_NOISE_MAX[id];
-    for (const w of tailWords[id]) {
-      if (off.has(w) || !body.endsWith(w)) continue;
-      if (ceiling !== undefined && body.length - w.length > ceiling) continue;
-      if (!best || w.length > best.word.length) best = {id, word: w};
+    let hit = null;
+    const consider = (w, wk) => {
+      if (!wk || !key.endsWith(wk)) return;
+      const n = [...wk].length;
+      if (hit && n <= hit.n) return;
+      hit = {w, wk, n};
+    };
+    for (const w of tailWords[id]) consider(w, cmdKey(w));
+    if (id === 'mute') {
+      for (const w of mine) if (cmdKey(w) === key) consider(w, key);
+    } else {
+      for (const w of mine) consider(w, cmdKey(w));
     }
+    if (hit === null) continue;
+    const cut = at[chars.length - hit.n];
+    if (ceiling !== undefined && hit.wk !== key) {
+      let rest = body.slice(0, cut).replace(TAIL_TRIM, '');
+      const low = rest.toLowerCase();
+      const pre = TAIL_PREFIX.find(p => low.endsWith(p));
+      if (pre) rest = rest.slice(0, rest.length - pre.length).replace(TAIL_TRIM, '');
+      if ([...rest].length > ceiling) continue;
+    }
+    if (off.has(hit.wk) && ![...mine].some(w => cmdKey(w) === hit.wk)) continue;
+    if (!best || hit.n > best.n)
+      best = {id, word: hit.w, start: lead + cut, n: hit.n};
   }
   return best;
 }
@@ -1529,7 +1653,12 @@ function paintBrowserSendCue(now) {
     return;
   }
   const wait = sendWaitMs();
-  const target = wait > 0 ? Math.max(0, Math.min(1, (now - lastLoudAt) / wait)) : 1;
+  let target = wait > 0 ? Math.max(0, Math.min(1, (now - lastLoudAt) / wait)) : 1;
+  // Held just short of the end while recognition is still behind, so the ring
+  // never sits full with nothing going out (browserGateTick reads the same
+  // question). Short of it rather than frozen where it stood, because what is
+  // being waited on really is nearly over.
+  if (recognizerOwesWords(now, wait)) target = Math.min(target, 0.95);
   // Checked against the whole queue joined together, the shape it actually
   // goes out in (browserGateTick), not just the oldest item alone. A short
   // clause sitting behind more still-accumulating queued content is not the
@@ -1836,8 +1965,12 @@ let dictUnignore = new Set();   // taken off the built in ignore list, so short 
 async function loadDictPairs() {
   try {
     const d = await (await fetch('/api/dictionary?scope=effective')).json();
+    // The side that is matched folds the way the recognized text does, so an
+    // entry saved as 「ＡＷＳ」 lights up on the half-width AWS on screen, exactly as
+    // apply_replacements does it on the server. What it becomes is left as typed.
     dictPairs = Object.entries(d.replace || {})
       .filter(([k, v]) => k && v)
+      .map(([k, v]) => [toHalfWidth(k), v])
       .sort((a, b) => b[0].length - a[0].length);   // match the longer words first
     // The same read already carries both lists the drawing in the corner needs,
     // so it costs no second request and there is no second thing to keep fresh.
@@ -1847,8 +1980,10 @@ async function loadDictPairs() {
     // the utterance really is sent. Trimming it here would go dark on a word
     // that goes out. is_allowed_short does strip the punctuation off its list,
     // so that one gets the same treatment here.
-    dictIgnore = new Set((d.ignore || []).map(w => w.trim().toLowerCase()).filter(Boolean));
-    dictUnignore = new Set((d.unignore || []).map(cueCore).filter(Boolean));
+    dictIgnore = new Set((d.ignore || []).map(w => toHalfWidth(w).trim().toLowerCase())
+                                        .filter(Boolean));
+    dictUnignore = new Set((d.unignore || []).map(w => cueCore(toHalfWidth(w)))
+                                             .filter(Boolean));
   } catch { /* if it cannot be fetched, show the text plain */ }
 }
 function withDict(text) {
@@ -1898,7 +2033,7 @@ function showTailMark() {
 
 function renderTailMark(s, match) {
   const trimmed = s.replace(TAIL_TRIM, '');
-  const cut = trimmed.length - match.word.length;
+  const cut = match.start;
   const mark = document.createElement('mark');
   mark.className = 'tailcmd ' + (TAIL_PREVIEW_CLASS[match.id] || 'warn');
   mark.textContent = s.slice(cut, trimmed.length);
@@ -2309,6 +2444,82 @@ let seeded = false;   // restores what had piled up, once, on reload
 let uiStamp = 0;      // the mtime of the screen file at the moment it was loaded
 let wayland = false;  // whether the daemon's own session is Wayland (floating cannot stay on top there)
 
+/* What this tab had going at the moment it was reloaded, handed across the
+   reload in its own sessionStorage. A reload used to come back muted with
+   everything unsent gone: only the held lines the server keeps (s.held) ever
+   made it back, never the instant-mode box, the clauses still waiting out
+   their quiet stretch, or the words being recognized (#118). It is written on
+   the main window's pagehide, so the "Updated" button and an ordinary F5
+   both go through it. The small window closing fires pagehide on its own
+   window, never this one, so that is not mistaken for a reload. */
+const RESUME_KEY = 'vs.resume';
+const RESUME_MAX_AGE_MS = 30000;   // older than this is some other visit, not this reload
+
+/* A box already on its way out (sendDraft waiting on the server) is left
+   out. It is emptied only once the send answers, and put back after the
+   reload it would go out a second time with the next utterance. A box being
+   discarded (discard waiting on the server) is left out the same way, or
+   what was just thrown away would come back after the reload. */
+function resumeSnapshot() {
+  const leaving = sendingDraft || discardingDraft;
+  return {
+    live: route !== 'off' && recWanted,
+    draft: leaving ? '' : el.draft.value,
+    touched: leaving ? false : draftTouched,
+    pending: browserStreamText(),
+    at: Date.now(),
+  };
+}
+
+// Read once and removed at once, so a later reload never picks up an old one.
+function takeResume(storage, now) {
+  let raw = null;
+  try {
+    raw = storage.getItem(RESUME_KEY);
+    storage.removeItem(RESUME_KEY);
+  } catch { return null; }
+  if (!raw) return null;
+  let r;
+  try { r = JSON.parse(raw); } catch { return null; }
+  if (!r || typeof r.at !== 'number' || !(now - r.at <= RESUME_MAX_AGE_MS)) return null;
+  return r;
+}
+
+/* The box comes back as it was, with whatever had not gone out yet added at
+   the end rather than queued again. It may already have reached Claude in the
+   instant the page went away, so it waits for a look and a press instead of
+   going out twice. */
+function restoreDraft(r) {
+  const text = [r.draft, r.pending]
+    .map(s => (typeof s === 'string' ? s.trim() : ''))
+    .filter(Boolean).join('\n');
+  if (!text) return;
+  el.draft.value = text;
+  draftTouched = !!r.touched;
+  paintDraft();
+  grow();
+}
+
+/* The held lines the server keeps, added once on the first look after a
+   load. Only the ones the box does not already have go in, so the ones it
+   got back from before the reload are not doubled, while the ones held
+   during the reload itself still turn up. Left out, they stayed out of
+   sight and were wiped along with the list when the box was sent. */
+function mergeHeld(held) {
+  const have = new Set(el.draft.value.split('\n').map(l => l.trim()).filter(Boolean));
+  const add = held.map(r => (r && typeof r.text === 'string' ? r.text.trim() : ''))
+    .filter(x => x && !have.has(x));
+  if (!add.length) return;
+  const cur = el.draft.value.replace(/\s*$/, '');
+  el.draft.value = cur ? cur + '\n' + add.join('\n') : add.join('\n');
+  paintDraft();
+  grow();
+}
+
+addEventListener('pagehide', () => {
+  try { sessionStorage.setItem(RESUME_KEY, JSON.stringify(resumeSnapshot())); } catch {}
+});
+
 el.fresh.onclick = () => {
   const w = floatingWindow();
   if (w) {
@@ -2376,18 +2587,25 @@ async function refreshState() {
     el.note.textContent = s.note || '';
     el.note.hidden = !s.note;
 
+    const prevRoute = route;
     if (!armPending) {
       route = s.muted ? 'off' : (s.paused ? 'hold' : 'live');
       if (route !== 'off') lastMode = route;
     }
     paint();
+    // Coming out of off here, not through a press, still has to bring
+    // recognition back. Only the display flipping left the screen saying live
+    // while nothing listened, and with the idle clock never started, the
+    // idle mute then really muted a few minutes later (#118, after a reload
+    // whose first touch was not the mic).
+    if (prevRoute === 'off' && route !== 'off') applyRouteSideEffects(route);
+    // And into off the same way. Muted from another screen while this one was
+    // reloading, the display went to off with recognition still running.
+    else if (prevRoute !== 'off' && route === 'off') applyRouteSideEffects('off');
 
-    // Restore what was collected so a reload does not lose it (never touched while you are typing)
-    if (!seeded && Array.isArray(s.held) && s.held.length && !el.draft.value.trim()) {
-      el.draft.value = s.held.map(r => r.text).join('\n');
-      paintDraft();
-      grow();
-    }
+    // Restore what was collected so a reload does not lose it. Only what the
+    // box lacks goes in, at the end, so nothing being typed is overwritten.
+    if (!seeded && Array.isArray(s.held) && s.held.length) mergeHeld(s.held);
     seeded = true;
     paintDraft();
     if (!el.draft.hidden) grow();
@@ -2397,11 +2615,20 @@ async function refreshState() {
 }
 
 /* ── Send and discard ───────────────────── */
+// Raised while the box is on its way to the server (resumeSnapshot leaves it out)
+let sendingDraft = false;
+// Same for a discard waiting on the server
+let discardingDraft = false;
 async function sendDraft({carry = false} = {}) {
   carryDraft = false;
   const text = el.draft.value.trim();
   if (!text) return;
-  await post('/api/send', {text, edited: draftTouched, carry});
+  sendingDraft = true;
+  try {
+    await post('/api/send', {text, edited: draftTouched, carry});
+  } finally {
+    sendingDraft = false;
+  }
   el.draft.value = '';
   draftTouched = false;
   grow();
@@ -2420,7 +2647,12 @@ el.discard.onclick = async () => {
   if (carryDraft) { carryDraft = false; endOneShot(); }
   lastDiscarded = el.draft.value;
   lastDiscardedTouched = draftTouched;
-  await post('/api/discard');
+  discardingDraft = true;
+  try {
+    await post('/api/discard');
+  } finally {
+    discardingDraft = false;
+  }
   el.draft.value = '';
   draftTouched = false;
   grow();
@@ -2863,6 +3095,15 @@ function onKey(e) {
     const no = Number(digit[1]);
     const pickTo = knownListeners[no - 1];
     if (!pickTo) { chime('err'); say(t('voiceRouteMissing', {n: no})); return; }
+    /* One that is gone keeps its number, so the key is still pressed at it.
+       setRoute2 turns it down and says why, and the ack below would paint
+       over that with "now going there" for a place nothing can reach (#110).
+       So the answer is given here and the ack skipped. */
+    if (pickTo.gone) {
+      chime('err');
+      say(t('listenerGoneHow', {name: pickTo.label}), 9);
+      return;
+    }
     setRoute2(String(pickTo.pid));
     chime('ok');
     say(t('voiceRoute', {name: pickTo.label}));
@@ -3268,7 +3509,8 @@ for (const ev of ['pointerup', 'pointercancel']) {
 // The spoken language choices. Chrome takes BCP-47 tags, so the common ones are listed.
 const ASR_LANGS = [
   ['ja-JP', '日本語'], ['en-US', 'English (US)'], ['en-GB', 'English (UK)'],
-  ['zh-CN', '中文（简体）'], ['zh-TW', '中文（繁體）'], ['ko-KR', '한국어'],
+  ['zh-CN', '中文（简体）'], ['zh-TW', '中文（台灣）'], ['zh-HK', '粵語（香港）'],
+  ['ko-KR', '한국어'],
   ['es-ES', 'Español'], ['fr-FR', 'Français'], ['de-DE', 'Deutsch'],
   ['it-IT', 'Italiano'], ['pt-BR', 'Português (BR)'], ['ru-RU', 'Русский'],
   ['hi-IN', 'हिन्दी'], ['id-ID', 'Indonesia'], ['th-TH', 'ไทย'],
@@ -3278,6 +3520,254 @@ const ASR_LANGS = [
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 const canBrowserASR = !!SR;
 
+/* ── Browser recognition that stays on this device ──
+   Chrome 139 and later can run the very same Web Speech API recognition on
+   this machine instead of sending the audio to Google, once it holds a model
+   for the language being spoken (processLocally). The model is a one-time
+   download per Chrome profile, shared by every site, and Chrome only lets a
+   page start that download from inside a press (SR.install). Chrome also
+   keeps from each site whether the model is there until that site has asked
+   for it once: a site that never called install() is told downloadable even
+   with the model on disk (seen on Chrome 153, so another site cannot learn
+   what you have installed). The press is then over in a few seconds with
+   nothing fetched, and the answer stays for that site across restarts.
+
+   It is offered as a second browser entry in the engine dropdown. The server
+   never hears about it: to the server both entries are 'browser', and which
+   of the two it is lives in this browser (localStorage), which is also where
+   the model it needs lives. Another browser pointed at the same viewer has
+   models of its own, or none. The 5 second loadEngines poll keeps putting the
+   server's 'browser' back into chosenEngine, so what the dropdown shows is
+   worked out from both (engineShown). Read off chosenEngine alone, it would
+   snap back to the plain entry every 5 seconds.
+
+   Nothing here ever falls back to the cloud. Whoever picked this entry picked
+   it so their voice stays on the machine. When the model is missing, or
+   Chrome refuses, recognition simply does not start, and the settings say why
+   and what to do (download it, or pick the plain entry on purpose). A quiet
+   fallback would send exactly the audio they chose to keep.
+
+   The pieces with no page in them come first, together, so a test can lift
+   them out and run them on their own (tests/test_on_device.py). */
+const BROWSER_LOCAL = 'browser-local';
+const ON_DEVICE_FLAG = 'asrLocal';
+
+// Through store, which already swallows a storage that throws (a private
+// window, blocked site data). Losing it only puts the plain entry back, which
+// recognizes nothing until someone presses the mic anyway.
+const readOnDeviceFlag = s => s.get(ON_DEVICE_FLAG, '') === '1';
+const writeOnDeviceFlag = (s, on) => s.set(ON_DEVICE_FLAG, on ? '1' : '');
+
+// The dropdown's value, from the server's engine and this browser's flag
+const engineShown = (chosen, local) => chosen === BROWSER_ENGINE && local ? BROWSER_LOCAL : chosen;
+// And back again: what the server is told, and whether it is the local one
+const enginePicked = value => value === BROWSER_LOCAL
+  ? {engine: BROWSER_ENGINE, local: true}
+  : {engine: value, local: false};
+
+/* What our own server saw on the disk (GET /api/ondevice). engine is the
+   SODA engine, pack the model for this one language, and either can be null
+   when nothing could be told. Only both being there means Chrome really
+   holds it, and then downloadable is only this site not having asked yet. */
+const onDeviceHasModel = disk => !!disk && disk.engine === true && disk.pack === true;
+// What that model weighs, for the line that says so. '' when the server could
+// not tell, and the wording falls back to a rough figure per language.
+const onDeviceSizeText = disk => {
+  const bytes = disk && disk.packBytes > 0 ? disk.packBytes : 0;
+  return bytes ? Math.round(bytes / 1048576) + ' MB' : '';
+};
+
+/* What the settings say for each answer SR.available() can give. '' is not
+   asked yet (or asked for a language no longer chosen), and a refusal from
+   Chrome itself outranks whatever available() last said, since it is Chrome
+   saying no to the real thing.
+
+   downloadable is the one answer that does not say what it looks like.
+   Chrome tells a site downloadable until that site has called install()
+   itself, model on disk or not, so that no site can read off what you have.
+   With the disk saying the model is right there, nothing is fetched at all,
+   it is this page being let at what Chrome already holds, and it is over in
+   seconds. Told that, the line says so, and so does the one shown while it
+   runs (the "few minutes" of a real download would be wrong there). */
+const ON_DEVICE_KEYS = {
+  available: 'onDeviceReady', downloadable: 'onDeviceNeedsDownload',
+  downloading: 'onDeviceDownloading', unavailable: 'onDeviceUnavailable',
+};
+const ON_DEVICE_HERE_KEYS = {downloadable: 'onDeviceEnable', downloading: 'onDeviceEnabling'};
+const onDeviceStatusKey = (status, refused, disk) =>
+  refused ? 'onDeviceRefused'
+    : (onDeviceHasModel(disk) && ON_DEVICE_HERE_KEYS[status])
+      || ON_DEVICE_KEYS[status] || 'onDeviceChecking';
+
+/* Whether a press anywhere on the page may finish it by itself.
+   Chrome only starts install() from inside a press, so nothing here can be
+   fully unattended. But when the model is already on the disk there is
+   nothing to fetch, and letting the next press of anything at all (mute,
+   send, settings) carry the install too costs that press nothing and is over
+   in seconds. A real download is not slipped into a press meant for something
+   else, so with the model missing, or with the disk unreadable, only the
+   button does it. And nothing fires off the local entry, where recognition on
+   this device is not what was asked for in the first place. */
+const onDeviceMayAutoInstall = (local, chosen, status, refused, installing, disk) =>
+  !!local && !!chosen && status === 'downloadable' && !refused && !installing
+  && onDeviceHasModel(disk);
+
+// Whether recognition may start at all. Off the local entry nothing is held
+// here. On it, only a model Chrome says is on this machine lets it through,
+// and every other answer holds it off rather than letting it go to the cloud.
+const onDeviceMayStart = (local, status, refused) =>
+  !local || (status === 'available' && !refused);
+
+/* What Chrome says when processLocally is on and it has no model to use.
+   Chromium says language-not-supported, the spec says service-not-allowed.
+   Only the second is also what a refused microphone can look like, and only
+   while starting on its own after a reload (autoResumed) is that the likelier
+   reading, so there it is left to the path that already handles it. */
+const onDeviceRefusal = (error, autoResumed) =>
+  error === 'language-not-supported' || (error === 'service-not-allowed' && !autoResumed);
+
+// Whether the local entry can be offered here at all. Chrome 139 and later.
+const canLocalASR = canBrowserASR && typeof SR.available === 'function'
+  && typeof SR.install === 'function';
+let onDeviceLocal = canLocalASR && readOnDeviceFlag(store);
+let onDeviceStatus = '';      // what available() last said, for onDeviceLang
+let onDeviceLang = '';
+let onDeviceRefused = false;  // Chrome refused a start after available() said yes
+let onDeviceInstalling = false;
+let onDeviceInstallId = 0;    // which press the current download belongs to
+let onDeviceInstallLang = '';  // and the language it was pressed for
+let onDeviceSawDownloading = false;
+let onDeviceProblem = '';     // a download that did not go through, until the next try
+let onDeviceAsk = null;       // the available() call under way, {lang, promise}
+let onDevicePoll = null;
+let onDeviceDisk = null;      // what the server saw on the disk, for onDeviceDisk.lang
+let onDeviceDiskAsk = '';     // the language a look at the disk is under way for
+let onDeviceArmed = null;     // the press listener waiting, while one is armed
+
+// The answer for the language chosen now, or '' if it was for another one
+const onDeviceNow = () => onDeviceLang === browserLang() ? onDeviceStatus : '';
+// And the same for what the disk said, which is per language as well
+const onDeviceDiskNow = () => onDeviceDisk && onDeviceDisk.lang === browserLang() ? onDeviceDisk : null;
+// Held off on purpose, and known to be (an answer still on its way is not a hold yet)
+const onDeviceHeld = () => asrActive() && onDeviceLocal
+  && (onDeviceRefused || (onDeviceNow() !== '' && onDeviceNow() !== 'available'));
+
+/* Ask Chrome whether the chosen language can be recognized here. One call at
+   a time per language: the 5 second poll, a start, and the download's own
+   polling all end up here and would otherwise pile up. An answer that comes
+   back for a language no longer chosen is dropped. */
+function askOnDevice() {
+  const lang = browserLang();
+  if (onDeviceAsk && onDeviceAsk.lang === lang) return onDeviceAsk.promise;
+  const promise = (async () => {
+    let status;
+    try {
+      status = await SR.available({langs: [lang], processLocally: true});
+    } catch {
+      status = 'unavailable';
+    }
+    if (onDeviceAsk && onDeviceAsk.promise === promise) onDeviceAsk = null;
+    if (browserLang() !== lang) return '';
+    const was = onDeviceNow();
+    onDeviceStatus = status;
+    onDeviceLang = lang;
+    // Only downloadable is ambiguous, so only it is worth a look at the disk
+    if (status === 'downloadable') checkOnDeviceDisk(lang);
+    paintOnDevice();
+    // No progress events come out of a download, so it is watched by asking again
+    if (status === 'downloading' && lang === onDeviceInstallLang) onDeviceSawDownloading = true;
+    if (status === 'downloading' || onDeviceInstalling) keepPollingOnDevice();
+    // Came in just now (the download finished, here or anywhere else in this
+    // Chrome). Start what was being held for it. A start already under way is
+    // the one that asked, and carries on by itself.
+    if (status === 'available' && was !== 'available') {
+      paint();
+      if (onDeviceLocal && !onDeviceRefused && recWanted && !rec && !recStarting) startRecognition();
+    }
+    return status;
+  })();
+  onDeviceAsk = {lang, promise};
+  return promise;
+}
+
+/* Ask our own server to look at the disk. Chrome tells every site
+   downloadable until that site has called install() itself, model on disk or
+   not, so the page alone cannot tell a real download from a switch on that
+   takes seconds. The server runs on this machine and can simply look
+   (GET /api/ondevice), read only, without touching Chrome.
+
+   Asked once per language: a model does not come and go while the page is
+   open, and the one way it does (the download we started) ends in available,
+   which never reads the answer again. An answer for a language no longer
+   chosen is dropped, the same as available()'s. */
+function checkOnDeviceDisk(lang) {
+  if (onDeviceDiskAsk === lang || (onDeviceDisk && onDeviceDisk.lang === lang)) return;
+  onDeviceDiskAsk = lang;
+  fetch('/api/ondevice?lang=' + encodeURIComponent(lang))
+    .then(r => r.json())
+    .then(d => {
+      if (onDeviceDiskAsk !== lang) return;
+      onDeviceDiskAsk = '';
+      onDeviceDisk = d && d.lang === lang ? d : null;
+      paintOnDevice();
+    })
+    .catch(() => { if (onDeviceDiskAsk === lang) onDeviceDiskAsk = ''; });
+}
+
+function keepPollingOnDevice() {
+  if (onDevicePoll) return;
+  onDevicePoll = setTimeout(() => {
+    onDevicePoll = null;
+    if (onDeviceLocal && asrChosen) askOnDevice();
+  }, 2000);
+}
+
+// The status line and the download button, under the spoken language
+function paintOnDevice() {
+  const show = asrChosen && onDeviceLocal;
+  el.onDeviceField.hidden = !show;
+  if (!show) { disarmOnDeviceInstall(); return; }
+  let status = onDeviceNow();
+  // Between the press and Chrome saying downloading, it still says downloadable.
+  // Only for the language the press was for: switched to another one while it
+  // downloads, that one has not been asked for, and reading it as downloading
+  // would grey its button out until the first one is done, minutes later.
+  const installing = onDeviceInstalling && onDeviceInstallLang === browserLang();
+  if (installing && status !== 'available' && status !== 'unavailable') status = 'downloading';
+  const disk = onDeviceDiskNow();
+  el.onDeviceStatus.textContent = onDeviceProblem
+    ? t(onDeviceProblem, {back: t('unfloatBtn')})
+    : t(onDeviceStatusKey(status, onDeviceRefused, disk),
+        {plain: t('engineBrowser'), size: onDeviceSizeText(disk) || t('onDeviceSizeGuess')});
+  el.onDeviceRow.hidden = onDeviceRefused || status !== 'downloadable';
+  // The button says what pressing it really does. Nothing is fetched when
+  // Chrome already holds the model, and calling that a download is the very
+  // thing this whole look at the disk is here to stop saying. The drawing
+  // says it too: a download arrow over something that downloads nothing is
+  // the same untruth in a picture.
+  const here = onDeviceHasModel(disk);
+  setLabel(el.onDeviceDownload, t(here ? 'onDeviceEnableBtn' : 'onDeviceDownload'));
+  setIcon(el.onDeviceDownload, here ? 'bolt' : 'download');
+  el.onDeviceDownload.disabled = installing;
+  // Every path that changes any of this comes through here (the engine
+  // dropdown, the language dropdown, another tab's switch, each answer from
+  // available(), the answer from the disk), so the arming is worked out here
+  // rather than being remembered to at each of them.
+  if (onDeviceMayAutoInstall(onDeviceLocal, asrChosen, status, onDeviceRefused, installing, disk)) {
+    armOnDeviceInstall();
+  } else {
+    disarmOnDeviceInstall();
+  }
+}
+
+// Say on the main screen too why nothing is being listened to. Settings
+// carries the detail, the screen you are looking at only has to point there.
+function holdOnDevice() {
+  paintOnDevice();
+  say(t('onDeviceHold'), 10);
+  paint();
+}
+
 let rec = null;              // the current SpeechRecognition
 let recRunning = false;      // start() has been called and end has not come yet
 let recWanted = false;       // whether the setting says to use it
@@ -3286,6 +3776,11 @@ let recStartedAt = 0;        // when the current session was opened
 let recFails = 0;            // failures in a row (used to decide when to give up)
 let recStarting = false;
 let recGeneration = 0;
+// Set only while recognition is being started on its own after a reload
+// (#118), with nothing touched yet. A refusal then may be Chrome wanting a
+// touch first rather than the person saying no, so it falls back to "touch to
+// start" instead of switching browser recognition off.
+let autoResumed = false;
 
 /* Whether browser recognition is set to be used and whether it is running
    right now are two different things. Treating them as one meant that the
@@ -3337,6 +3832,13 @@ function watchBrowserGesture(level, now) {
   setRoute(lastMode);
 }
 
+// A browser set to Hong Kong or Macau Chinese, or to Cantonese by name (yue)
+function speaksCantonese(tag) {
+  const [head, ...rest] = (tag || '').toLowerCase().replace(/_/g, '-').split('-');
+  if (head === 'yue') return true;
+  return head === 'zh' && !rest.includes('hans') && (rest.includes('hk') || rest.includes('mo'));
+}
+
 function browserLang() {
   // The language to recognize. Not the language the screen is in, the language you speak.
   const saved = store.get('asrLang', '');
@@ -3346,6 +3848,13 @@ function browserLang() {
   // sitting among the choices.
   const want = (navigator.language || 'en-US');
   if (ASR_LANGS.some(([c]) => c === want)) return want;
+  // Hong Kong and Macau read the Traditional screen but mostly speak
+  // Cantonese, which Chrome hears as zh-HK. Taiwan's Mandarin would turn it
+  // into the wrong words.
+  if (speaksCantonese(want)) return 'zh-HK';
+  // zh-Hant would otherwise land on the first zh in the list, which is the
+  // mainland one, and come back written in Simplified characters.
+  if (isTraditionalZh(want)) return 'zh-TW';
   const head = want.split('-')[0].toLowerCase();
   const hit = ASR_LANGS.find(([c]) => c.split('-')[0].toLowerCase() === head);
   return hit ? hit[0] : 'en-US';
@@ -3447,6 +3956,11 @@ function paintInterimThrottled(interim) {
 function newRecognition(generation) {
   const r = new SR();
   r.lang = browserLang();
+  // Only ever reached with a model Chrome says is here (the hold in
+  // startRecognition), so this never asks for one that would have to be
+  // fetched. quality is left at its default on purpose: 'command' is the one
+  // Chrome 153 has models for, and asking for any other makes it unavailable.
+  if (onDeviceLocal) r.processLocally = true;
   r.continuous = true;
   r.interimResults = true;
   r.maxAlternatives = 1;
@@ -3467,6 +3981,7 @@ function newRecognition(generation) {
     recStarting = false;
     recRunning = true; recStartedAt = performance.now(); recFails = 0;
     asrDeniedFlag = false;
+    autoResumed = false;
   };
 
   r.onresult = ev => {
@@ -3474,7 +3989,11 @@ function newRecognition(generation) {
     let interim = '';
     for (let i = ev.resultIndex; i < ev.results.length; i++) {
       const res = ev.results[i];
-      const transcript = stripInventedSpaces(res[0].transcript);
+      // Folded first, then the invented spaces. INVENTED_SPACE_RE only strips a
+      // space with a non-ASCII character on either side, and on-device Japanese
+      // writes Latin full-width, so the other order ate the space in 「ＰＲ ｔｅｓｔ」
+      // and sent PRtest, where cloud recognition of the same words kept it.
+      const transcript = stripInventedSpaces(toHalfWidth(res[0].transcript));
       if (res.isFinal) queueOrSendFinal(transcript);
       else interim += transcript;
     }
@@ -3507,8 +4026,30 @@ function newRecognition(generation) {
   r.onerror = ev => {
     if (!mine()) return;
     recStarting = false;
+    // Kept on this device and Chrome would not do it there. Nothing is
+    // counted as a failure, since trying again would only bring the same
+    // answer with growing waits in between and end in "check your
+    // connection". It is held instead (startRecognition reads
+    // onDeviceRefused), and available() is asked again so the settings show
+    // what Chrome now says. Read as a refused microphone below, it would
+    // switch browser recognition off altogether.
+    if (r.processLocally === true && onDeviceRefusal(ev.error, autoResumed)) {
+      onDeviceRefused = true;
+      onDeviceStatus = '';
+      askOnDevice();
+      holdOnDevice();
+      return;
+    }
     // A refused microphone needs a person to act. Roll the setting back and say so.
     if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
+      if (autoResumed) {
+        autoResumed = false;
+        armPending = true;
+        route = 'off';
+        applyRouteSideEffects('off');
+        paint();
+        return;
+      }
       asrDeniedFlag = true;
       beat('denied');            // make the refusal visible from outside too
       disableBrowserASR(t('asrDenied'));
@@ -3543,13 +4084,38 @@ function newRecognition(generation) {
 }
 
 async function startRecognition() {
-  if (!canBrowserASR || !recWanted || rec || recRunning || recStarting) return;
+  // A start that gives up before recognition opens also ends the unattended
+  // one after a reload (autoResumed). Left raised, a refusal much later, to
+  // someone who has since touched the page, would be taken for Chrome wanting
+  // a touch and would not say it was refused. A call that bounces off one
+  // already under way leaves it alone.
+  if (!canBrowserASR || !recWanted || rec || recRunning || recStarting) {
+    if (!canBrowserASR || !recWanted) autoResumed = false;
+    return;
+  }
   const generation = recGeneration;
   recStarting = true;
   try {
-    if (!await beat('listening') || generation !== recGeneration || !recWanted || route === 'off' || rec) return;
+    // On the local entry nothing starts until Chrome says the model is here.
+    // Asked before the heartbeat, so a start held off here never claims
+    // browser recognition for a tab that is not listening. Nothing is counted
+    // as a failure either: no session opens, so no end comes back to retry,
+    // and it is the answer turning to available (askOnDevice) that starts it.
+    if (onDeviceLocal) {
+      if (onDeviceNow() !== 'available') await askOnDevice();
+      if (generation !== recGeneration || !recWanted) { autoResumed = false; return; }
+      if (!onDeviceMayStart(onDeviceLocal, onDeviceNow(), onDeviceRefused)) {
+        autoResumed = false;
+        holdOnDevice();
+        return;
+      }
+    }
+    if (!await beat('listening') || generation !== recGeneration || !recWanted || route === 'off' || rec) {
+      autoResumed = false;
+      return;
+    }
     const r = newRecognition(generation);
-    if (generation !== recGeneration || rec) return;
+    if (generation !== recGeneration || rec) { autoResumed = false; return; }
     rec = r;
     try {
       r.start();
@@ -3661,6 +4227,73 @@ let lastInterimHeard = '';      // the interim last seen, so an unchanged repeat
 let lastInterimChangeAt = 0;   // when it last changed (words still coming in)
 let pendingBrowserSends = [];   // [{text, queuedAt}], oldest first
 
+/* The two clocks the hold below compares. Both are kept apart from lastLoudAt
+   on purpose: lastLoudAt answers "how long has it been quiet" and is nudged by
+   things that are not sound at all (a changed interim, a session coming back
+   up), which is right for a wait but useless for asking what the microphone
+   actually heard. lastMicLoudAt is the microphone alone, nothing else writes
+   it. lastFinalAt is the last time recognition handed anything back. */
+let lastMicLoudAt = 0;
+let lastFinalAt = 0;
+
+/* Whether recognition still owes us words.
+
+   Kept on this device (processLocally), Chrome recognizes behind the speech,
+   seconds behind it on a long sentence, and it goes quiet while it catches up.
+   The wait above reads that quiet as the end of the thought: the clauses
+   already handed over go out, and the rest of the same sentence arrives after
+   they have gone and lands as a second prompt. One thought, two prompts, which
+   is what this is for.
+
+   The question it answers is not "has anything been said lately" (that is the
+   wait) but "is there sound the recognizer has not accounted for yet". Loud
+   audio after the last thing recognition said is exactly that: it was heard,
+   and nothing has come back for it. Interims cannot stand in for it, because
+   going quiet is what the stall looks like from here.
+
+   Sound with nothing said about it is not the only sign, though, and on its
+   own it misses the shape this is actually for. A clause handed back while
+   the room is already quiet is itself the proof: the audio it covers was
+   over before it arrived, so the recognizer is running that far behind, and
+   a recognizer that far behind rarely has just the one clause left. Reading
+   only the first sign, the catch-up traffic disarmed the hold that was
+   waiting for it, so a stall that came back as two events two tenths of a
+   second apart went out as two prompts anyway.
+
+   How far behind it is, is the same measure as how much longer to wait: a
+   clause that landed a second into the quiet says the recognizer is a second
+   behind, so it gets a second past that clause before anything moves. Prompt
+   recognition measures near zero there and so waits no longer than it ever
+   did, which is what keeps this from costing every on-device sentence a
+   second send wait.
+
+   Bounded by twice the wait either way, and this is not the outer limit on
+   sending that was turned down before. That one cut people off while they
+   were still talking. This one only says how long to keep waiting for a
+   recognizer that has gone quiet after the talking stopped, and it is here so
+   that a keyboard clack or a door after the last word, loud with no words
+   behind it, does not hold the prompt back until the cap. A recognizer
+   further behind than that still splits, which is the honest limit of reading
+   it from the outside. (The bound is measured from the last sound, and a
+   session renewed mid-hold moves the wait itself, so in the worst case the
+   real delay is that bound plus one more wait after the session settles.)
+
+   The ordinary browser path is left exactly as it was. It answers within a
+   fraction of a second, so it is never behind in the first place. */
+const RECOG_OWED_FACTOR = 2;
+function recognizerOwesWords(now, waitMs) {
+  if (!onDeviceLocal) return false;
+  // Never heard anything at all. The analyser can fail to open (startViz, and
+  // on Windows it does), and then the level reads 0 forever: with no sound to
+  // reason from there is nothing to say the recognizer is behind, so this
+  // stays out of the way and the wait alone decides, exactly as before.
+  if (!lastMicLoudAt) return false;
+  if (now - lastMicLoudAt >= waitMs * RECOG_OWED_FACTOR) return false;
+  if (lastMicLoudAt > lastFinalAt) return true;
+  const behind = lastFinalAt - lastMicLoudAt;
+  return now - lastFinalAt < behind;
+}
+
 /* How long to wait for quiet before a finished clause moves on. In draft mode
    it only lands in the box on screen, nothing goes to Claude yet, so a long
    "pause to send" (5 or 10 seconds, set for thinking out loud) would just
@@ -3680,7 +4313,7 @@ function browserGateTick() {
   // (only updating it once something was already queued) is what made the
   // very first version of this send everything the instant it queued.
   const now = performance.now();
-  if (browserRmsNow >= tuning.silence_threshold) lastLoudAt = now;
+  if (browserRmsNow >= tuning.silence_threshold) lastMicLoudAt = lastLoudAt = now;
   // Chrome cuts its session every 7 to 10 seconds and the next one takes a
   // moment to come up. Nothing can be heard in that gap, so it must not count
   // as the quiet that sends what was said so far.
@@ -3718,7 +4351,10 @@ function browserGateTick() {
   // of talking each aged past the cap on their own staggered schedule, so
   // each went out as its own POST, undoing the joining below entirely on
   // exactly the path continuous speech takes most often.
-  const ready = (quietFor >= waitMs || capTripped) ? pendingBrowserSends : [];
+  // Quiet for long enough, and nothing still on its way in. The cap goes
+  // around it, so a hold here can never be the thing that loses a prompt.
+  const ready = ((quietFor >= waitMs && !recognizerOwesWords(now, waitMs)) || capTripped)
+    ? pendingBrowserSends : [];
   pendingBrowserSends = ready.length ? [] : pendingBrowserSends;
   // Joined into one utterance, not one POST per clause. Chrome's own
   // endpointing is what split a single continuous thought into several
@@ -3757,6 +4393,11 @@ function paintPendingBrowserSends() {
    parked in pendingBrowserSends to wait out a quiet stretch first. Called
    from onresult in place of calling sendUtterance directly. */
 function queueOrSendFinal(text) {
+  // Ahead of every way out below. A clause that trims away to nothing, one
+  // dropped as stale, and a closing mute are all recognition having said
+  // something about what it heard, which is the whole of what lastFinalAt
+  // tracks (see recognizerOwesWords).
+  lastFinalAt = performance.now();
   text = (text || '').trim();
   if (!text) return;
   // The one straggler discardCurrentNow warns about, stale content the newly
@@ -4014,7 +4655,12 @@ function paintRoutes() {
     const b = document.createElement('button');
     // Between two watches (a Monitor deadline): it keeps its number and its
     // place as destination, shown faded until its next watch picks it up.
-    b.className = 'route-chip' + (on ? ' on' : '') + (l.away ? ' away' : '');
+    // Away is a session between two watches, faded and coming back on its
+    // own. Gone is one whose listen ended and is not coming back by itself:
+    // it keeps its place and its number so the row does not shuffle under the
+    // person, and says outright that it cannot be used (#110).
+    b.className = 'route-chip' + (on ? ' on' : '') + (l.away ? ' away' : '')
+                + (l.gone ? ' gone' : '');
     b.dataset.pid = String(l.pid);
     // The number is the same one used in the spoken signal (「2番」). Even when
     // a narrow window folds the name away, this part always stays.
@@ -4025,8 +4671,10 @@ function paintRoutes() {
     nm.className = 'nm';
     nm.textContent = l.label;
     b.append(no, nm);
-    b.title = [`${l.no}. ${l.label}`, l.away ? t('listenerAway') : '', l.cwd || '',
-               t('renameHint')].filter(Boolean).join('\n');
+    b.title = [`${l.no}. ${l.label}`,
+               l.gone ? t('listenerGone') : l.away ? t('listenerAway') : '',
+               l.cwd || '', t('renameHint')].filter(Boolean).join('\n');
+    if (l.gone) b.setAttribute('aria-disabled', 'true');
 
     /* Double click the chip to change its name. A long press does the same, for
        screens where a double tap is either awkward or already spoken for by the
@@ -4214,6 +4862,19 @@ el.routePick.onclick = () =>
     });
 
 async function setRoute2(to) {
+  /* One whose listen is gone stays in the row, numbered, so the person can
+     still see it was there. Nothing reads it, so it cannot be where speech
+     goes. Say why rather than let the fill move and the words disappear
+     (#110). The server refuses this one too. */
+  const gone = knownListeners.find(l => String(l.pid) === to && l.gone);
+  if (gone) {
+    // Pressing it is how someone asks "why can I not use this one". Answer
+    // with what to do about it, in the same status line every other notice
+    // on this screen uses, and give it longer to be read than a plain ack.
+    chime('err');
+    say(t('listenerGoneHow', {name: gone.label}), 9);
+    return;
+  }
   routeTo = to;
   markChosen();
   try { await putJSON('/api/route', {to}); } catch {}
@@ -4231,13 +4892,18 @@ async function loadListeners() {
   knownListeners.forEach(l => routeNames.set(String(l.pid), l.label));
   relabelEntries();
   effectiveTo = d.target || '';
-  const live = new Set(knownListeners.map(l => String(l.pid)));
+  // One that is gone is still in the row, so counting it as alive here would
+  // let the destination move out from under the person without a word, which
+  // is the very thing this notice exists to stop (#110). Only the ones that
+  // can actually be reached count.
+  const usable = knownListeners.filter(l => !l.gone);
+  const live = new Set(usable.map(l => String(l.pid)));
 
   // If where it was going has ended, move to a session that is still alive and
   // say so. Left hanging silently, you talk and never notice nothing arrives.
   if (routeTo && !live.has(routeTo)) {
     const gone = before.find(l => String(l.pid) === routeTo);
-    const next = knownListeners[knownListeners.length - 1];
+    const next = usable[usable.length - 1];
     routeTo = '';                       // back to nothing chosen, and leave it to the server's default
     await putJSON('/api/route', {to: ''}).catch(() => {});
     el.note.textContent = next
@@ -4293,6 +4959,7 @@ const engineLabel = e => ENGINE_KEYS[e.id] ? t(ENGINE_KEYS[e.id]) : (e.label || 
 function paintEnginePick() {
   const opts = [];
   if (canBrowserASR) opts.push([BROWSER_ENGINE, engineLabel({id: BROWSER_ENGINE}), false]);
+  if (canLocalASR) opts.push([BROWSER_LOCAL, t('engineBrowserLocal'), false]);
   /* An engine the server marked not ready is shown, not hidden. It cannot be
      picked yet, so the row carries the one command that makes it pickable
      (`apple` on a Mac without the Command Line Tools is the case this is for).
@@ -4309,20 +4976,26 @@ function paintEnginePick() {
   if (!opts.some(([, , off]) => !off)) opts.push(['', t('engineNone'), false]);
   el.enginePick.replaceChildren(...opts.map(([id, label, off]) => {
     const o = document.createElement('option');
-    o.value = id; o.textContent = label; o.selected = id === chosenEngine;
+    o.value = id; o.textContent = label;
+    o.selected = id === engineShown(chosenEngine, onDeviceLocal);
     o.disabled = off;
     return o;
   }));
 }
 
 function paintBrowserAsr() {
-  el.browserAsrWarn.hidden = !asrChosen;
+  // "Keep this off if everything must stay on this machine" is the wrong
+  // thing to say to someone who picked the entry that does exactly that.
+  el.browserAsrWarn.hidden = !asrChosen || onDeviceLocal;
   el.asrConflict.hidden = !asrChosen || !asrConflict;
   el.asrConflict.textContent = t('asrConflict');
   el.browserMic.hidden = !asrChosen;
   el.asrLangField.hidden = !asrChosen;
   el.idleMuteField.hidden = !asrChosen;
   el.idleMuteNote.hidden = !asrChosen;
+  // "Keeps reconnecting to Google" is untrue on the local entry, where the
+  // reason to switch off is the same but nothing goes anywhere
+  el.idleMuteNote.textContent = t(onDeviceLocal ? 'idleMuteNoteLocal' : 'idleMuteNote');
   el.browserGestureField.hidden = !asrChosen;
   paintIdleMute();
   // Browser recognition decides for itself when a clause is grammatically
@@ -4330,7 +5003,11 @@ function paintBrowserAsr() {
   // governs, on both engines now, is how long it waits after that before
   // actually sending it (queueOrSendFinal), so the slider stays live here too.
   el.silenceNote.textContent = t(asrChosen ? 'silenceNoteBrowser' : 'silenceNote');
-  el.engineNote.textContent = t(asrChosen ? 'browserAsrNote' : 'localAsrNote');
+  el.engineNote.textContent = t(asrChosen && !onDeviceLocal ? 'browserAsrNote' : 'localAsrNote');
+  // Asked again with every paint, the 5 second poll included, so a model that
+  // arrives some other way (another site, chrome://components) is noticed too
+  paintOnDevice();
+  if (asrChosen && onDeviceLocal) askOnDevice();
   // For turning listening on and off, paintPower() decides both whether it
   // shows and what it says (it changes with more than the engine, it changes
   // with whether anything is running).
@@ -4383,7 +5060,16 @@ async function loadEngines() {
 }
 
 el.enginePick.onchange = async () => {
-  const pick = el.enginePick.value;
+  // Both browser entries are 'browser' to the server. Which one it is stays here.
+  const {engine: pick, local} = enginePicked(el.enginePick.value);
+  const localChanged = pick === BROWSER_ENGINE && local !== onDeviceLocal;
+  if (pick === BROWSER_ENGINE) {
+    onDeviceLocal = local && canLocalASR;
+    writeOnDeviceFlag(store, onDeviceLocal);
+    // Picking it again is also how a refusal gets another try
+    onDeviceRefused = false;
+    onDeviceProblem = '';
+  }
   // Do not wait for the loadEngines every 5 seconds. Line up what shows from the moment it is chosen
   chosenEngine = pick;
   el.enginePick.disabled = true;
@@ -4414,6 +5100,10 @@ el.enginePick.onchange = async () => {
       // started down with it (was && !asrChosen in loadEngines), leaving
       // neither engine actually listening.
       await post('/api/engine', {running: false, engine: BROWSER_ENGINE});
+      // Moving between the two browser entries with recognition running. The
+      // session open now was built for the other one, so it is closed and the
+      // one that follows is built afresh (through the hold, if local).
+      if (localChanged && rec) { try { rec.stop(); } catch {} }
       if (recWanted) startRecognition();
     } else {
       asrChosen = false;
@@ -4444,6 +5134,10 @@ el.enginePick.onchange = async () => {
 
 el.asrLang.onchange = () => {
   store.set('asrLang', el.asrLang.value);
+  // A model is per language, so what was known is for the old one
+  onDeviceRefused = false;
+  onDeviceProblem = '';
+  if (onDeviceLocal) paintBrowserAsr();
   // The language takes effect on the next reconnect. If it is in use, reconnect right now.
   if (recWanted && rec) { try { rec.stop(); } catch {} }
   // The words ignored out of the box are matched against what the recognizer
@@ -4452,6 +5146,127 @@ el.asrLang.onchange = () => {
   // now would be weighed against a list it was never drawn from.
   saveDict().then(loadDict);
 };
+
+/* Another tab in this browser moved between the two browser entries. The
+   flag is shared by every tab of this browser (localStorage), and a tab that
+   kept the answer it read at load would go on with the old one. Left on the
+   plain entry, it is the tab that takes over listening (the 5 second
+   heartbeat) once the one where local was picked closes, and it would send
+   the audio to Google while this browser's choice says it stays here. A
+   session already open was built for the other entry, so it is closed and the
+   next one goes through the hold. */
+addEventListener('storage', ev => {
+  if (!canLocalASR || (ev.key !== null && ev.key !== 'vs.' + ON_DEVICE_FLAG)) return;
+  const local = readOnDeviceFlag(store);
+  if (local === onDeviceLocal) return;
+  onDeviceLocal = local;
+  onDeviceRefused = false;
+  onDeviceProblem = '';
+  if (rec) { try { rec.stop(); } catch {} }
+  paintEnginePick();
+  paintBrowserAsr();
+  paint();
+});
+
+/* The download button. SR.install() has to be the very first thing the press
+   does: Chrome only starts a download from inside a press, and even one await
+   before it can let that go. It hands back no progress, so the status line
+   shows downloading and available() is asked every 2 seconds until it says
+   otherwise (askOnDevice starts listening when it does).
+
+   The button sits in the settings sheet, which moves into the floating window.
+   Whether a press there counts for this page's SR is Chrome's call, and if it
+   says no (NotAllowedError) the line says to bring the window back and press
+   it in the tab. */
+el.onDeviceDownload.onclick = () => startOnDeviceInstall();
+
+function startOnDeviceInstall() {
+  const lang = browserLang();
+  // Armed, the press that lands on the button itself gets here twice: once
+  // through the capture listener on pointerdown, once through the button's own
+  // click. The second would take the id the first is waiting on (settle drops
+  // anything but the newest), leaving the line saying downloading for good.
+  // A plain read of two variables, so install() is still the first thing the
+  // press that does get through does.
+  if (onDeviceInstalling && onDeviceInstallLang === lang) return;
+  let asked;
+  try {
+    asked = SR.install({langs: [lang], processLocally: true});
+  } catch (e) {
+    asked = Promise.reject(e);
+  }
+  const id = ++onDeviceInstallId;
+  onDeviceInstalling = true;
+  onDeviceInstallLang = lang;
+  onDeviceSawDownloading = false;
+  onDeviceRefused = false;
+  onDeviceProblem = '';
+  paintOnDevice();
+  keepPollingOnDevice();
+  const settle = problem => {
+    if (id !== onDeviceInstallId || !onDeviceInstalling) return;
+    onDeviceInstalling = false;
+    onDeviceProblem = browserLang() === lang ? problem : '';
+    paintOnDevice();
+    askOnDevice();
+  };
+  Promise.resolve(asked).then(
+    ok => settle(ok ? '' : 'onDeviceDownloadFailed'),
+    e => settle(e && e.name === 'NotAllowedError' ? 'onDevicePressMain' : 'onDeviceDownloadFailed'));
+  /* Nothing promises install() ever settles. Left waiting on one that never
+     does, the line would say downloading forever with the button greyed out
+     and no way on short of a reload. If Chrome has not so much as begun after
+     a while, the button comes back with the line saying it did not go through. */
+  setTimeout(() => {
+    if (!onDeviceSawDownloading && onDeviceNow() !== 'available') settle('onDeviceDownloadFailed');
+  }, 45000);
+}
+
+/* ── Letting any press do it ──
+   Ideally the model would just be got ready by voice-shell with nobody
+   pressing anything. Chrome will not have that: install() only counts from
+   inside a press. What it does not ask is that the press be on our button.
+   So when the server has looked and Chrome already holds the model, the
+   listener below rides along on the very next press anywhere on the page,
+   whatever that press was for, and hands it to install() before the button
+   or the field under the finger gets it (capture). Nothing is fetched, it is
+   over in a few seconds, and from where you sit the local entry simply
+   started working after you pressed something.
+
+   keydown counts as a press for this too, so a keyboard is not left out.
+   Both go on and come off together, and the first one to fire takes both off
+   so the other cannot fire into a second install. paintOnDevice decides when
+   it is on at all (onDeviceMayAutoInstall), and the guards are read again
+   here at the moment of the press, since a press can land at any time. */
+function armOnDeviceInstall() {
+  if (onDeviceArmed) return;
+  const fire = () => {
+    // Not every keypress is a press as Chrome counts it. Escape (which closes
+    // the settings sheet) and the modifiers on their own hand out no
+    // activation, and install() would throw NotAllowedError, which the line
+    // reads as the floating window and tells you to go back to the tab, which
+    // is nonsense for a key. Stay armed for a press that really is one.
+    try {
+      if (navigator.userActivation && !navigator.userActivation.isActive) return;
+    } catch {}
+    disarmOnDeviceInstall();
+    if (!onDeviceMayAutoInstall(onDeviceLocal, asrChosen, onDeviceNow(), onDeviceRefused,
+                                onDeviceInstalling, onDeviceDiskNow())) return;
+    // As with the button, install() has to be the first thing the press does
+    startOnDeviceInstall();
+  };
+  onDeviceArmed = fire;
+  addEventListener('pointerdown', fire, true);
+  addEventListener('keydown', fire, true);
+}
+
+function disarmOnDeviceInstall() {
+  if (!onDeviceArmed) return;
+  const fire = onDeviceArmed;
+  onDeviceArmed = null;
+  removeEventListener('pointerdown', fire, true);
+  removeEventListener('keydown', fire, true);
+}
 
 /* ── Floating on top ─────────────────────
    So you never have to line browsers up side by side, it moves into a small
@@ -5168,11 +5983,8 @@ const cmdI18nBase = id =>
    copy kept on the screen. Keep a copy and, the day the accepted kinds change
    over there, one side is left stale. */
 let cmdEditable = new Set();
-const CMD_WIDE = '１２３４５６７８９０';
 const CMD_DROP = /[ \t　。、．，・…！？!?.,\-~〜"'「」『』()（）]/g;
-const cmdNormal = s => s.trim()
-  .replace(/[１２３４５６７８９０]/g, c => '1234567890'[CMD_WIDE.indexOf(c)])
-  .replace(CMD_DROP, '').toLowerCase();
+const cmdNormal = s => toHalfWidth(s.trim()).replace(CMD_DROP, '').toLowerCase();
 
 function cleanPhrase(kind, s) {
   if (!cmdEditable.has(kind)) return '';
@@ -5620,23 +6432,75 @@ if (canBrowserASR) {
   // By browser rule the microphone cannot open until something is touched, so
   // it starts the moment it is touched. Some people work from the keyboard
   // alone, so a keypress starts it too.
-  const arm = () => {
+  // Held off, the route here is the screen's alone, so the touch asks the
+  // server where it really stands and refreshState takes it from off to that
+  // through applyRouteSideEffects. Just clearing the flag and starting left
+  // the screen saying live with recognition never started (#118). Not when
+  // the touch is on a mic, though: its click is the switch on, and had the
+  // answer come back first, that click would read live and switch it off.
+  const arm = ev => {
     vizArmed = true;
-    armPending = false;
+    // Touched now, so a refusal from here on is a real one (autoResumed)
+    autoResumed = false;
+    if (armPending) {
+      armPending = false;
+      const onMic = [el.segOff, el.miniMic, el.helpMini]
+        .some(b => { try { return b.contains(ev.target); } catch { return false; } });
+      if (!onMic) refreshState();
+    }
     if (recWanted) startRecognition();
   };
   addEventListener('pointerdown', arm, {once:true});
   addEventListener('keydown', arm, {once:true});
 }
+// What the tab had going the moment it was reloaded, if that was just now
+let resume = null;
+try { resume = takeResume(sessionStorage, Date.now()); } catch {}
+if (resume) restoreDraft(resume);
+// A floating window cannot be reopened without a press. The bubble that asks
+// to float it shows on every load anyway (paintFloatAsk), so that press is one
+// click away and the snapshot does not need to note it.
 loadEngines().then(() => {
   if (!recWanted) return;
   if (vizArmed) { startRecognition(); return; }
+  // It was listening right up to the reload, so carry on without waiting for
+  // a touch. The meter still waits for one (armViz), and a refusal falls back
+  // to the held-off start below (autoResumed, in onerror).
+  if (resume?.live) {
+    autoResumed = true;
+    // Text put back in the box while in instant mode was left sitting there,
+    // and what was said next went straight out ahead of it: the second half
+    // of a sentence arrived before the first. It rides along with the next
+    // utterance instead, the same as switching back from draft with text
+    // still in the box (carryIntoNext).
+    // Whether it was instant is read from the server (not paused), not from
+    // anything the old page wrote down, so it holds even for a page that
+    // predates this.
+    // Recognition starts only once that is settled. Started alongside it, a
+    // quick first word could beat the switch and go out ahead of the box, or
+    // land before the carry and not count as the one that sends it.
+    if (el.draft.value.trim()) {
+      fetch('/api/state').then(r => r.json()).then(st => {
+        if (st.paused || route === 'off' || carryDraft || !el.draft.value.trim()) return;
+        const rev = routeRevision + 1;
+        return setRoute('hold').then(() => {
+          if (routeRevision === rev && route === 'hold' && el.draft.value.trim()) carryIntoNext();
+        });
+      }).catch(() => {}).finally(() => startRecognition());
+    } else {
+      startRecognition();
+    }
+    return;
+  }
   // By browser rule the microphone cannot open until the screen has been
   // touched once. Instead of asking anyone to please click, we start switched
   // off. Pressing the mic to turn it on, the obvious thing to do, is itself the
   // touch.
   armPending = true;
   route = 'off';
+  // Make it really off, not only on screen, so that leaving it takes the
+  // same way back as any other off (see arm above and refreshState).
+  applyRouteSideEffects('off');
   paint();
 });
 applyTheme(store.get('theme', 'auto'));
