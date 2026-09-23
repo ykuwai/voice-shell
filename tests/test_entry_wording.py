@@ -137,6 +137,28 @@ class EntryWordingTest(unittest.TestCase):
             "認識できます。"
             "音声は外部に送信されません。")
 
+    def test_the_here_caution_is_one_plain_sentence(self):
+        """Condition then result, and nothing else. It points at no other
+        choice, since there is nothing to act on while the model is here,
+        and it says nothing about the model being deleted, since Chrome
+        re-arms that timer every time it starts and any figure we gave
+        would be wrong."""
+        for lang in LANGS:
+            here = self.i18n[lang]["browserAsrWarnHere"]
+            self.assertTrue(here.strip(), lang)
+            for bad in ("30", "削除", "delete", "unused"):
+                self.assertNotIn(bad, here, f"{lang} carries {bad!r}")
+        self.assertEqual(
+            self.i18n["en"]["browserAsrWarnHere"],
+            "While the speech model is downloaded, "
+            "your audio is recognized locally.")
+        self.assertEqual(
+            self.i18n["ja"]["browserAsrWarnHere"],
+            "音声認識モデルが"
+            "ダウンロードされている"
+            "場合は、ローカルで"
+            "認識します。")
+
     def test_one_vocabulary_across_the_group(self):
         """The whole group says local in one word, so a reader meets the
         same idea under the same name wherever the state lands them."""
