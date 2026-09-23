@@ -157,6 +157,35 @@ needs nothing installed and has no wait.
    takes the chip back rather than arriving as a stranger. Only the five most
    recent are kept.
 
+5. Say which chip this session is.
+
+   ```bash
+   ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh whoami
+   ```
+
+   It prints this session's number in the chip row at the top of the viewer and
+   the name drawn on that chip. With several sessions listening, the user cannot
+   otherwise tell which one they are talking to.
+
+   **In the first message, right beside the viewer URL, give both in one short
+   sentence, written in the language the user is using** (Japanese when they
+   speak Japanese, English when English, and so on). The command prints the bare
+   facts in English on purpose; the wording is yours to write. Say that it is the
+   number as things stand now, because it changes as other sessions start
+   listening and stop.
+
+   > ビューアは http://127.0.0.1:47865 です。いまのところ、このセッションは2番の
+   > 「認証まわりの修正」として表示されています。
+
+   > The viewer is at http://127.0.0.1:47865, and right now this session shows
+   > as number 2, "Fixing the auth code".
+
+   **Run it once, when listening first starts.** A watch that ends on its
+   deadline and is re-armed keeps the same number and the same name, so there is
+   nothing new to say and repeating it every half hour is noise. Run it again
+   only when the user asks which one they are talking to, or right after a
+   rename.
+
 **Keep only one Monitor of your own.** A re-arm on a deadline is always safe.
 Re-attaching for any other reason (compacting included) while the old one might
 still be alive: stop it with TaskStop first. Two alive means every utterance
@@ -168,7 +197,10 @@ alive.** Run `voice-shell.sh listeners` (or `status`) and look for
 conversation's `$CLAUDE_CODE_SESSION_ID`, so it settles the question. No mark
 means your Monitor is not registered; start one with `listen`. (Starting
 `listen` again under the same session id retires the earlier registration by
-itself, so this check is for knowing where things stand.)
+itself, so this check is for knowing where things stand.) Use `listeners` here
+rather than `whoami`: `whoami` waits up to 10 seconds for a chip to come live,
+which is right when a watch has just been armed and is only delay when the
+question is whether one was.
 
 **Do not stop `voice-shell.sh listen` with pkill.** Your own Monitor matches the
 same pattern and goes down with it.
@@ -260,8 +292,9 @@ picks a destination at any time from the chips at the top of the viewer.
 
 Chips are numbered by when that conversation first started listening, and
 turning voice mode back on keeps the number (so "the second one" can be said
-out loud). The × on a chip, pressed twice, makes that session stop listening
-(the session itself goes on).
+out loud). `voice-shell.sh whoami` says which of them this session is. The ×
+on a chip, pressed twice, makes that session stop listening (the session itself
+goes on).
 
 The display name starts as the folder name and becomes the conversation's title
 once it has one. **When told "name this session X", rename it right away.**

@@ -2261,6 +2261,13 @@ def parse_args():
                    help="Stop the resident process and exit")
     p.add_argument("--listeners", action="store_true",
                    help="List the sessions listening to the utterance log and exit")
+    p.add_argument("--whoami", action="store_true",
+                   help="Print this session's own place in the chip row as "
+                        "'number<TAB>chips in the row<TAB>how many of them are "
+                        "listening<TAB>state<TAB>name', where state is live, "
+                        "away or gone. The name comes last because it is the "
+                        "one field that could itself hold a tab. Exit 1 when "
+                        "this session is not in the row at all")
     p.add_argument("--leave", metavar="REG", default=None,
                    help="A listen is going away: keep REG as a short-lived "
                         "tombstone so a re-armed listen for the same session "
@@ -2645,6 +2652,48 @@ def label_listeners(entries):
         seen[base] = n
         e["label"] = base if n == 1 else f"{base} ({n})"
     return entries
+
+
+def whoami_of(log_path, session):
+    """Where this session sits in the chip row right now, and what it is called.
+
+    The number is that entry's place in `list_active_listeners`, which is the
+    same order the viewer numbers the chips in (viewer.js, paintRoutes counts
+    `i + 1` over exactly this list) and the same number a spoken 「2番に切り替え」
+    picks (`handle_voice_command`). Counting it here rather than anywhere else
+    means there is only ever one answer to what number a session is.
+
+    The label is whatever `label_listeners` settled on, the (2) of a duplicated
+    name included, because that is the text drawn on the chip.
+
+    "state" tells the three apart. A chip in the row does not mean somebody is
+    reading it. One between two watches ("away") and one whose listen ended for
+    good ("gone") both keep their place on purpose, so the numbers do not
+    shuffle under the person. A caller that read either as "listening" would
+    decide it had a Monitor when it had none, which is #110 over again.
+
+    None when this session is not in the row at all, so nothing can make up a
+    number for a session that was never there.
+    """
+    if not session:
+        return None
+    entries = list_active_listeners(log_path)
+    for n, entry in enumerate(entries, 1):
+        if entry.get("session") == session:
+            state = "gone" if entry.get("gone") else (
+                "away" if entry.get("away") else "live")
+            # "total" is how many chips the row draws, which is what the
+            # number is counted out of. "live" is how many of them somebody is
+            # really listening through, which is a smaller number whenever an
+            # away or a gone chip is holding its place. Telling the user the
+            # row size as if it were the number listening overstates how many
+            # sessions can hear them, so both are handed over and the caller
+            # says which is which.
+            live = sum(1 for e in entries
+                       if not e.get("gone") and not e.get("away"))
+            return {"no": n, "label": entry["label"], "total": len(entries),
+                    "live": live, "pid": entry["pid"], "state": state}
+    return None
 
 
 def my_session_id():
@@ -3387,6 +3436,17 @@ def main():
             print(f"  {l['label']}  (PID {l['pid']}){mark}")
             print(f"    started at  {l['started']}")
             print(f"    folder      {l['cwd']}")
+        return
+
+    if args.whoami:
+        # Fields, not a sentence. voice-shell.sh reads them apart and words the
+        # line it prints; what the user finally hears is written by the agent in
+        # the language of the conversation, so nothing here needs translating.
+        found = whoami_of(args.log_file, my_session_id())
+        if not found:
+            sys.exit(1)
+        print(f"{found['no']}\t{found['total']}\t{found['live']}"
+              f"\t{found['state']}\t{found['label']}")
         return
 
     if args.newer_same_session is not None:
