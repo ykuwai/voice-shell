@@ -1607,7 +1607,12 @@ function paintBrowserSendCue(now) {
     return;
   }
   const wait = sendWaitMs();
-  const target = wait > 0 ? Math.max(0, Math.min(1, (now - lastLoudAt) / wait)) : 1;
+  let target = wait > 0 ? Math.max(0, Math.min(1, (now - lastLoudAt) / wait)) : 1;
+  // Held just short of the end while recognition is still behind, so the ring
+  // never sits full with nothing going out (browserGateTick reads the same
+  // question). Short of it rather than frozen where it stood, because what is
+  // being waited on really is nearly over.
+  if (recognizerOwesWords(now, wait)) target = Math.min(target, 0.95);
   // Checked against the whole queue joined together, the shape it actually
   // goes out in (browserGateTick), not just the oldest item alone. A short
   // clause sitting behind more still-accumulating queued content is not the
@@ -4071,6 +4076,47 @@ let lastInterimHeard = '';      // the interim last seen, so an unchanged repeat
 let lastInterimChangeAt = 0;   // when it last changed (words still coming in)
 let pendingBrowserSends = [];   // [{text, queuedAt}], oldest first
 
+/* The two clocks the hold below compares. Both are kept apart from lastLoudAt
+   on purpose: lastLoudAt answers "how long has it been quiet" and is nudged by
+   things that are not sound at all (a changed interim, a session coming back
+   up), which is right for a wait but useless for asking what the microphone
+   actually heard. lastMicLoudAt is the microphone alone, nothing else writes
+   it. lastFinalAt is the last time recognition handed anything back. */
+let lastMicLoudAt = 0;
+let lastFinalAt = 0;
+
+/* Whether recognition still owes us words.
+
+   Kept on this device (processLocally), Chrome recognizes behind the speech,
+   seconds behind it on a long sentence, and it goes quiet while it catches up.
+   The wait above reads that quiet as the end of the thought: the clauses
+   already handed over go out, and the rest of the same sentence arrives after
+   they have gone and lands as a second prompt. One thought, two prompts, which
+   is what this is for.
+
+   The question it answers is not "has anything been said lately" (that is the
+   wait) but "is there sound the recognizer has not accounted for yet". Loud
+   audio after the last thing recognition said is exactly that: it was heard,
+   and nothing has come back for it. Interims cannot stand in for it, because
+   going quiet is what the stall looks like from here.
+
+   Bounded by twice the wait, and this is not the outer limit on sending that
+   was turned down before. That one cut people off while they were still
+   talking. This one only says how long to keep waiting for a recognizer that
+   has gone quiet after the talking stopped, and it is here so that a keyboard
+   clack or a door after the last word, loud with no words behind it, does not
+   hold the prompt back until the cap. A recognizer further behind than that
+   still splits, which is the honest limit of reading it from the outside.
+
+   The ordinary browser path is left exactly as it was. It answers within a
+   fraction of a second, so it is never behind in the first place. */
+const RECOG_OWED_FACTOR = 2;
+function recognizerOwesWords(now, waitMs) {
+  if (!onDeviceLocal) return false;
+  if (lastMicLoudAt <= lastFinalAt) return false;
+  return now - lastMicLoudAt < waitMs * RECOG_OWED_FACTOR;
+}
+
 /* How long to wait for quiet before a finished clause moves on. In draft mode
    it only lands in the box on screen, nothing goes to Claude yet, so a long
    "pause to send" (5 or 10 seconds, set for thinking out loud) would just
@@ -4090,7 +4136,7 @@ function browserGateTick() {
   // (only updating it once something was already queued) is what made the
   // very first version of this send everything the instant it queued.
   const now = performance.now();
-  if (browserRmsNow >= tuning.silence_threshold) lastLoudAt = now;
+  if (browserRmsNow >= tuning.silence_threshold) lastMicLoudAt = lastLoudAt = now;
   // Chrome cuts its session every 7 to 10 seconds and the next one takes a
   // moment to come up. Nothing can be heard in that gap, so it must not count
   // as the quiet that sends what was said so far.
@@ -4128,7 +4174,10 @@ function browserGateTick() {
   // of talking each aged past the cap on their own staggered schedule, so
   // each went out as its own POST, undoing the joining below entirely on
   // exactly the path continuous speech takes most often.
-  const ready = (quietFor >= waitMs || capTripped) ? pendingBrowserSends : [];
+  // Quiet for long enough, and nothing still on its way in. The cap goes
+  // around it, so a hold here can never be the thing that loses a prompt.
+  const ready = ((quietFor >= waitMs && !recognizerOwesWords(now, waitMs)) || capTripped)
+    ? pendingBrowserSends : [];
   pendingBrowserSends = ready.length ? [] : pendingBrowserSends;
   // Joined into one utterance, not one POST per clause. Chrome's own
   // endpointing is what split a single continuous thought into several
@@ -4173,6 +4222,10 @@ function queueOrSendFinal(text) {
   // restarted session can still carry right after an abort. Caught here, at
   // the point of queuing, since sendUtterance's own copy of this same check
   // never gets a turn to run until whatever the queue eventually flushes.
+  // Before the two ways out below: a clause dropped as stale, and a closing
+  // mute, are both recognition having said something, which is the whole of
+  // what lastFinalAt tracks (see recognizerOwesWords).
+  lastFinalAt = performance.now();
   if (dropNextLocal) { dropNextLocal = false; return; }
   // A closing mute must not sit behind whatever else is already waiting for
   // quiet, or the room stays live for however long that wait runs, exactly
