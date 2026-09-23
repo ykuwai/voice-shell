@@ -37,9 +37,14 @@ supports. The seven kinds, with English examples:
 - **Several machines** (in the lightbulb): name each machine, and only phrases
   prefixed with the name ("work mute") are taken. Without it one phrase affects
   every machine.
-- **Browser recognition cannot hear "unmute"**: muting releases the audio.
-  Turn it back on from the screen (or, if enabled in settings, with a few loud
-  sounds).
+- **Plain browser recognition cannot hear "unmute"**: muting releases the
+  audio. Turn it back on from the screen (or, if enabled in settings, with a
+  few loud sounds).
+- **On-device browser recognition can**: nothing leaves the machine, so it
+  keeps recognizing while muted. Everything heard there is thrown away (not
+  sent, not logged, not shown, not drafted) and only "unmute" is acted on,
+  matched in the page with the same wordings, lead-in, switch-offs and machine
+  name as the daemon.
 - Browser and local engines use the same matching code.
 
 ## Keyboard

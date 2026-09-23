@@ -1308,9 +1308,13 @@ function paintTinyButtons() {
    signal to be accepted, so while it is on, the machine name shows on the main
    screen too (buried in settings, you could be talking to the wrong machine and
    never notice). */
+// What this machine answers to, as typed (several spellings, comma separated)
+const machineNames = () =>
+  el.machineName.value.split(/[,、]/).map(v => v.trim()).filter(Boolean);
+
 function paintMachine() {
   const on = el.multiOn.checked;
-  const all = el.machineName.value.split(/[,、]/).map(v => v.trim()).filter(Boolean);
+  const all = machineNames();
   el.machineNameField.hidden = !on;      // a setting that is not in use is not shown
   el.machineTag.hidden = !(on && all.length);
   el.machineTag.textContent = all[0] || '';
@@ -1493,15 +1497,33 @@ const toHalfWidth = text => text
   .replace(HALFWIDTH_KANA_RE, run => run.normalize('NFKC'));
 
 const TAIL_IDS = ['cancel_tail', 'hold_tail', 'mute'];
-let tailWords = {cancel_tail: new Set(), hold_tail: new Set(), mute: new Set()};
-let userWords = {cancel_tail: new Set(), hold_tail: new Set(), mute: new Set()};
-const TAIL_NOISE_MAX = {mute: 7};
+/* unmute is gathered from the same endpoint but stays out of TAIL_IDS, so the
+   sweep above never picks it up on its own. It decides nothing about an
+   utterance on its way out, and a sentence that happens to end in
+   「ミュート解除」 while the mic is on is ordinary speech, so letting it into
+   the sweep would darken the ring for words that really do get sent. The one
+   place that wants it asks for it by name (unmuteCommand below). */
+const CMD_IDS = [...TAIL_IDS, 'unmute'];
+const UNMUTE_IDS = ['unmute'];
+const emptyWords = () => Object.fromEntries(CMD_IDS.map(id => [id, new Set()]));
+let tailWords = emptyWords();
+let userWords = emptyWords();
+/* How much may sit ahead of the word and still count as noise rather than a
+   real clause. voice_daemon.MUTE_TAIL_NOISE_MAX and UNMUTE_TAIL_NOISE_MAX.
+   Unmute's is the tighter of the two there and is the tighter one here: a
+   false unmute costs the whole stretch the speaker thought was off, not one
+   utterance. */
+const TAIL_NOISE_MAX = {mute: 7, unmute: 3};
+/* voice_daemon._UNMUTE_TAIL_EXCLUDE. Everyday bare words (「解除」 is said about
+   a lock, a hold, anything) still bring the mic back when the whole utterance
+   is that and nothing else, but never with a lead-in ahead of them. */
+const UNMUTE_TAIL_EXCLUDE = new Set(['解除', 'かいじょ', '解除して', 'かいじょして']);
 async function loadTailWords() {
   try {
     const all = await Promise.all(UI_LANGS.map(
       ([code]) => fetch('/api/commands?lang=' + code).then(r => r.json())));
-    const out = {cancel_tail: new Set(), hold_tail: new Set(), mute: new Set()};
-    const mine = {cancel_tail: new Set(), hold_tail: new Set(), mute: new Set()};
+    const out = emptyWords();
+    const mine = emptyWords();
     for (const d of all) {
       for (const g of d.groups || [])
         if (out[g.id])
@@ -1534,7 +1556,7 @@ let cmdOff = {kinds: new Set(), words: {}};
 function takeCmdOff(d) {
   if (!d || typeof d !== 'object') return;
   const words = {};
-  for (const id of TAIL_IDS)
+  for (const id of CMD_IDS)
     words[id] = new Set(((d.off_words || {})[id] || []).map(cmdKey).filter(Boolean));
   cmdOff = {kinds: new Set(d.off || []), words};
 }
@@ -1600,7 +1622,7 @@ const cmdKey = s => foldChars(String(s).trim()).chars.join('');
    sentence that only happens to end in the word after a real clause is not
    read as "about to fire", and 「えーと、コマンドミュート」 is. Words added
    by hand for mute count only as the whole utterance, as in the daemon. */
-function matchingTailWord(text) {
+function matchingTailWord(text, ids = TAIL_IDS) {
   const body = text.trim().replace(TAIL_TRIM, '');
   if (!body) return null;
   const lead = text.length - text.trimStart().length;
@@ -1608,7 +1630,7 @@ function matchingTailWord(text) {
   const key = chars.join('');
   if (!key) return null;
   let best = null;
-  for (const id of TAIL_IDS) {
+  for (const id of ids) {
     if (cmdOff.kinds.has(id)) continue;
     const off = cmdOff.words[id] || new Set();
     const mine = userWords[id] || new Set();
@@ -1620,10 +1642,18 @@ function matchingTailWord(text) {
       if (hit && n <= hit.n) return;
       hit = {w, wk, n};
     };
-    for (const w of tailWords[id]) consider(w, cmdKey(w));
+    for (const w of tailWords[id] || []) {
+      const wk = cmdKey(w);
+      // The everyday words on unmute's list count only as the whole utterance
+      // (voice_daemon builds UNMUTE_TAIL without them while UNMUTE_WORDS keeps
+      // them), so they are passed over unless nothing at all sits ahead of them.
+      if (id === 'unmute' && UNMUTE_TAIL_EXCLUDE.has(w) && wk !== key) continue;
+      consider(w, wk);
+    }
     if (id === 'mute') {
       for (const w of mine) if (cmdKey(w) === key) consider(w, key);
-    } else {
+    } else if (id !== 'unmute') {
+      // unmute is the one kind no wording can be added to (USER_COMMAND_KINDS)
       for (const w of mine) consider(w, cmdKey(w));
     }
     if (hit === null) continue;
@@ -1643,6 +1673,56 @@ function matchingTailWord(text) {
 }
 function endsWithTailCmd(text) {
   return matchingTailWord(text) !== null;
+}
+
+/* voice_daemon._NAME_SEP: what may sit between the machine's name and the
+   word itself in 「開発用ミュート解除」. */
+const NAME_SEP = ' \t\u3000、,。．，:：・のはでをへに';
+
+/* voice_daemon._strip_name. What is left once this machine's name has been
+   taken off the head, or null when the head is not one of its names. The name
+   is folded the way the recognized text already is, so a name typed as
+   「Ｍａｃ」 matches. Longest first, so a machine called both Mac and MacBook
+   is not cut at the shorter one. */
+function stripMachineName(text, names) {
+  const body = text.trim();
+  const low = body.toLowerCase();
+  for (const name of [...(names || [])].sort((a, b) => b.length - a.length)) {
+    const folded = toHalfWidth(name).toLowerCase();
+    if (!folded || !low.startsWith(folded)) continue;
+    let rest = body.slice(folded.length);
+    let i = 0;
+    while (i < rest.length && NAME_SEP.includes(rest[i])) i++;
+    return rest.slice(i);
+  }
+  return null;
+}
+
+/* The wording that brings the mic back, or null. Asked of an utterance heard
+   while the mic is off, and of nothing else.
+
+   The same question voice_daemon.apply_voice_command asks with muted=True, put
+   to the tables this page already holds: the built-in wordings of every
+   language, the lead-in tolerance, the kind and the single wordings the user
+   switched off, and the machine's own name at the front when several machines
+   are listening. With names on and none of them at the front, nothing moves,
+   the same as there (a command with no name cannot be pinned to a machine).
+
+   The dictionary-rewritten form is asked about as well, the way the daemon
+   asks it, so a wording that keeps coming back garbled can be brought back by
+   registering it (「ミュート回収 → ミュート解除」). */
+function unmuteCommand(text, {multi = false, names = [], fixup = null} = {}) {
+  let body = (text || '').trim();
+  if (!body) return null;
+  if (multi) {
+    const named = stripMachineName(body, names);
+    if (named === null) return null;
+    body = named.trim();
+    if (!body) return null;
+  }
+  const hit = matchingTailWord(body, UNMUTE_IDS)
+    || (fixup ? matchingTailWord(fixup(body), UNMUTE_IDS) : null);
+  return hit ? hit.word : null;
 }
 
 /* Whether what has been heard so far is something the daemon would send on its
@@ -1941,7 +2021,9 @@ function applyRouteSideEffects(next) {
   // the screen says nothing is being recorded while the audio alone keeps going
   // out.
   if (next === 'off') {
-    if (recWanted) { asrPausedByRoute = true; stopRecognition(); }
+    // Except on the on-device entry, where there is no audio going anywhere to
+    // let go of and the word that brings it back has to stay audible.
+    if (recWanted && !listensWhileMuted()) { asrPausedByRoute = true; stopRecognition(); }
   } else {
     resetBrowserGesture();
     // Coming back from off (by hand or by voice) always counts as a voice just
@@ -1980,12 +2062,19 @@ function say(text, sec = 6) {
   hintHoldUntil = performance.now() + sec * 1000;
 }
 
-// "Say X to come back" is only true where saying it can still be heard. This
-// browser's own recognition cuts the mic the instant it mutes (unlike the
-// daemon, which keeps listening for the word on purpose), so under it the
-// one true way back is the button, not the word the other engines can still
-// hear.
-const muteHint = () => t(asrChosen ? 'voiceMutedBrowser' : 'voiceMuted');
+// "Say X to come back" is only true where saying it can still be heard. The
+// plain browser entry cuts the mic the instant it mutes (unlike the daemon,
+// which keeps listening for the word on purpose), so under that one the only
+// way back is the button. The on-device entry keeps listening, so it gets the
+// same line the local engines get.
+const muteHint = () => t(asrChosen && !listensWhileMuted() ? 'voiceMutedBrowser' : 'voiceMuted');
+
+/* The line under the unmute switch in the lightbulb, where it cannot be heard.
+   The plain entry is the one that cuts the mic; the entry that recognizes on
+   this device keeps listening, so it is offered as the way to have the word
+   back, but only where Chrome is new enough to show it (canLocalASR). */
+const unmuteDeadLine = () => t('cmdUnmuteBrowserOff')
+  + (canLocalASR ? ' ' + t('cmdUnmuteOnDevice', {local: t('engineBrowserLocal')}) : '');
 
 /* Show the word taken as a signal in the live transcript box, lit up as it is.
    Watching the very word you said take on color tells you what happened at a
@@ -3689,6 +3778,32 @@ const onDeviceMayAutoInstall = (local, chosen, status, refused, installing, disk
 const onDeviceMayStart = (local, status, refused) =>
   !local || (status === 'available' && !refused);
 
+/* Whether recognition keeps running while the mic is off.
+
+   On the plain browser entry it must not: the audio goes to Google, and the
+   whole meaning of muting is that it stops. Chrome's microphone is let go the
+   instant it mutes, which is also why the word cannot be heard there.
+
+   On the on-device entry nothing leaves this machine, so there is nothing to
+   stop. It keeps listening exactly as the local engines do, and for the same
+   one reason: so 「ミュート解除」 can still be heard. Everything else heard while
+   it is off is thrown away where it is heard (newRecognition's onresult), it
+   is never queued, never sent, never written down and never put on screen.
+   Chrome goes on showing its recording dot while that runs, the same as it
+   does for a local engine's own microphone, and the screen says muted
+   throughout so nobody reads that dot as being listened to. */
+const listensWhileMuted = () => asrChosen && onDeviceLocal;
+
+/* Whether a session should be open right now, and the pause flag that goes
+   with it. Everywhere that used to work this out from route === 'off' comes
+   through here, or the 5 second poll would put its own answer back a moment
+   later and cut the mic the on-device entry is supposed to keep. */
+function syncRecWanted() {
+  recWanted = asrChosen && (route !== 'off' || listensWhileMuted());
+  asrPausedByRoute = asrChosen && !recWanted;
+  return recWanted;
+}
+
 /* What Chrome says when processLocally is on and it has no model to use.
    Chromium says language-not-supported, the spec says service-not-allowed.
    Only the second is also what a refused microphone can look like, and only
@@ -4108,6 +4223,25 @@ function newRecognition(generation) {
 
   r.onresult = ev => {
     if (!mine()) return;
+    /* The mic is off and this session is still open, which only happens on the
+       on-device entry (listensWhileMuted). Everything heard here is dropped on
+       the spot: no interim painted, no clause queued, nothing sent, nothing
+       written and nothing left in the draft box. The settled text is looked at
+       once, for the one word that brings the mic back, and then it is gone.
+
+       Read off the session rather than off the setting, so the promise holds
+       whatever else moved: a session built for the plain entry cannot be the
+       one still listening here, and one that somehow is gets aborted instead
+       of heard, rather than quietly sending the audio to Google while the
+       screen says muted. */
+    if (route === 'off') {
+      if (r.processLocally !== true) { try { r.abort(); } catch {} return; }
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const res = ev.results[i];
+        if (res.isFinal) heardWhileMuted(toHalfWidth(stripInventedSpaces(res[0].transcript)));
+      }
+      return;
+    }
     let interim = '';
     for (let i = ev.resultIndex; i < ev.results.length; i++) {
       const res = ev.results[i];
@@ -4207,6 +4341,26 @@ function newRecognition(generation) {
   return r;
 }
 
+/* An utterance settled while the mic is off. Nothing is kept: it is asked the
+   one question the daemon asks in the same state (is this 「ミュート解除」), and
+   whatever the answer, the text goes no further than this function.
+
+   Coming back sounds and reads exactly as it does under a local engine: the
+   same rising chime, the same line, and the word that did it lit up in the
+   transcript box, so operating by ear tells you the same thing either way.
+   The switch itself goes through setRoute, which posts /api/mute, so the
+   daemon and every other screen come back with it. */
+function heardWhileMuted(text) {
+  if (route !== 'off' || inFlight) return;
+  const said = unmuteCommand(text, {multi: el.multiOn.checked,
+                                    names: machineNames(), fixup: withDict});
+  if (!said) return;
+  setRoute(lastMode);
+  chime('up');
+  say(t('voiceUnmuted'));
+  flashCommand(text.trim().slice(0, 60), 'live');
+}
+
 async function startRecognition() {
   // A start that gives up before recognition opens also ends the unattended
   // one after a reload (autoResumed). Left raised, a refusal much later, to
@@ -4237,7 +4391,11 @@ async function startRecognition() {
         return;
       }
     }
-    if (!await beat('listening') || generation !== recGeneration || !recWanted || route === 'off' || rec) {
+    // route === 'off' holds a start back, except where the mic is meant to stay
+    // open through the mute (listensWhileMuted). Chrome ends a session every 7
+    // to 10 seconds, so without that the first end would be the last one.
+    if (!await beat('listening') || generation !== recGeneration || !recWanted
+        || (route === 'off' && !listensWhileMuted()) || rec) {
       autoResumed = false;
       return;
     }
@@ -5265,8 +5423,7 @@ async function loadEngines() {
   const cur = d.chosen || BROWSER_ENGINE;
   chosenEngine = cur;
   asrChosen = canBrowserASR && cur === BROWSER_ENGINE;
-  asrPausedByRoute = asrChosen && route === 'off';
-  recWanted = asrChosen && !asrPausedByRoute;
+  syncRecWanted();
 
   // If another tab or a command switched it, follow along here too.
   // Without following, recognition runs twice over, our send gets rejected and
@@ -5316,8 +5473,10 @@ el.enginePick.onchange = async () => {
   try {
     if (pick === BROWSER_ENGINE) {
       asrChosen = true;
-      asrPausedByRoute = route === 'off';
-      recWanted = !asrPausedByRoute;
+      // onDeviceLocal has already moved above, so this answers for the entry
+      // being picked. Moving off the on-device entry while the mic is off puts
+      // recWanted down, and the restart below then only stops.
+      syncRecWanted();
       lastVoiceAt = performance.now();
       // Forced: a capture already open from the local engine's own device
       // pick (asr_mic.py's, read off el.mic) has to be rebuilt without one,
@@ -5414,6 +5573,12 @@ function followOnDeviceFlag() {
   // about the one being left
   onDeviceRefused = false;
   onDeviceProblem = '';
+  /* Whether a session belongs open at all has just changed with the entry,
+     while the mic is off: the on-device entry keeps one and the plain entry
+     keeps none. Worked out before the restart below, or moving to the plain
+     entry from another tab while muted would restart straight into a session
+     that sends to Google what the mute was about. */
+  syncRecWanted();
   // Unconditional, the same as the dropdown's own: a tab held off for a
   // missing model has no session open to close, and it is exactly that tab
   // that has to open one now that the plain entry is the one chosen.
@@ -6327,14 +6492,15 @@ function cmdGroupEl(g, mine, off, offWords) {
   use.append(useBox, track);
   head.append(use);
 
-  // This browser's own recognition cuts the mic the instant it mutes, so the
-  // word can never be heard here to begin with, unlike the daemon's mute
-  // (mic_command_shape keeps listening for it on purpose). Not the same
-  // thing as switched off, that is a choice made here and undone here. This
-  // is a fact of the engine currently running, so the switch itself is held
-  // still (whatever it was set to keeps its place for the next time an
-  // engine that can hear it is running) and only the line under it changes.
-  const deadHere = g.id === 'unmute' && asrChosen;
+  // The plain browser entry cuts the mic the instant it mutes, so the word
+  // can never be heard under that one to begin with, unlike the daemon's mute
+  // (mic_command_shape keeps listening for it on purpose) and unlike the
+  // on-device entry, which keeps listening because nothing leaves the machine.
+  // Not the same thing as switched off, that is a choice made here and undone
+  // here. This is a fact of the entry currently running, so the switch itself
+  // is held still (whatever it was set to keeps its place for the next time
+  // something that can hear it is running) and only the line under it changes.
+  const deadHere = g.id === 'unmute' && asrChosen && !onDeviceLocal;
   if (deadHere) useBox.disabled = true;
 
   const what = document.createElement('p');
@@ -6345,7 +6511,9 @@ function cmdGroupEl(g, mine, off, offWords) {
      on, and left with the old sentence above them they would read as still working.
      One line carries it. Nothing new is put up for it. */
   const paintUse = () => {
-    what.textContent = deadHere ? t('cmdUnmuteBrowserOff')
+    // The second sentence only where that entry exists at all (Chrome 139 and
+    // later). Pointing at something the picker does not show helps nobody.
+    what.textContent = deadHere ? unmuteDeadLine()
                        : useBox.checked ? t(base + 'What') : t('cmdOff');
     box.classList.toggle('off', !useBox.checked);
     box.classList.toggle('unavailable', deadHere);

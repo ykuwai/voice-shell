@@ -134,7 +134,7 @@ Willst du nur das eben Gesagte korrigieren, sag am Ende „das ändere ich“. D
 | Sprachbefehl | Aktion |
 |---|---|
 | „Stumm“, „Mikro aus“ | Schaltet das Mikrofon aus |
-| „Stummschaltung aufheben“, „Mikrofon an“ | Schaltet das Mikrofon wieder ein (nur bei lokaler Erkennung).<br>Bei der Browser-Erkennung klickst du stattdessen auf das Mikrofon im Fenster |
+| „Stummschaltung aufheben“, „Mikrofon an“ | Schaltet das Mikrofon wieder ein. Die lokale Erkennung hört es, und die Browser-Erkennung auch, wenn sie auf diesem Gerät läuft.<br>Bei der gewöhnlichen Browser-Erkennung klickst du stattdessen auf das Mikrofon im Fenster |
 | „Nummer zwei“, „Sitzung 2“ | Wechselt zu dieser Sitzung, wenn mehrere laufen |
 | „streich das“ am Ende | Verwirft das eben Gesagte |
 | „das ändere ich“ am Ende | Wechselt nur dafür vorübergehend in den Modus Prüfen |

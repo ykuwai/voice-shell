@@ -134,7 +134,7 @@ Pour corriger seulement ce que vous venez de dire, terminez par « je corrige »
 | Commande vocale | Action |
 |---|---|
 | « couper le micro » | Coupe le micro |
-| « réactiver le micro » | Réactive le micro (reconnaissance locale uniquement).<br>Avec la reconnaissance du navigateur, cliquez sur le micro à l'écran |
+| « réactiver le micro » | Réactive le micro. La reconnaissance locale l'entend, et celle du navigateur aussi quand elle tourne sur cet appareil.<br>Avec la reconnaissance ordinaire du navigateur, cliquez sur le micro à l'écran |
 | « session 2 », « numéro deux » | Change de destination quand plusieurs sessions sont ouvertes |
 | « annule ça » en fin de phrase | Annule ce que vous venez de dire |
 | « je corrige » en fin de phrase | Passe en mode Relecture juste pour cette phrase |

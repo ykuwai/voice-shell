@@ -134,7 +134,7 @@ To draft just the last thing you said, end it with "edit this". Voice Shell swit
 | Voice command | Action |
 |---|---|
 | "mute" | Turns the microphone off |
-| "unmute" | Turns the microphone back on (local recognizers only).<br>With browser recognition, click the on-screen microphone instead |
+| "unmute" | Turns the microphone back on. Heard by the local recognizers, and by browser recognition when it runs on this device.<br>With plain browser recognition, click the on-screen microphone instead |
 | "number two", "session 2" | Switches to that session when you have more than one |
 | "cancel that" at the end | Discards what you just said |
 | "edit this" at the end | Switches to Draft mode just for that |

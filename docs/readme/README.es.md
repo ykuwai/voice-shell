@@ -134,7 +134,7 @@ Para corregir solo lo último que has dicho, termina con «lo edito yo». Pasa a
 | Comando de voz | Acción |
 |---|---|
 | «silenciar» | Apaga el micrófono |
-| «quitar silencio» | Enciende el micrófono (solo con reconocimiento local).<br>Con el reconocimiento del navegador, pulsa el micrófono de la ventana |
+| «quitar silencio» | Enciende el micrófono. Lo oyen el reconocimiento local y el del navegador cuando funciona en este equipo.<br>Con el reconocimiento normal del navegador, pulsa el micrófono de la ventana |
 | «sesión 2», «número dos» | Cambia el destino a esa sesión cuando usas varias |
 | «cancela eso» al final | Descarta lo que acabas de decir |
 | «lo edito yo», «déjame editarlo» al final | Pasa al modo Revisar solo para esa frase |

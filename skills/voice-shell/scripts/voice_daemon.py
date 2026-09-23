@@ -817,8 +817,9 @@ def is_allowed_short(text: str, allow=()) -> bool:
 COMMAND_WORDS = {
     # Turn the mic off.
     # Recognition keeps running while it is off (it records but does not send), so
-    # the unmute command still gets through. Browser recognition lets go of the audio
-    # when it is turned off, so voice cannot bring it back.
+    # the unmute command still gets through. Browser recognition on this device does
+    # the same, in the page. Plain browser recognition lets go of the audio when it
+    # is turned off, so there voice cannot bring it back.
     "mute": {
         # The order is for the screen. Matching uses a set so order means nothing
         # there, but the list only shows the first few, so similar phrasings are not
