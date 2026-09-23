@@ -11,6 +11,7 @@
 #   voice-shell.sh codex-forward          send new utterances to this Codex App Server thread
 #   voice-shell.sh engines                the ways of recognizing on offer, and the last choice
 #   voice-shell.sh listeners              the sessions listening right now
+#   voice-shell.sh whoami                 which chip this session is (number and name)
 #   voice-shell.sh name "NAME"            give this session a display name
 #   voice-shell.sh whisper                recognize with Whisper (strong on proper nouns)
 #   voice-shell.sh apple                  run on the recognition that ships with macOS 26 (light)
@@ -515,6 +516,38 @@ case "$cmd" in
     if [ -n "$listeners_now" ]; then echo "$listeners_now"
     else echo "  none (the voice is reaching nowhere)"; fi
     ;;
+  whoami)
+    # Which chip this session is, so the agent can say it at startup.
+    #
+    # Not printed from `listen`. Everything listen writes goes through Monitor
+    # and is read as an utterance, so a plain line there would look like
+    # something the user said. Not printed from `start` either, because at that
+    # moment this session has not registered yet and has no place in the row.
+    # Asked for on its own, once the watch is up, which also makes it something
+    # the user can ask for again later.
+    #
+    # The registration is written a moment after Monitor starts the watch, so
+    # wait a little rather than tell a session that is about to be listening
+    # that it is not.
+    found=""
+    for _ in $(seq 1 20); do          # up to 10 seconds
+      found="$("$PY" "$APP" --whoami 2>/dev/null || true)"
+      [[ -n "$found" ]] && break
+      sleep 0.5
+    done
+    if [[ -z "$found" ]]; then
+      echo "This session has no chip yet. Start listening first, with voice-shell.sh listen" >&2
+      exit 1
+    fi
+    # Only the facts. The wording the user hears is the agent's to write, in
+    # whatever language the conversation is in, so nothing is translated here.
+    IFS=$'\t' read -r _no _label _total <<< "$found"
+    echo "  number  $_no"
+    echo "  name    $_label"
+    echo "  It is the number as things stand right now, out of $_total listening."
+    echo "  It changes as other sessions start listening and stop."
+    echo "  Tell the user the number and the name in the language they are using."
+    ;;
   codex-forward)
     if [[ -z "${CODEX_THREAD_ID:-}" ]]; then
       echo "codex-forward needs CODEX_THREAD_ID from a Codex CLI or App Server thread." >&2
@@ -976,7 +1009,7 @@ except Exception:
     ;;
   *)
     echo "Usage is voice-shell.sh {start [--engine X] [--no-gui]|stop|status|engines}" >&2
-    echo "        voice-shell.sh {listen|codex-forward|listeners|name|hold|live|log-path|wait-ready|viewer}" >&2
+    echo "        voice-shell.sh {listen|codex-forward|listeners|whoami|name|hold|live|log-path|wait-ready|viewer}" >&2
     echo "        voice-shell.sh {apple|whisper}" >&2
     exit 1
     ;;
