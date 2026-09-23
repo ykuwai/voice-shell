@@ -162,6 +162,20 @@ picked last time (`~/.config/voice-shell/config.json`), and the first time it is
    chip and any hold on the destination go right away instead of lingering
    for the two minutes kept for a re-arm.
 
+   Forgetting that no longer strands anyone. `listen` watches the shell the
+   watch runs it in and ends with it, so a watch that is stopped or hits its
+   deadline takes the listen with it on Windows too (it used to keep running
+   there, still registered, still the destination, reading nothing, and what
+   was said next was lost). Past the two minutes the chip stays in the row
+   for a week, drawn as unusable and pushed to the end so the live ones
+   keep their numbers. Nothing is routed to it, and pressing it says to type
+   `/voice-shell` in that session to start it again. Start listening again in
+   that same session while its chip is still one of these and it takes that
+   chip back rather than arriving as a stranger, so a machine left alone over
+   a long weekend picks up where it was. Only the five most recent are kept,
+   so the row stays short however long it runs, and the sixth comes back as a
+   new arrival.
+
 **Keep only one Monitor of your own.** Re-arming on a deadline or "source
 ended" notification (above) is always safe on its own. Re-attaching for some
 other reason, compacting included, when the old one might still actually be

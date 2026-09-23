@@ -2188,7 +2188,9 @@ def apply_voice_command(text: str, log_path, muted: bool, user_dict=None):
     if n:
         live = list_active_listeners(log_path)
         if sum(1 for e in live if not e.get("away")) > 1:
-            if 1 <= n <= len(live):
+            # A gone one keeps its number so the row does not renumber under
+            # the person mid-sentence, but saying that number cannot pick it.
+            if 1 <= n <= len(live) and not live[n - 1].get("gone"):
                 write_atomic(route_file(log_path), str(live[n - 1]["pid"]))
                 note_voice_cmd(log_path, "route",
                                f"{n}. {live[n - 1]['label']}", text)
@@ -2464,7 +2466,17 @@ def resolve_target(log_path):
     live = list_active_listeners(log_path)
     if not live:
         return None
-    present = [e for e in live if not e.get("away")] or live
+    present = [e for e in live if not e.get("away")]
+    if not present:
+        # Nothing here is listening. One only away is still worth choosing,
+        # its next watch replays what it missed. One gone is not: it is past
+        # the hold, nobody is coming back for it, and naming it would tag the
+        # line to a listen no one reads, which is how an utterance was lost
+        # outright (#110). Nobody named means every listener drops the line,
+        # the same as it has always meant.
+        present = [e for e in live if not e.get("gone")]
+    if not present:
+        return None
     return str(max(present, key=_order_of)["pid"])
 
 
@@ -2598,9 +2610,16 @@ def label_listeners(entries):
     for a while and comes back does not keep a claim on wherever it used to sit,
     it lines up as of this moment instead (#74).
     """
+    # A gone one is sorted to the end whatever its own order was. It keeps a
+    # number so it can still be talked about, but it must not hold one a
+    # session that is really listening should have, and the live numbers must
+    # not shift as one drops out of the row hours later. One only away keeps
+    # its place, which is the whole point of holding it (its next watch takes
+    # the same number back).
     # When the times tie, the PID decides. Leave this undecided and the numbers swap
     # around with the order the registration files get read (left to the OS).
-    entries = sorted(entries, key=lambda e: (_order_of(e), e.get("pid", 0)))
+    entries = sorted(entries, key=lambda e: (1 if e.get("gone") else 0,
+                                             _order_of(e), e.get("pid", 0)))
     seen = {}
     for e in entries:
         hand = custom_name(e)
@@ -2652,6 +2671,29 @@ AWAY_HOLD = 120
 # How long its tombstone can still be adopted. A re-arm that comes later than
 # AWAY_HOLD (the agent was busy) still gets its old place in the row back.
 LEAVE_GRACE = 600
+# How long one that is gone stays in the row after that, greyed out, unusable
+# and saying how to start it again. It is not a destination while it sits
+# there: nothing is routed to it and it cannot be chosen. It stays so that
+# coming back to the machine shows what happened rather than an empty row, and
+# so that the same session can pick its entry back up (ADOPT_GRACE below).
+# A week, because a machine left alone over a long weekend is the ordinary
+# case, not the strange one, and half a day meant a session that was still
+# perfectly resumable had dropped out of sight by the time anyone looked
+# (measured on a Mac mini left for three days). GONE_KEEP is what keeps the
+# row short, not this.
+GONE_SHOW = 7 * 24 * 3600
+# How long the same session id can still take its own entry back. The same
+# stretch, since an entry that is no longer on disk cannot be adopted anyway.
+# Safe to make this long because the tombstone is filed under the session id
+# itself, so only that same conversation can ever reach it, never a neighbour
+# and never a reused PID. What it does not carry over past LEAVE_GRACE is the
+# old place in the row and the replay of what was said in between: see
+# adopt_tombstone.
+ADOPT_GRACE = GONE_SHOW
+# And no more than this many of them at once, the most recent first. The row
+# has to stay readable, and past a few the older ones say nothing the newest
+# does not.
+GONE_KEEP = 5
 
 
 def gone_dir(log_path):
@@ -2785,13 +2827,33 @@ def adopt_tombstone(log_path, session):
         if data.get("disconnected") and time.time() - data["stopped"] < LEAVE_GRACE:
             return "blocked"
         return None
-    if "left" not in data or time.time() - data["left"] > LEAVE_GRACE:
+    if "left" not in data:
         return None
+    gap = time.time() - data["left"]
+    if gap > ADOPT_GRACE:
+        return None
+    # Past LEAVE_GRACE this is no longer a re-arm between two watches, it is the
+    # same conversation coming back after a while (a machine left alone for
+    # days, #110). It still takes its own entry back, so the chip does not
+    # double up and the session is one thing on screen from beginning to end.
+    # Two things it does not take back:
+    stale = gap > LEAVE_GRACE
     offset = int(data.get("offset") or 0)
-    if data.get("epoch", "-") != (log_epoch(log_path) or "-"):
-        offset = ""                 # the log was emptied since, start at its end
-    return {"pid": data.get("pid", ""), "order": _order_of(data.get("reg") or {}),
-            "offset": offset}
+    if stale or data.get("epoch", "-") != (log_epoch(log_path) or "-"):
+        # What was said in between. Nothing has been addressed to it since it
+        # went (resolve_target stops naming one that is gone), and reading days
+        # of log back at once would bury whatever is said next. Start at the
+        # end of the log as it stands, the same as the log having been emptied.
+        offset = ""
+    # And the old place in the row. While it is gone the chip sits at the end
+    # (label_listeners), so coming back to an order from days ago would jump it
+    # to the front and renumber every live one under the person. It lines up as
+    # of this moment instead, which is where it already was on screen (#74).
+    # "-" rather than an empty field: the three values are read back as words,
+    # so a blank one in the middle would be swallowed and the offset read as
+    # the order. voice-shell.sh falls back to now for anything unreadable.
+    order = "-" if stale else _order_of(data.get("reg") or {})
+    return {"pid": data.get("pid", ""), "order": order, "offset": offset}
 
 
 def _departed_pids(log_path):
@@ -2831,8 +2893,15 @@ def forget_tombstone(log_path, session):
             pass
 
 
-def _tombstones(log_path):
-    """Fresh tombstones, clearing the expired ones along the way."""
+def _tombstones(log_path, include_departed=False):
+    """Fresh tombstones, clearing the expired ones along the way.
+
+    include_departed also hands back the ones past AWAY_HOLD, marked
+    "departed". Those keep no claim on anything: nothing is routed to them and
+    no re-arm is waited on. They come back only so the row can go on showing
+    the session and say plainly that it is not listening (#110), instead of
+    the chip quietly vanishing while the person is still looking at it.
+    """
     d = gone_dir(log_path)
     if not d.is_dir():
         return []
@@ -2850,15 +2919,36 @@ def _tombstones(log_path):
                 pass
             continue
         data = _read_json(f) or {}
-        at = data.get("left", data.get("stopped", 0))
-        if not data or now - at > LEAVE_GRACE:
+        if "left" not in data:
+            # Stopped on purpose, or unreadable. Nothing is kept for it beyond
+            # long enough to turn away the one re-arm a disconnect causes.
+            if not data or now - data.get("stopped", 0) > LEAVE_GRACE:
+                try:
+                    f.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            continue
+        since = now - data["left"]
+        if since > GONE_SHOW:
             try:
                 f.unlink(missing_ok=True)
             except OSError:
                 pass
             continue
-        if "left" in data and now - data["left"] <= AWAY_HOLD:
+        if since <= AWAY_HOLD:
             out.append(data)
+        elif include_departed:
+            out.append(dict(data, departed=True))
+    # Only the most recent few of the gone ones. The rest go for good rather
+    # than sit in the folder unseen until GONE_SHOW runs out.
+    departed = sorted((e for e in out if e.get("departed")),
+                      key=lambda e: e["left"], reverse=True)
+    for stale in departed[GONE_KEEP:]:
+        out.remove(stale)
+        try:
+            _gone_file(log_path, stale.get("session")).unlink(missing_ok=True)
+        except OSError:
+            pass
     return out
 
 
@@ -3022,12 +3112,19 @@ def list_active_listeners(log_path):
     # Sessions between two watches keep their chip and their number.
     present = {info.get("session") for info in deduped if info.get("session")}
     present_pids = {str(info.get("pid")) for info in deduped}
-    for tomb in _tombstones(log_path):
+    for tomb in _tombstones(log_path, include_departed=True):
         if tomb.get("session") in present or str(tomb.get("pid")) in present_pids:
             continue
         info = dict(tomb.get("reg") or {})
         info["pid"] = tomb.get("pid")
         info["away"] = True
+        # Past AWAY_HOLD nothing is waiting for it any more. It still has a
+        # tombstone to adopt if that session ever listens again, but as things
+        # stand it cannot be used: no utterance goes to it and choosing it does
+        # nothing. Said plainly on screen rather than left to look merely faded
+        # (#110, an ended session sat there lit and swallowed what was said).
+        if tomb.get("departed"):
+            info["gone"] = True
         info.setdefault("cwd", "unknown")
         info.setdefault("started", "unknown")
         info.setdefault("since", tomb.get("left", 0))
@@ -3147,6 +3244,12 @@ def main():
         mine = my_session_id()
         for l in list_active_listeners(args.log_file):
             mark = "  <- this session" if mine and l.get("session") == mine else ""
+            # Printed the same as a live one, an ended session read as one
+            # still listening, and speech kept being aimed at it (#110).
+            if l.get("gone"):
+                mark = "  <- not listening, cannot be used" + mark
+            elif l.get("away"):
+                mark = "  <- between two watches" + mark
             print(f"  {l['label']}  (PID {l['pid']}){mark}")
             print(f"    started at  {l['started']}")
             print(f"    folder      {l['cwd']}")
@@ -3407,7 +3510,8 @@ def main():
         last_count = None
         while True:
             time.sleep(5)
-            count = len(list_active_listeners(log_path))
+            count = sum(1 for e in list_active_listeners(log_path)
+                        if not e.get("gone"))
             # With a target chosen, nothing arrives twice even with several
             # listening. That is the intended way to use it, so stay quiet.
             # With a target settled nothing arrives twice (the default settles one too)

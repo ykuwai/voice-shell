@@ -1107,7 +1107,9 @@ function openPickMenu(anchor, items, currentKey, onPick, heading, onDisconnect) 
 /* The numbers are the ones said out loud (「2番に切り替え」). The chips, the
    chip menu and the roll-up picker all have to count them the same way. */
 const listenerItems = () =>
-  knownListeners.map((l, i) => ({key: String(l.pid), label: `${i + 1}. ${l.label}`, name: l.label}));
+  knownListeners.map((l, i) => ({key: String(l.pid), label: `${i + 1}. ${l.label}`,
+                                 name: l.label, gone: !!l.gone}))
+                .filter(i => !i.gone);
 
 // The chip on a sent card. Picking another name sends the same text there.
 // The chip is rebuilt right away rather than left for the five second poll,
@@ -3093,6 +3095,15 @@ function onKey(e) {
     const no = Number(digit[1]);
     const pickTo = knownListeners[no - 1];
     if (!pickTo) { chime('err'); say(t('voiceRouteMissing', {n: no})); return; }
+    /* One that is gone keeps its number, so the key is still pressed at it.
+       setRoute2 turns it down and says why, and the ack below would paint
+       over that with "now going there" for a place nothing can reach (#110).
+       So the answer is given here and the ack skipped. */
+    if (pickTo.gone) {
+      chime('err');
+      say(t('listenerGoneHow', {name: pickTo.label}), 9);
+      return;
+    }
     setRoute2(String(pickTo.pid));
     chime('ok');
     say(t('voiceRoute', {name: pickTo.label}));
@@ -4644,7 +4655,12 @@ function paintRoutes() {
     const b = document.createElement('button');
     // Between two watches (a Monitor deadline): it keeps its number and its
     // place as destination, shown faded until its next watch picks it up.
-    b.className = 'route-chip' + (on ? ' on' : '') + (l.away ? ' away' : '');
+    // Away is a session between two watches, faded and coming back on its
+    // own. Gone is one whose listen ended and is not coming back by itself:
+    // it keeps its place and its number so the row does not shuffle under the
+    // person, and says outright that it cannot be used (#110).
+    b.className = 'route-chip' + (on ? ' on' : '') + (l.away ? ' away' : '')
+                + (l.gone ? ' gone' : '');
     b.dataset.pid = String(l.pid);
     // The number is the same one used in the spoken signal (「2番」). Even when
     // a narrow window folds the name away, this part always stays.
@@ -4655,8 +4671,10 @@ function paintRoutes() {
     nm.className = 'nm';
     nm.textContent = l.label;
     b.append(no, nm);
-    b.title = [`${l.no}. ${l.label}`, l.away ? t('listenerAway') : '', l.cwd || '',
-               t('renameHint')].filter(Boolean).join('\n');
+    b.title = [`${l.no}. ${l.label}`,
+               l.gone ? t('listenerGone') : l.away ? t('listenerAway') : '',
+               l.cwd || '', t('renameHint')].filter(Boolean).join('\n');
+    if (l.gone) b.setAttribute('aria-disabled', 'true');
 
     /* Double click the chip to change its name. A long press does the same, for
        screens where a double tap is either awkward or already spoken for by the
@@ -4844,6 +4862,19 @@ el.routePick.onclick = () =>
     });
 
 async function setRoute2(to) {
+  /* One whose listen is gone stays in the row, numbered, so the person can
+     still see it was there. Nothing reads it, so it cannot be where speech
+     goes. Say why rather than let the fill move and the words disappear
+     (#110). The server refuses this one too. */
+  const gone = knownListeners.find(l => String(l.pid) === to && l.gone);
+  if (gone) {
+    // Pressing it is how someone asks "why can I not use this one". Answer
+    // with what to do about it, in the same status line every other notice
+    // on this screen uses, and give it longer to be read than a plain ack.
+    chime('err');
+    say(t('listenerGoneHow', {name: gone.label}), 9);
+    return;
+  }
   routeTo = to;
   markChosen();
   try { await putJSON('/api/route', {to}); } catch {}
@@ -4861,13 +4892,18 @@ async function loadListeners() {
   knownListeners.forEach(l => routeNames.set(String(l.pid), l.label));
   relabelEntries();
   effectiveTo = d.target || '';
-  const live = new Set(knownListeners.map(l => String(l.pid)));
+  // One that is gone is still in the row, so counting it as alive here would
+  // let the destination move out from under the person without a word, which
+  // is the very thing this notice exists to stop (#110). Only the ones that
+  // can actually be reached count.
+  const usable = knownListeners.filter(l => !l.gone);
+  const live = new Set(usable.map(l => String(l.pid)));
 
   // If where it was going has ended, move to a session that is still alive and
   // say so. Left hanging silently, you talk and never notice nothing arrives.
   if (routeTo && !live.has(routeTo)) {
     const gone = before.find(l => String(l.pid) === routeTo);
-    const next = knownListeners[knownListeners.length - 1];
+    const next = usable[usable.length - 1];
     routeTo = '';                       // back to nothing chosen, and leave it to the server's default
     await putJSON('/api/route', {to: ''}).catch(() => {});
     el.note.textContent = next

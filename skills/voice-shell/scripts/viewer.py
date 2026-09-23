@@ -1222,15 +1222,21 @@ async def main_async(args):
     async def handle_listeners(_req):
         """The sessions listening right now, and the destination that is picked."""
         import voice_daemon as vd
+        # Asked before the route file is read. resolve_target is what lets go of
+        # a pick whose listen is gone, and reading the file first showed that
+        # PID as picked for one more poll, so the chip came up lit while
+        # already saying it could not be used.
+        listeners = vd.list_active_listeners(args.log_file)
+        target = vd.resolve_target(args.log_file) or ""
         try:
             chosen = route_path.read_text(encoding="utf-8").strip()
         except OSError:
             chosen = ""
         return web.json_response({
-            "listeners": vd.list_active_listeners(args.log_file),
+            "listeners": listeners,
             "route": chosen,                                  # the one that is picked
             # Where it actually lands. With nothing picked, the later start wins.
-            "target": vd.resolve_target(args.log_file) or "",
+            "target": target,
         })
 
     async def handle_ondevice(req):
@@ -1318,8 +1324,16 @@ async def main_async(args):
 
     async def handle_route(req):
         """Pick the destination. Empty means everyone."""
+        import voice_daemon as vd
         body = await req.json()
         to = str(body.get("to") or "").strip()
+        # A session whose listen is gone is still in the row, so it can still
+        # be asked for. Nothing reads it, so choosing it would only hide where
+        # speech really goes, which is how one was lost (#110). Refused here
+        # rather than on the page alone, since the page is not the only caller.
+        if to and any(str(l.get("pid")) == to and l.get("gone")
+                      for l in vd.list_active_listeners(args.log_file)):
+            return web.json_response({"error": "gone"}, status=409)
         # Write under another name first, then replace. If the daemon reads
         # between the truncate and the write it gets a chopped PID, and one
         # utterance goes to somebody else.
