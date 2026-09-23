@@ -1378,9 +1378,10 @@ async def main_async(args):
         user_dict = vd.load_dictionary()
 
         # Voice-only signals. They go through the same function as the daemon,
-        # so they bite the same however recognition is done (browser recognition
-        # lets go of the audio itself when cut, though, so 「ミュート解除」 after
-        # a cut is the one thing it cannot hear).
+        # so they bite the same however recognition is done (the plain browser
+        # entry lets go of the audio itself when cut, though, so 「ミュート解除」
+        # after a cut is the one thing it cannot hear; on-device browser
+        # recognition keeps listening and answers that one itself, in the page).
         kind = vd.apply_voice_command(text, args.log_file,
                                       mute_file.exists(), user_dict)
         if kind:

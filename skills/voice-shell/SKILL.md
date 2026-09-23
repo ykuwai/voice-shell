@@ -326,9 +326,11 @@ ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh viewer-stop
 The user can drive the viewer by voice ("mute", "unmute", "draft", "instant",
 "switch to 2", and "cancel that" / "edit this" at the end of a sentence) and by
 keyboard. A command counts only as a whole utterance, never inside a sentence,
-and a wording switched off in the lightbulb never fires. Browser recognition
-cannot hear "unmute" (muting releases the audio), so the user turns it back on
-from the screen. The exact matching rules, custom wordings, several machines and
+and a wording switched off in the lightbulb never fires. Plain browser
+recognition cannot hear "unmute" (muting releases the audio), so the user
+turns it back on from the screen. Browser recognition on this device keeps
+listening while muted, throws everything it hears there away and acts only on
+"unmute". The exact matching rules, custom wordings, several machines and
 the key map are in [REFERENCE.md](REFERENCE.md); read it when the user asks
 about commands or one misfires.
 
