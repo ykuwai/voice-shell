@@ -218,7 +218,9 @@ const pureFrom = source.indexOf("// Full-width Latin letters and digits");
 const pureTo = source.indexOf("\n/* Whether what has been heard so far", pureFrom);
 const recFrom = source.indexOf('function newRecognition(generation)');
 const recTo = source.indexOf('\n// When it can no longer be used', recFrom);
-if ([pureFrom, pureTo, recFrom, recTo].some(i => i < 0)) process.exit(2);
+const sideFrom = source.indexOf('function applyRouteSideEffects(next)');
+const sideTo = source.indexOf('\n/* The floating window is a separate document', sideFrom);
+if ([pureFrom, pureTo, recFrom, recTo, sideFrom, sideTo].some(i => i < 0)) process.exit(2);
 const pure = source.slice(pureFrom, pureTo)
   .replace(/async function loadTailWords[\s\S]*?\n}\n/, '');
 const make = new Function('SR', 'env', `
@@ -261,9 +263,21 @@ const make = new Function('SR', 'env', `
   const flashCommand = (s, k) => { env.flashed.push([s, k]); };
   const t = k => k;
   const listensWhileMuted = () => asrChosen && onDeviceLocal;
+  let interimThrottleTimer = null, vizArmed = false;
+  const resetBrowserGesture = () => {};
+  const startViz = () => {};
+  const syncVizCapture = () => {};
+  const paintBrowserAsr = () => {};
   ${source.slice(recFrom, recTo)}
+  ${source.slice(sideFrom, sideTo)}
   return {make: () => { rec = newRecognition(0); return rec; },
-          stream: () => el.stream.textContent};
+          stream: () => el.stream.textContent,
+          mute: () => { route = 'off'; applyRouteSideEffects('off'); },
+          held: () => ({recWanted, live: !!rec, timer: interimThrottleTimer}),
+          paintedAs: v => {
+            el.stream.textContent = v;
+            interimThrottleTimer = setTimeout(() => { el.stream.textContent = v; }, 1000);
+          }};
 `);
 class FakeRecognition {
   constructor() { this.aborted = false; }
@@ -328,6 +342,24 @@ const r = h.make();
 r.onresult(finals(['認証まわりを直して', 'ミュート解除']));
 assert(r.aborted === true, 'the session is aborted');
 assert(env.sent.length === 0 && env.routes.length === 0, 'and nothing it heard is acted on');
+""")
+
+    def test_muting_takes_what_was_on_screen_with_it(self):
+        # Folding the session up was what used to clear the box. It is not
+        # folded up any more, so the last words heard before the mute would sit
+        # there under a screen that says muted, and a throttled paint still
+        # waiting its turn would put them back a moment later.
+        self.run_heard(r"""
+const env = freshEnv({route: 'live'});
+const h = make(FakeRecognition, env);
+h.make();
+h.paintedAs('\u8a8d\u8a3c\u307e\u308f\u308a\u3092');
+assert(h.stream() !== '', 'something was on screen');
+h.mute();
+assert(h.stream() === '', 'the mute took it with it');
+assert(h.held().timer === null, 'and the paint waiting its turn was dropped');
+assert(h.held().recWanted === true && h.held().live === true,
+       'while the session itself stays open');
 """)
 
     def test_with_the_mic_on_everything_goes_through_as_before(self):

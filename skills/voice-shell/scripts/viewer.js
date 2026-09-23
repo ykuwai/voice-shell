@@ -2024,6 +2024,17 @@ function applyRouteSideEffects(next) {
     // Except on the on-device entry, where there is no audio going anywhere to
     // let go of and the word that brings it back has to stay audible.
     if (recWanted && !listensWhileMuted()) { asrPausedByRoute = true; stopRecognition(); }
+    // The session stays there, so nothing clears what was on screen when the
+    // mute landed. Folding the session up was what did it before, and left to
+    // itself the last thing heard sits in the box under a screen that says
+    // muted. A throttled paint already waiting its turn is dropped with it
+    // (paintInterimThrottled), or it would fire a moment later and put those
+    // same words back.
+    else if (recWanted) {
+      if (interimThrottleTimer) { clearTimeout(interimThrottleTimer); interimThrottleTimer = null; }
+      latestInterimForPaint = lastInterimHeard = '';
+      el.stream.textContent = browserStreamText();
+    }
   } else {
     resetBrowserGesture();
     // Coming back from off (by hand or by voice) always counts as a voice just
