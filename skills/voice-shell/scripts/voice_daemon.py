@@ -3434,7 +3434,7 @@ def main():
         found = whoami_of(args.log_file, my_session_id())
         if not found:
             sys.exit(1)
-        print(f"{found['no']}\t{found['label']}\t{found['total']}"
+        print(f"{found['no']}\t{found['label']}\t{found['total']}"
               f"\t{found['state']}")
         return
 
