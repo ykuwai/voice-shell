@@ -1255,7 +1255,11 @@ function paint() {
            t(off ? 'statusOff' : shown === 'hold' ? 'statusHold' : 'statusLive'));
   if (!oneShot && performance.now() > hintHoldUntil) {
     el.hint.textContent = armPending ? t('hintArm')
-      : !off && onDeviceHeld() ? t('onDeviceHold')
+      // Muted as well, not only while listening. On the on-device entry a model
+      // that goes away while the mic is off takes the spoken way back with it,
+      // and left saying only that nothing is recorded, the screen keeps the
+      // promise muteHint made a moment earlier long after it stopped holding.
+      : onDeviceHeld() ? t('onDeviceHold')
       : t(off ? 'hintOff' : shown === 'hold' ? 'hintHold' : 'hintLive');
   }
   // While you are working elsewhere, the tab title is the only cue left
@@ -2079,7 +2083,15 @@ function say(text, sec = 6) {
 // which keeps listening for the word on purpose), so under that one the only
 // way back is the button. The on-device entry keeps listening, so it gets the
 // same line the local engines get.
-const muteHint = () => t(asrChosen && !listensWhileMuted() ? 'voiceMutedBrowser' : 'voiceMuted');
+// Held off for a model that is not there (onDeviceHeld), the on-device entry
+// has no session open either, so the word cannot be heard through it after
+// all and the button is the only way back. Said at the moment of muting, this
+// line is the one thing the person carries into a stretch they are not
+// watching the screen for, so it has to be true of right now, not of the
+// entry in the dropdown.
+const muteHint = () =>
+  t(asrChosen && !(listensWhileMuted() && !onDeviceHeld())
+    ? 'voiceMutedBrowser' : 'voiceMuted');
 
 /* The line under the unmute switch in the lightbulb, where it cannot be heard.
    The plain entry is the one that cuts the mic; the entry that recognizes on

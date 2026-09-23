@@ -423,10 +423,23 @@ class MutedSessionWiringTest(unittest.TestCase):
             self.assertNotIn(leak, muted)
 
     def test_the_screen_says_what_is_true_of_the_entry_in_use(self):
-        self.assertIn("t(asrChosen && !listensWhileMuted() ? 'voiceMutedBrowser' : 'voiceMuted')",
+        self.assertIn("t(asrChosen && !(listensWhileMuted() && !onDeviceHeld())",
                       self.src)
         self.assertIn("const deadHere = g.id === 'unmute' && asrChosen && !onDeviceLocal;",
                       self.src)
+
+    def test_a_model_that_is_not_there_is_said_while_muted_too(self):
+        """The entry is picked but nothing can run under it.
+
+        Muting there releases nothing, because there was no session to release,
+        and the word cannot be heard. The line said at the moment of muting has
+        to point at the button, and the standing line under a muted screen has to
+        go on saying why, or the promise outlives the thing that kept it.
+        """
+        hint = self.src.split("if (!oneShot && performance.now() > hintHoldUntil)", 1)[1]
+        hint = hint.split("}", 1)[0]
+        self.assertIn(": onDeviceHeld() ? t('onDeviceHold')", hint)
+        self.assertNotIn("!off && onDeviceHeld()", hint)
 
 
 class WordingTest(unittest.TestCase):
