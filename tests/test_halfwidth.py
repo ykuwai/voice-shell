@@ -41,6 +41,25 @@ def run(script):
     subprocess.run(["node", "-e", HARNESS + script, str(VIEWER_JS)], check=True)
 
 
+# foldChars sits below the tail tables, so it needs the wider slice the switch-off
+# test cuts. loadTailWords goes out with it, since it would reach for fetch.
+HARNESS_FOLD = r"""
+const fs = require('fs');
+const source = fs.readFileSync(process.argv[1], 'utf8');
+const start = source.indexOf('// Full-width Latin letters and digits');
+const end = source.indexOf('function endsWithTailCmd', start);
+if (start < 0 || end < 0) process.exit(2);
+const body = source.slice(start, end).replace(/async function loadTailWords[\s\S]*?\n}\n/, '');
+const h = new Function(`${body}
+  return {toHalfWidth, foldChars, cmdKey, cmdNormal: null};`)();
+const assert = (cond, what) => { if (!cond) { console.error(what); process.exit(1); } };
+"""
+
+
+def run_fold(script):
+    subprocess.run(["node", "-e", HARNESS_FOLD + script, str(VIEWER_JS)], check=True)
+
+
 class ToHalfWidthTest(unittest.TestCase):
     def test_latin_letters_and_digits_fold(self):
         self.assertEqual(to_halfwidth("ＰＲを２０２６年に出す"), "PRを2026年に出す")
@@ -62,6 +81,12 @@ class ToHalfWidthTest(unittest.TestCase):
         self.assertEqual(to_halfwidth("ｶﾞｷﾞ ﾊﾟ"), "ガギ パ")
         self.assertEqual(to_halfwidth("ｺｰﾋｰ"), "コーヒー")
 
+    def test_folding_twice_changes_nothing(self):
+        # The browser road folds on the page and again in /api/asr. Both ends
+        # only agree because the second fold is a no-op.
+        for s in ["ＰＲを２０２６年に", "ｶﾞｷﾞ ﾊﾟ", "これは「PR」です。ー〜", "　"]:
+            self.assertEqual(to_halfwidth(to_halfwidth(s)), to_halfwidth(s), s)
+
     def test_it_changes_nothing_in_plain_text(self):
         for s in ["git push origin main", "これでお願いします。", ""]:
             self.assertEqual(to_halfwidth(s), s, s)
@@ -79,6 +104,21 @@ class FoldedTextFlowsOnTest(unittest.TestCase):
     def test_the_tail_match_folds_the_same_way(self):
         from voice_daemon import _folded_chars
         self.assertEqual("".join(f for f, _ in _folded_chars("ＲＯＵＴｅ２")), "route2")
+
+    def test_a_dakuten_written_half_width_folds_as_one_letter(self):
+        """_folded_chars has to land on the same string command_key does.
+
+        The dakuten is a character of its own half-width, so folded one character
+        at a time 「ｺﾞｰ」 came out as コ+゛ where command_key says ゴー, and the tail
+        stopped matching. Where each folded character came from still points at the
+        base, so the cut takes the whole pair off.
+        """
+        from voice_daemon import _folded_chars
+        for s in ["ｺﾞｰ", "ｶﾞｷﾞ", "ﾊﾟｿｺﾝ", "ﾐｭｰﾄ", "ｺﾚ｡"]:
+            self.assertEqual("".join(f for f, _ in _folded_chars(s)),
+                             command_key(s), s)
+        from voice_daemon import take_tail_word
+        self.assertEqual(take_tail_word("これをｺﾞｰ", ["ゴー"]), ("これを", "ゴー"))
 
     def test_an_acronym_read_out_letter_by_letter_folds_then_collapses(self):
         self.assertEqual(collapse_letter_acronyms(to_halfwidth("Ｇ Ｐ Ｕ")), "GPU")
@@ -128,6 +168,44 @@ class OrderTest(unittest.TestCase):
         self.assertLess(fold, src.index("len(text) < int(min_chars)"))
         self.assertLess(fold, src.index("polished = vd.polish(text, user_dict"))
 
+    def test_voice_daemon_is_imported_above_its_first_use(self):
+        """viewer.py imports voice_daemon inside each handler, and a name imported
+        anywhere in a function is local to the whole of it. Use it above the import
+        and the line reads an unbound local, so the handler raises on every call
+        instead of doing its work. The fold is the first thing /api/asr does, which
+        is exactly where that bit.
+        """
+        import ast
+        tree = ast.parse(VIEWER_PY.read_text(encoding="utf-8"))
+
+        def own_nodes(fn):
+            """Every node of that function's own scope, nested defs left out."""
+            stack, out = list(fn.body), []
+            while stack:
+                node = stack.pop()
+                out.append(node)
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                     ast.Lambda)):
+                    continue
+                stack.extend(ast.iter_child_nodes(node))
+            return out
+
+        bad = []
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            nodes = own_nodes(fn)
+            lines = [n.lineno for n in nodes if isinstance(n, ast.Import)
+                     and any(a.asname == "vd" for a in n.names)]
+            if not lines:
+                continue
+            first = min(lines)
+            bad += [f"{fn.name}: vd used at line {n.lineno}, imported at {first}"
+                    for n in nodes
+                    if isinstance(n, ast.Name) and n.id == "vd"
+                    and isinstance(n.ctx, ast.Load) and n.lineno < first]
+        self.assertEqual(bad, [])
+
 
 class ViewerJsTest(unittest.TestCase):
     def test_to_half_width_matches_the_python_one(self):
@@ -140,13 +218,37 @@ assert(h.toHalfWidth('ｶﾞｷﾞ ﾊﾟ') === 'ガギ パ', 'half-width kana c
 assert(h.toHalfWidth('git push') === 'git push', 'plain text untouched');
 """)
 
+    def test_fold_chars_lands_on_the_same_string_cmd_key_does(self):
+        run_fold(r"""
+const j = s => h.foldChars(s).chars.join('');
+assert(j('ＲＯＵＴｅ２') === 'route2', 'letters and digits');
+assert(j('ｺﾞｰ') === 'ゴー', 'a half-width dakuten composes: ' + j('ｺﾞｰ'));
+assert(j('ﾊﾟｿｺﾝ') === 'パソコン', 'handakuten');
+assert(j('ｺﾚ｡') === 'コレ', 'a half-width 。 drops the way it does folded');
+// where each folded character came from still points at the base it was read on
+const f = h.foldChars('これをｺﾞｰ');
+assert(f.at[f.chars.indexOf('ゴ')] === 3, 'the cut lands on the base: ' + f.at.join(','));
+""")
+
+    def test_the_space_between_two_folded_words_survives(self):
+        # stripInventedSpaces only eats a space between two non-ASCII characters.
+        # Folded after it instead of before, 「ＰＲ ｔｅｓｔ」 went out as PRtest.
+        src = VIEWER_JS.read_text(encoding="utf-8")
+        self.assertIn("stripInventedSpaces(toHalfWidth(res[0].transcript))", src)
+        run(r"""
+const RE = /(?<=[^\x00-\x7F\s])[ \t]+(?=[^\x00-\x7F\s])/g;
+assert(h.toHalfWidth('ＰＲ ｔｅｓｔ').replace(RE, '') === 'PR test', 'folded first keeps it');
+assert('ＰＲ ｔｅｓｔ'.replace(RE, '') === 'ＰＲｔｅｓｔ', 'the other way round ate it');
+assert('これは テスト'.replace(RE, '') === 'これはテスト', 'japanese still loses it');
+""")
+
     def test_the_interim_on_screen_is_already_folded(self):
         src = VIEWER_JS.read_text(encoding="utf-8")
-        self.assertIn("toHalfWidth(stripInventedSpaces(res[0].transcript))", src)
+        self.assertIn("stripInventedSpaces(toHalfWidth(res[0].transcript))", src)
         # The preview's own copy of the dictionary matches on the folded side too
         self.assertIn("toHalfWidth(k), v", src)
         # and so do the two screen-side copies of the server's command_key
-        self.assertIn("toHalfWidth(c).toLowerCase()", src)
+        self.assertIn("for (const x of toHalfWidth(unit))", src)
         self.assertIn("cmdNormal = s => toHalfWidth(s.trim())", src)
 
 

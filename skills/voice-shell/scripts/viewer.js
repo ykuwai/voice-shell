@@ -1503,13 +1503,25 @@ const TAIL_PREFIX = ['コマンド', 'こまんど', 'command'];
 const FOLD_DROP = new Set(' \t\u3000。、．，・…！？!?.,-~〜"\'「」『』()（）');
 function foldChars(s) {
   const chars = [], at = [];
+  const cs = [...s];
   let i = 0;
-  for (const c of s) {
-    // toHalfWidth the same as the server's _folded_chars. One character at a
-    // time keeps where it came from intact, since every fold is one for one.
-    const f = FOLD_DROP.has(c) ? '' : toHalfWidth(c).toLowerCase();
+  for (let k = 0; k < cs.length; k++) {
+    // toHalfWidth the same as the server's _folded_chars, and folded before the
+    // drop test rather than after, so 「｡」 goes out as the 「。」 it means the way
+    // it does there. One character at a time, except for the one fold that is
+    // not one for one: half-width katakana carries its dakuten as a character of
+    // its own, so ｷ and ﾞ are taken together and come back as ギ. Both characters
+    // of the pair hang on the base, so cutting there takes the whole pair off.
+    let unit = cs[k];
+    if (unit >= '｡' && unit <= 'ﾟ'
+        && (cs[k + 1] === 'ﾞ' || cs[k + 1] === 'ﾟ')) {
+      unit += cs[k + 1];
+      k++;
+    }
+    let f = '';
+    for (const x of toHalfWidth(unit)) if (!FOLD_DROP.has(x)) f += x.toLowerCase();
     for (const x of f) { chars.push(x); at.push(i); }
-    i += c.length;
+    i += unit.length;
   }
   return {chars, at};
 }
@@ -3863,7 +3875,11 @@ function newRecognition(generation) {
     let interim = '';
     for (let i = ev.resultIndex; i < ev.results.length; i++) {
       const res = ev.results[i];
-      const transcript = toHalfWidth(stripInventedSpaces(res[0].transcript));
+      // Folded first, then the invented spaces. INVENTED_SPACE_RE only strips a
+      // space with a non-ASCII character on either side, and on-device Japanese
+      // writes Latin full-width, so the other order ate the space in 「ＰＲ ｔｅｓｔ」
+      // and sent PRtest, where cloud recognition of the same words kept it.
+      const transcript = stripInventedSpaces(toHalfWidth(res[0].transcript));
       if (res.isFinal) queueOrSendFinal(transcript);
       else interim += transcript;
     }

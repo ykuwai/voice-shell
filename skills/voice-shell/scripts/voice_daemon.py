@@ -1981,12 +1981,22 @@ def _folded_chars(text: str) -> list:
     folded tail has matched, since the two no longer line up character for character.
     """
     out = []
-    for i, c in enumerate(text):
+    i = 0
+    while i < len(text):
         # to_halfwidth the same as command_key, so a tail said with full-width
-        # letters or digits matches. One character at a time keeps where it came
-        # from intact, since every fold here is one character for one.
-        for f in to_halfwidth(c).translate(_CMD_DROP).lower():
+        # letters or digits matches. One character at a time, except for the one
+        # fold that is not one character for one: half-width katakana carries its
+        # dakuten as a character of its own, so ｷ and ﾞ are taken together and come
+        # back as ギ. Fold them apart and 「ｺﾞｰ」 lands on キ+゛ where command_key
+        # says ゴー, and the tail never matches. Both characters of the pair are
+        # hung on the base, so cutting at that spot takes the whole pair off.
+        unit = text[i]
+        if ("｡" <= unit <= "ﾟ"
+                and text[i + 1:i + 2] in ("ﾞ", "ﾟ")):
+            unit = text[i:i + 2]
+        for f in to_halfwidth(unit).translate(_CMD_DROP).lower():
             out.append((f, i))
+        i += len(unit)
     return out
 
 
