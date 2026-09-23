@@ -3701,6 +3701,14 @@ const onDeviceRefusal = (error, autoResumed) =>
 const canLocalASR = canBrowserASR && typeof SR.available === 'function'
   && typeof SR.install === 'function';
 let onDeviceLocal = canLocalASR && readOnDeviceFlag(store);
+/* Whether this browser really keeps the flag. store swallows a storage that
+   throws (site data blocked), so a write there can quietly go nowhere and a
+   read come back as off. Only where it is kept may the 5 second poll read it
+   back: where it is not, the read would say off every time and put the plain
+   entry back five seconds after the local one was picked, sending to Google
+   exactly the audio that pick was about. There this tab's own memory is the
+   only record of the choice there is, and it holds until the page is left. */
+let onDeviceFlagKept = true;
 let onDeviceStatus = '';      // what available() last said, for onDeviceLang
 let onDeviceLang = '';
 let onDeviceRefused = false;  // Chrome refused a start after available() said yes
@@ -4211,6 +4219,39 @@ function stopRecognition(keepWanted = false) {
   if (r) { try { r.abort(); } catch {} }
   latestInterimForPaint = lastInterimHeard = '';
   el.stream.textContent = browserStreamText();
+}
+
+/* Build the session again, with the settings as they stand now.
+
+   Moving between the two browser entries changes nothing the server can see
+   (both of them are 'browser' to it), and nothing about a session already
+   open either: processLocally is fixed when the SpeechRecognition object is
+   built, so whichever of the two it was built for goes on being used until
+   the object itself is replaced. Asking Chrome to stop() and waiting for the
+   end it throws back is not enough on its own, because then the swap rests on
+   Chrome answering: a stop() that goes unanswered, or merely takes its time,
+   leaves the old session recognizing under the old setting while the
+   dropdown, the settings and the status line all say the other one. Coming
+   off the local entry that reads as a switch back to Chrome's cloud that
+   never happened, and going onto it, as audio still going to Google after the
+   entry that keeps it here was picked. Neither may wait on a reply.
+
+   So the old one is dropped through stopRecognition, which aborts it there
+   and then and steps the generation, so nothing arriving late from it is
+   heard (mine() in newRecognition), and the next one is opened immediately
+   after. There is never a moment with both of them open, and the gap with
+   neither is the one lease heartbeat startRecognition already takes. The half
+   clause still being recognized goes with the session, which is right: it was
+   recognized under the setting that has just been left behind. */
+function restartRecognition() {
+  // The hold line is pinned on the main screen for 10 seconds (holdOnDevice).
+  // The entry it was about is gone, so the pin goes with it and the next
+  // paint writes what is true now, rather than leaving the screen saying
+  // recognition is held here while a cloud session runs.
+  if (el.hint.textContent === t('onDeviceHold')) hintHoldUntil = 0;
+  stopRecognition(true);
+  if (recWanted) startRecognition();
+  paint();
 }
 
 // When it can no longer be used, bring the setting, what is saved and the
@@ -5126,6 +5167,13 @@ async function loadEngines() {
   // otherwise sit there unrebuilt, measuring a device nothing is actually
   // listening through (see vizDeviceLabel's own comment).
   syncVizCapture(was !== asrChosen);
+  /* The flag itself, read again here as well as on the storage event. The
+     event is the only word another tab gives, it is not delivered to the tab
+     that wrote it, and a tab that was asleep or had not loaded yet never
+     hears it at all. Read off storage every 5 seconds, a tab that missed one
+     comes back into line by itself rather than recognizing under a setting
+     this browser moved away from minutes ago. */
+  followOnDeviceFlag();
   paintEnginePick();
   paintBrowserAsr();
 }
@@ -5137,6 +5185,8 @@ el.enginePick.onchange = async () => {
   if (pick === BROWSER_ENGINE) {
     onDeviceLocal = local && canLocalASR;
     writeOnDeviceFlag(store, onDeviceLocal);
+    // Read back rather than assumed. See onDeviceFlagKept.
+    onDeviceFlagKept = readOnDeviceFlag(store) === onDeviceLocal;
     // Picking it again is also how a refusal gets another try
     onDeviceRefused = false;
     onDeviceProblem = '';
@@ -5171,11 +5221,12 @@ el.enginePick.onchange = async () => {
       // started down with it (was && !asrChosen in loadEngines), leaving
       // neither engine actually listening.
       await post('/api/engine', {running: false, engine: BROWSER_ENGINE});
-      // Moving between the two browser entries with recognition running. The
-      // session open now was built for the other one, so it is closed and the
-      // one that follows is built afresh (through the hold, if local).
-      if (localChanged && rec) { try { rec.stop(); } catch {} }
-      if (recWanted) startRecognition();
+      // Moving between the two browser entries. The session open now was
+      // built for the other one, so it is dropped and the one that follows is
+      // built afresh (through the hold, if local). Not conditional on one
+      // being open: with none open, this is also what opens the right one.
+      if (localChanged) restartRecognition();
+      else if (recWanted) startRecognition();
     } else {
       asrChosen = false;
       recWanted = false;
@@ -5209,8 +5260,13 @@ el.asrLang.onchange = () => {
   onDeviceRefused = false;
   onDeviceProblem = '';
   if (onDeviceLocal) paintBrowserAsr();
-  // The language takes effect on the next reconnect. If it is in use, reconnect right now.
-  if (recWanted && rec) { try { rec.stop(); } catch {} }
+  // The language takes effect on the next reconnect. If it is in use,
+  // reconnect right now. Through restartRecognition rather than a stop() and
+  // the end it throws back, for the same reason the entry switch goes that
+  // way: a model is per language, so on the local entry the new language may
+  // have none, and a session left standing because Chrome never answered
+  // would go on recognizing the old one on this device.
+  if (recWanted) restartRecognition();
   // The words ignored out of the box are matched against what the recognizer
   // wrote down, so they follow this dropdown. Write what is on screen out under
   // the old language before reading the new one back, or a chip pressed just
@@ -5218,25 +5274,40 @@ el.asrLang.onchange = () => {
   saveDict().then(loadDict);
 };
 
-/* Another tab in this browser moved between the two browser entries. The
-   flag is shared by every tab of this browser (localStorage), and a tab that
-   kept the answer it read at load would go on with the old one. Left on the
-   plain entry, it is the tab that takes over listening (the 5 second
+/* This browser moved between the two browser entries somewhere other than
+   here. The flag is shared by every tab of this browser (localStorage), and a
+   tab that kept the answer it read at load would go on with the old one. Left
+   on the plain entry, it is the tab that takes over listening (the 5 second
    heartbeat) once the one where local was picked closes, and it would send
    the audio to Google while this browser's choice says it stays here. A
-   session already open was built for the other entry, so it is closed and the
-   next one goes through the hold. */
-addEventListener('storage', ev => {
-  if (!canLocalASR || (ev.key !== null && ev.key !== 'vs.' + ON_DEVICE_FLAG)) return;
+   session already open was built for the other entry, so it is dropped and
+   the next one goes through the hold.
+
+   Both the storage event below and the 5 second poll come through here. The
+   event alone is not enough: it never reaches the tab that wrote the flag,
+   and a tab asleep or not yet loaded never hears it at all. */
+function followOnDeviceFlag() {
+  if (!canLocalASR || !onDeviceFlagKept) return false;
   const local = readOnDeviceFlag(store);
-  if (local === onDeviceLocal) return;
+  if (local === onDeviceLocal) return false;
   onDeviceLocal = local;
+  // A model is per entry as much as per language, and Chrome's refusal was
+  // about the one being left
   onDeviceRefused = false;
   onDeviceProblem = '';
-  if (rec) { try { rec.stop(); } catch {} }
+  // Unconditional, the same as the dropdown's own: a tab held off for a
+  // missing model has no session open to close, and it is exactly that tab
+  // that has to open one now that the plain entry is the one chosen.
+  restartRecognition();
   paintEnginePick();
   paintBrowserAsr();
   paint();
+  return true;
+}
+
+addEventListener('storage', ev => {
+  if (ev.key !== null && ev.key !== 'vs.' + ON_DEVICE_FLAG) return;
+  followOnDeviceFlag();
 });
 
 /* The download button. SR.install() has to be the very first thing the press

@@ -622,11 +622,14 @@ class OnDeviceWiringTest(unittest.TestCase):
         # take over listening later on the plain entry, sending to Google.
         listener = self.section("addEventListener('storage', ev => {", "\n});\n")
         self.assertIn("'vs.' + ON_DEVICE_FLAG", listener)
-        self.assertIn("onDeviceLocal = local;", listener)
-        # A session built for the other entry is closed, so the next one goes
-        # through the hold in startRecognition
-        self.assertIn("if (rec) { try { rec.stop(); } catch {} }", listener)
-        self.assertIn("paintEnginePick();", listener)
+        self.assertIn("followOnDeviceFlag();", listener)
+        # The reading of the flag itself is shared with the 5 second poll
+        follow = self.section("function followOnDeviceFlag() {", "\n}\n")
+        self.assertIn("onDeviceLocal = local;", follow)
+        # The session is dropped and the next one goes through the hold in
+        # startRecognition, whether or not there was one open to drop
+        self.assertIn("restartRecognition();", follow)
+        self.assertIn("paintEnginePick();", follow)
 
     def test_every_language_has_every_string(self):
         i18n = I18N_JS.read_text(encoding="utf-8").replace("\r\n", "\n")
@@ -756,6 +759,283 @@ class OnDeviceDiskTest(unittest.TestCase):
             self.assertTrue(any("canary" in d.lower() for d in dirs))
         else:
             self.assertTrue(any(d.endswith("google-chrome") for d in dirs))
+
+
+# The engine dropdown, the spoken language dropdown and the cross tab listener,
+# run for real with the page around them stood in for, to watch which of the
+# two browser entries the session actually open was built for.
+SWITCH_HARNESS = r"""
+const fs = require('fs');
+const source = fs.readFileSync(process.argv[1], 'utf8');
+const pureFrom = source.indexOf("const BROWSER_LOCAL = 'browser-local';");
+const pureTo = source.indexOf("// Whether the local entry can be offered here at all.", pureFrom);
+const recFrom = source.indexOf('function newRecognition(generation)');
+const recTo = source.indexOf('\n// When it can no longer be used', recFrom);
+const swFrom = source.indexOf('el.enginePick.onchange = async () => {');
+const swTo = source.indexOf('\n/* The download button.', swFrom);
+if ([pureFrom, pureTo, recFrom, recTo, swFrom, swTo].some(i => i < 0)) process.exit(2);
+const make = new Function('SR', 'env', `
+  const BROWSER_ENGINE = 'browser';
+  ${source.slice(pureFrom, pureTo)}
+  const canBrowserASR = true, canLocalASR = true;
+  const store = env.store;
+  let onDeviceLocal = readOnDeviceFlag(store);
+  let onDeviceRefused = false, onDeviceProblem = '', onDeviceStatus = 'available';
+  let onDeviceFlagKept = true;
+  let rec = null, recRunning = false, recStarting = false, recWanted = true;
+  let recGeneration = 0, recFails = 0, recStartedAt = 0;
+  let route = 'live', asrDeniedFlag = false, lastVoiceAt = 0, autoResumed = false;
+  let asrChosen = true, asrPausedByRoute = false, chosenEngine = 'browser';
+  let engine = 'off', hintHoldUntil = 0;
+  const MAX_FAILS = 6;
+  const browserLang = () => env.lang;
+  const onDeviceNow = () => onDeviceStatus;
+  const askOnDevice = async () => { env.asked++; return onDeviceStatus; };
+  const holdOnDevice = () => { env.held++; };
+  const beat = async () => { env.beats++; return true; };
+  const performance = {now: () => 0};
+  const el = {stream: {textContent: ''}, tray: {classList: {toggle: () => {}}},
+              hint: {textContent: ''}, enginePick: env.enginePick, asrLang: env.asrLang};
+  const withDict = v => v, streamTail = () => {}, browserStreamText = () => '';
+  let latestInterimForPaint = '', lastInterimHeard = '';
+  const paintTinyButtons = () => {};
+  const disableBrowserASR = () => { env.disabled++; };
+  const t = key => key;
+  const paint = () => { env.paints++; };
+  const paintPower = () => {}, paintBrowserAsr = () => {}, paintEnginePick = () => {};
+  const refreshState = () => {}, syncVizCapture = () => {}, engineOnish = () => false;
+  const post = (path, body) => { env.posts.push({path, body}); return Promise.resolve({}); };
+  const saveDict = () => Promise.resolve();
+  const loadDict = () => {};
+  const addEventListener = (type, fn) => { env.listeners.push({type, fn}); };
+  const removeEventListener = () => {};
+  ${source.slice(recFrom, recTo)}
+  ${source.slice(swFrom, swTo)}
+  return {
+    pick: () => el.enginePick.onchange(),
+    lang: () => el.asrLang.onchange(),
+    // typeof, so that a source without them still builds and the tests below
+    // are the ones that say what is missing
+    follow: () => typeof followOnDeviceFlag === 'function' ? followOnDeviceFlag() : false,
+    startRecognition,
+    restartRecognition: typeof restartRecognition === 'function' ? restartRecognition : null,
+    setHint: (text, until) => { el.hint.textContent = text; hintHoldUntil = until; },
+    kept: () => onDeviceFlagKept,
+    state: () => ({rec: rec && rec.id, recLocal: rec ? rec.processLocally === true : null,
+                   recWanted, recStarting, onDeviceLocal, chosenEngine, asrChosen,
+                   hintHoldUntil, hint: el.hint.textContent}),
+  };
+`);
+
+/* A SpeechRecognition that answers stop() and one that never does.
+   Chrome's own is free to take its time over a stop, or to swallow one that
+   lands between start() and onstart, and nothing about which of the two
+   browser entries is in use may rest on its answer. */
+const made = [];
+let answerStop = true;
+class FakeRecognition {
+  constructor() { this.id = made.length + 1; this.live = false; made.push(this); }
+  start() { this.live = true; this.started = true; }
+  stop() { this.stopped = true; if (answerStop) this.end(); }
+  abort() { this.aborted = true; this.end(); }
+  end() { if (!this.live) return; this.live = false; if (this.onend) this.onend(); }
+}
+const live = () => made.filter(r => r.live);
+class Storage {
+  constructor(v) { this.m = new Map(v === undefined ? [] : [['vs.asrLocal', v]]); }
+  getItem(k) { return this.m.has(k) ? this.m.get(k) : null; }
+  setItem(k, v) { this.m.set(k, String(v)); }
+}
+const storeOver = storage => ({
+  get(k, d) { try { return storage.getItem('vs.' + k) ?? d; } catch { return d; } },
+  set(k, v) { try { storage.setItem('vs.' + k, v); } catch {} },
+});
+const freshEnv = flag => {
+  made.length = 0;
+  answerStop = true;
+  const storage = new Storage(flag);
+  return {storage, store: storeOver(storage), lang: 'ja-JP', posts: [], listeners: [],
+          asked: 0, held: 0, beats: 0, disabled: 0, paints: 0,
+          enginePick: {value: flag === '1' ? 'browser-local' : 'browser'},
+          asrLang: {value: 'ja-JP'}};
+};
+const assert = (cond, what) => { if (!cond) { console.error(what); process.exit(1); } };
+const tick = async (n = 6) => { for (let i = 0; i < n; i++) await new Promise(r => setTimeout(r, 0)); };
+"""
+
+
+def run_switch(script):
+    subprocess.run(["node", "-e", SWITCH_HARNESS + script, str(VIEWER_JS)], check=True)
+
+
+class BrowserEntrySwitchTest(unittest.TestCase):
+    """Moving between the two browser entries, in both directions (issue #126)."""
+
+    def test_the_entry_picked_is_the_one_the_session_is_built_for(self):
+        run_switch(r"""
+(async () => {
+  for (const answers of [true, false]) {
+    const env = freshEnv('1');
+    const h = make(FakeRecognition, env);
+    await h.startRecognition();
+    assert(made.length === 1 && made[0].processLocally === true, 'opened on this device');
+    // Chrome answering the stop, or not answering it, must come to the same thing
+    answerStop = answers;
+    env.enginePick.value = 'browser';
+    await h.pick();
+    await tick();
+    const s = h.state();
+    assert(s.onDeviceLocal === false, 'the flag followed the pick');
+    assert(env.storage.getItem('vs.asrLocal') === '', 'and so did what is remembered');
+    assert(s.recLocal === false, 'the session open now goes to the cloud, answerStop=' + answers);
+    assert(live().length === 1, 'exactly one session is open, answerStop=' + answers);
+    assert(made[0].live === false, 'the on device one is really gone, answerStop=' + answers);
+    // And back again
+    env.enginePick.value = 'browser-local';
+    await h.pick();
+    await tick();
+    assert(h.state().recLocal === true, 'back on this device, answerStop=' + answers);
+    assert(live().length === 1, 'still exactly one, answerStop=' + answers);
+    assert(env.storage.getItem('vs.asrLocal') === '1', 'remembered again');
+  }
+})().then(() => process.exit(0), e => { console.error(e); process.exit(1); });
+""")
+
+    def test_another_tab_reaches_one_with_nothing_open(self):
+        run_switch(r"""
+(async () => {
+  const env = freshEnv('1');
+  const h = make(FakeRecognition, env);
+  // Held off for a model that is not here, so there is no session to close.
+  // It is this tab that has to open one now that the plain entry is chosen.
+  assert(h.state().rec === null, 'nothing open');
+  env.storage.setItem('vs.asrLocal', '');
+  const storage = env.listeners.find(l => l.type === 'storage');
+  assert(storage, 'the cross tab listener is armed');
+  storage.fn({key: 'vs.asrLocal'});
+  await tick();
+  assert(h.state().onDeviceLocal === false, 'followed');
+  assert(made.length === 1, 'a session was opened, got ' + made.length);
+  assert(made[0].processLocally === undefined, 'and it is the cloud one');
+  assert(live().length === 1, 'exactly one');
+})().then(() => process.exit(0), e => { console.error(e); process.exit(1); });
+""")
+
+    def test_a_flag_no_storage_event_announced_is_picked_up(self):
+        run_switch(r"""
+(async () => {
+  const env = freshEnv('');
+  const h = make(FakeRecognition, env);
+  await h.startRecognition();
+  assert(made[0].processLocally === undefined, 'started on the cloud entry');
+  // No event at all: the tab was asleep, or it had not loaded yet
+  env.storage.setItem('vs.asrLocal', '1');
+  assert(h.follow() === true, 'the poll reads it off storage itself');
+  await tick();
+  assert(h.state().recLocal === true, 'and swaps the session');
+  assert(live().length === 1, 'exactly one');
+  assert(h.follow() === false, 'nothing to do the second time');
+})().then(() => process.exit(0), e => { console.error(e); process.exit(1); });
+""")
+
+    def test_a_browser_that_cannot_keep_the_flag_is_not_talked_out_of_the_pick(self):
+        run_switch(r"""
+(async () => {
+  const env = freshEnv('');
+  // Site data blocked: the write goes nowhere and every read comes back off
+  env.store = {get: (k, d) => d, set: () => {}};
+  const h = make(FakeRecognition, env);
+  env.enginePick.value = 'browser-local';
+  await h.pick();
+  await tick();
+  assert(h.state().onDeviceLocal === true, 'the pick took in this tab');
+  assert(h.kept() === false, 'and this browser cannot keep it');
+  assert(h.follow() === false, 'so the poll leaves it alone');
+  assert(h.state().onDeviceLocal === true, 'rather than putting the cloud back');
+  assert(h.state().recLocal === true, 'and the session is the one that was picked');
+})().then(() => process.exit(0), e => { console.error(e); process.exit(1); });
+""")
+
+    def test_the_spoken_language_swaps_the_session_too(self):
+        run_switch(r"""
+(async () => {
+  const env = freshEnv('1');
+  const h = make(FakeRecognition, env);
+  await h.startRecognition();
+  assert(made.length === 1 && made[0].lang === 'ja-JP', 'opened for the language chosen');
+  answerStop = false;                  // Chrome does not get round to it
+  env.lang = 'en-US';
+  h.lang();
+  await tick();
+  assert(made.length === 2 && made[1].lang === 'en-US', 'the new language is the one open');
+  assert(made[1].processLocally === true, 'still on this device');
+  assert(live().length === 1, 'exactly one');
+})().then(() => process.exit(0), e => { console.error(e); process.exit(1); });
+""")
+
+    def test_the_hold_line_does_not_outlive_the_entry_it_was_about(self):
+        run_switch(r"""
+(async () => {
+  const env = freshEnv('1');
+  const h = make(FakeRecognition, env);
+  // "No model here, so nothing is being listened to", pinned for 10 seconds
+  h.setHint('onDeviceHold', 10000);
+  env.enginePick.value = 'browser';
+  await h.pick();
+  await tick();
+  assert(h.state().hintHoldUntil === 0,
+         'the pin goes with the entry, so the screen stops saying held');
+  // A line about something else is left where it is
+  h.setHint('voiceUnmuted', 10000);
+  env.enginePick.value = 'browser-local';
+  await h.pick();
+  await tick();
+  assert(h.state().hintHoldUntil === 10000, 'somebody else\'s line is left alone');
+})().then(() => process.exit(0), e => { console.error(e); process.exit(1); });
+""")
+
+    def test_switching_away_and_back_keeps_the_entry(self):
+        run_switch(r"""
+(async () => {
+  const env = freshEnv('1');
+  const h = make(FakeRecognition, env);
+  await h.startRecognition();
+  assert(made[0].processLocally === true, 'on this device');
+  env.enginePick.value = 'whisper';
+  await h.pick();
+  await tick();
+  assert(live().length === 0, 'browser recognition is down while another engine runs');
+  assert(h.state().asrChosen === false, 'and the page knows it');
+  env.enginePick.value = 'browser-local';
+  await h.pick();
+  await tick();
+  assert(h.state().recLocal === true, 'back on the same browser entry');
+  assert(live().length === 1, 'exactly one');
+})().then(() => process.exit(0), e => { console.error(e); process.exit(1); });
+""")
+
+
+class SwitchOrderTest(unittest.TestCase):
+    """What the order of things has to be, read off the source."""
+
+    def test_the_poll_reads_the_flag_as_well_as_the_engine(self):
+        src = VIEWER_JS.read_text(encoding="utf-8")
+        body = src[src.index("async function loadEngines()"):
+                   src.index("el.enginePick.onchange")]
+        self.assertIn("followOnDeviceFlag()", body)
+
+    def test_every_switch_drops_the_session_rather_than_asking_it_to_stop(self):
+        src = VIEWER_JS.read_text(encoding="utf-8")
+        # The one stop() left is the reconnect ahead of time while it is quiet,
+        # where settling the last result is the whole point of it.
+        self.assertEqual(src.count("rec.stop()"), 1)
+        self.assertIn("function restartRecognition()", src)
+        # And it aborts through stopRecognition, which steps the generation, so
+        # nothing late from the old session is heard
+        restart = src[src.index("function restartRecognition()"):]
+        restart = restart[:restart.index("\n}")]
+        self.assertIn("stopRecognition(true)", restart)
+        self.assertIn("startRecognition()", restart)
 
 
 if __name__ == "__main__":
