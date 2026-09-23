@@ -80,6 +80,51 @@ class StopMarkerTest(unittest.TestCase):
         proc.communicate(timeout=10)
         self.assertTrue(still_here)
 
+    def test_a_stop_addressed_to_an_older_pid_of_mine_ends_nothing(self):
+        """A stop names one process, and an alias is not that process.
+
+        On a re-arm this listen answers to its own earlier PIDs as well, so
+        that what was said while nobody was reading still arrives. A stop left
+        unread in the log (the x was pressed, the reader had already gone) is
+        replayed the same way. Acted on, it ends a listen that is running
+        perfectly well; printed, it tells that agent it was disconnected when
+        it was not. Either way the line is somebody else's.
+        """
+        line = json.dumps({"system_warning": "x", "to": "111", "stop": True})
+        env = dict(os.environ, VOICE_SHELL_ALIAS_UNTIL="999999",
+                   VOICE_SHELL_START_OFFSET="0")
+        env.pop("VOICE_SHELL_PROGRESS", None)
+        env.pop("VOICE_SHELL_PARENT_PID", None)
+        proc = subprocess.Popen(
+            [sys.executable, "-u", str(SCRIPTS / "listen_filter.py"), "222", "111"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, env=env)
+        proc.stdin.write(line + "\n")
+        proc.stdin.flush()
+        time.sleep(1)
+        still_here = proc.poll() is None
+        proc.stdin.close()
+        out = proc.communicate(timeout=10)[0]
+        self.assertTrue(still_here, "a predecessor's stop ended this listen")
+        self.assertEqual(out.strip(), "", "and it must not be printed either")
+
+    def test_an_utterance_to_an_older_pid_of_mine_still_arrives(self):
+        """The alias itself has to go on working. Same line without "stop"."""
+        line = json.dumps({"text": "hello", "to": "111"})
+        env = dict(os.environ, VOICE_SHELL_ALIAS_UNTIL="999999",
+                   VOICE_SHELL_START_OFFSET="0")
+        env.pop("VOICE_SHELL_PROGRESS", None)
+        env.pop("VOICE_SHELL_PARENT_PID", None)
+        proc = subprocess.Popen(
+            [sys.executable, "-u", str(SCRIPTS / "listen_filter.py"), "222", "111"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, env=env)
+        proc.stdin.write(line + "\n")
+        proc.stdin.flush()
+        try:
+            self.assertEqual(proc.stdout.readline().strip(), line)
+        finally:
+            proc.stdin.close()
+            proc.communicate(timeout=10)
+
 
 BASH = shutil.which("bash")
 
@@ -186,6 +231,95 @@ class DisconnectEndToEndTest(unittest.TestCase):
         self.listen.wait(timeout=10)
         self.assertEqual(vd.adopt_tombstone(self.log, "disconnect-warning-test"),
                          "blocked")
+
+
+@unittest.skipUnless(BASH, "bash is not installed")
+class AliasWindowTest(unittest.TestCase):
+    """A re-arm still hears what was said to it while the handover ran.
+
+    Where tail starts reading and how far the old PID still counts as this
+    session's own are two different questions. The first wants a measurement
+    from before this registration exists, so an x pressed the instant the chip
+    appears cannot land behind the starting point. The second wants one from
+    after the destination has moved over, because right up to that moment the
+    daemon was still tagging speech with the old PID. Measure the two together
+    and one of them is wrong: taken early, every word said while the handover
+    went through falls outside the window and is dropped, which is the one
+    thing the replay exists to prevent.
+    """
+
+    SESSION = "alias-window-test"
+    OLD_PID = "999001"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        root = Path(self.tmp.name)
+        self.state = root / "run" / "voice-shell"
+        (self.state / "listeners-gone").mkdir(parents=True)
+        self.log = self.state / "utterances.jsonl"
+        # Something already in it, so an offset of 0 is plainly a replay from
+        # the beginning rather than the end of an empty file.
+        self.log.write_text(
+            json.dumps({"text": "said before", "to": self.OLD_PID}) + "\n",
+            encoding="utf-8")
+        # The tombstone a Monitor deadline leaves behind. --adopt hands it to
+        # the re-arm, which then replays from its offset and answers to its
+        # PID as well.
+        (self.state / "listeners-gone" / self.SESSION).write_text(json.dumps({
+            "session": self.SESSION, "pid": self.OLD_PID, "left": time.time(),
+            "offset": 0, "epoch": "-", "reg": {"order": time.time()}}),
+            encoding="utf-8")
+        self.env = _shell_env(dict(os.environ))
+        self.env.update({
+            "XDG_RUNTIME_DIR": str(root / "run"),
+            "XDG_CONFIG_HOME": str(root / "cfg"),
+            "HOME": str(root / "home"),
+            "CLAUDE_CODE_SESSION_ID": self.SESSION,
+        })
+        self.env.pop("VOICE_SHELL_NAME", None)
+        self.out = root / "out.txt"
+        self.handle = open(self.out, "w", encoding="utf-8")
+        self.errors = open(root / "err.txt", "w", encoding="utf-8")
+        self.listen = None
+
+    def tearDown(self):
+        if self.listen and self.listen.poll() is None:
+            self.listen.kill()
+        if self.listen:
+            self.listen.wait()
+        self.handle.close()
+        self.errors.close()
+        self.tmp.cleanup()
+
+    def test_a_word_said_during_the_handover_is_not_dropped(self):
+        late = json.dumps({"text": "said during the handover", "to": self.OLD_PID})
+        self.listen = subprocess.Popen(
+            [BASH, str(SCRIPTS / "voice-shell.sh"), "listen"],
+            stdout=self.handle, stderr=self.errors, env=self.env)
+        # The registration appearing is the first thing after the starting
+        # offset is measured, and the handover (the destination moving over,
+        # the tombstone being forgotten) still has a way to run after it. So
+        # this lands inside exactly the stretch in question.
+        listeners = self.state / "listeners"
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            if listeners.is_dir() and any(listeners.iterdir()):
+                break
+            self.assertIsNone(self.listen.poll(), "listen ended before registering")
+            time.sleep(0.002)
+        else:
+            self.fail("listen never registered itself")
+        with open(self.log, "a", encoding="utf-8") as f:
+            f.write(late + "\n")
+            f.flush()
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            self.handle.flush()
+            if late in self.out.read_text(encoding="utf-8"):
+                return
+            time.sleep(0.05)
+        self.fail("what was said during the handover never arrived: "
+                  + repr(self.out.read_text(encoding="utf-8")))
 
 
 if __name__ == "__main__":

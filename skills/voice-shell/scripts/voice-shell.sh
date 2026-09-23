@@ -609,8 +609,12 @@ except Exception:
     # from, so it was never read and never printed. Measured from before,
     # nothing addressed to this listen can fall in the gap: it did not exist
     # yet, so nothing earlier can be meant for it.
-    log_size="$(wc -c < "$LOG_FILE" 2>/dev/null | tr -d ' ')"
-    [[ "$log_size" =~ ^[0-9]+$ ]] || log_size=0
+    #
+    # Only where the reading starts. Where the old PID stops counting as this
+    # session's own is a different question with a different answer, measured
+    # further down once the handover is really done (alias_until).
+    start_size="$(wc -c < "$LOG_FILE" 2>/dev/null | tr -d ' ')"
+    [[ "$start_size" =~ ^[0-9]+$ ]] || start_size=0
 
     # An escape hatch so any tool can name itself. VOICE_SHELL_NAME wins outright.
     "$PY" - "$reg" "$agent" "$session" "${VOICE_SHELL_NAME:-}" "$inherit_order" <<'REG' || true
@@ -694,9 +698,23 @@ REG
     # progress file is normally cleared long before this, but it outlives the
     # sweep whenever nothing was running to do the sweeping.
     [[ "$inherit_order" == "-" ]] && replay_offset=""
-    start_offset="$log_size"
+    # How far the old PID still counts as this session's own (listen_filter.py
+    # reads it as VOICE_SHELL_ALIAS_UNTIL). Measured here, after the
+    # registration and the destination have both moved over, because up to
+    # this moment the daemon was still tagging speech with the old PID: that
+    # is exactly what the alias is for. Measured before the handover instead,
+    # every word said while it was going through fell outside the window and
+    # was dropped, which is the one thing the replay exists to prevent.
+    log_size="$(wc -c < "$LOG_FILE" 2>/dev/null | tr -d ' ')"
+    [[ "$log_size" =~ ^[0-9]+$ ]] || log_size="$start_size"
+    start_offset="$start_size"
+    # No replay means no handover to bridge, so no window either: the old PID
+    # is just a number, and Windows hands those out again. Left open, a word
+    # meant for whoever holds it now would be taken here (#73).
+    alias_until="$start_offset"
     if [[ "$replay_offset" =~ ^[0-9]+$ ]] && (( replay_offset <= log_size )); then
       start_offset="$replay_offset"
+      alias_until="$log_size"
     fi
     # By byte position rather than -n 0, so it starts exactly where the
     # progress count starts.
@@ -732,7 +750,7 @@ REG
     epoch_native="$STATE_DIR/log_epoch"
     command -v cygpath >/dev/null 2>&1 && epoch_native="$(cygpath -w "$epoch_native")"
     VOICE_SHELL_PROGRESS="$progress_native" VOICE_SHELL_START_OFFSET="$start_offset" \
-    VOICE_SHELL_EPOCH_FILE="$epoch_native" VOICE_SHELL_ALIAS_UNTIL="$log_size" \
+    VOICE_SHELL_EPOCH_FILE="$epoch_native" VOICE_SHELL_ALIAS_UNTIL="$alias_until" \
     VOICE_SHELL_PARENT_PID="$parent_pid" \
       "$PY" -u "$HERE/listen_filter.py" "$reg_pid" $old_pid < <(tail "${tail_opts[@]}" "$LOG_FILE") &
     tail_pid=$!

@@ -380,6 +380,18 @@ def main():
             if str(to) not in mine:
                 progress.advance(size)
                 continue
+            # A "stop" names one process, not a session. Reached through an
+            # alias it is somebody else's: either this session's own earlier
+            # listen, whose x was pressed and never read (the line is still
+            # sitting in the log, and a re-arm replays from before it), or a
+            # different session that held that PID before Windows handed it
+            # on. Acting on it would end a listen that is running perfectly
+            # well, and printing it would tell that agent it had been
+            # disconnected when it had not. Drop it: it was already said, or
+            # it was never ours to be told.
+            if rec.get("stop") and str(to) != me:
+                progress.advance(size)
+                continue
         elif "system_warning" not in rec:
             progress.advance(size)
             continue

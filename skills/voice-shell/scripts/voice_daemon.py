@@ -2834,7 +2834,16 @@ def disconnect_listener(log_path, pid, wait=DISCONNECT_WAIT, poll=0.05):
     # Nothing read it within the wait (a listen from before this shipped, or
     # one whose reader had already gone). Cut it, now that the line has had
     # its chance rather than half a second of one.
-    os.kill(int(pid), signal.SIGTERM)
+    #
+    # A process that has already gone is not a failure: the mark is written
+    # and the line is out, which is the whole of what was asked for. Only the
+    # registration outlived it (a forceful kill on Windows leaves one behind,
+    # #82), and the liveness sweep clears that on its own. Raising here
+    # instead put a 500 on the screen for a disconnect that had worked.
+    try:
+        os.kill(int(pid), signal.SIGTERM)
+    except OSError:
+        pass
     return entry
 
 
