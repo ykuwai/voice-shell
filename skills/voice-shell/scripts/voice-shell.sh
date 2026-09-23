@@ -11,6 +11,7 @@
 #   voice-shell.sh codex-forward          send new utterances to this Codex App Server thread
 #   voice-shell.sh engines                the ways of recognizing on offer, and the last choice
 #   voice-shell.sh listeners              the sessions listening right now
+#   voice-shell.sh whoami                 which chip this session is (number and name)
 #   voice-shell.sh name "NAME"            give this session a display name
 #   voice-shell.sh whisper                recognize with Whisper (strong on proper nouns)
 #   voice-shell.sh apple                  run on the recognition that ships with macOS 26 (light)
@@ -515,6 +516,73 @@ case "$cmd" in
     if [ -n "$listeners_now" ]; then echo "$listeners_now"
     else echo "  none (the voice is reaching nowhere)"; fi
     ;;
+  whoami)
+    # Which chip this session is, so the agent can say it at startup.
+    #
+    # Not printed from `listen`. Everything listen writes goes through Monitor
+    # and is read as an utterance, so a plain line there would look like
+    # something the user said. Not printed from `start` either, because at that
+    # moment this session has not registered yet and has no place in the row.
+    # Asked for on its own, once the watch is up, which also makes it something
+    # the user can ask for again later.
+    #
+    # No conversation id means there is nothing to look this session up by, and
+    # waiting changes nothing. Say so at once, the way `name` already does.
+    if [[ -z "${CLAUDE_CODE_SESSION_ID:-${CODEX_THREAD_ID:-${CODEX_SESSION_ID:-}}}" ]]; then
+      echo "This tool has no session id, so which chip it is cannot be looked up." >&2
+      exit 1
+    fi
+    # The registration is written a moment after Monitor starts the watch, so
+    # wait a little rather than tell a session that is about to be listening
+    # that it is not.
+    #
+    # A chip in the row is not the same as somebody reading it. A session
+    # between two watches, and one whose listen has ended for good, both keep
+    # their place in the row. Keep waiting on either, because at startup that
+    # is the old chip still sitting there while this watch's own registration
+    # lands a moment later, and it takes the same number over, so the answer
+    # does not move.
+    #
+    # Ten seconds means ten seconds on the clock, not twenty tries of unknown
+    # cost. Counting the tries instead had each one paying for a whole Python
+    # start on top of its own sleep, so the wait a session that never comes up
+    # live actually sat through was half again as long as what is written here
+    # and in SKILL.md (measured: 15s). The sleep only happens when there is
+    # still time left to sleep into, so the last try is not followed by one.
+    found=""; state=""; _deadline=$((SECONDS + 10))
+    while :; do
+      found="$("$PY" "$APP" --whoami 2>/dev/null || true)"
+      # The name is the last field on purpose: it is the one that could itself
+      # hold a tab, and read gives everything left over to the last variable.
+      IFS=$'\t' read -r _no _total _live state _label <<< "$found"
+      [[ "$state" == "live" ]] && break
+      (( SECONDS < _deadline )) || break
+      sleep 0.5
+    done
+    # Only the facts. The wording the user hears is the agent's to write, in
+    # whatever language the conversation is in, so nothing is translated here.
+    if [[ -n "$found" ]]; then
+      echo "  number  $_no"
+      echo "  name    $_label"
+    fi
+    if [[ "$state" != "live" ]]; then
+      if [[ -n "$found" ]]; then
+        echo "  That chip is in the row, but nothing is listening through it." >&2
+      else
+        echo "  This session has no chip." >&2
+      fi
+      echo "  Start listening first, with voice-shell.sh listen under Monitor." >&2
+      exit 1
+    fi
+    # Two different numbers, and saying the row size as though it were the
+    # number listening would tell the user more sessions can hear them than
+    # really can: an away chip and a gone one both sit in the row holding a
+    # number with nobody behind it.
+    echo "  It is the number as things stand right now, out of $_total in the" \
+         "row, $_live listening."
+    echo "  It changes as other sessions start listening and stop."
+    echo "  Tell the user the number and the name in the language they are using."
+    ;;
   codex-forward)
     if [[ -z "${CODEX_THREAD_ID:-}" ]]; then
       echo "codex-forward needs CODEX_THREAD_ID from a Codex CLI or App Server thread." >&2
@@ -976,7 +1044,7 @@ except Exception:
     ;;
   *)
     echo "Usage is voice-shell.sh {start [--engine X] [--no-gui]|stop|status|engines}" >&2
-    echo "        voice-shell.sh {listen|codex-forward|listeners|name|hold|live|log-path|wait-ready|viewer}" >&2
+    echo "        voice-shell.sh {listen|codex-forward|listeners|whoami|name|hold|live|log-path|wait-ready|viewer}" >&2
     echo "        voice-shell.sh {apple|whisper}" >&2
     exit 1
     ;;
