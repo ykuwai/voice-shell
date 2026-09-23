@@ -92,6 +92,60 @@ assert(h.sent.length === 1, 'one prompt, not one per clause, got ' + JSON.string
 assert(h.sent[0] === 'first half+second half', 'joined in order, got ' + h.sent[0]);
 ''')
 
+    def test_a_stall_that_comes_back_in_pieces_is_still_one_prompt(self):
+        """The same stall, answered as a burst rather than in one event.
+
+        The recognizer says nothing through the whole quiet stretch and then
+        hands back what it owes across two events a fifth of a second apart.
+        Reading only "sound with nothing said about it", the first of those two
+        disarmed the hold that was waiting for exactly them, and the second went
+        out on its own: the split the whole thing exists to stop, reached from
+        the other side.
+        """
+        run(r'''
+h.run(4000, {loud: true});
+h.final('first');
+h.run(3000, {loud: true});
+h.run(3200);                    // quiet, the wait runs out, nothing has come back
+h.final('a');                   // the catch-up starts, late
+h.run(200);
+h.final('b');                   // and finishes a fifth of a second later
+h.run(4000);
+assert(h.sent.length === 1, 'one prompt, not one per catch-up event, got ' + JSON.stringify(h.sent));
+assert(h.sent[0] === 'first+a+b', 'joined in order, got ' + h.sent[0]);
+''')
+
+    def test_recognition_that_keeps_up_waits_no_longer_than_it_ever_did(self):
+        """The cost of the above, paid only by a recognizer that is behind.
+
+        A clause landing a fraction of a second into the quiet proves almost no
+        lag, so it buys almost no extra wait and the send lands on the plain
+        schedule. Without this the local entry would cost every sentence a
+        second send wait.
+        """
+        run(r'''
+h.run(4000, {loud: true});
+h.final('prompt');
+h.run(300);
+h.final('reply');               // a third of a second behind the audio, no more
+h.run(2800);
+assert(h.sent.length === 1, 'sent on the plain three second wait, got ' + JSON.stringify(h.sent));
+assert(h.now() <= 7200, 'and not a wait later, at ' + h.now());
+''')
+
+    def test_a_dead_analyser_leaves_the_wait_to_decide_alone(self):
+        """The level meter never opened (startViz gave up: Windows, NotReadableError).
+
+        computeBrowserRms reads 0 for the rest of the session, so there is no
+        sound to reason from at all. Nothing may be held on the strength of a
+        measurement that was never taken.
+        """
+        run(r'''
+h.final('nothing heard');       // rms stays 0 throughout: h.run is never given loud
+h.run(3200);
+assert(h.sent.length === 1, 'the wait alone sent it, got ' + JSON.stringify(h.sent));
+''')
+
     def test_the_ordinary_browser_path_is_left_alone(self):
         """The same timeline off the local entry, sending on the old schedule."""
         run(r'''

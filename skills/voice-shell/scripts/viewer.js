@@ -4100,21 +4100,47 @@ let lastFinalAt = 0;
    and nothing has come back for it. Interims cannot stand in for it, because
    going quiet is what the stall looks like from here.
 
-   Bounded by twice the wait, and this is not the outer limit on sending that
-   was turned down before. That one cut people off while they were still
-   talking. This one only says how long to keep waiting for a recognizer that
-   has gone quiet after the talking stopped, and it is here so that a keyboard
-   clack or a door after the last word, loud with no words behind it, does not
-   hold the prompt back until the cap. A recognizer further behind than that
-   still splits, which is the honest limit of reading it from the outside.
+   Sound with nothing said about it is not the only sign, though, and on its
+   own it misses the shape this is actually for. A clause handed back while
+   the room is already quiet is itself the proof: the audio it covers was
+   over before it arrived, so the recognizer is running that far behind, and
+   a recognizer that far behind rarely has just the one clause left. Reading
+   only the first sign, the catch-up traffic disarmed the hold that was
+   waiting for it, so a stall that came back as two events two tenths of a
+   second apart went out as two prompts anyway.
+
+   How far behind it is, is the same measure as how much longer to wait: a
+   clause that landed a second into the quiet says the recognizer is a second
+   behind, so it gets a second past that clause before anything moves. Prompt
+   recognition measures near zero there and so waits no longer than it ever
+   did, which is what keeps this from costing every on-device sentence a
+   second send wait.
+
+   Bounded by twice the wait either way, and this is not the outer limit on
+   sending that was turned down before. That one cut people off while they
+   were still talking. This one only says how long to keep waiting for a
+   recognizer that has gone quiet after the talking stopped, and it is here so
+   that a keyboard clack or a door after the last word, loud with no words
+   behind it, does not hold the prompt back until the cap. A recognizer
+   further behind than that still splits, which is the honest limit of reading
+   it from the outside. (The bound is measured from the last sound, and a
+   session renewed mid-hold moves the wait itself, so in the worst case the
+   real delay is that bound plus one more wait after the session settles.)
 
    The ordinary browser path is left exactly as it was. It answers within a
    fraction of a second, so it is never behind in the first place. */
 const RECOG_OWED_FACTOR = 2;
 function recognizerOwesWords(now, waitMs) {
   if (!onDeviceLocal) return false;
-  if (lastMicLoudAt <= lastFinalAt) return false;
-  return now - lastMicLoudAt < waitMs * RECOG_OWED_FACTOR;
+  // Never heard anything at all. The analyser can fail to open (startViz, and
+  // on Windows it does), and then the level reads 0 forever: with no sound to
+  // reason from there is nothing to say the recognizer is behind, so this
+  // stays out of the way and the wait alone decides, exactly as before.
+  if (!lastMicLoudAt) return false;
+  if (now - lastMicLoudAt >= waitMs * RECOG_OWED_FACTOR) return false;
+  if (lastMicLoudAt > lastFinalAt) return true;
+  const behind = lastFinalAt - lastMicLoudAt;
+  return now - lastFinalAt < behind;
 }
 
 /* How long to wait for quiet before a finished clause moves on. In draft mode
