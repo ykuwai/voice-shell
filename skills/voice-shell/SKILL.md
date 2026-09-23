@@ -22,13 +22,19 @@ as an instruction from the user.
 
 | Name | What it is | Where the audio goes |
 |---|---|---|
-| `browser` (default) | Chrome's Web Speech API. Works with nothing installed | **Google's servers** |
+| `browser` (default) | Chrome's Web Speech API. Works with nothing installed | **Local while Chrome holds a model for the language, otherwise Google's servers** |
 | `apple` | On-device recognition that ships with macOS 26. Light | Only inside this machine |
 | `whisper` | faster-whisper. Strong on proper nouns | Only inside this machine |
 
-Never recommend `browser` to someone who wants everything to stay local. (The
-screen's own caution says "the browser's built-in speech recognition" without
-naming Google. Know that it is Google either way.)
+A page cannot ask Chrome for cloud recognition. It can only forbid it, and
+that is what the screen's second browser choice ("local only") does. On the
+plain choice Chrome recognizes locally whenever it holds the model for the
+language, and sends the audio to Google's servers when it does not, so where
+the audio goes is read off the disk (`GET /api/ondevice`) and the note on the
+screen says which of the two is happening. Still never recommend the plain
+choice to someone who wants everything to stay local, since the model can go
+away and the audio then goes out. Recommend the local browser choice, `apple`
+or `whisper` instead.
 
 The argument is `$ARGUMENTS` (`start` / `stop` / `status` / `setup`; `start` when omitted).
 
@@ -383,8 +389,8 @@ ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh start --engine whisper --model /path/
 ```
 
 **With browser recognition, the mic is turned off after a stretch of no voice** (5 minutes by default,
-0 to 30 under "Turn off when idle", 0 = never), so it does not keep talking to
-Google while the user is away. A sound and a note mark it; pressing the
+0 to 30 under "Turn off when idle", 0 = never), so it does not keep its
+recognition connected while the user is away. A sound and a note mark it; pressing the
 microphone brings it back.
 
 ### Settings (the gear)

@@ -75,7 +75,7 @@ npx skills update voice-shell -y
 
 セットアップ不要で、すぐに使えます。\
 Chrome に入っている無料の音声認識（Web Speech API）です。\
-音声は Google のサーバーで処理されます。
+その言語のモデルが Chrome にある間はローカルで認識され、なければ音声は Google のサーバーへ送信されます。どちらになっているかは設定に出ます。
 
 ### 2. Mac なら Apple のローカル音声認識
 
