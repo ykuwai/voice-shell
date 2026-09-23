@@ -7,8 +7,9 @@ environment first and **ask the user which way to go before running anything**
 **Most of the time there is nothing to install.** The default uses **the
 browser's own built-in speech recognition** (Chrome's Web Speech API), and
 `pip install numpy aiohttp` is enough to run it. No model to load, nothing to
-wait for. Chrome decides where that recognizing happens, on this machine when
-it has a model for the language and on Google's servers when it has none.
+wait for. It recognizes on this machine while Chrome holds a model for the
+language, and on Google's servers when it holds none. The note under the entry
+in the settings says which of the two is happening.
 
 What follows is for when you want everything to stay on your machine, or when you
 want to use it without opening the window.

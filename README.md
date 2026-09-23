@@ -75,7 +75,7 @@ Switch between them in the on-screen settings. If one needs setup, just ask Clau
 
 Nothing to set up. It just works.\
 It uses Chrome's free, built-in speech recognition (Web Speech API).\
-Where it recognizes is Chrome's call. With a model for your language on the machine it may recognize there, and without one your audio goes to Google's servers.
+While Chrome holds a model for your language, it recognizes on the machine. Without one, your audio goes to Google's servers. The settings say which of the two is happening.
 
 ### 2. Macs — Apple's on-device recognition
 

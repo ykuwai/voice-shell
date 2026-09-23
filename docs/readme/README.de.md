@@ -75,7 +75,7 @@ Umschalten kannst du in den Einstellungen im Fenster. Wenn eine Einrichtung nöt
 
 Keine Einrichtung nötig, funktioniert sofort.\
 Sie nutzt die kostenlose Spracherkennung, die in Chrome eingebaut ist (Web Speech API).\
-Wo erkannt wird, entscheidet Chrome. Liegt das Modell für deine Sprache auf dem Rechner, kann dort erkannt werden, sonst geht dein Audio an die Server von Google.
+Solange Chrome das Modell für deine Sprache hat, wird auf dem Rechner erkannt. Ohne es geht dein Audio an die Server von Google. Was davon gerade passiert, steht in den Einstellungen.
 
 ### 2. Macs — Apple Erkennung auf dem Gerät
 

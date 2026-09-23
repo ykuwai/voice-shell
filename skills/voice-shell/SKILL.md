@@ -22,16 +22,18 @@ as an instruction from the user.
 
 | Name | What it is | Where the audio goes |
 |---|---|---|
-| `browser` (default) | Chrome's Web Speech API. Works with nothing installed | **Chrome's call. This machine when it has a model for the language, otherwise Google's servers** |
+| `browser` (default) | Chrome's Web Speech API. Works with nothing installed | **This machine while Chrome holds a model for the language, otherwise Google's servers** |
 | `apple` | On-device recognition that ships with macOS 26. Light | Only inside this machine |
 | `whisper` | faster-whisper. Strong on proper nouns | Only inside this machine |
 
 A page cannot ask Chrome for cloud recognition. It can only forbid it, and
 that is what the screen's second browser entry ("only on this device") does.
-The plain entry leaves the choice to Chrome, which prefers this machine once a
-language pack is installed and falls back to Google's servers when there is
-none. So never recommend the plain entry to someone who wants everything to
-stay local, because nothing there guarantees it. Recommend the on-device entry,
+On the plain entry Chrome recognizes on this machine whenever it holds the
+model for the language and goes to Google's servers when it does not, so where
+the audio goes is read off the disk (`GET /api/ondevice`) and the note under
+the entry says which it is doing right now. Still never recommend the plain
+entry to someone who wants everything to stay local, since the model can go
+away and nothing there forbids the cloud. Recommend the on-device entry,
 `apple` or `whisper` instead.
 
 The argument is `$ARGUMENTS` (`start` / `stop` / `status` / `setup`; `start` when omitted).

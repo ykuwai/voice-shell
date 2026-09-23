@@ -75,7 +75,7 @@ npx skills update voice-shell -y
 
 설치할 것 없이 바로 쓸 수 있습니다.\
 Chrome에 들어 있는 무료 음성 인식(Web Speech API)입니다.\
-어디서 인식할지는 Chrome 이 정합니다. 그 언어의 모델이 컴퓨터에 있으면 거기서 인식할 수 있고, 없으면 음성은 Google 서버로 갑니다.
+Chrome 에 그 언어의 모델이 있는 동안은 컴퓨터에서 인식됩니다. 없으면 음성은 Google 서버로 갑니다. 둘 중 어느 쪽인지는 설정에 나옵니다.
 
 ### 2. Mac - Apple 기기 내 음성 인식
 

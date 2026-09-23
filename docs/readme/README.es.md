@@ -75,7 +75,7 @@ Se cambia desde los ajustes de la ventana. Si alguna necesita instalación, píd
 
 No hay que instalar nada. Funciona desde el primer momento.\
 Es el reconocimiento de voz gratuito que trae Chrome (Web Speech API).\
-Dónde se reconoce lo decide Chrome. Si el modelo de tu idioma está en el equipo, puede reconocerse ahí, y si no, el audio va a los servidores de Google.
+Mientras Chrome tenga el modelo de tu idioma, se reconoce en el equipo. Sin él, el audio va a los servidores de Google. Los ajustes dicen cuál de las dos cosas está pasando.
 
 ### 2. Mac - Reconocimiento local de Apple
 

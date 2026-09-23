@@ -3761,6 +3761,19 @@ const enginePicked = value => value === BROWSER_LOCAL
    when nothing could be told. Only both being there means Chrome really
    holds it, and then downloadable is only this site not having asked yet. */
 const onDeviceHasModel = disk => !!disk && disk.engine === true && disk.pack === true;
+
+/* Where the plain browser entry is recognizing right now.
+
+   A page cannot ask Chrome that, and it does not have to. Chrome uses the
+   model whenever it holds a usable one, so the very look at the disk the
+   local entry already does answers it for the plain entry too. 'here' when
+   the model is there, 'cloud' when the server looked and it is not, and ''
+   when nothing could be told (no Chrome directory to look in, every one of
+   them unreadable, or the answer not back yet), where the wording hedges. */
+const plainAsrWhere = disk =>
+  onDeviceHasModel(disk) ? 'here'
+    : disk && (disk.engine === false || disk.pack === false) ? 'cloud' : '';
+
 // What that model weighs, for the line that says so. '' when the server could
 // not tell, and the wording falls back to a rough figure per language.
 const onDeviceSizeText = disk => {
@@ -5423,9 +5436,23 @@ function paintEnginePick() {
 }
 
 function paintBrowserAsr() {
+  /* On the plain entry, what the note and the caution say depends on whether
+     Chrome holds the model for the language being spoken, which is what the
+     disk says. Asked once per language and cached (checkOnDeviceDisk returns
+     at once for one already known or under way), so repainting costs nothing
+     and only a change of language goes out again. */
+  const plain = asrChosen && !onDeviceLocal;
+  if (plain) checkOnDeviceDisk(browserLang());
+  const where = plain ? plainAsrWhere(onDeviceDiskNow()) : '';
   // "Keep this off if everything must stay on this machine" is the wrong
   // thing to say to someone who picked the entry that does exactly that.
   el.browserAsrWarn.hidden = !asrChosen || onDeviceLocal;
+  /* Warning about Google is wrong while the model is right here, and hedging
+     is wrong once the disk has said which it is, so the caution follows the
+     same three answers as the note. It is set here rather than through
+     data-i18n for that reason. */
+  el.browserAsrWarn.textContent = t(where === 'here' ? 'browserAsrWarnHere'
+    : where === 'cloud' ? 'browserAsrWarnCloud' : 'browserAsrWarn');
   el.asrConflict.hidden = !asrChosen || !asrConflict;
   el.asrConflict.textContent = t('asrConflict');
   el.browserMic.hidden = !asrChosen;
@@ -5443,7 +5470,11 @@ function paintBrowserAsr() {
   // governs, on both engines now, is how long it waits after that before
   // actually sending it (queueOrSendFinal), so the slider stays live here too.
   el.silenceNote.textContent = t(asrChosen ? 'silenceNoteBrowser' : 'silenceNote');
-  el.engineNote.textContent = t(asrChosen && !onDeviceLocal ? 'browserAsrNote' : 'localAsrNote');
+  // What is really happening, not what Chrome might do. The model being here
+  // is the whole of it, so the note says that and nothing about a choice.
+  el.engineNote.textContent = !plain ? t('localAsrNote')
+    : t(where === 'here' ? 'browserAsrNoteHere'
+        : where === 'cloud' ? 'browserAsrNoteCloud' : 'browserAsrNote');
   // Asked again with every paint, the 5 second poll included, so a model that
   // arrives some other way (another site, chrome://components) is noticed too
   paintOnDevice();
@@ -5588,7 +5619,10 @@ el.asrLang.onchange = () => {
   // A model is per language, so what was known is for the old one
   onDeviceRefused = false;
   onDeviceProblem = '';
-  if (onDeviceLocal) paintBrowserAsr();
+  // Both entries have something to repaint here. The local one its status
+  // line, the plain one its note, which says whether the model for the
+  // language now chosen is on this machine.
+  paintBrowserAsr();
   // The language takes effect on the next reconnect. If it is in use,
   // reconnect right now. Through restartRecognition rather than a stop() and
   // the end it throws back, for the same reason the entry switch goes that
