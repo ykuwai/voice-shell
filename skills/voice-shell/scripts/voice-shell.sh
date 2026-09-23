@@ -526,24 +526,45 @@ case "$cmd" in
     # Asked for on its own, once the watch is up, which also makes it something
     # the user can ask for again later.
     #
+    # No conversation id means there is nothing to look this session up by, and
+    # waiting changes nothing. Say so at once, the way `name` already does.
+    if [[ -z "${CLAUDE_CODE_SESSION_ID:-${CODEX_THREAD_ID:-${CODEX_SESSION_ID:-}}}" ]]; then
+      echo "This tool has no session id, so which chip it is cannot be looked up." >&2
+      exit 1
+    fi
     # The registration is written a moment after Monitor starts the watch, so
     # wait a little rather than tell a session that is about to be listening
     # that it is not.
-    found=""
+    #
+    # A chip in the row is not the same as somebody reading it. A session
+    # between two watches, and one whose listen has ended for good, both keep
+    # their place in the row. Keep waiting on either, because at startup that
+    # is the old chip still sitting there while this watch's own registration
+    # lands a moment later, and it takes the same number over, so the answer
+    # does not move.
+    found=""; state=""
     for _ in $(seq 1 20); do          # up to 10 seconds
       found="$("$PY" "$APP" --whoami 2>/dev/null || true)"
-      [[ -n "$found" ]] && break
+      state="${found##*$'\t'}"
+      [[ "$state" == "live" ]] && break
       sleep 0.5
     done
-    if [[ -z "$found" ]]; then
-      echo "This session has no chip yet. Start listening first, with voice-shell.sh listen" >&2
-      exit 1
-    fi
     # Only the facts. The wording the user hears is the agent's to write, in
     # whatever language the conversation is in, so nothing is translated here.
-    IFS=$'\t' read -r _no _label _total <<< "$found"
-    echo "  number  $_no"
-    echo "  name    $_label"
+    if [[ -n "$found" ]]; then
+      IFS=$'\t' read -r _no _label _total _state <<< "$found"
+      echo "  number  $_no"
+      echo "  name    $_label"
+    fi
+    if [[ "$state" != "live" ]]; then
+      if [[ -n "$found" ]]; then
+        echo "  That chip is in the row, but nothing is listening through it." >&2
+      else
+        echo "  This session has no chip." >&2
+      fi
+      echo "  Start listening first, with voice-shell.sh listen under Monitor." >&2
+      exit 1
+    fi
     echo "  It is the number as things stand right now, out of $_total listening."
     echo "  It changes as other sessions start listening and stop."
     echo "  Tell the user the number and the name in the language they are using."

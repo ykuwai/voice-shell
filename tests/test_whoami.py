@@ -37,10 +37,9 @@ class _Row:
     def live(self, session, pid=None, cwd="/work/auth", order=None):
         """A registration for a process that really is running (this one).
 
-        Only one pid can be alive to register under, so a second live entry is
-        faked by writing the same pid under a different name is not possible.
-        Tests that need two entries use a tombstone for the other one, which is
-        what a session between two watches really looks like.
+        Only this process's own pid is alive to register under, so a test that
+        needs a second entry uses a tombstone for the other one, which is what
+        a session between two watches really looks like anyway.
         """
         pid = pid or str(os.getpid())
         now = time.time()
@@ -99,6 +98,23 @@ class WhoamiTest(_Row, unittest.TestCase):
         self.tomb(5, pid="40856", session="s-old", cwd="/a/docs")
         self.live("s-mine", cwd="/b/docs")
         self.assertEqual(vd.whoami_of(self.log, "s-mine")["label"], "docs (2)")
+
+    def test_a_chip_of_a_session_between_two_watches_says_so(self):
+        # #110 again if this read as "listening". The chip is there, keeps its
+        # number, and nothing is reading through it, so the caller has to be
+        # able to tell that apart and start `listen`.
+        self.tomb(5, pid="40856", session="s-mine")
+        found = vd.whoami_of(self.log, "s-mine")
+        self.assertEqual(found["no"], 1)
+        self.assertEqual(found["state"], "away")
+
+    def test_a_chip_whose_listen_ended_for_good_says_so(self):
+        self.tomb(vd.LEAVE_GRACE + 3600, pid="40856", session="s-mine")
+        self.assertEqual(vd.whoami_of(self.log, "s-mine")["state"], "gone")
+
+    def test_one_that_is_really_listening_says_live(self):
+        self.live("s-mine")
+        self.assertEqual(vd.whoami_of(self.log, "s-mine")["state"], "live")
 
     def test_a_session_that_is_not_listening_gets_nothing(self):
         self.live("s-mine")

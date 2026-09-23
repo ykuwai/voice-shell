@@ -189,8 +189,8 @@ arrives twice.
 alive.** Run `voice-shell.sh listeners` (or `status`) and look for
 **`<- this session`**: it marks only the entry registered with this
 conversation's `$CLAUDE_CODE_SESSION_ID`, so it settles the question.
-`voice-shell.sh whoami` answers the same question more directly, and fails when
-this session has no chip. No mark means your Monitor is not registered; start
+`voice-shell.sh whoami` answers the same question more directly, and fails
+when the chip is there but nothing is listening through it. No mark means your Monitor is not registered; start
 one with `listen`. (Starting `listen` again under the same session id retires
 the earlier registration by itself, so this check is for knowing where things
 stand.)
