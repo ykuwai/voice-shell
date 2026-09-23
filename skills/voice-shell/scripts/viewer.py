@@ -884,8 +884,12 @@ async def main_async(args):
         # around, a line arriving while an await is open rides neither history
         # nor broadcast, and just that one goes missing.
         tail.clients.add(ws)
+        # Marked as the history rather than something that just happened. The
+        # page says so out loud when an utterance reaches nowhere, and without
+        # this every old line of a session spent working alone would say it
+        # again on every reload, all at once.
         for rec in list(tail.history):
-            await ws.send_str(json.dumps(rec, ensure_ascii=False))
+            await ws.send_str(json.dumps({**rec, "replay": True}, ensure_ascii=False))
         # watch_partial only broadcasts on change, one text shared by every
         # connected client, so a browser that opens (or reloads) mid-sentence
         # never gets told what is already sitting there until it changes

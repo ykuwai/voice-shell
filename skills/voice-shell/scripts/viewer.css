@@ -856,6 +856,14 @@
   .to-menu-item.asking { color:var(--danger); }
   .to-menu-item.asking .x { opacity:1; }
   .entry .text { font-size:.88rem; line-height:1.65; word-break:break-word; }
+  /* Said under the text, not beside the time, because it is about the
+     utterance itself rather than about when it was said. Quiet ink and no
+     ground of its own: it is a fact to read once, not a warning to act on,
+     and the card is already in the log by the time anyone sees it. */
+  .entry .nowhere {
+    margin-top:.3rem; font-size:.7rem; line-height:1.4; color:var(--faint);
+  }
+  .entry .nowhere::before { content:"○"; margin-right:.3rem; font-size:.85em; }
 
   /* The draft card. The live transcript shows up here too (prime spot) */
   /* Stacked vertically, when seats run short only the live transcript has to

@@ -20,7 +20,13 @@ const start = source.indexOf("const RESUME_KEY = 'vs.resume';");
 const end = source.indexOf("addEventListener('pagehide'", start);
 if (start < 0 || end < 0) process.exit(2);
 const body = source.slice(start, end);
+/* The fold itself comes along, since what comes back out of storage is folded
+   on the way in (a page that went away before the fold existed wrote the
+   snapshot wide). */
+const fold = source.slice(source.indexOf('// Full-width Latin letters and digits'),
+                          source.indexOf('const TAIL_IDS = '));
 const make = new Function('env', `
+  ${fold}
   let {route, recWanted, draftTouched, seeded} = env;
   let sendingDraft = !!env.sendingDraft;
   let discardingDraft = !!env.discardingDraft;
@@ -131,6 +137,28 @@ assert(el.draft.value === 'a\nb\nc', 'nothing new, nothing changes');
 const el2 = {draft: {value: ''}};
 make({el: el2}).mergeHeld([{text: 'x'}, {text: 'y'}]);
 assert(el2.draft.value === 'x\ny', 'empty box takes them all');
+''')
+
+    def test_what_comes_back_into_the_box_is_folded(self):
+        """The box is filled from three places that are not the live stream.
+
+        All three carry text written somewhere else (the snapshot the page that
+        went away left behind, and the lines the server held), so a full-width
+        「ｗｉ－ｆｉ」 from either of them sat in the unsent card while the live
+        transcript above it had already folded the same words.
+        """
+        run(r'''
+const el = {draft: {value: ''}};
+const h = make({el, draftTouched: false, seeded: false});
+h.restoreDraft({draft: 'ｗｉ－ｆｉ', pending: 'ＰＲ ｔｅｓｔ', touched: false});
+assert(el.draft.value === 'wi-fi\nPR test', 'restored folded: ' + el.draft.value);
+
+// The box already holds the folded line, so its full-width twin is the same
+// line and must not be added a second time.
+const el2 = {draft: {value: 'wi-fi'}};
+const h2 = make({el: el2});
+h2.mergeHeld([{text: 'ｗｉ－ｆｉ'}, {text: 'ＰＲ'}]);
+assert(el2.draft.value === 'wi-fi\nPR', 'merged folded, once: ' + el2.draft.value);
 ''')
 
     def test_startup_and_route_paths_share_side_effects(self):

@@ -69,9 +69,25 @@ class ToHalfWidthTest(unittest.TestCase):
         self.assertEqual(to_halfwidth("＠＃＆％＋＝／＼＿＜＞＄＊＾｜｀［］｛｝"),
                          r"@#&%+=/\_<>$*^|`[]{}")
 
+    def test_the_hyphen_in_a_name_folds(self):
+        """A hyphen inside a word is half-width wherever it is written down.
+
+        Said as one word, Wi-Fi came back 「Ｗｉ－Ｆｉ」 and only the letters folded,
+        so what was sent carried a full-width hyphen in the middle of a name
+        nobody writes that way.
+        """
+        self.assertEqual(to_halfwidth("Ｗｉ－Ｆｉ"), "Wi-Fi")
+        self.assertEqual(to_halfwidth("ｖｏｉｃｅ－ｓｈｅｌｌ"), "voice-shell")
+        self.assertEqual(to_halfwidth("－－ｈｅｌｐ"), "--help")
+        # The long vowel mark is a different character and a word of Japanese
+        self.assertEqual(to_halfwidth("コーヒーとｗｉ－ｆｉ"), "コーヒーとwi-fi")
+
     def test_japanese_punctuation_is_left_alone(self):
+        # ＂ and ＇ are left wide on purpose, the same reasoning as 〜. They turn
+        # up in quoted prose at least as often as in code, and folding them
+        # would rewrite a sentence someone quoted rather than a line of code.
         for s in ["、", "。", "「", "」", "・", "？", "！", "：", "；", "，", "．",
-                  "（", "）", "〜", "～", "ー", "　", "あア亜"]:
+                  "（", "）", "〜", "～", "ー", "　", "＂", "＇", "あア亜"]:
             self.assertEqual(to_halfwidth(s), s, s)
         self.assertEqual(to_halfwidth("これは「ＰＲ」です。ー〜"), "これは「PR」です。ー〜")
 
@@ -227,7 +243,40 @@ assert(h.toHalfWidth('これは「ＰＲ」です。ー〜') === 'これは「PR
 assert(h.toHalfWidth('　') === '　', 'the full-width space stays');
 assert(h.toHalfWidth('ｶﾞｷﾞ ﾊﾟ') === 'ガギ パ', 'half-width kana composes');
 assert(h.toHalfWidth('git push') === 'git push', 'plain text untouched');
+assert(h.toHalfWidth('Ｗｉ－Ｆｉ') === 'Wi-Fi', 'the hyphen in a name folds');
+assert(h.toHalfWidth('コーヒーとｗｉ－ｆｉ') === 'コーヒーとwi-fi', 'the long vowel mark stays');
+assert(h.toHalfWidth('＂＇') === '＂＇', 'the full-width quotes stay');
 """)
+
+    def test_every_road_into_the_unsent_card_folds(self):
+        """The live transcript folded and the card beside it did not.
+
+        Both the browser road (onresult) and the daemon road (the partial over
+        the WebSocket) fold before anything is decided, and the server folds
+        again before it writes the log. That leaves the screen agreeing with
+        what was sent only as long as every one of them is running the same
+        code. Out of step, a card sat there full-width while the words above it
+        read half-width. paintStream is the one place the unsent card is
+        written, so the fold sits there too and no road can get past it.
+        """
+        src = VIEWER_JS.read_text(encoding="utf-8")
+        stream = src.split("function paintStream(s) {", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("s = toHalfWidth(s || '');", stream)
+        # The partial from the daemon is folded where it arrives as well, since
+        # worthSending and the send cue read that same string.
+        self.assertIn("livePartial = toHalfWidth(m.partial).trim();", src)
+        # The held lines, the box put back after a reload, and the sent cards
+        held = src.split("function appendHeld(text) {", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("toHalfWidth(text || '')", held)
+        merge = src.split("function mergeHeld(held) {", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("toHalfWidth(r.text).trim()", merge)
+        restore = src.split("function restoreDraft(r) {", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("toHalfWidth(s).trim()", restore)
+        entry = src.split("function addEntry(rec) {", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("const body = toHalfWidth(rec.text || '');", entry)
+        # The card says what was sent, so the text the dictionary picks words
+        # out of is the folded one too, not a second, wider copy of it.
+        self.assertIn("text.dataset.raw = body;", entry)
 
     def test_fold_chars_lands_on_the_same_string_cmd_key_does(self):
         run_fold(r"""
