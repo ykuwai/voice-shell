@@ -123,7 +123,8 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'silence','silenceVal','silenceNote','minChars','minCharsVal','clean',
                   'wakeLockField','wakeLockOn','wakeLockNote',
                   'engineGroup','enginePick','engineNote','whisperModel','whisperModelField','whisperModelNote',
-                  'browserAsrWarn','asrConflict','browserMic','micSettingsLink','asrLang','asrLangField',
+                  'browserAsrWarn','asrConflict','browserMic','micSettingsLink','micSettingsSaid',
+                  'asrLang','asrLangField',
                   'onDeviceField','onDeviceStatus','onDeviceRow','onDeviceDownload',
                   'idleMute','idleMuteVal','idleMuteField','idleMinsField','idleMuteOn','idleMuteNote',
                   'browserGestureField','browserGestureOn','browserGesturePeaks','browserGesturePeaksVal',
@@ -5221,6 +5222,7 @@ function paintBrowserAsr() {
   el.asrConflict.hidden = !asrChosen || !asrConflict;
   el.asrConflict.textContent = t('asrConflict');
   el.browserMic.hidden = !asrChosen;
+  if (!asrChosen) el.micSettingsSaid.hidden = true;   // no stale answer left behind
   el.asrLangField.hidden = !asrChosen;
   el.idleMuteField.hidden = !asrChosen;
   el.idleMuteNote.hidden = !asrChosen;
@@ -5897,13 +5899,40 @@ async function syncWakeLock() {
 }
 document.addEventListener('visibilitychange', syncWakeLock);
 
-/* A page cannot open chrome://, so pressing it only copies. */
+/* A page cannot open chrome://, so pressing it only copies.
+
+   Two things were wrong in the small floating window. The clipboard was asked
+   of this document's navigator while the button itself had been moved into the
+   other window (floatParts), and Chrome turns down a write from a document that
+   is not the focused one, so it threw every time. wakeTarget already takes the
+   same care for the wake lock, so the window the button is actually living in
+   is what gets asked here too. And the refusal was swallowed whole, which left
+   pressing it looking like nothing at all happened. Whatever comes of it is
+   said now, right under the address, because the settings sheet covers the main
+   screen's hint line and a word written there would never be read. */
+async function pressMicSettings(clip, url, show, tr) {
+  try {
+    await clip.writeText(url);
+    show(true, tr('micSettingsCopied'));
+    return true;
+  } catch {
+    show(false, tr('micSettingsCopyFailed', {url}));
+    return false;
+  }
+}
+
 el.micSettingsLink.onclick = async () => {
   const url = el.micSettingsLink.textContent.trim();
-  try { await navigator.clipboard.writeText(url); } catch { return; }
-  const was = el.micSettingsLink.textContent;
-  el.micSettingsLink.textContent = t('copied');
-  setTimeout(() => { el.micSettingsLink.textContent = was; }, 1400);
+  const win = el.micSettingsLink.ownerDocument.defaultView || window;
+  await pressMicSettings(win.navigator.clipboard, url, (ok, line) => {
+    el.micSettingsSaid.textContent = line;
+    el.micSettingsSaid.hidden = false;
+    // The address is the label, so on a refusal it has to stay readable
+    if (!ok) return;
+    const was = el.micSettingsLink.textContent;
+    el.micSettingsLink.textContent = t('copied');
+    setTimeout(() => { el.micSettingsLink.textContent = was; }, 1400);
+  }, t);
 };
 
 /* ── The user dictionary ─────────────────
