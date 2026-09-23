@@ -478,11 +478,18 @@ def kanji_numbers_to_arabic(text: str) -> str:
 # folded here, at the one point every engine's text comes in.
 #
 # What folds is Latin letters, digits, and the symbols that only ever mean code when
-# they are spoken (@ # & % + = / \ _ < > $ * ^ | ` and the bracket pairs). What
-# does not fold is everything that is punctuation in Japanese prose: 、。「」・？！：；，．
+# they are spoken (@ # & % + = / \ _ < > $ * ^ | ` and the bracket pairs). The
+# hyphen-minus － (U+FF0D) folds with them, because a hyphen inside a name like
+# Wi-Fi, voice-shell or a command line flag is half-width wherever it is written
+# down, and 「Ｗｉ－Ｆｉ」 came back with the letters folded and the hyphen still wide.
+# The long vowel mark ー (U+30FC) is a different character and is left alone, so
+# 「コーヒー」 is untouched.
+# What does not fold is everything that is punctuation in Japanese prose: 、。「」・？！：；，．
 # and the full-width parentheses, which Japanese writes full-width on purpose. The
-# long vowel mark ー, kana and the full-width space 　 stay as they are too, since all
-# three carry meaning at their own width.
+# quotes ＂ (U+FF02) and ＇ (U+FF07) are left wide for the same reason as 〜, they
+# turn up in prose at least as often as in code, and folding them would rewrite a
+# quoted sentence. The long vowel mark ー, kana and the full-width space 　 stay as
+# they are too, since all three carry meaning at their own width.
 #
 # Half-width katakana (ｱｲｳ) goes the other way, to full-width, which is the shape
 # Japanese is written in. A whole run at a time, because the dakuten is its own
@@ -491,7 +498,7 @@ def kanji_numbers_to_arabic(text: str) -> str:
 # Not unicodedata.normalize("NFKC") over the whole text: that also swallows the
 # full-width space, rewrites 〜 as ~, opens ① out to 1 and ㎠ to cm, and leaves no
 # say in any of it.
-_FULLWIDTH_CODE_SYMBOLS = "＠＃＆％＋＝／＼＿＜＞＄＊＾｜｀［］｛｝"
+_FULLWIDTH_CODE_SYMBOLS = "＠＃＆％＋＝／＼＿＜＞＄＊＾｜｀［］｛｝－"
 _HALFWIDTH_TABLE = str.maketrans({
     c: chr(ord(c) - 0xFEE0)
     for c in ([chr(n) for n in range(0xFF21, 0xFF3B)]      # Ａ-Ｚ

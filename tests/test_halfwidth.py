@@ -69,9 +69,25 @@ class ToHalfWidthTest(unittest.TestCase):
         self.assertEqual(to_halfwidth("＠＃＆％＋＝／＼＿＜＞＄＊＾｜｀［］｛｝"),
                          r"@#&%+=/\_<>$*^|`[]{}")
 
+    def test_the_hyphen_in_a_name_folds(self):
+        """A hyphen inside a word is half-width wherever it is written down.
+
+        Said as one word, Wi-Fi came back 「Ｗｉ－Ｆｉ」 and only the letters folded,
+        so what was sent carried a full-width hyphen in the middle of a name
+        nobody writes that way.
+        """
+        self.assertEqual(to_halfwidth("Ｗｉ－Ｆｉ"), "Wi-Fi")
+        self.assertEqual(to_halfwidth("ｖｏｉｃｅ－ｓｈｅｌｌ"), "voice-shell")
+        self.assertEqual(to_halfwidth("－－ｈｅｌｐ"), "--help")
+        # The long vowel mark is a different character and a word of Japanese
+        self.assertEqual(to_halfwidth("コーヒーとｗｉ－ｆｉ"), "コーヒーとwi-fi")
+
     def test_japanese_punctuation_is_left_alone(self):
+        # ＂ and ＇ are left wide on purpose, the same reasoning as 〜. They turn
+        # up in quoted prose at least as often as in code, and folding them
+        # would rewrite a sentence someone quoted rather than a line of code.
         for s in ["、", "。", "「", "」", "・", "？", "！", "：", "；", "，", "．",
-                  "（", "）", "〜", "～", "ー", "　", "あア亜"]:
+                  "（", "）", "〜", "～", "ー", "　", "＂", "＇", "あア亜"]:
             self.assertEqual(to_halfwidth(s), s, s)
         self.assertEqual(to_halfwidth("これは「ＰＲ」です。ー〜"), "これは「PR」です。ー〜")
 
@@ -227,6 +243,65 @@ assert(h.toHalfWidth('これは「ＰＲ」です。ー〜') === 'これは「PR
 assert(h.toHalfWidth('　') === '　', 'the full-width space stays');
 assert(h.toHalfWidth('ｶﾞｷﾞ ﾊﾟ') === 'ガギ パ', 'half-width kana composes');
 assert(h.toHalfWidth('git push') === 'git push', 'plain text untouched');
+assert(h.toHalfWidth('Ｗｉ－Ｆｉ') === 'Wi-Fi', 'the hyphen in a name folds');
+assert(h.toHalfWidth('コーヒーとｗｉ－ｆｉ') === 'コーヒーとwi-fi', 'the long vowel mark stays');
+assert(h.toHalfWidth('＂＇') === '＂＇', 'the full-width quotes stay');
+""")
+
+    def test_the_fold_runs_where_text_arrives_and_nowhere_after(self):
+        """Folded once, on the way in, above the dictionary. Never again after.
+
+        The server's own order settles it: to_halfwidth runs at the top of the
+        loop, then polish calls apply_replacements, which leaves a replacement
+        at the width it was typed in on purpose. Fold a second time further down
+        and that deliberate width is undone, on a card that is supposed to be
+        the record of what went out, or worse, in the draft box, whose contents
+        are posted to /api/send word for word.
+
+        So the fold sits where text comes in (the browser's own result and the
+        daemon's partial, both before withDict) and on none of the roads that
+        only carry text that has already been through it.
+        """
+        src = VIEWER_JS.read_text(encoding="utf-8")
+        # Where it comes in. Both are read by worthSending and the send cue, so
+        # they have to be the string the server judges.
+        self.assertIn("livePartial = toHalfWidth(m.partial).trim();", src)
+        self.assertIn("stripInventedSpaces(toHalfWidth(res[0].transcript))", src)
+
+        def body_of(head):
+            return src.split(head, 1)[1].split("\n}\n", 1)[0]
+
+        # And nowhere after. paintStream is handed the text withDict has already
+        # rewritten; the other three feed the draft box or the log card.
+        for head in ("function paintStream(s) {", "function appendHeld(text) {",
+                     "function mergeHeld(held) {", "function restoreDraft(r) {"):
+            self.assertNotIn("toHalfWidth", body_of(head), head)
+        entry = body_of("function addEntry(rec) {")
+        self.assertNotIn("toHalfWidth", entry)
+        # What the card shows and what a resend posts are the line as written.
+        self.assertIn("const body = rec.text || '';", entry)
+        self.assertIn("text.dataset.raw = body;", entry)
+
+    def test_a_full_width_replacement_survives_the_screen(self):
+        """A dictionary told to write 「ＡＷＳ」 means it, all the way to the card.
+
+        apply_replacements folds the side it matches on and leaves the side it
+        produces exactly as typed. The screen has to keep that promise, or the
+        card would read AWS under words that reached Claude wide.
+        """
+        # What the daemon sends out, in its own order: fold, then the dictionary.
+        spoken = to_halfwidth("エーダブリューエス を使う")
+        sent = apply_replacements(spoken, {"エーダブリューエス": "ＡＷＳ"})
+        self.assertEqual(sent, "ＡＷＳ を使う")
+        # A second fold anywhere downstream is exactly what would break it, which
+        # is why the card, the held lines and the draft box do not run one.
+        self.assertEqual(to_halfwidth(sent), "AWS を使う")
+        # The page matches the same way: keys folded, what they become as typed.
+        run_fold(r"""
+const pairs = [['エーダブリューエス', 'ＡＷＳ']].map(([k, v]) => [h.toHalfWidth(k), v]);
+const withDict = t => { for (const [f, o] of pairs) t = t.split(f).join(o); return t; };
+assert(withDict('エーダブリューエス を使う') === 'ＡＷＳ を使う',
+       'the replacement keeps its width');
 """)
 
     def test_fold_chars_lands_on_the_same_string_cmd_key_does(self):

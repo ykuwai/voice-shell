@@ -136,7 +136,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'dictNote','dictExport','dictImport','dictFile',
                   'paneBasic','paneDict',
                   'openHelp','helpSheet','closeHelp','helpMini','helpMiniViz',
-                  'clearHistory','clearHistoryLabel',
+                  'clearHistory','clearHistoryLabel','clearHistoryDone',
                   'cmdGroups','cmdNote','floatStand','floatStandBack'])
   el[id] = $(id);
 
@@ -725,6 +725,17 @@ el.clearHistory.onclick = async () => {
   try { await post('/api/history/clear'); } catch {}
 };
 
+/* Say it is done, in the note under the button. The clearing itself is the
+   server's answer coming back to every open screen (history_cleared below),
+   so this is said there rather than here, and every screen that just lost its
+   list says so rather than only the one that was pressed. */
+let clearedNoteTimer = 0;
+function flashHistoryCleared() {
+  clearTimeout(clearedNoteTimer);
+  el.clearHistoryDone.textContent = t('historyCleared');
+  clearedNoteTimer = setTimeout(() => { el.clearHistoryDone.textContent = ''; }, 2600);
+}
+
 function retally() {
   el.none.hidden = el.log.children.length > 0;
 }
@@ -774,11 +785,36 @@ function addEntry(rec) {
   row.dataset.to = rec.to ? String(rec.to) : '';
   const text = document.createElement('div');
   text.className = 'text';
-  text.dataset.raw = rec.text;
-  text.textContent = format(rec.text);
+  // Shown exactly as it was written, and not folded here. The card is the
+  // record of what went out, and the fold runs on the server before anything is
+  // decided, above the dictionary (to_halfwidth at the top of the loop, then
+  // polish). A replacement the dictionary is told to produce keeps the width it
+  // was typed in on purpose (apply_replacements), so folding the line again
+  // here would show 「ＡＷＳ」 as AWS on a card whose words reached Claude wide.
+  // dataset.raw is what /api/resend sends back out, and a resend is meant to be
+  // the same utterance a second time, not a narrower one.
+  const body = rec.text || '';
+  text.dataset.raw = body;
+  text.textContent = format(body);
   gutter.append(buildToControl(row.dataset.to));
 
   row.append(gutter, text);
+  /* Nothing was listening when this went out, so it reached nowhere. The line
+     the daemon and the viewer write carries a destination whenever any
+     listener is known at all (resolve_target names the latest one rather than
+     leaving it blank), so a body with none on it is the record of an utterance
+     that was written down and read by nothing. Said on the card rather than
+     only in the status line, because the status line is gone a few seconds
+     later and this is the one place the utterance itself stays. Not built into
+     the destination chip beside it, which relabelEntries rebuilds every five
+     seconds off who is listening now, while this is a fact about the moment it
+     was said and never changes afterwards. */
+  if (!row.dataset.to) {
+    const nowhere = document.createElement('div');
+    nowhere.className = 'nowhere';
+    nowhere.textContent = t('sentNowhere');
+    row.append(nowhere);
+  }
   // Read before the insert below moves it: CSS scroll anchoring already
   // keeps whatever you were reading in the same place on screen when a row
   // lands above it (Chrome, tested), so a reader scrolled away from the top
@@ -1440,12 +1476,17 @@ function isBackchannel(text, words) {
 // sent. Fold it only there and the card would show 「ＰＲ」 and then flip to PR
 // the moment it went out.
 //
-// Letters, digits and the symbols that only ever mean code when spoken. Japanese
-// punctuation (、。「」・？！), the full-width parentheses, the long vowel mark ー,
-// kana and the full-width space are all left as they are, since each carries
-// meaning at the width it is written in. Half-width katakana goes the other way,
-// a whole run at a time so ｷﾞ comes back as ギ rather than ｷ + ﾞ.
-const FULLWIDTH_CODE_RE = /[Ａ-Ｚａ-ｚ０-９＠＃＆％＋＝／＼＿＜＞＄＊＾｜｀［］｛｝]/g;
+// Letters, digits and the symbols that only ever mean code when spoken, the
+// hyphen-minus － (U+FF0D) among them: a hyphen inside a name like Wi-Fi or
+// voice-shell is half-width wherever it is written down, and 「Ｗｉ－Ｆｉ」 came back
+// with the letters folded and the hyphen still wide. The long vowel mark ー
+// (U+30FC) is a different character and stays, so 「コーヒー」 is untouched.
+// Japanese punctuation (、。「」・？！), the full-width parentheses, the full-width
+// quotes ＂ and ＇ (prose as often as code, the same reasoning as 〜), kana and the
+// full-width space are all left as they are, since each carries meaning at the
+// width it is written in. Half-width katakana goes the other way, a whole run at
+// a time so ｷﾞ comes back as ギ rather than ｷ + ﾞ.
+const FULLWIDTH_CODE_RE = /[Ａ-Ｚａ-ｚ０-９＠＃＆％＋＝／＼＿＜＞＄＊＾｜｀［］｛｝－]/g;
 const HALFWIDTH_KANA_RE = /[\uFF61-\uFF9F]+/g;
 const toHalfWidth = text => text
   .replace(FULLWIDTH_CODE_RE, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
@@ -2007,6 +2048,14 @@ let tailMarkTimer = null, tailMarkKey = null, tailMarkPending = null;
    local-engine partial and the browser SpeechRecognition interim result, so
    the two read identically. */
 function paintStream(s) {
+  /* Not folded here. What arrives has already been folded where it came in,
+     above the dictionary both times (onresult on the browser road, the partial
+     from the daemon), and what this is handed is the text after withDict has
+     run. Folding at this point would narrow a replacement the dictionary was
+     told to produce wide, and the live line would then disagree with the card
+     the same words land on when they go out. Same reasoning as the server's,
+     which folds once at the top of the loop and never again after polish. */
+  s = s || '';
   const match = s ? matchingTailWord(s) : null;
   const key = match ? match.id + ' ' + match.word : null;
   tailMarkPending = {s, match};
@@ -2195,6 +2244,7 @@ async function handleWsMessage({ev, message, number, discardInProgress: wasDisca
       el.log.replaceChildren();
       el.logJumpWrap.hidden = true;
       retally();
+      flashHistoryCleared();
       return;
     }
     const result = 'partial' in m || 'held' in m || m.text != null;
@@ -2302,7 +2352,10 @@ async function handleWsMessage({ev, message, number, discardInProgress: wasDisca
       // Keep the text as it came as well. The minimum length is measured before
       // the dictionary rewrites anything, so counting the rewritten characters
       // here would let the drawing and the daemon disagree over the same words.
-      livePartial = m.partial.trim();
+      // Folded on arrival, not only where it is drawn. worthSending and the
+      // send cue below read this same string, so leaving it wide here would
+      // have them judging text the server would never see in that shape.
+      livePartial = toHalfWidth(m.partial).trim();
       const s = withDict(livePartial);
       paintStream(s);
       el.tray.classList.toggle('idle', !s);
@@ -2336,6 +2389,12 @@ async function handleWsMessage({ev, message, number, discardInProgress: wasDisca
       // older screen would line it up as an utterance and make an empty card.
       // Quietly dropping keys it does not know is the safer way.
       addEntry(m);
+      // Nothing was listening, so say it at the moment it happens as well.
+      // The card below keeps the record, but someone talking is watching the
+      // line under the mic, not the log. Left out for the history replayed
+      // when the page connects (m.replay), or every old card of a session
+      // spent working alone would announce itself again on every reload.
+      if (!m.to && !m.replay) say(t('sentNowhereHint'), 8);
       el.stream.textContent = '';
       el.tray.classList.add('idle');
     }
@@ -2347,7 +2406,12 @@ function grow() {
   el.draft.style.height = el.draft.scrollHeight + 'px';
 }
 
-// Append a held utterance at the end. The caret position and your edits are kept.
+/* Append a held utterance at the end. The caret position and your edits are kept.
+   Taken as it came, not folded. The held line was folded on the server before
+   the dictionary ran and has been through the dictionary since, and what goes
+   into this box is what gets posted to /api/send word for word. Folding here
+   would quietly narrow a replacement the dictionary was told to produce wide,
+   and Claude would receive text nobody asked for. */
 function appendHeld(text) {
   text = (text || '').trim();
   if (!text) return;
@@ -2490,6 +2554,9 @@ function takeResume(storage, now) {
    instant the page went away, so it waits for a look and a press instead of
    going out twice. */
 function restoreDraft(r) {
+  // Put back character for character. Most of what is in this box was typed by
+  // hand, and a reload is no occasion to rewrite somebody's own words. Someone
+  // who wrote 「ＡＢＣ」 on purpose gets it back that way, and it goes out that way.
   const text = [r.draft, r.pending]
     .map(s => (typeof s === 'string' ? s.trim() : ''))
     .filter(Boolean).join('\n');
@@ -2507,6 +2574,10 @@ function restoreDraft(r) {
    sight and were wiped along with the list when the box was sent. */
 function mergeHeld(held) {
   const have = new Set(el.draft.value.split('\n').map(l => l.trim()).filter(Boolean));
+  // Compared as written, on both sides. Everything that reaches this box keeps
+  // the width it arrived in (appendHeld and restoreDraft above), so a held line
+  // and the copy of it already sitting there are the same string, and nothing
+  // has to be narrowed on one side of the comparison to make them meet.
   const add = held.map(r => (r && typeof r.text === 'string' ? r.text.trim() : ''))
     .filter(x => x && !have.has(x));
   if (!add.length) return;
