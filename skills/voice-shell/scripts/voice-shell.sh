@@ -542,17 +542,26 @@ case "$cmd" in
     # is the old chip still sitting there while this watch's own registration
     # lands a moment later, and it takes the same number over, so the answer
     # does not move.
-    found=""; state=""
-    for _ in $(seq 1 20); do          # up to 10 seconds
+    #
+    # Ten seconds means ten seconds on the clock, not twenty tries of unknown
+    # cost. Counting the tries instead had each one paying for a whole Python
+    # start on top of its own sleep, so the wait a session that never comes up
+    # live actually sat through was half again as long as what is written here
+    # and in SKILL.md (measured: 15s). The sleep only happens when there is
+    # still time left to sleep into, so the last try is not followed by one.
+    found=""; state=""; _deadline=$((SECONDS + 10))
+    while :; do
       found="$("$PY" "$APP" --whoami 2>/dev/null || true)"
-      state="${found##*$'\t'}"
+      # The name is the last field on purpose: it is the one that could itself
+      # hold a tab, and read gives everything left over to the last variable.
+      IFS=$'\t' read -r _no _total _live state _label <<< "$found"
       [[ "$state" == "live" ]] && break
+      (( SECONDS < _deadline )) || break
       sleep 0.5
     done
     # Only the facts. The wording the user hears is the agent's to write, in
     # whatever language the conversation is in, so nothing is translated here.
     if [[ -n "$found" ]]; then
-      IFS=$'\t' read -r _no _label _total _state <<< "$found"
       echo "  number  $_no"
       echo "  name    $_label"
     fi
@@ -565,7 +574,12 @@ case "$cmd" in
       echo "  Start listening first, with voice-shell.sh listen under Monitor." >&2
       exit 1
     fi
-    echo "  It is the number as things stand right now, out of $_total listening."
+    # Two different numbers, and saying the row size as though it were the
+    # number listening would tell the user more sessions can hear them than
+    # really can: an away chip and a gone one both sit in the row holding a
+    # number with nobody behind it.
+    echo "  It is the number as things stand right now, out of $_total in the" \
+         "row, $_live listening."
     echo "  It changes as other sessions start listening and stop."
     echo "  Tell the user the number and the name in the language they are using."
     ;;

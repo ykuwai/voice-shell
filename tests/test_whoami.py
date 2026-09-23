@@ -116,6 +116,46 @@ class WhoamiTest(_Row, unittest.TestCase):
         self.live("s-mine")
         self.assertEqual(vd.whoami_of(self.log, "s-mine")["state"], "live")
 
+    def test_a_chip_holding_a_place_is_not_counted_as_listening(self):
+        # The row is two chips deep, but the other one is between two watches
+        # and nobody is reading through it. Handing the row size over as the
+        # number listening would tell the user two sessions can hear them.
+        self.tomb(5, pid="40856", session="s-old")
+        self.live("s-mine")
+        found = vd.whoami_of(self.log, "s-mine")
+        self.assertEqual(found["total"], 2)
+        self.assertEqual(found["live"], 1)
+
+    def test_a_gone_chip_is_not_counted_as_listening_either(self):
+        self.tomb(vd.LEAVE_GRACE + 3600, pid="40856", session="s-old")
+        self.live("s-mine")
+        found = vd.whoami_of(self.log, "s-mine")
+        self.assertEqual(found["total"], 2)
+        self.assertEqual(found["live"], 1)
+
+    def test_a_renamed_session_is_told_its_new_name(self):
+        # "name this session X" writes the name into the registration, and the
+        # chip is drawn with it. That is the name to say out loud, not the
+        # folder it happens to be running in.
+        pid = self.live("s-mine", cwd="/work/auth")
+        reg = Path(self.tmp.name) / "listeners" / pid
+        info = json.loads(reg.read_text(encoding="utf-8"))
+        info["name"] = "認証まわりの修正"
+        reg.write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
+        self.assertEqual(vd.whoami_of(self.log, "s-mine")["label"],
+                         "認証まわりの修正")
+
+    def test_a_renamed_session_keeps_the_suffix_the_chip_shows(self):
+        # Renamed onto a name another chip already has. The screen writes
+        # "docs (2)", so that is what has to be said.
+        self.tomb(5, pid="40856", session="s-old", cwd="/a/docs")
+        pid = self.live("s-mine", cwd="/work/auth")
+        reg = Path(self.tmp.name) / "listeners" / pid
+        info = json.loads(reg.read_text(encoding="utf-8"))
+        info["name"] = "docs"
+        reg.write_text(json.dumps(info, ensure_ascii=False), encoding="utf-8")
+        self.assertEqual(vd.whoami_of(self.log, "s-mine")["label"], "docs (2)")
+
     def test_a_session_that_is_not_listening_gets_nothing(self):
         self.live("s-mine")
         self.assertIsNone(vd.whoami_of(self.log, "somebody-else"))

@@ -188,12 +188,13 @@ arrives twice.
 **A resumed session (`claude -r`) does not know whether its old Monitor is still
 alive.** Run `voice-shell.sh listeners` (or `status`) and look for
 **`<- this session`**: it marks only the entry registered with this
-conversation's `$CLAUDE_CODE_SESSION_ID`, so it settles the question.
-`voice-shell.sh whoami` answers the same question more directly, and fails
-when the chip is there but nothing is listening through it. No mark means your Monitor is not registered; start
-one with `listen`. (Starting `listen` again under the same session id retires
-the earlier registration by itself, so this check is for knowing where things
-stand.)
+conversation's `$CLAUDE_CODE_SESSION_ID`, so it settles the question. No mark
+means your Monitor is not registered; start one with `listen`. (Starting
+`listen` again under the same session id retires the earlier registration by
+itself, so this check is for knowing where things stand.) Use `listeners` here
+rather than `whoami`: `whoami` waits up to 10 seconds for a chip to come live,
+which is right when a watch has just been armed and is only delay when the
+question is whether one was.
 
 **Do not stop `voice-shell.sh listen` with pkill.** Your own Monitor matches the
 same pattern and goes down with it.

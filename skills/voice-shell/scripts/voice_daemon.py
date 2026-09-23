@@ -2263,9 +2263,11 @@ def parse_args():
                    help="List the sessions listening to the utterance log and exit")
     p.add_argument("--whoami", action="store_true",
                    help="Print this session's own place in the chip row as "
-                        "'number<TAB>name<TAB>how many<TAB>state', where state "
-                        "is live, away or gone. Exit 1 when this session is "
-                        "not in the row at all")
+                        "'number<TAB>chips in the row<TAB>how many of them are "
+                        "listening<TAB>state<TAB>name', where state is live, "
+                        "away or gone. The name comes last because it is the "
+                        "one field that could itself hold a tab. Exit 1 when "
+                        "this session is not in the row at all")
     p.add_argument("--leave", metavar="REG", default=None,
                    help="A listen is going away: keep REG as a short-lived "
                         "tombstone so a re-armed listen for the same session "
@@ -2680,8 +2682,17 @@ def whoami_of(log_path, session):
         if entry.get("session") == session:
             state = "gone" if entry.get("gone") else (
                 "away" if entry.get("away") else "live")
+            # "total" is how many chips the row draws, which is what the
+            # number is counted out of. "live" is how many of them somebody is
+            # really listening through, which is a smaller number whenever an
+            # away or a gone chip is holding its place. Telling the user the
+            # row size as if it were the number listening overstates how many
+            # sessions can hear them, so both are handed over and the caller
+            # says which is which.
+            live = sum(1 for e in entries
+                       if not e.get("gone") and not e.get("away"))
             return {"no": n, "label": entry["label"], "total": len(entries),
-                    "pid": entry["pid"], "state": state}
+                    "live": live, "pid": entry["pid"], "state": state}
     return None
 
 
@@ -3434,8 +3445,8 @@ def main():
         found = whoami_of(args.log_file, my_session_id())
         if not found:
             sys.exit(1)
-        print(f"{found['no']}\t{found['label']}\t{found['total']}"
-              f"\t{found['state']}")
+        print(f"{found['no']}\t{found['total']}\t{found['live']}"
+              f"\t{found['state']}\t{found['label']}")
         return
 
     if args.newer_same_session is not None:
