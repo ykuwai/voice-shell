@@ -785,12 +785,15 @@ function addEntry(rec) {
   row.dataset.to = rec.to ? String(rec.to) : '';
   const text = document.createElement('div');
   text.className = 'text';
-  // Folded here as well. Every road into the log folds on the server before
-  // the line is written, so in step this changes nothing, and it is what keeps
-  // a card written by a server that has not been restarted since the fold
-  // landed reading the same as the live transcript above it. Folding twice is
-  // a no-op, so the card still says what was sent.
-  const body = toHalfWidth(rec.text || '');
+  // Shown exactly as it was written, and not folded here. The card is the
+  // record of what went out, and the fold runs on the server before anything is
+  // decided, above the dictionary (to_halfwidth at the top of the loop, then
+  // polish). A replacement the dictionary is told to produce keeps the width it
+  // was typed in on purpose (apply_replacements), so folding the line again
+  // here would show 「ＡＷＳ」 as AWS on a card whose words reached Claude wide.
+  // dataset.raw is what /api/resend sends back out, and a resend is meant to be
+  // the same utterance a second time, not a narrower one.
+  const body = rec.text || '';
   text.dataset.raw = body;
   text.textContent = format(body);
   gutter.append(buildToControl(row.dataset.to));
@@ -2045,19 +2048,14 @@ let tailMarkTimer = null, tailMarkKey = null, tailMarkPending = null;
    local-engine partial and the browser SpeechRecognition interim result, so
    the two read identically. */
 function paintStream(s) {
-  /* The last stop for every road that carries text from somewhere else onto
-     the unsent card, so the fold runs here too. The browser road folds each
-     result as it arrives (onresult), and the daemon folds the partial it
-     writes, so this is a no-op whenever both ends are in step. Out of step it
-     is the whole of the difference, and the card is where it shows: a daemon
-     or a server still running the code from before the fold hands the page
-     full-width text, and it was read as the page having failed to fold. The
-     writes that do not come through here (paintPendingBrowserSends and the
-     three that put browserStreamText straight on screen) carry the browser's
-     own results, folded as each one arrived.
-     word taken as a signal below is matched on the folded text as well, the
-     same string the server matches on. */
-  s = toHalfWidth(s || '');
+  /* Not folded here. What arrives has already been folded where it came in,
+     above the dictionary both times (onresult on the browser road, the partial
+     from the daemon), and what this is handed is the text after withDict has
+     run. Folding at this point would narrow a replacement the dictionary was
+     told to produce wide, and the live line would then disagree with the card
+     the same words land on when they go out. Same reasoning as the server's,
+     which folds once at the top of the loop and never again after polish. */
+  s = s || '';
   const match = s ? matchingTailWord(s) : null;
   const key = match ? match.id + ' ' + match.word : null;
   tailMarkPending = {s, match};
@@ -2409,14 +2407,13 @@ function grow() {
 }
 
 /* Append a held utterance at the end. The caret position and your edits are kept.
-   Folded here as well as on the way in. The held line comes from the server,
-   which folds it too, so in step this changes nothing. Out of step it is the
-   whole difference: a line held by a server that was started before the fold
-   existed arrives full-width, and the unsent card showed 「ｗｉ－ｆｉ」 where the live
-   transcript above it had already said wi-fi. Folding twice is a no-op
-   (test_folding_twice_changes_nothing), so this costs nothing to keep. */
+   Taken as it came, not folded. The held line was folded on the server before
+   the dictionary ran and has been through the dictionary since, and what goes
+   into this box is what gets posted to /api/send word for word. Folding here
+   would quietly narrow a replacement the dictionary was told to produce wide,
+   and Claude would receive text nobody asked for. */
 function appendHeld(text) {
-  text = toHalfWidth(text || '').trim();
+  text = (text || '').trim();
   if (!text) return;
   // Something arriving outside review mode never opens the edit box (that display would have no explanation)
   if (route !== 'hold') return;
@@ -2557,11 +2554,11 @@ function takeResume(storage, now) {
    instant the page went away, so it waits for a look and a press instead of
    going out twice. */
 function restoreDraft(r) {
-  // Folded on the way back in. The snapshot was written by the page that just
-  // went away, which may have been an older one that did not fold, and a reload
-  // is exactly when that older page is being replaced.
+  // Put back character for character. Most of what is in this box was typed by
+  // hand, and a reload is no occasion to rewrite somebody's own words. Someone
+  // who wrote 「ＡＢＣ」 on purpose gets it back that way, and it goes out that way.
   const text = [r.draft, r.pending]
-    .map(s => (typeof s === 'string' ? toHalfWidth(s).trim() : ''))
+    .map(s => (typeof s === 'string' ? s.trim() : ''))
     .filter(Boolean).join('\n');
   if (!text) return;
   el.draft.value = text;
@@ -2577,9 +2574,11 @@ function restoreDraft(r) {
    sight and were wiped along with the list when the box was sent. */
 function mergeHeld(held) {
   const have = new Set(el.draft.value.split('\n').map(l => l.trim()).filter(Boolean));
-  // Folded before the comparison, not after, or a line already sitting in the
-  // box folded would not match its own full-width twin and would go in again.
-  const add = held.map(r => (r && typeof r.text === 'string' ? toHalfWidth(r.text).trim() : ''))
+  // Compared as written, on both sides. Everything that reaches this box keeps
+  // the width it arrived in (appendHeld and restoreDraft above), so a held line
+  // and the copy of it already sitting there are the same string, and nothing
+  // has to be narrowed on one side of the comparison to make them meet.
+  const add = held.map(r => (r && typeof r.text === 'string' ? r.text.trim() : ''))
     .filter(x => x && !have.has(x));
   if (!add.length) return;
   const cur = el.draft.value.replace(/\s*$/, '');

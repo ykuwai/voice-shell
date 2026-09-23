@@ -248,35 +248,61 @@ assert(h.toHalfWidth('コーヒーとｗｉ－ｆｉ') === 'コーヒーとwi-fi
 assert(h.toHalfWidth('＂＇') === '＂＇', 'the full-width quotes stay');
 """)
 
-    def test_every_road_into_the_unsent_card_folds(self):
-        """The live transcript folded and the card beside it did not.
+    def test_the_fold_runs_where_text_arrives_and_nowhere_after(self):
+        """Folded once, on the way in, above the dictionary. Never again after.
 
-        Both the browser road (onresult) and the daemon road (the partial over
-        the WebSocket) fold before anything is decided, and the server folds
-        again before it writes the log. That leaves the screen agreeing with
-        what was sent only as long as every one of them is running the same
-        code. Out of step, a card sat there full-width while the words above it
-        read half-width. Every road that carries text written somewhere else
-        onto that card goes through paintStream, so the fold sits there too.
+        The server's own order settles it: to_halfwidth runs at the top of the
+        loop, then polish calls apply_replacements, which leaves a replacement
+        at the width it was typed in on purpose. Fold a second time further down
+        and that deliberate width is undone, on a card that is supposed to be
+        the record of what went out, or worse, in the draft box, whose contents
+        are posted to /api/send word for word.
+
+        So the fold sits where text comes in (the browser's own result and the
+        daemon's partial, both before withDict) and on none of the roads that
+        only carry text that has already been through it.
         """
         src = VIEWER_JS.read_text(encoding="utf-8")
-        stream = src.split("function paintStream(s) {", 1)[1].split("\n}\n", 1)[0]
-        self.assertIn("s = toHalfWidth(s || '');", stream)
-        # The partial from the daemon is folded where it arrives as well, since
-        # worthSending and the send cue read that same string.
+        # Where it comes in. Both are read by worthSending and the send cue, so
+        # they have to be the string the server judges.
         self.assertIn("livePartial = toHalfWidth(m.partial).trim();", src)
-        # The held lines, the box put back after a reload, and the sent cards
-        held = src.split("function appendHeld(text) {", 1)[1].split("\n}\n", 1)[0]
-        self.assertIn("toHalfWidth(text || '')", held)
-        merge = src.split("function mergeHeld(held) {", 1)[1].split("\n}\n", 1)[0]
-        self.assertIn("toHalfWidth(r.text).trim()", merge)
-        restore = src.split("function restoreDraft(r) {", 1)[1].split("\n}\n", 1)[0]
-        self.assertIn("toHalfWidth(s).trim()", restore)
-        entry = src.split("function addEntry(rec) {", 1)[1].split("\n}\n", 1)[0]
-        self.assertIn("const body = toHalfWidth(rec.text || '');", entry)
-        # The card says what was sent, so the text the dictionary picks words
-        # out of is the folded one too, not a second, wider copy of it.
+        self.assertIn("stripInventedSpaces(toHalfWidth(res[0].transcript))", src)
+
+        def body_of(head):
+            return src.split(head, 1)[1].split("\n}\n", 1)[0]
+
+        # And nowhere after. paintStream is handed the text withDict has already
+        # rewritten; the other three feed the draft box or the log card.
+        for head in ("function paintStream(s) {", "function appendHeld(text) {",
+                     "function mergeHeld(held) {", "function restoreDraft(r) {"):
+            self.assertNotIn("toHalfWidth", body_of(head), head)
+        entry = body_of("function addEntry(rec) {")
+        self.assertNotIn("toHalfWidth", entry)
+        # What the card shows and what a resend posts are the line as written.
+        self.assertIn("const body = rec.text || '';", entry)
         self.assertIn("text.dataset.raw = body;", entry)
+
+    def test_a_full_width_replacement_survives_the_screen(self):
+        """A dictionary told to write 「ＡＷＳ」 means it, all the way to the card.
+
+        apply_replacements folds the side it matches on and leaves the side it
+        produces exactly as typed. The screen has to keep that promise, or the
+        card would read AWS under words that reached Claude wide.
+        """
+        # What the daemon sends out, in its own order: fold, then the dictionary.
+        spoken = to_halfwidth("エーダブリューエス を使う")
+        sent = apply_replacements(spoken, {"エーダブリューエス": "ＡＷＳ"})
+        self.assertEqual(sent, "ＡＷＳ を使う")
+        # A second fold anywhere downstream is exactly what would break it, which
+        # is why the card, the held lines and the draft box do not run one.
+        self.assertEqual(to_halfwidth(sent), "AWS を使う")
+        # The page matches the same way: keys folded, what they become as typed.
+        run_fold(r"""
+const pairs = [['エーダブリューエス', 'ＡＷＳ']].map(([k, v]) => [h.toHalfWidth(k), v]);
+const withDict = t => { for (const [f, o] of pairs) t = t.split(f).join(o); return t; };
+assert(withDict('エーダブリューエス を使う') === 'ＡＷＳ を使う',
+       'the replacement keeps its width');
+""")
 
     def test_fold_chars_lands_on_the_same_string_cmd_key_does(self):
         run_fold(r"""
