@@ -323,6 +323,9 @@
       <span data-i18n="browserMicNote"></span>
       <button class="link" id="micSettingsLink">chrome://settings/content/microphone</button>
     </p>
+    <!-- What pressing the address did. It belongs here rather than on the
+         main screen's hint line, because this sheet covers that line whole. -->
+    <p class="range-note" id="micSettingsSaid" role="status" hidden></p>
     <div class="field" id="idleMuteField" style="margin-top:.7rem" hidden>
       <span data-i18n="idleMute">Turn off when idle</span>
       <label class="switch" data-i18n-title="idleMute"><input type="checkbox" id="idleMuteOn"><span class="track"><span class="knob"></span></span></label>
