@@ -195,6 +195,30 @@ class AdoptAfterDaysTest(_Row, unittest.TestCase):
         self.assertEqual(vd.list_active_listeners(self.log), [])
         self.assertFalse(vd._gone_file(self.log, "s1").exists())
 
+    def test_the_x_on_a_gone_chip_still_clears_it_quickly(self):
+        # The chip is struck through but the x is still on it, and pressing it
+        # has to mean the same as always. The row holds a gone one for a week
+        # now, so a stop that left "left" in place behind "stopped" would park
+        # it there for the whole week instead.
+        self.tomb(vd.AWAY_HOLD + 30, session="s1")
+        vd.mark_stopped(self.log, "s1", disconnected=True)
+        data = json.loads(vd._gone_file(self.log, "s1").read_text(encoding="utf-8"))
+        self.assertNotIn("left", data)
+        self.assertTrue(vd.list_active_listeners(self.log))   # held for the re-arm
+        data["stopped"] -= vd.LEAVE_GRACE + 60
+        vd.write_atomic(vd._gone_file(self.log, "s1"), json.dumps(data))
+        self.assertEqual(vd.list_active_listeners(self.log), [])
+        self.assertFalse(vd._gone_file(self.log, "s1").exists())
+
+    def test_unlisten_on_one_already_gone_still_clears_it_quickly(self):
+        self.tomb(vd.AWAY_HOLD + 30, session="s1")
+        vd.unlisten(self.log, "s1")
+        data = json.loads(vd._gone_file(self.log, "s1").read_text(encoding="utf-8"))
+        self.assertNotIn("left", data)
+        data["stopped"] -= vd.LEAVE_GRACE + 60
+        vd.write_atomic(vd._gone_file(self.log, "s1"), json.dumps(data))
+        self.assertEqual(vd.list_active_listeners(self.log), [])
+
     def test_a_disconnect_still_blocks_the_one_re_arm_it_causes(self):
         vd.write_atomic(vd._gone_file(self.log, "s1"), json.dumps({
             "session": "s1", "pid": "40856", "disconnected": True,
