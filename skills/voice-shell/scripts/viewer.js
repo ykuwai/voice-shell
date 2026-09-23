@@ -3987,16 +3987,51 @@ const NO_SPACE_LANGS = new Set(['ja', 'zh', 'th']);
 const speakingNoSpaceLang = () => NO_SPACE_LANGS.has(browserLang().split('-')[0].toLowerCase());
 const clauseJoin = () => speakingNoSpaceLang() ? '' : ' ';
 
-// Chrome's own recognizer writes a plain space between words even in
-// Japanese, where nothing was said in that gap at all, not for any of the
-// reasons clauseJoin exists for. Stripped only between two characters that
-// are both outside plain ASCII, so a space actually separating an English
-// word dropped into the sentence ("Claude Code", "GitHub", the everyday
-// case here) is left standing, only the ones the recognizer invented on
-// its own go.
-const INVENTED_SPACE_RE = /(?<=[^\x00-\x7F\s])[ \t]+(?=[^\x00-\x7F\s])/g;
+/* Chrome's own recognizer writes a plain space between words even in
+   Japanese, where nothing was said in that gap at all, not for any of the
+   reasons clauseJoin exists for. A Latin word it hears inside Japanese comes
+   back the same way and worse, spelled out a letter at a time:
+   「Ｉ Ｐ ａ ｄ ｉ Ｐ ｈ ｏ ｎ ｅ」 for "iPad iPhone", every single letter with a
+   space after it. On this device that is full-width, and from Google's own
+   servers the same sentence comes back half-width (I P a d i P h o n e), so
+   the width says nothing about it either way. Nobody said any of those gaps.
+
+   What does tell them apart is how many letters stand together. One letter on
+   each side is the recognizer spelling a word out and the space goes. Two or
+   more on either side is a word it wrote as a word (「ＰＲ ｔｅｓｔ」, "Claude
+   Code", 「Ｍａｃ ｍｉｎｉ」) and the space stays, because that one really does
+   separate two words. With no Latin on both sides it is the ordinary invented
+   space between two characters outside plain ASCII, which goes as it always
+   did, while a space against an English word dropped into the sentence stays.
+
+   Run on the raw transcript, before the fold, the way it was before #127.
+   Folding first made that impossible for the spelled-out case: the letters
+   are ASCII by then, the rule that only looked at non-ASCII neighbours could
+   not touch them, and 「ＩＰｈｏｎｅ」 reached the screen as "I P h o n e", which
+   is what full-width looks like at a glance. Reading it first without
+   counting the letters is the other half of the same mistake, and that is
+   what sent 「ＰＲ ｔｅｓｔ」 out as PRtest. */
+const INVENTED_SPACE_RE = /[ \t]+/g;
+const NON_ASCII_RE = /[^\x00-\x7F\s]/;
+const LETTER_RE = /[A-Za-z0-9Ａ-Ｚａ-ｚ０-９]/;
+// How many Latin letters stand in a row from i, walking in one direction
+const letterRunFrom = (s, i, step) => {
+  let n = 0;
+  while (i >= 0 && i < s.length && LETTER_RE.test(s[i])) { n++; i += step; }
+  return n;
+};
 const stripInventedSpaces = text =>
-  speakingNoSpaceLang() ? text.replace(INVENTED_SPACE_RE, '') : text;
+  speakingNoSpaceLang()
+    ? text.replace(INVENTED_SPACE_RE, (gap, at, whole) => {
+        const before = whole[at - 1], after = whole[at + gap.length];
+        if (before === undefined || after === undefined) return gap;
+        const left = letterRunFrom(whole, at - 1, -1);
+        const right = letterRunFrom(whole, at + gap.length, 1);
+        if (left === 1 && right === 1) return '';             // spelled out
+        if (left && right) return gap;                        // two real words
+        return NON_ASCII_RE.test(before) && NON_ASCII_RE.test(after) ? '' : gap;
+      })
+    : text;
 
 /* The one string both writers to el.stream agree on: whatever is queued,
    with whatever was last recognized after it. Two different callers used to
@@ -4076,11 +4111,13 @@ function newRecognition(generation) {
     let interim = '';
     for (let i = ev.resultIndex; i < ev.results.length; i++) {
       const res = ev.results[i];
-      // Folded first, then the invented spaces. INVENTED_SPACE_RE only strips a
-      // space with a non-ASCII character on either side, and on-device Japanese
-      // writes Latin full-width, so the other order ate the space in 「ＰＲ ｔｅｓｔ」
-      // and sent PRtest, where cloud recognition of the same words kept it.
-      const transcript = stripInventedSpaces(toHalfWidth(res[0].transcript));
+      // The spaces first, then the fold. stripInventedSpaces has to read the
+      // transcript while the Latin in it is still full-width: that is what
+      // says the letters are the recognizer's own writing and not something
+      // anyone spoke, and it is what tells 「Ｉ Ｐ ａ ｄ」 spelled a letter at a
+      // time from the two words of 「ＰＲ ｔｅｓｔ」. Folded first, both look like
+      // ASCII words with a space between them and neither can be helped.
+      const transcript = toHalfWidth(stripInventedSpaces(res[0].transcript));
       if (res.isFinal) queueOrSendFinal(transcript);
       else interim += transcript;
     }
