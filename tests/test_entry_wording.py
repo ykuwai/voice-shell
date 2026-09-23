@@ -52,11 +52,25 @@ class EntryWordingTest(unittest.TestCase):
     def test_every_language_is_there(self):
         self.assertEqual(sorted(self.i18n), sorted(LANGS))
 
+    # The one string a state is allowed to leave empty, which hides the
+    # caution there and folds the point into the note. Empty, not absent:
+    # t() falls back to the key name for a key that is not there.
+    MAY_BE_EMPTY = {"browserAsrWarnHere"}
+
     def test_every_language_carries_the_keys(self):
         for lang in LANGS:
             for key in ENTRY_KEYS:
                 self.assertIn(key, self.i18n[lang], f"{lang} is missing {key}")
+                if key in self.MAY_BE_EMPTY:
+                    continue
                 self.assertTrue(self.i18n[lang][key].strip(), f"{lang}.{key} is empty")
+
+    def test_a_string_left_empty_is_empty_everywhere(self):
+        """Half the languages hiding the caution and half showing it would be
+        two different screens, so an empty one has to be empty in all 8."""
+        for key in self.MAY_BE_EMPTY:
+            empty = {lang for lang in LANGS if not self.i18n[lang][key].strip()}
+            self.assertIn(len(empty), (0, len(LANGS)), f"{key} is empty in {empty}")
 
     def test_fill_ins_match_english(self):
         def fills(s):
@@ -99,11 +113,15 @@ class EntryWordingTest(unittest.TestCase):
                          self.i18n["ja"]["browserAsrNote"])
 
     def test_the_caution_is_not_shown_wrong_when_the_model_is_here(self):
-        """With the model on the machine, a flat warning about Google is
-        false, so that state gets its own wording."""
-        here = self.i18n["en"]["browserAsrWarnHere"]
-        self.assertIn("does not forbid it", here)
-        self.assertIn("only on this device", here)
+        """With the model on the machine, the flat warning about Google is
+        false, so that state either says something of its own or says
+        nothing. What it must not do is repeat the other one."""
+        for lang in LANGS:
+            here = self.i18n[lang]["browserAsrWarnHere"].strip()
+            if not here:
+                continue
+            self.assertNotEqual(here, self.i18n[lang]["browserAsrWarnCloud"].strip(), lang)
+            self.assertNotEqual(here, self.i18n[lang]["browserAsrWarn"].strip(), lang)
 
     def test_the_on_device_entry_is_the_one_that_guarantees_it(self):
         ready = self.i18n["en"]["onDeviceReady"]
@@ -169,3 +187,11 @@ class PlainNoteWiringTest(unittest.TestCase):
         start = src.index("function checkOnDeviceDisk")
         end = src.index("function keepPollingOnDevice", start)
         self.assertIn("paintBrowserAsr(", src[start:end])
+
+    def test_a_state_with_nothing_to_warn_about_hides_the_caution(self):
+        """A wording left empty means that state folds its point into the
+        note, and the red rule keeps out of the way instead of framing
+        nothing. t() falls back to the key name for a missing key, so such a
+        state carries an empty string rather than no key at all."""
+        src = VIEWER_JS.read_text(encoding="utf-8")
+        self.assertIn("el.browserAsrWarn.hidden = !asrChosen || onDeviceLocal || !warn;", src)

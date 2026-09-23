@@ -5449,15 +5449,20 @@ function paintBrowserAsr() {
   const plain = asrChosen && !onDeviceLocal;
   if (plain) checkOnDeviceDisk(browserLang());
   const where = plain ? plainAsrWhere(onDeviceDiskNow()) : '';
-  // "Keep this off if everything must stay on this machine" is the wrong
-  // thing to say to someone who picked the entry that does exactly that.
-  el.browserAsrWarn.hidden = !asrChosen || onDeviceLocal;
   /* Warning about Google is wrong while the model is right here, and hedging
      is wrong once the disk has said which it is, so the caution follows the
      same three answers as the note. It is set here rather than through
-     data-i18n for that reason. */
-  el.browserAsrWarn.textContent = t(where === 'here' ? 'browserAsrWarnHere'
+     data-i18n for that reason.
+
+     An empty wording means that state has nothing to warn about, and the
+     caution keeps out of the way rather than leaving its red rule around
+     nothing. That is how a state folds its point into the note instead. */
+  const warn = t(where === 'here' ? 'browserAsrWarnHere'
     : where === 'cloud' ? 'browserAsrWarnCloud' : 'browserAsrWarn');
+  el.browserAsrWarn.textContent = warn;
+  // "Keep this off if everything must stay on this machine" is the wrong
+  // thing to say to someone who picked the entry that does exactly that.
+  el.browserAsrWarn.hidden = !asrChosen || onDeviceLocal || !warn;
   el.asrConflict.hidden = !asrChosen || !asrConflict;
   el.asrConflict.textContent = t('asrConflict');
   el.browserMic.hidden = !asrChosen;
