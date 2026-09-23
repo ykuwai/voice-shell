@@ -3989,40 +3989,47 @@ const clauseJoin = () => speakingNoSpaceLang() ? '' : ' ';
 
 /* Chrome's own recognizer writes a plain space between words even in
    Japanese, where nothing was said in that gap at all, not for any of the
-   reasons clauseJoin exists for. Latin words it hears inside Japanese come
-   back the same way, full-width and spelled a letter at a time:
+   reasons clauseJoin exists for. A Latin word it hears inside Japanese comes
+   back the same way and worse, spelled out a letter at a time:
    「Ｉ Ｐ ａ ｄ ｉ Ｐ ｈ ｏ ｎ ｅ」 for "iPad iPhone", every single letter with a
-   space after it. Nobody said those gaps either.
+   space after it. On this device that is full-width, and from Google's own
+   servers the same sentence comes back half-width (I P a d i P h o n e), so
+   the width says nothing about it either way. Nobody said any of those gaps.
 
-   Run on the raw transcript, before the fold, which is the only place the two
-   kinds of space can still be told apart: while the letters are full-width,
-   they are the recognizer's own writing rather than anything that was
-   spoken, and how many of them stand together says which kind it is. A run of
-   one on both sides is the letter-at-a-time spelling and the space goes; a
-   run of two or more on either side is a word the recognizer wrote as a word
-   (「ＰＲ ｔｅｓｔ」, 「Ｍａｃ ｍｉｎｉ」) and the space stays, since that one really
-   does separate two words. Everything else between two non-ASCII characters
-   is the ordinary invented space and goes.
+   What does tell them apart is how many letters stand together. One letter on
+   each side is the recognizer spelling a word out and the space goes. Two or
+   more on either side is a word it wrote as a word (「ＰＲ ｔｅｓｔ」, "Claude
+   Code", 「Ｍａｃ ｍｉｎｉ」) and the space stays, because that one really does
+   separate two words. With no Latin on both sides it is the ordinary invented
+   space between two characters outside plain ASCII, which goes as it always
+   did, while a space against an English word dropped into the sentence stays.
 
-   Folded first instead, every letter is plain ASCII and none of that is left
-   to read: the letter-at-a-time spaces all survived, and 「ＩＰｈｏｎｅ」 reached
-   the screen as "I P h o n e", which is what full-width looks like at a
-   glance. Stripping first without counting the runs is the other half of the
-   same mistake: 「ＰＲ ｔｅｓｔ」 went out as PRtest. */
-const INVENTED_SPACE_RE = /(?<=[^\x00-\x7F\s])[ \t]+(?=[^\x00-\x7F\s])/g;
-const WIDE_LETTER_RE = /[Ａ-Ｚａ-ｚ０-９]/;
-// How many full-width letters stand in a row from i, walking in one direction
-const wideRunFrom = (s, i, step) => {
+   Run on the raw transcript, before the fold, the way it was before #127.
+   Folding first made that impossible for the spelled-out case: the letters
+   are ASCII by then, the rule that only looked at non-ASCII neighbours could
+   not touch them, and 「ＩＰｈｏｎｅ」 reached the screen as "I P h o n e", which
+   is what full-width looks like at a glance. Reading it first without
+   counting the letters is the other half of the same mistake, and that is
+   what sent 「ＰＲ ｔｅｓｔ」 out as PRtest. */
+const INVENTED_SPACE_RE = /[ \t]+/g;
+const NON_ASCII_RE = /[^\x00-\x7F\s]/;
+const LETTER_RE = /[A-Za-z0-9Ａ-Ｚａ-ｚ０-９]/;
+// How many Latin letters stand in a row from i, walking in one direction
+const letterRunFrom = (s, i, step) => {
   let n = 0;
-  while (i >= 0 && i < s.length && WIDE_LETTER_RE.test(s[i])) { n++; i += step; }
+  while (i >= 0 && i < s.length && LETTER_RE.test(s[i])) { n++; i += step; }
   return n;
 };
 const stripInventedSpaces = text =>
   speakingNoSpaceLang()
     ? text.replace(INVENTED_SPACE_RE, (gap, at, whole) => {
-        const left = wideRunFrom(whole, at - 1, -1);
-        const right = wideRunFrom(whole, at + gap.length, 1);
-        return left && right && (left > 1 || right > 1) ? gap : '';
+        const before = whole[at - 1], after = whole[at + gap.length];
+        if (before === undefined || after === undefined) return gap;
+        const left = letterRunFrom(whole, at - 1, -1);
+        const right = letterRunFrom(whole, at + gap.length, 1);
+        if (left === 1 && right === 1) return '';             // spelled out
+        if (left && right) return gap;                        // two real words
+        return NON_ASCII_RE.test(before) && NON_ASCII_RE.test(after) ? '' : gap;
       })
     : text;
 

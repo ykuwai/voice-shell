@@ -345,23 +345,30 @@ assert(f.at[f.chars.indexOf('ゴ')] === 3, 'the cut lands on the base: ' + f.at.
     def test_a_word_spelled_a_letter_at_a_time_comes_back_as_one_word(self):
         """Chrome writes Latin inside Japanese one letter at a time.
 
-        「ＩＰｈｏｎｅ」 arrives as 「Ｉ Ｐ ｈ ｏ ｎ ｅ」, every letter full-width with a
-        space after it. Folded before the spaces are read, all of that is plain
-        ASCII and the spaces survive, so the live line said "I P h o n e" and
-        the card that came back a few seconds later, from a server that folds
-        and never spaces, said iPhone. The exact line the page was caught
-        showing is below, codepoint for codepoint.
+        「ＩＰｈｏｎｅ」 arrives as 「Ｉ Ｐ ｈ ｏ ｎ ｅ」, every letter with a space after
+        it, full-width on this device and half-width from Google's servers.
+        Read only between two non-ASCII characters, none of those spaces is
+        touched once the letters have been folded, so the live line said
+        "I P h o n e" (49 20 50 20 68…), which is what full-width looks like at
+        a glance, and the card that came back a few seconds later from a server
+        that never spaces read iPhone. Both widths of the line the page was
+        caught showing are below, codepoint for codepoint.
         """
         src = VIEWER_JS.read_text(encoding="utf-8")
         self.assertIn("toHalfWidth(stripInventedSpaces(res[0].transcript))", src)
         run_spaces(r"""
-const spelled = 'はい、こちらを。Ｉ Ｐ ａ ｄ ｉ Ｐ ｈ ｏ ｎ ｅ Ｍ ａ ｃ ｍ ｉ ｎ';
-const got = heard(spelled);
-assert(got === 'はい、こちらを。IPadiPhoneMacmin', 'one word again, got ' + got);
-// what the live page showed instead, the reading this test exists for
-const was = h.stripInventedSpaces(h.toHalfWidth(spelled));
-assert(codes(was).includes('49 20 50 20 61 20 64'), 'the old order kept every space');
-assert(!codes(got).includes('49 20 50'), 'and this one does not: ' + codes(got));
+for (const spelled of ['はい、こちらを。Ｉ Ｐ ａ ｄ ｉ Ｐ ｈ ｏ ｎ ｅ Ｍ ａ ｃ ｍ ｉ ｎ',
+                       'はい、こちらを。I P a d i P h o n e M a c m i n']) {
+  const got = heard(spelled);
+  assert(got === 'はい、こちらを。IPadiPhoneMacmin', 'one word again, got ' + got);
+  assert(codes(got).endsWith('49 50 61 64 69 50 68 6f 6e 65 4d 61 63 6d 69 6e'),
+         'letter after letter, no gaps: ' + codes(got));
+}
+// What the live page showed instead, and why: the rule that only read a space
+// between two non-ASCII characters, handed text the fold had already made ASCII.
+const wasRe = /(?<=[^\x00-\x7F\s])[ \t]+(?=[^\x00-\x7F\s])/g;
+const was = h.toHalfWidth('Ｉ Ｐ ａ ｄ').replace(wasRe, '');
+assert(codes(was) === '49 20 50 20 61 20 64', 'every space survived: ' + codes(was));
 """)
 
     def test_the_space_between_two_folded_words_survives(self):
@@ -370,12 +377,16 @@ assert(!codes(got).includes('49 20 50'), 'and this one does not: ' + codes(got))
         # real. Stripped anyway, 「ＰＲ ｔｅｓｔ」 went out as PRtest.
         run_spaces(r"""
 assert(heard('ＰＲ ｔｅｓｔ') === 'PR test', 'two words stay two words');
+assert(heard('PR test') === 'PR test', 'and so do they half-width');
 assert(heard('Ｍａｃ ｍｉｎｉ') === 'Mac mini', 'and so does this one');
+assert(heard('Claude Code を使う') === 'Claude Code を使う', 'the everyday case');
 assert(heard('これは テスト') === 'これはテスト', 'japanese still loses it');
+// Pre-#127 behaviour, deliberately back: the recognizer invented that gap too,
+// and folding first had been keeping it only because P turned into ASCII.
 assert(heard('テスト ＰＲ') === 'テストPR', 'nothing was said in that gap either');
 h.speak('en-US');
 assert(heard('PR test') === 'PR test', 'a language that writes spaces keeps all of them');
-assert(heard('Ｉ Ｐ ａ ｄ') === 'I P a d', 'and is left alone even full-width');
+assert(heard('I P a d') === 'I P a d', 'and spells things out if it wants to');
 """)
 
     def test_the_interim_on_screen_is_already_folded(self):
