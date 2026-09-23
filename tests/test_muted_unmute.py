@@ -273,6 +273,7 @@ const make = new Function('SR', 'env', `
   return {make: () => { rec = newRecognition(0); return rec; },
           stream: () => el.stream.textContent,
           mute: () => { route = 'off'; applyRouteSideEffects('off'); },
+          unmute: () => { route = 'live'; },
           held: () => ({recWanted, live: !!rec, timer: interimThrottleTimer}),
           paintedAs: v => {
             el.stream.textContent = v;
@@ -292,6 +293,13 @@ const finals = texts => ({
 const interim = text => ({
   resultIndex: 0,
   results: [Object.assign([{transcript: text}], {isFinal: false})],
+});
+// Chrome keeps one growing list per session and revises the last entry until it
+// settles, so a result index has to be said out loud to write that down.
+const at = (resultIndex, items) => ({
+  resultIndex,
+  results: items.map(([text, isFinal]) =>
+    Object.assign([{transcript: text}], {isFinal})),
 });
 const freshEnv = (over) => Object.assign({
   route: 'off', local: true, words: ['ミュート解除'],
@@ -360,6 +368,39 @@ assert(h.stream() === '', 'the mute took it with it');
 assert(h.held().timer === null, 'and the paint waiting its turn was dropped');
 assert(h.held().recWanted === true && h.held().live === true,
        'while the session itself stays open');
+""")
+
+    def test_the_sentence_spoken_while_off_does_not_settle_after_the_mic_is_back(self):
+        # The session outlives the mute now, so what was said while the screen
+        # read muted is still half settled in Chrome's own list when the mic
+        # comes back. It must not go out then.
+        self.run_heard(r"""
+const env = freshEnv();
+const h = make(FakeRecognition, env);
+const r = h.make();
+r.onresult(at(0, [['\u3053\u306e\u30d1\u30b9\u30ef\u30fc\u30c9\u306f', false]]));
+h.unmute();
+r.onresult(at(0, [['\u3053\u306e\u30d1\u30b9\u30ef\u30fc\u30c9\u306f abc123', true]]));
+assert(env.sent.length === 0, 'it never went out');
+assert(!env.painted.some(p => p.startsWith('interim:') && p.length > 'interim:'.length),
+       'and it was never drawn');
+// The next thing said is ordinary speech again
+r.onresult(at(1, [['', true], ['\u30c6\u30b9\u30c8\u3092\u901a\u3057\u3066', true]]));
+assert(env.sent.length === 1, 'the session goes on working');
+""")
+
+    def test_the_sentence_cut_off_mid_way_by_the_mute_goes_the_same_way(self):
+        # Stop talking at the very moment of muting and no event fires while it
+        # is off, so the write-off has to happen where the mute lands too.
+        self.run_heard(r"""
+const env = freshEnv({route: 'live'});
+const h = make(FakeRecognition, env);
+const r = h.make();
+r.onresult(at(0, [['\u3053\u306e\u30d1\u30b9\u30ef\u30fc\u30c9\u306f', false]]));
+h.mute();
+h.unmute();
+r.onresult(at(0, [['\u3053\u306e\u30d1\u30b9\u30ef\u30fc\u30c9\u306f abc123', true]]));
+assert(env.sent.length === 0, 'the half said sentence went nowhere');
 """)
 
     def test_with_the_mic_on_everything_goes_through_as_before(self):

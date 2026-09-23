@@ -2039,6 +2039,12 @@ function applyRouteSideEffects(next) {
       if (interimThrottleTimer) { clearTimeout(interimThrottleTimer); interimThrottleTimer = null; }
       latestInterimForPaint = lastInterimHeard = '';
       el.stream.textContent = browserStreamText();
+      /* The sentence that was being spoken as the mic was cut is written off with
+         the same mark the muted branch uses (onresult). Someone who stops talking
+         at the same moment they mute leaves nothing for that branch to fire on,
+         and then the half sentence from before the cut settles after the mic is
+         back and goes out as though it had just been said. */
+      if (rec) rec.dropBelow = Math.max(rec.dropBelow || 0, rec.sawResults || 0);
     }
   } else {
     resetBrowserGesture();
@@ -4248,6 +4254,13 @@ function newRecognition(generation) {
 
   r.onresult = ev => {
     if (!mine()) return;
+    /* How far this session's results have come. Chrome only ever adds to the
+       list within one session and keeps revising the last entry until it
+       settles, so this is also the index the utterance being spoken right now
+       sits at. Kept for the moment the mic is cut mid-sentence (see
+       applyRouteSideEffects), where no event of our own may arrive again
+       before it settles. */
+    r.sawResults = ev.results.length;
     /* The mic is off and this session is still open, which only happens on the
        on-device entry (listensWhileMuted). Everything heard here is dropped on
        the spot: no interim painted, no clause queued, nothing sent, nothing
@@ -4261,6 +4274,15 @@ function newRecognition(generation) {
        screen says muted. */
     if (route === 'off') {
       if (r.processLocally !== true) { try { r.abort(); } catch {} return; }
+      /* The session outlives the mute now, so the utterance being spoken while it
+         is off is still sitting in this same list, half settled, when the mic
+         comes back. Left alone it settles a moment later under a live screen and
+         goes out whole, carrying the whole muted stretch with it. Everything the
+         list holds at this moment is written off here instead, and the live
+         branch below skips it for the rest of the session. That is the daemon's
+         own answer too (changeRoute discards whatever was already running when
+         the mic comes back), reached without folding the session up. */
+      r.dropBelow = Math.max(r.dropBelow || 0, ev.results.length);
       for (let i = ev.resultIndex; i < ev.results.length; i++) {
         const res = ev.results[i];
         if (res.isFinal) heardWhileMuted(toHalfWidth(stripInventedSpaces(res[0].transcript)));
@@ -4269,6 +4291,9 @@ function newRecognition(generation) {
     }
     let interim = '';
     for (let i = ev.resultIndex; i < ev.results.length; i++) {
+      // Heard while the mic was off. It is neither painted nor sent, whatever it
+      // settles into and however long after the mic came back that happens.
+      if (i < (r.dropBelow || 0)) continue;
       const res = ev.results[i];
       // The spaces first, then the fold. stripInventedSpaces has to read the
       // transcript while the Latin in it is still full-width: that is what
