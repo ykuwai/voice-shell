@@ -124,6 +124,17 @@ class FoldedTextFlowsOnTest(unittest.TestCase):
         self.assertEqual(collapse_letter_acronyms(to_halfwidth("Ｇ Ｐ Ｕ")), "GPU")
 
 
+class MachineNameTest(unittest.TestCase):
+    """The name at the head is matched folded, like every other written-down word."""
+
+    def test_a_name_typed_full_width_still_matches(self):
+        from voice_daemon import _strip_name
+        self.assertEqual(_strip_name("Macミュート", ["Ｍａｃ"]), "ミュート")
+        self.assertEqual(_strip_name("Macミュート", ["Mac"]), "ミュート")
+        self.assertEqual(_strip_name("開発用、ミュート", ["開発用"]), "ミュート")
+        self.assertIsNone(_strip_name("Winミュート", ["Mac"]))
+
+
 class DictionaryTest(unittest.TestCase):
     """An entry registered with full-width letters still matches the folded text."""
 

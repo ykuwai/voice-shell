@@ -2072,9 +2072,15 @@ def _strip_name(text: str, names):
     """When the head is this machine's name, return the rest. None otherwise."""
     body = text.strip()
     low = body.lower()
+    # The name is folded the way the utterance already is, the same as everywhere
+    # else a written-down word is matched against speech. Left raw, a name somebody
+    # typed as 「Ｍａｃ」 matched the full-width 「Ｍａｃミュート」 the recognizer used to
+    # hand over and matches nothing now that the text arrives folded. Cutting by the
+    # folded length is exact, since body has been through the same fold.
     for name in sorted(names or [], key=len, reverse=True):
-        if low.startswith(name.lower()):
-            return body[len(name):].lstrip(_NAME_SEP)
+        folded = to_halfwidth(name).lower()
+        if folded and low.startswith(folded):
+            return body[len(folded):].lstrip(_NAME_SEP)
     return None
 
 
