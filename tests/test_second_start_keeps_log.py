@@ -15,6 +15,7 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -121,6 +122,88 @@ class EmptyLogTest(unittest.TestCase):
         self.assertEqual(vd.progress_of(self.log, "4321"), 0)
         vd.empty_log(self.log)
         self.assertIsNone(vd.progress_of(self.log, "4321"))
+
+
+class _StoppedHere(Exception):
+    """Raised from the first call after the emptying, to end main() there."""
+
+
+class DaemonStartupTest(unittest.TestCase):
+    """Starting a local engine goes through the daemon, not through --empty-log.
+
+    `voice-shell.sh start --engine whisper` (or apple, or the viewer switching
+    engines) runs voice_daemon.py itself, and its startup used to empty the log
+    with nothing asked. A session already listening on browser recognition lost
+    whatever it had not read yet, the same bug the browser start was fixed for.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.state = Path(self.tmp.name)
+        self.log = self.state / "utterances.jsonl"
+        self.log.write_text('{"text": "said a moment ago", "to": "1"}\n',
+                            encoding="utf-8")
+        (self.state / "listeners").mkdir()
+        (self.state / "listeners-gone").mkdir()
+        run = self.state / "run"
+        run.mkdir()
+        # Every path main() touches before the emptying, pointed at the temp
+        # dir. Left alone these are the real install's, and the test would run
+        # against whatever is listening on this machine right now.
+        self.patches = [
+            unittest.mock.patch.object(vd, "STATE_DIR", self.state),
+            unittest.mock.patch.object(vd, "RUN_DIR", run),
+            unittest.mock.patch.object(vd, "PID_FILE", run / "daemon.pid"),
+            unittest.mock.patch.object(vd, "read_pid", lambda: None),
+            unittest.mock.patch.object(vd, "save_default_dictionary",
+                                       self._stop_here),
+            unittest.mock.patch.object(sys, "argv",
+                                       ["voice_daemon.py", "--log-file",
+                                        str(self.log)]),
+        ]
+        for p in self.patches:
+            p.start()
+
+    def _stop_here(self, *a, **kw):
+        raise _StoppedHere()
+
+    def tearDown(self):
+        for p in reversed(self.patches):
+            p.stop()
+        # main() holds the startup lock open in a global. Windows will not let
+        # the temp dir go while that file is open.
+        lock = globals().get("vd") and getattr(vd, "_daemon_lock", None)
+        if lock is not None:
+            try:
+                lock.close()
+            except OSError:
+                pass
+            vd.__dict__.pop("_daemon_lock", None)
+        self.tmp.cleanup()
+
+    def listening(self):
+        now = time.time()
+        (self.state / "listeners" / str(os.getpid())).write_text(json.dumps({
+            "cwd": "/work", "started": "2026-09-23 10:00:00",
+            "since": now, "order": now, "session": "first"}), encoding="utf-8")
+
+    def start_daemon(self):
+        with self.assertRaises(_StoppedHere):
+            vd.main()
+
+    def test_startup_with_nobody_listening_empties_the_log(self):
+        self.start_daemon()
+        self.assertEqual(self.log.read_text(encoding="utf-8"), "")
+        self.assertTrue(vd.log_epoch(self.log))
+
+    def test_startup_keeps_what_a_listening_session_has_not_read(self):
+        self.listening()
+        was = self.log.read_text(encoding="utf-8")
+        self.start_daemon()
+        self.assertEqual(self.log.read_text(encoding="utf-8"), was)
+        # Nothing emptied means nothing stamped: every offset recorded against
+        # this log still points where it did.
+        self.assertFalse((self.state / "log_epoch").exists())
 
 
 if __name__ == "__main__":

@@ -259,5 +259,62 @@ Everything you set stays in `~/.config/voice-shell/` and survives a restart.
 | Whisper is slow | Shrink the model (`--model base`). On a CPU add `--whisper-compute int8` |
 | You talk and nothing arrives | Check `voice-shell.sh status` first (a crashed engine reads the same as a quiet one, see the row above). If it says it is running, the trigger level is too high, lower the mark under the mic in the viewer until the bar crosses it when you speak |
 | Noises send things on their own | The trigger level is too low. Raise that same mark until only your voice gets past it |
-| A session that ended stays in the destination row (Windows) | Fixed in `listen`. When a Monitor watch expires, Windows can leave part of the `listen` tree running, and it kept its registration alive. `listen_filter.py` now quits once nobody reads its stdout, `listen` waits on it alone, and tail is tied to `listen` with `--pid`. A listen that goes away keeps its chip (faded), number and destination for 2 minutes, and its place in the row for 10, so a re-armed watch of the same session picks up where it left off and receives what was said in between. Stopping on purpose (`stop`, the × on a chip) leaves none. For a leftover from an older version, end its `voice-shell.sh listen` processes in the task manager |
+| A session that ended stays in the destination row (Windows) | Fixed in `listen`, see [Notes for Windows](#notes-for-windows). A listen that goes away keeps its chip (faded), number and destination for 2 minutes, and its place in the row for 10, so a re-armed watch of the same session picks up where it left off and receives what was said in between. Stopping on purpose (`stop`, the × on a chip) leaves none. For a leftover from an older version, end its `voice-shell.sh listen` processes in the task manager |
 | You want a different mic | Pick it in the viewer, or pass its name to `--device`. On Linux `--device` takes the `-D` of `arecord` (`arecord -L` lists them) |
+
+## Notes for Windows
+
+Windows behaves differently enough here that several fixes only make sense with
+the reason written down. The code itself is written to run everywhere; these are
+the reasons behind the shape it has.
+
+- **A `listen` outlives the watch it was started in.** Claude Code's Monitor
+  ends the wrapper shell and nothing else, so on Windows `listen`, its tail and
+  its filter all carried on: still registered, still the chosen destination,
+  reading nothing, and whatever was said next was routed to a session nobody was
+  reading. `listen` now hands its parent's pid down as `VOICE_SHELL_PARENT_PID`
+  and `listen_filter.py` quits when that process goes, which ends the pipeline
+  `listen` waits on and lets its `EXIT` trap run. On MSYS the value has to be the
+  real Win32 pid, read from `/proc/$PPID/winpid`, because Python is what checks
+  it; an MSYS pid handed over would be read as a Win32 one and could land on some
+  unrelated process.
+- **`os.kill` is `TerminateProcess`, so no `EXIT` trap ever runs.** Stopping a
+  listen with a signal killed it where it stood and lost everything its tail had
+  not polled up yet, and from inside the session it looked exactly like a crash.
+  The disconnect (the × on a chip) now writes the warning line with a `stop` flag
+  on it, so the listen prints the line and ends itself: telling it and ending it
+  are one thing. The signal stays only as a last resort for a listen that never
+  read the line.
+- **There is no signal 0 either.** `os.kill(pid, 0)` raises `SystemError` on
+  Windows, so liveness is a handle instead. A handle can still be opened on a
+  process that has already exited for as long as anything else holds one (MSYS
+  children hold one on their parent), so the exit code decides: only
+  `STILL_ACTIVE` counts as running. Without that, a `listen` gone from the task
+  list kept passing the check and its registration was never cleared.
+- **A listener measures where it starts reading before it registers.** The chip
+  is clickable the moment the registration appears, so anything written in
+  between (the viewer telling this very session it was disconnected) landed
+  behind the point tail was told to start from and was never read. Measured from
+  before, nothing addressed to this listen can fall in the gap, because it did
+  not exist yet.
+- **Starting must not empty the utterance log while another session is
+  listening.** Both entry points, `voice-shell.sh start --engine browser` and the
+  daemon's own startup for a local engine, go through `empty_log_for_start`,
+  which empties only when nobody is listening. What sits in the log while a
+  session is listening is what was said a moment ago and has not been handed over
+  yet; emptying it takes that away with nothing said anywhere on screen. A new
+  epoch is stamped only when it really is emptied, so no offset recorded against
+  the old log is ever read against a new one.
+- **Everything is folded to half-width before it is matched.** Chrome's on-device
+  recognition returns full-width Latin letters and digits, so the user
+  dictionary, the end-of-sentence commands and the machine names all go through
+  `to_halfwidth` first, or none of them match what was said. The display keeps
+  the words as they were sent.
+- **Paths handed to native Python are converted with `cygpath -w`.** The shell
+  side runs under MSYS and the Python side does not, so a path like `/c/Users/...`
+  passed straight through is not a path Python can open. Applies to the progress
+  and epoch files `listen` hands to `listen_filter.py`.
+- **`listen` feeds its filter through process substitution, not a pipe.** Under
+  Git Bash, waiting on a background pipeline waits for tail as well, and tail is
+  held to this listen with `--pid`, so the two waited on each other and the
+  filter quitting never let `listen` go.
