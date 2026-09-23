@@ -297,6 +297,20 @@ the reasons behind the shape it has.
   behind the point tail was told to start from and was never read. Measured from
   before, nothing addressed to this listen can fall in the gap, because it did
   not exist yet.
+- **Paths handed to native Python are converted with `cygpath -w`.** The shell
+  side runs under MSYS and the Python side does not, so a path like `/c/Users/...`
+  is not one Python can open. MSYS converts paths in the arguments to a native
+  exe, but never in environment variable values, and the progress and epoch files
+  `listen` hands to `listen_filter.py` travel as `VOICE_SHELL_PROGRESS` and
+  `VOICE_SHELL_EPOCH_FILE`, so those are converted by hand.
+- **`listen` feeds its filter through process substitution, not a pipe.** Under
+  Git Bash, waiting on a background pipeline waits for tail as well, and tail is
+  held to this listen with `--pid`, so the two waited on each other and the
+  filter quitting never let `listen` go.
+
+Two more from the same round of fixes that are not about Windows, kept here so
+they are not lost.
+
 - **Starting must not empty the utterance log while another session is
   listening.** Both entry points, `voice-shell.sh start --engine browser` and the
   daemon's own startup for a local engine, go through `empty_log_for_start`,
@@ -310,11 +324,3 @@ the reasons behind the shape it has.
   dictionary, the end-of-sentence commands and the machine names all go through
   `to_halfwidth` first, or none of them match what was said. The display keeps
   the words as they were sent.
-- **Paths handed to native Python are converted with `cygpath -w`.** The shell
-  side runs under MSYS and the Python side does not, so a path like `/c/Users/...`
-  passed straight through is not a path Python can open. Applies to the progress
-  and epoch files `listen` hands to `listen_filter.py`.
-- **`listen` feeds its filter through process substitution, not a pipe.** Under
-  Git Bash, waiting on a background pipeline waits for tail as well, and tail is
-  held to this listen with `--pid`, so the two waited on each other and the
-  filter quitting never let `listen` go.
