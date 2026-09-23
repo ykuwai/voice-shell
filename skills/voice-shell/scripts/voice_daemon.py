@@ -23,6 +23,7 @@ import subprocess
 import sys
 import threading
 import time
+import unicodedata
 from pathlib import Path
 
 # fcntl is POSIX only (Windows does not have it). The only use here is the lock
@@ -469,6 +470,45 @@ def kanji_numbers_to_arabic(text: str) -> str:
     return _KANJI_NUM_RE.sub(sub, text)
 
 
+# ── Full-width letters and digits ─────────────────
+#
+# Chrome's on-device Japanese recognition writes Latin letters and digits full-width
+# (「ＰＲ」, 「２０２６」). Nobody means that when they say a word of code or a year, and
+# a full-width 「ＰＲ」 read as a filename or a branch name is simply wrong. So it is
+# folded here, at the one point every engine's text comes in.
+#
+# What folds is Latin letters, digits, and the symbols that only ever mean code when
+# they are spoken (@ # & % + = / \ _ < > $ * ^ | ` and the bracket pairs). What
+# does not fold is everything that is punctuation in Japanese prose: 、。「」・？！：；，．
+# and the full-width parentheses, which Japanese writes full-width on purpose. The
+# long vowel mark ー, kana and the full-width space 　 stay as they are too, since all
+# three carry meaning at their own width.
+#
+# Half-width katakana (ｱｲｳ) goes the other way, to full-width, which is the shape
+# Japanese is written in. A whole run at a time, because the dakuten is its own
+# character half-width and ｷﾞ has to come back as ギ rather than ｷ + ﾞ.
+#
+# Not unicodedata.normalize("NFKC") over the whole text: that also swallows the
+# full-width space, rewrites 〜 as ~, opens ① out to 1 and ㎠ to cm, and leaves no
+# say in any of it.
+_FULLWIDTH_CODE_SYMBOLS = "＠＃＆％＋＝／＼＿＜＞＄＊＾｜｀［］｛｝"
+_HALFWIDTH_TABLE = str.maketrans({
+    c: chr(ord(c) - 0xFEE0)
+    for c in ([chr(n) for n in range(0xFF21, 0xFF3B)]      # Ａ-Ｚ
+              + [chr(n) for n in range(0xFF41, 0xFF5B)]    # ａ-ｚ
+              + [chr(n) for n in range(0xFF10, 0xFF1A)]    # ０-９
+              + list(_FULLWIDTH_CODE_SYMBOLS))})
+_HALFWIDTH_KANA_RE = re.compile(r"[\uFF61-\uFF9F]+")
+
+
+def to_halfwidth(text: str) -> str:
+    """Fold full-width Latin letters, digits and code symbols down to half-width,
+    and write half-width katakana out full-width."""
+    text = text.translate(_HALFWIDTH_TABLE)
+    return _HALFWIDTH_KANA_RE.sub(
+        lambda m: unicodedata.normalize("NFKC", m.group(0)), text)
+
+
 # Written in caps and still not an acronym. Do not turn "A vs B" into "A VS B".
 # Lowercase shorthand like e.g. / i.e. / a.m. is already rejected by the uppercase
 # test, so it is not listed here.
@@ -513,10 +553,19 @@ def collapse_letter_acronyms(text: str) -> str:
 
 
 def apply_replacements(text: str, replace: dict) -> str:
-    """Apply the dictionary replacements. Longest first, to catch partial matches."""
-    for src in sorted(replace, key=len, reverse=True):
+    """Apply the dictionary replacements. Longest first, to catch partial matches.
+
+    The side that is matched is folded the same way the incoming text is, so an entry
+    somebody registered as 「ＡＷＳ」 still finds the AWS that arrives half-width. What
+    it becomes is left exactly as it was typed, because a replacement written
+    full-width was written that way on purpose.
+    """
+    folded = {}
+    for src, dst in replace.items():
         if src:
-            text = text.replace(src, replace[src])
+            folded.setdefault(to_halfwidth(src), dst)
+    for src in sorted(folded, key=len, reverse=True):
+        text = text.replace(src, folded[src])
     return text
 
 
@@ -691,9 +740,9 @@ def is_noise(text: str, extra=(), allow=(), lang: str = "") -> bool:
     is in, since it is matched against what the recognizer wrote down. The user's own
     two lists follow neither, they are the user's.
     """
-    off = {w.strip().lower() for w in allow}
+    off = {to_halfwidth(w).strip().lower() for w in allow}
     words = ({w for w in noise_words(lang) if w.lower() not in off}
-             | {w.lower() for w in extra})
+             | {to_halfwidth(w).lower() for w in extra})
     core = text.strip().strip(_TRIM)
     if core.lower() in words:
         return True
@@ -720,7 +769,7 @@ def is_allowed_short(text: str, allow=()) -> bool:
     does not widen. The test matches the shape of is_noise (compare with symbols
     stripped, and treat a repeat like 「了解、了解」 the same way).
     """
-    off = {w.strip().strip(_TRIM).lower() for w in allow}
+    off = {to_halfwidth(w).strip().strip(_TRIM).lower() for w in allow}
     off.discard("")
     if not off:
         return False
@@ -1021,10 +1070,10 @@ def builtin_words(kind: str, lang: str = None) -> list:
 
 
 # Compare after dropping symbols and the spaces in between. 「ミュート。」, 「mute me」
-# and 「マイク、オン」 should all land on the same key. Full-width digits fold to
-# half-width here. The long vowel mark ー is not dropped. Drop it and 「ミュート」
-# becomes 「ミュト」 and never matches.
-_CMD_DROP = str.maketrans("１２３４５６７８９０", "1234567890",
+# and 「マイク、オン」 should all land on the same key. Full-width letters and
+# digits fold to half-width first, through to_halfwidth. The long vowel mark ー is
+# not dropped. Drop it and 「ミュート」 becomes 「ミュト」 and never matches.
+_CMD_DROP = str.maketrans("", "",
                           " \t\u3000。、．，・…！？!?.,-~〜\"'「」『』()（）")
 
 
@@ -1035,8 +1084,12 @@ def command_key(text: str) -> str:
     Phrasings the user adds are remembered in this same shape. Remember them without
     going through here and a word registered with a comma in it, like 「ミュート、して」,
     will never match.
+
+    Full-width letters and digits fold first, so 「ＰＲ」 and 「２番」 compare the same
+    as the half-width forms. A phrasing somebody registered full-width matches too,
+    since it is remembered through here.
     """
-    return text.strip().translate(_CMD_DROP).lower()
+    return to_halfwidth(text.strip()).translate(_CMD_DROP).lower()
 
 
 # Folded into the shape matching uses.
@@ -1928,9 +1981,22 @@ def _folded_chars(text: str) -> list:
     folded tail has matched, since the two no longer line up character for character.
     """
     out = []
-    for i, c in enumerate(text):
-        for f in c.translate(_CMD_DROP).lower():
+    i = 0
+    while i < len(text):
+        # to_halfwidth the same as command_key, so a tail said with full-width
+        # letters or digits matches. One character at a time, except for the one
+        # fold that is not one character for one: half-width katakana carries its
+        # dakuten as a character of its own, so ｷ and ﾞ are taken together and come
+        # back as ギ. Fold them apart and 「ｺﾞｰ」 lands on キ+゛ where command_key
+        # says ゴー, and the tail never matches. Both characters of the pair are
+        # hung on the base, so cutting at that spot takes the whole pair off.
+        unit = text[i]
+        if ("｡" <= unit <= "ﾟ"
+                and text[i + 1:i + 2] in ("ﾞ", "ﾟ")):
+            unit = text[i:i + 2]
+        for f in to_halfwidth(unit).translate(_CMD_DROP).lower():
             out.append((f, i))
+        i += len(unit)
     return out
 
 
@@ -2006,9 +2072,15 @@ def _strip_name(text: str, names):
     """When the head is this machine's name, return the rest. None otherwise."""
     body = text.strip()
     low = body.lower()
+    # The name is folded the way the utterance already is, the same as everywhere
+    # else a written-down word is matched against speech. Left raw, a name somebody
+    # typed as 「Ｍａｃ」 matched the full-width 「Ｍａｃミュート」 the recognizer used to
+    # hand over and matches nothing now that the text arrives folded. Cutting by the
+    # folded length is exact, since body has been through the same fold.
     for name in sorted(names or [], key=len, reverse=True):
-        if low.startswith(name.lower()):
-            return body[len(name):].lstrip(_NAME_SEP)
+        folded = to_halfwidth(name).lower()
+        if folded and low.startswith(folded):
+            return body[len(folded):].lstrip(_NAME_SEP)
     return None
 
 
@@ -2116,7 +2188,9 @@ def apply_voice_command(text: str, log_path, muted: bool, user_dict=None):
     if n:
         live = list_active_listeners(log_path)
         if sum(1 for e in live if not e.get("away")) > 1:
-            if 1 <= n <= len(live):
+            # A gone one keeps its number so the row does not renumber under
+            # the person mid-sentence, but saying that number cannot pick it.
+            if 1 <= n <= len(live) and not live[n - 1].get("gone"):
                 write_atomic(route_file(log_path), str(live[n - 1]["pid"]))
                 note_voice_cmd(log_path, "route",
                                f"{n}. {live[n - 1]['label']}", text)
@@ -2392,7 +2466,17 @@ def resolve_target(log_path):
     live = list_active_listeners(log_path)
     if not live:
         return None
-    present = [e for e in live if not e.get("away")] or live
+    present = [e for e in live if not e.get("away")]
+    if not present:
+        # Nothing here is listening. One only away is still worth choosing,
+        # its next watch replays what it missed. One gone is not: it is past
+        # the hold, nobody is coming back for it, and naming it would tag the
+        # line to a listen no one reads, which is how an utterance was lost
+        # outright (#110). Nobody named means every listener drops the line,
+        # the same as it has always meant.
+        present = [e for e in live if not e.get("gone")]
+    if not present:
+        return None
     return str(max(present, key=_order_of)["pid"])
 
 
@@ -2526,9 +2610,16 @@ def label_listeners(entries):
     for a while and comes back does not keep a claim on wherever it used to sit,
     it lines up as of this moment instead (#74).
     """
+    # A gone one is sorted to the end whatever its own order was. It keeps a
+    # number so it can still be talked about, but it must not hold one a
+    # session that is really listening should have, and the live numbers must
+    # not shift as one drops out of the row hours later. One only away keeps
+    # its place, which is the whole point of holding it (its next watch takes
+    # the same number back).
     # When the times tie, the PID decides. Leave this undecided and the numbers swap
     # around with the order the registration files get read (left to the OS).
-    entries = sorted(entries, key=lambda e: (_order_of(e), e.get("pid", 0)))
+    entries = sorted(entries, key=lambda e: (1 if e.get("gone") else 0,
+                                             _order_of(e), e.get("pid", 0)))
     seen = {}
     for e in entries:
         hand = custom_name(e)
@@ -2580,6 +2671,29 @@ AWAY_HOLD = 120
 # How long its tombstone can still be adopted. A re-arm that comes later than
 # AWAY_HOLD (the agent was busy) still gets its old place in the row back.
 LEAVE_GRACE = 600
+# How long one that is gone stays in the row after that, greyed out, unusable
+# and saying how to start it again. It is not a destination while it sits
+# there: nothing is routed to it and it cannot be chosen. It stays so that
+# coming back to the machine shows what happened rather than an empty row, and
+# so that the same session can pick its entry back up (ADOPT_GRACE below).
+# A week, because a machine left alone over a long weekend is the ordinary
+# case, not the strange one, and half a day meant a session that was still
+# perfectly resumable had dropped out of sight by the time anyone looked
+# (measured on a Mac mini left for three days). GONE_KEEP is what keeps the
+# row short, not this.
+GONE_SHOW = 7 * 24 * 3600
+# How long the same session id can still take its own entry back. The same
+# stretch, since an entry that is no longer on disk cannot be adopted anyway.
+# Safe to make this long because the tombstone is filed under the session id
+# itself, so only that same conversation can ever reach it, never a neighbour
+# and never a reused PID. What it does not carry over past LEAVE_GRACE is the
+# old place in the row and the replay of what was said in between: see
+# adopt_tombstone.
+ADOPT_GRACE = GONE_SHOW
+# And no more than this many of them at once, the most recent first. The row
+# has to stay readable, and past a few the older ones say nothing the newest
+# does not.
+GONE_KEEP = 5
 
 
 def gone_dir(log_path):
@@ -2713,13 +2827,33 @@ def adopt_tombstone(log_path, session):
         if data.get("disconnected") and time.time() - data["stopped"] < LEAVE_GRACE:
             return "blocked"
         return None
-    if "left" not in data or time.time() - data["left"] > LEAVE_GRACE:
+    if "left" not in data:
         return None
+    gap = time.time() - data["left"]
+    if gap > ADOPT_GRACE:
+        return None
+    # Past LEAVE_GRACE this is no longer a re-arm between two watches, it is the
+    # same conversation coming back after a while (a machine left alone for
+    # days, #110). It still takes its own entry back, so the chip does not
+    # double up and the session is one thing on screen from beginning to end.
+    # Two things it does not take back:
+    stale = gap > LEAVE_GRACE
     offset = int(data.get("offset") or 0)
-    if data.get("epoch", "-") != (log_epoch(log_path) or "-"):
-        offset = ""                 # the log was emptied since, start at its end
-    return {"pid": data.get("pid", ""), "order": _order_of(data.get("reg") or {}),
-            "offset": offset}
+    if stale or data.get("epoch", "-") != (log_epoch(log_path) or "-"):
+        # What was said in between. Nothing has been addressed to it since it
+        # went (resolve_target stops naming one that is gone), and reading days
+        # of log back at once would bury whatever is said next. Start at the
+        # end of the log as it stands, the same as the log having been emptied.
+        offset = ""
+    # And the old place in the row. While it is gone the chip sits at the end
+    # (label_listeners), so coming back to an order from days ago would jump it
+    # to the front and renumber every live one under the person. It lines up as
+    # of this moment instead, which is where it already was on screen (#74).
+    # "-" rather than an empty field: the three values are read back as words,
+    # so a blank one in the middle would be swallowed and the offset read as
+    # the order. voice-shell.sh falls back to now for anything unreadable.
+    order = "-" if stale else _order_of(data.get("reg") or {})
+    return {"pid": data.get("pid", ""), "order": order, "offset": offset}
 
 
 def _departed_pids(log_path):
@@ -2759,8 +2893,15 @@ def forget_tombstone(log_path, session):
             pass
 
 
-def _tombstones(log_path):
-    """Fresh tombstones, clearing the expired ones along the way."""
+def _tombstones(log_path, include_departed=False):
+    """Fresh tombstones, clearing the expired ones along the way.
+
+    include_departed also hands back the ones past AWAY_HOLD, marked
+    "departed". Those keep no claim on anything: nothing is routed to them and
+    no re-arm is waited on. They come back only so the row can go on showing
+    the session and say plainly that it is not listening (#110), instead of
+    the chip quietly vanishing while the person is still looking at it.
+    """
     d = gone_dir(log_path)
     if not d.is_dir():
         return []
@@ -2778,15 +2919,36 @@ def _tombstones(log_path):
                 pass
             continue
         data = _read_json(f) or {}
-        at = data.get("left", data.get("stopped", 0))
-        if not data or now - at > LEAVE_GRACE:
+        if "left" not in data:
+            # Stopped on purpose, or unreadable. Nothing is kept for it beyond
+            # long enough to turn away the one re-arm a disconnect causes.
+            if not data or now - data.get("stopped", 0) > LEAVE_GRACE:
+                try:
+                    f.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            continue
+        since = now - data["left"]
+        if since > GONE_SHOW:
             try:
                 f.unlink(missing_ok=True)
             except OSError:
                 pass
             continue
-        if "left" in data and now - data["left"] <= AWAY_HOLD:
+        if since <= AWAY_HOLD:
             out.append(data)
+        elif include_departed:
+            out.append(dict(data, departed=True))
+    # Only the most recent few of the gone ones. The rest go for good rather
+    # than sit in the folder unseen until GONE_SHOW runs out.
+    departed = sorted((e for e in out if e.get("departed")),
+                      key=lambda e: e["left"], reverse=True)
+    for stale in departed[GONE_KEEP:]:
+        out.remove(stale)
+        try:
+            _gone_file(log_path, stale.get("session")).unlink(missing_ok=True)
+        except OSError:
+            pass
     return out
 
 
@@ -2950,12 +3112,19 @@ def list_active_listeners(log_path):
     # Sessions between two watches keep their chip and their number.
     present = {info.get("session") for info in deduped if info.get("session")}
     present_pids = {str(info.get("pid")) for info in deduped}
-    for tomb in _tombstones(log_path):
+    for tomb in _tombstones(log_path, include_departed=True):
         if tomb.get("session") in present or str(tomb.get("pid")) in present_pids:
             continue
         info = dict(tomb.get("reg") or {})
         info["pid"] = tomb.get("pid")
         info["away"] = True
+        # Past AWAY_HOLD nothing is waiting for it any more. It still has a
+        # tombstone to adopt if that session ever listens again, but as things
+        # stand it cannot be used: no utterance goes to it and choosing it does
+        # nothing. Said plainly on screen rather than left to look merely faded
+        # (#110, an ended session sat there lit and swallowed what was said).
+        if tomb.get("departed"):
+            info["gone"] = True
         info.setdefault("cwd", "unknown")
         info.setdefault("started", "unknown")
         info.setdefault("since", tomb.get("left", 0))
@@ -3075,6 +3244,12 @@ def main():
         mine = my_session_id()
         for l in list_active_listeners(args.log_file):
             mark = "  <- this session" if mine and l.get("session") == mine else ""
+            # Printed the same as a live one, an ended session read as one
+            # still listening, and speech kept being aimed at it (#110).
+            if l.get("gone"):
+                mark = "  <- not listening, cannot be used" + mark
+            elif l.get("away"):
+                mark = "  <- between two watches" + mark
             print(f"  {l['label']}  (PID {l['pid']}){mark}")
             print(f"    started at  {l['started']}")
             print(f"    folder      {l['cwd']}")
@@ -3335,7 +3510,8 @@ def main():
         last_count = None
         while True:
             time.sleep(5)
-            count = len(list_active_listeners(log_path))
+            count = sum(1 for e in list_active_listeners(log_path)
+                        if not e.get("gone"))
             # With a target chosen, nothing arrives twice even with several
             # listening. That is the intended way to use it, so stay quiet.
             # With a target settled nothing arrives twice (the default settles one too)
@@ -3465,13 +3641,16 @@ def main():
 
                 if ev["type"] == "partial":
                     # Partials overwrite a separate file (the prompt log stays clean)
-                    partial_path.write_text(ev["text"], encoding="utf-8")
+                    partial_path.write_text(to_halfwidth(ev["text"]),
+                                            encoding="utf-8")
                     continue
                 if ev["type"] != "final":
                     continue
 
                 partial_path.write_text("", encoding="utf-8")
-                text = ev["text"].strip()
+                # Folded here, above every decision below, so the words that get
+                # judged are the words that get sent and shown.
+                text = to_halfwidth(ev["text"]).strip()
                 # Whether the send button on screen is what settled this one.
                 # asr_mic hangs it on the event, because by the time the line
                 # gets here the press has been spent and the file it was written

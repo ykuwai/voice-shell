@@ -126,6 +126,7 @@ const makeHarness = new Function('SR', 'beat', `
   let canBrowserASR = true, recWanted = true, rec = null, recRunning = false;
   let recStarting = false, recGeneration = 0, recFails = 0, recStartedAt = 0;
   let route = 'on', asrDeniedFlag = false, lastVoiceAt = 0;
+  let onDeviceLocal = false;
   const MAX_FAILS = 6;
   const browserLang = () => 'en-US';
   const performance = {now: () => 0};

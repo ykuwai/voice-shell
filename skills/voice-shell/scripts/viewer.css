@@ -500,6 +500,12 @@
   .route-chip.asking { border-color:var(--danger); color:var(--danger); background:none; }
   /* A session between two watches. It comes back on its own in a moment. */
   .route-chip.away { opacity:.45; }
+  /* Gone is not coming back on its own, so it is drawn as a thing that cannot
+     be pressed: struck through, greyed, and the pointer says so too. Faded
+     alone read as "busy, wait a moment" and people kept aiming speech at it. */
+  .route-chip.gone { opacity:.4; cursor:not-allowed; }
+  .route-chip.gone .nm { text-decoration:line-through; }
+  .route-chip.gone:hover { background:inherit; }
   .route-chip.asking .x { opacity:1; }
   .route-chip.on {
     border-color:transparent; color:var(--panel); font-weight:600;

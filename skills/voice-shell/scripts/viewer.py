@@ -110,6 +110,143 @@ def _write_json(path: Path, value) -> None:
     os.replace(temp, path)
 
 
+# ── Chrome's on-device speech models, as they sit on this disk ──
+#
+# Chrome answers SpeechRecognition.available() per site: until a site has
+# called install() itself, it is told downloadable even when the model is
+# already there, so no site can read off what you have. The page cannot tell
+# the two apart, and would say "download 167 MB" for something that is a
+# three second switch on. The viewer's own server can look, so it does.
+#
+# Read only. Nothing here starts, touches or asks Chrome anything, it lists
+# directories and adds up file sizes. Anything unreadable comes back as None
+# (unknown) rather than as an answer, so the page hedges instead of lying.
+SODA_ENGINE_DIR = "SODA"
+SODA_PACKS_DIR = "SODALanguagePacks"
+
+
+def _chrome_user_data_dirs() -> list:
+    """Where each Chrome-family browser keeps the profile root on this platform.
+
+    The SODA engine and the language packs sit in that root, beside the
+    profiles, since they are shared by every profile of that install.
+    """
+    home = Path.home()
+    if sys.platform.startswith("win"):
+        local = os.environ.get("LOCALAPPDATA") or str(home / "AppData/Local")
+        base = Path(local)
+        return [base / "Google/Chrome/User Data",
+                base / "Google/Chrome Beta/User Data",
+                base / "Google/Chrome SxS/User Data",
+                base / "Chromium/User Data"]
+    if sys.platform == "darwin":
+        base = home / "Library/Application Support"
+        return [base / "Google/Chrome",
+                base / "Google/Chrome Beta",
+                base / "Google/Chrome Canary",
+                base / "Chromium"]
+    base = Path(os.environ.get("XDG_CONFIG_HOME") or (home / ".config"))
+    return [base / "google-chrome",
+            base / "google-chrome-beta",
+            base / "google-chrome-unstable",
+            base / "chromium"]
+
+
+def _dir_bytes(path: Path) -> int:
+    """How much a directory holds, as far as it can be read."""
+    total = 0
+    for here, _dirs, files in os.walk(path, onerror=lambda _e: None):
+        for name in files:
+            try:
+                total += (Path(here) / name).stat().st_size
+            except OSError:
+                pass
+    return total
+
+
+def _lang_matches(folder: str, lang: str) -> bool:
+    """Whether a pack folder is for this language tag.
+
+    Case is ignored, and ja matches ja-JP either way round: the page asks with
+    whatever BCP-47 tag the dropdown holds, and the folder is named however
+    Chrome named it.
+
+    Two regions of one language never stand in for each other, though. Chrome
+    ships a pack per region (SODA en-GB Models is not SODA en-US Models), and
+    the dropdown offers en-US beside en-GB, zh-CN beside zh-TW and zh-HK. Read
+    loosely, an en-US pack on the disk would have the page promise en-GB is
+    already here, and the very next press anywhere would quietly start a real
+    download it said would not happen.
+    """
+    a = folder.casefold().replace("_", "-").split("-")
+    b = lang.casefold().replace("_", "-").split("-")
+    if not a[0] or not b[0] or a[0] != b[0]:
+        return False
+    # Same language. Either it is the same region, or one of the two never
+    # named a region at all and takes whatever this one is.
+    return len(a) < 2 or len(b) < 2 or a[1] == b[1]
+
+
+def on_device_model(lang: str, roots=None) -> dict:
+    """Whether Chrome already holds the on-device recognition model here.
+
+    engine is the SODA engine itself, pack the model for this one language.
+    Each is True, False, or None when nothing could be told (no Chrome
+    directory to look in at all, or every one of them unreadable). Sizes are
+    in bytes, and are 0 when the thing is not there.
+    """
+    out = {"lang": lang, "engine": None, "pack": None,
+           "engineBytes": 0, "packBytes": 0, "root": ""}
+    try:
+        looked = False
+        for root in (roots if roots is not None else _chrome_user_data_dirs()):
+            root = Path(root)
+            if not root.is_dir():
+                continue
+            looked = True
+            # Any SODA/<version>/SODAFiles holding something counts. The
+            # engine file is SODA.dll on Windows and libsoda.so elsewhere, so
+            # the directory having contents is what is asked, not a name.
+            engine, engine_bytes = False, 0
+            for version in sorted(_subdirs(root / SODA_ENGINE_DIR)):
+                files = version / "SODAFiles"
+                size = _dir_bytes(files) if files.is_dir() else 0
+                if size > 0:
+                    engine, engine_bytes = True, max(engine_bytes, size)
+            pack, pack_bytes = False, 0
+            for folder in _subdirs(root / SODA_PACKS_DIR):
+                if not _lang_matches(folder.name, lang):
+                    continue
+                size = _dir_bytes(folder)
+                if size > 0:
+                    pack, pack_bytes = True, max(pack_bytes, size)
+            # The first install that has both wins, so a second Chrome with
+            # the engine but not this language cannot mask the one that has it
+            if engine and pack:
+                return {"lang": lang, "engine": True, "pack": True,
+                        "engineBytes": engine_bytes, "packBytes": pack_bytes,
+                        "root": str(root)}
+            if engine and out["engine"] is not True:
+                out.update(engine=True, engineBytes=engine_bytes, root=str(root))
+            if pack and out["pack"] is not True:
+                out.update(pack=True, packBytes=pack_bytes)
+        if looked:
+            out["engine"] = bool(out["engine"])
+            out["pack"] = bool(out["pack"])
+    except Exception:
+        return {"lang": lang, "engine": None, "pack": None,
+                "engineBytes": 0, "packBytes": 0, "root": ""}
+    return out
+
+
+def _subdirs(path: Path) -> list:
+    """The directories directly inside, or nothing if it cannot be read."""
+    try:
+        return [p for p in path.iterdir() if p.is_dir()]
+    except OSError:
+        return []
+
+
 def _secure_dir(path: Path) -> None:
     """Create this directory if needed, and make sure it is really this
     account's alone.
@@ -1085,16 +1222,33 @@ async def main_async(args):
     async def handle_listeners(_req):
         """The sessions listening right now, and the destination that is picked."""
         import voice_daemon as vd
+        # Asked before the route file is read. resolve_target is what lets go of
+        # a pick whose listen is gone, and reading the file first showed that
+        # PID as picked for one more poll, so the chip came up lit while
+        # already saying it could not be used.
+        listeners = vd.list_active_listeners(args.log_file)
+        target = vd.resolve_target(args.log_file) or ""
         try:
             chosen = route_path.read_text(encoding="utf-8").strip()
         except OSError:
             chosen = ""
         return web.json_response({
-            "listeners": vd.list_active_listeners(args.log_file),
+            "listeners": listeners,
             "route": chosen,                                  # the one that is picked
             # Where it actually lands. With nothing picked, the later start wins.
-            "target": vd.resolve_target(args.log_file) or "",
+            "target": target,
         })
+
+    async def handle_ondevice(req):
+        """Whether Chrome already holds the on-device model for this language.
+
+        Chrome tells a site downloadable until that site has called install()
+        itself, even with the model on disk, so the page cannot tell a real
+        167 MB download from a switch on that takes seconds. This looks at the
+        disk and says which it is. Read only, and it never fails: unknown
+        comes back as null and the page falls back to hedging.
+        """
+        return web.json_response(on_device_model(req.query.get("lang", "")))
 
     async def handle_machine(req):
         """This machine's name, and multi-machine mode on and off.
@@ -1170,8 +1324,16 @@ async def main_async(args):
 
     async def handle_route(req):
         """Pick the destination. Empty means everyone."""
+        import voice_daemon as vd
         body = await req.json()
         to = str(body.get("to") or "").strip()
+        # A session whose listen is gone is still in the row, so it can still
+        # be asked for. Nothing reads it, so choosing it would only hide where
+        # speech really goes, which is how one was lost (#110). Refused here
+        # rather than on the page alone, since the page is not the only caller.
+        if to and any(str(l.get("pid")) == to and l.get("gone")
+                      for l in vd.list_active_listeners(args.log_file)):
+            return web.json_response({"error": "gone"}, status=409)
         # Write under another name first, then replace. If the daemon reads
         # between the truncate and the write it gets a chopped PID, and one
         # utterance goes to somebody else.
@@ -1189,7 +1351,15 @@ async def main_async(args):
         the way it was recognized.
         """
         body = await req.json()
-        text = (body.get("text") or "").strip()
+        # Imported up here, above the first use. A name imported anywhere in a
+        # function is local to the whole of it, so with the import further down
+        # the fold below reads an unbound local and every utterance 500s.
+        import voice_daemon as vd
+        # Folded before anything is decided about it, the same as in the daemon.
+        # Chrome's on-device Japanese recognition writes Latin letters and digits
+        # full-width, and the page folds them for what it shows, so the two roads
+        # have to agree or the card would flip when the words were sent.
+        text = vd.to_halfwidth((body.get("text") or "")).strip()
         if not text:
             return web.json_response({"error": "empty"}, status=400)
         tab = str(body.get("tab") or "")[:40]
@@ -1201,8 +1371,6 @@ async def main_async(args):
         if not owns:
             return web.json_response({"error": "asr_owner_conflict",
                                       "owner": owner or None}, status=409)
-
-        import voice_daemon as vd
 
         # If the daemon is recognizing too, take nothing. Both write to the same
         # utterance log, so taking it sends one instruction to Claude twice.
@@ -1608,6 +1776,7 @@ async def main_async(args):
     app.router.add_get("/api/tuning", handle_tuning_get)
     app.router.add_put("/api/tuning", handle_tuning_put)
     app.router.add_get("/api/languages", handle_languages)
+    app.router.add_get("/api/ondevice", handle_ondevice)
     app.router.add_get("/api/whisper-model", handle_whisper_model_get)
     app.router.add_put("/api/whisper-model", handle_whisper_model_put)
     app.router.add_put("/api/mics", handle_mic_put)

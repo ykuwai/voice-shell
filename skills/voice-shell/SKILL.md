@@ -142,6 +142,15 @@ needs nothing installed and has no wait.
    `${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh unlisten`, so the chip and any
    hold on the destination go right away instead of lingering 2 minutes.
 
+   Forgetting that no longer strands anyone. `listen` ends with the watch it
+   runs in, on Windows too, where it used to keep running, still registered,
+   still the destination, reading nothing. Past the two minutes the chip stays
+   in the row for a week, drawn as unusable and pushed to the end so the live
+   ones keep their numbers. Nothing is routed to it, and pressing it says to
+   type `/voice-shell` in that session. Listening again from that same session
+   takes the chip back rather than arriving as a stranger. Only the five most
+   recent are kept.
+
 **Keep only one Monitor of your own.** A re-arm on a deadline is always safe.
 Re-attaching for any other reason (compacting included) while the old one might
 still be alive: stop it with TaskStop first. Two alive means every utterance

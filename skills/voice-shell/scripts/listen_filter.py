@@ -155,6 +155,15 @@ def _exit_when_reader_gone(every=5.0):
 
     POSIX needs none of this (a closed reader and SIGPIPE, or the process
     group going down with the watch, already take care of it).
+
+    Measured again since (#110): under Claude Code's Monitor on Windows this
+    never fires. Whoever reads our stdout is Claude Code itself, and it stays
+    running for the whole conversation, so ending a watch takes down the shell
+    the command ran in and leaves that read handle open. Polled every two
+    seconds across a watch that was stopped by hand and across one that hit
+    its deadline, the state stayed CONNECTED (3) throughout, never CLOSING.
+    Kept because it still catches the case it was written for, a reader that
+    really does close. _exit_when_parent_gone below covers the rest.
     """
     if not sys.platform.startswith("win"):
         return
@@ -192,6 +201,77 @@ def _exit_when_reader_gone(every=5.0):
         while True:
             time.sleep(every)
             if state() == _FILE_PIPE_CLOSING_STATE:
+                os._exit(0)
+
+    threading.Thread(target=watch, daemon=True).start()
+
+
+def _pid_alive(pid):
+    """Is that process still running?
+
+    Windows has no signal 0, and a handle can still be opened on a process
+    that has already exited for as long as anything else holds one (MSYS
+    children keep one on their parent), so the exit code is what tells the two
+    apart. The same check voice_daemon.py makes, written out again here
+    because this file deliberately imports nothing from it.
+    """
+    if sys.platform.startswith("win"):
+        import ctypes
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return True
+            return code.value == STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True         # running, only not ours to signal
+
+
+def _exit_when_parent_gone(every=5.0):
+    """Quit once the shell this listen was started from has gone.
+
+    #110: a Monitor watch that ends, stopped by hand or at its deadline, takes
+    down the shell Claude Code ran `voice-shell.sh listen` in. On Windows it
+    takes nothing else with it. Measured: the listen, its tail, its filter and
+    its heal loop all carried on for the full 260 seconds they were watched,
+    reparented and with nothing left reading them. The heal loop kept touching
+    the registration every 30 seconds, so the session stayed lit on screen and
+    stayed the chosen destination, and the next thing said was tagged to a
+    listen nobody was reading. That utterance was lost outright.
+
+    The shell the command ran in is the one thing that reliably goes. Its pid
+    arrives as VOICE_SHELL_PARENT_PID (voice-shell.sh, listen), the real Win32
+    one on Windows. Quitting here ends the pipeline `listen` waits on, so its
+    EXIT trap runs and the registration turns into a tombstone, which is what
+    the away and gone chips on screen are built on.
+
+    Armed only while that parent is alive to begin with. Started detached on
+    purpose, with nothing above it, there is no watch to lose and nothing here
+    to watch for.
+    """
+    try:
+        pid = int(os.environ.get("VOICE_SHELL_PARENT_PID", ""))
+    except ValueError:
+        return
+    if pid <= 1 or not _pid_alive(pid):
+        return
+
+    def watch():
+        while True:
+            time.sleep(every)
+            if not _pid_alive(pid):
                 os._exit(0)
 
     threading.Thread(target=watch, daemon=True).start()
@@ -271,6 +351,7 @@ def main():
     except ValueError:
         alias_until = 0
     _exit_when_reader_gone()
+    _exit_when_parent_gone()
     progress = _Progress()
     for raw in sys.stdin.buffer:
         progress.check()
