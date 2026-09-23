@@ -2272,6 +2272,10 @@ def parse_args():
     p.add_argument("--mark-stopped", metavar="SESSION", default=None,
                    help="SESSION stopped listening on purpose; do not keep "
                         "its place when its listen exits")
+    p.add_argument("--empty-log", action="store_true",
+                   help="Empty the utterance log for a fresh start and stamp a "
+                        "new epoch on it, unless a session is already "
+                        "listening to it (then it is left alone)")
     p.add_argument("--newer-same-session", metavar="REG", default=None,
                    help="Exit 0 if some other registration shares REG's "
                         "session and was written more recently, 1 "
@@ -2712,6 +2716,39 @@ def log_epoch(log_path):
         return (Path(log_path).parent / "log_epoch").read_text(encoding="utf-8").strip()
     except OSError:
         return ""
+
+
+def empty_log(log_path):
+    """Empty the utterance log and stamp a new epoch on it.
+
+    Every byte offset written down anywhere (a listen's progress file, the
+    viewer's clear-history mark) is an offset into the log as it stood, so the
+    new epoch goes down together with the emptying and those offsets are never
+    read against the log that follows. Emptied without one they still look
+    current against a log that has started over from zero.
+    """
+    path = Path(log_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("", encoding="utf-8")
+    try:
+        write_atomic(path.parent / "log_epoch", str(time.time_ns()))
+    except OSError:
+        pass
+
+
+def empty_log_for_start(log_path):
+    """Empty the log for a fresh start, unless a session is already listening.
+
+    Starting empties the log so that last time's utterances do not line up
+    again. A second session starting while the first one is already listening
+    is not last time, though: what sits in the log then is what was said a
+    moment ago and has not been handed over yet, and emptying it takes that
+    away with nothing said anywhere on screen. Hands back whether it emptied.
+    """
+    if list_active_listeners(log_path):
+        return False
+    empty_log(log_path)
+    return True
 
 
 def progress_of(log_path, pid):
@@ -3288,6 +3325,10 @@ def main():
         mark_stopped(args.log_file, args.mark_stopped)
         return
 
+    if args.empty_log:
+        empty_log_for_start(args.log_file)
+        return
+
     if args.status:
         pid = read_pid()
         if pid:
@@ -3336,14 +3377,10 @@ def main():
 
     log_path = Path(args.log_file)
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    # Emptied on every startup (so last time's utterances are not picked up)
-    log_path.write_text("", encoding="utf-8")
-    # A new epoch for the emptied log. Byte offsets a listen recorded against
-    # the old one must not be used against this one (listen_filter.py).
-    try:
-        write_atomic(log_path.parent / "log_epoch", str(time.time_ns()))
-    except OSError:
-        pass
+    # Emptied on every startup (so last time's utterances are not picked up),
+    # with a new epoch for the emptied log. Byte offsets a listen recorded
+    # against the old one must not be used against this one (listen_filter.py).
+    empty_log(log_path)
 
     save_default_dictionary()
 

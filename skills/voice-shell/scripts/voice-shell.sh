@@ -331,8 +331,13 @@ case "$cmd" in
     # Bring up only the viewer and finish (opening the screen starts it).
     if [[ "$engine" == "browser" ]]; then
       mkdir -p "$STATE_DIR"
-      # Same as daemon startup. Leave it and last time's utterances line up again.
-      : > "$LOG_FILE"
+      # Same as daemon startup. Leave it and last time's utterances line up
+      # again. Not while another session is already listening, though: what is
+      # in the log then is what was said a moment ago and has not been handed
+      # over yet, and emptying it loses that with nothing said anywhere. A new
+      # epoch is stamped on whenever it really is emptied, so no offset
+      # recorded against the old log is ever read against the new one.
+      "$PY" "$APP" --empty-log
       # Here the screen itself does the recognizing, so speak up once it is up.
       # Its own line ("The viewer started at ..." / "It is already running at
       # ...") carries the URL through to whoever is reading this output, since

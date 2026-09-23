@@ -4419,6 +4419,15 @@ function queueOrSendFinal(text) {
   paintPendingBrowserSends();
 }
 
+/* Why an utterance the server took in went nowhere, in words for the person
+   who said it. The reasons a command or a cancel leaves behind are not here:
+   those already put their own line up (voice_cmd.json), and one the draft box
+   is holding is on screen in the box itself. These four say nothing anywhere
+   else, and speech that goes nowhere while the screen carries on as though it
+   had arrived is the one thing this must never look like. */
+const DROP_REASONS = {too_short: 'dropTooShort', noise: 'dropNoise',
+                      muted: 'dropMuted', empty: 'dropEmpty'};
+
 /* Settled utterances go to the server. The dictionary, the ignored words, the
    min length and the hold decision all run through the same path the daemon
    takes, on the server side (so the result does not change with how it was
@@ -4457,6 +4466,16 @@ function sendUtterance(text) {
         loadEngines();
       } else if (!res.ok) {
         el.hint.textContent = t('asrSendFailed', {n: res.status});
+      } else {
+        // Taken in and let go again, for a reason the server knows and the
+        // person cannot see (under the floor on length, a word on the ignore
+        // list, a cut microphone, nothing left after the dictionary). It
+        // comes back as an ordinary 200, so without this the words simply
+        // vanish off the screen and nothing is ever said about them.
+        let data = {};
+        try { data = await res.json(); } catch {}
+        const why = DROP_REASONS[data.dropped];
+        if (why) el.hint.textContent = t(why);
       }
     } catch {
       el.hint.textContent = t('asrSendFailed', {n: '?'});
@@ -4521,6 +4540,48 @@ setInterval(() => {
     if (owned && recWanted && !recRunning && !recStarting) startRecognition();
   });
 }, 5000);
+
+/* Recognition that was wanted and never came back.
+
+   startRecognition turns away any call made while rec is still set, and
+   nothing clears rec on its own: a session that was start()ed and never
+   reached onstart, and one that went quiet without an end ever arriving,
+   both leave it set for good. The page then sits there wanting to listen
+   with nothing listening, everything said goes nowhere, nothing says so,
+   and only a reload brings it back. Nothing is being recognized in that
+   state, so there is nothing to lose by folding the dead session up and
+   beginning again.
+
+   Told apart from the ordinary gap between two sessions (Chrome cuts its own
+   every 7 to 10 seconds and the next takes a moment) by how long it has run. */
+const REC_STALL_MS = 30000;
+let recAliveAt = 0;
+
+/* How long recognition has been wanted with nothing actually running. Every
+   other state counts as alive: not wanted at all (stopped, paused, a local
+   engine doing the listening), held by another tab, or a microphone that was
+   refused. None of those are for this to start up again behind the person. */
+function recStalledFor(now, s) {
+  if (!s.recWanted || s.recRunning || s.conflict || s.denied) return 0;
+  return Math.max(0, now - s.aliveAt);
+}
+
+function recWatchdogTick(now = performance.now()) {
+  const stalled = recStalledFor(now, {recWanted, recRunning, conflict: !!asrConflict,
+                                      denied: asrDeniedFlag, aliveAt: recAliveAt});
+  if (stalled < REC_STALL_MS) {
+    if (!stalled) recAliveAt = now;
+    return false;
+  }
+  recAliveAt = now;
+  // Said out loud, since whatever was spoken into the dead session is gone
+  // and only the person can say it again.
+  el.hint.textContent = t('asrRestarted');
+  stopRecognition(true);
+  startRecognition();
+  return true;
+}
+setInterval(() => recWatchdogTick(), 5000);
 
 // On close, say that we are gone (left behind, it still looks like someone is there)
 addEventListener('pagehide', () => { if (asrChosen) beat('gone'); });
