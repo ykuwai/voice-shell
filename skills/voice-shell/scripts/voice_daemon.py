@@ -2538,9 +2538,16 @@ def label_listeners(entries):
     for a while and comes back does not keep a claim on wherever it used to sit,
     it lines up as of this moment instead (#74).
     """
+    # A gone one is sorted to the end whatever its own order was. It keeps a
+    # number so it can still be talked about, but it must not hold one a
+    # session that is really listening should have, and the live numbers must
+    # not shift as one drops out of the row hours later. One only away keeps
+    # its place, which is the whole point of holding it (its next watch takes
+    # the same number back).
     # When the times tie, the PID decides. Leave this undecided and the numbers swap
     # around with the order the registration files get read (left to the OS).
-    entries = sorted(entries, key=lambda e: (_order_of(e), e.get("pid", 0)))
+    entries = sorted(entries, key=lambda e: (1 if e.get("gone") else 0,
+                                             _order_of(e), e.get("pid", 0)))
     seen = {}
     for e in entries:
         hand = custom_name(e)
@@ -2592,6 +2599,18 @@ AWAY_HOLD = 120
 # How long its tombstone can still be adopted. A re-arm that comes later than
 # AWAY_HOLD (the agent was busy) still gets its old place in the row back.
 LEAVE_GRACE = 600
+# How long one that is gone stays in the row after that, greyed out, unusable
+# and saying how to start it again. It has no claim on anything by then: it
+# cannot be adopted, chosen or routed to, it is only still on screen so that
+# coming back to the machine after a while shows what happened rather than an
+# empty row. Half a day covers a night away, which is exactly the stretch that
+# lost an utterance (#110), and stops well short of yesterday's work piling up
+# in front of today's.
+GONE_SHOW = 12 * 3600
+# And no more than this many of them at once, the most recent first. The row
+# has to stay readable, and past a few the older ones say nothing the newest
+# does not.
+GONE_KEEP = 5
 
 
 def gone_dir(log_path):
@@ -2797,19 +2816,36 @@ def _tombstones(log_path, include_departed=False):
                 pass
             continue
         data = _read_json(f) or {}
-        at = data.get("left", data.get("stopped", 0))
-        if not data or now - at > LEAVE_GRACE:
+        if "left" not in data:
+            # Stopped on purpose, or unreadable. Nothing is kept for it beyond
+            # long enough to turn away the one re-arm a disconnect causes.
+            if not data or now - data.get("stopped", 0) > LEAVE_GRACE:
+                try:
+                    f.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            continue
+        since = now - data["left"]
+        if since > GONE_SHOW:
             try:
                 f.unlink(missing_ok=True)
             except OSError:
                 pass
             continue
-        if "left" not in data:
-            continue
-        if now - data["left"] <= AWAY_HOLD:
+        if since <= AWAY_HOLD:
             out.append(data)
         elif include_departed:
             out.append(dict(data, departed=True))
+    # Only the most recent few of the gone ones. The rest go for good rather
+    # than sit in the folder unseen until GONE_SHOW runs out.
+    departed = sorted((e for e in out if e.get("departed")),
+                      key=lambda e: e["left"], reverse=True)
+    for stale in departed[GONE_KEEP:]:
+        out.remove(stale)
+        try:
+            _gone_file(log_path, stale.get("session")).unlink(missing_ok=True)
+        except OSError:
+            pass
     return out
 
 

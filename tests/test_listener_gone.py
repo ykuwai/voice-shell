@@ -34,6 +34,16 @@ class ListenerGoneTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def live(self, session="s2", pid=None):
+        """A registration for a process that really is running (this one)."""
+        import os
+        pid = pid or str(os.getpid())
+        now = time.time()
+        (Path(self.tmp.name) / "listeners" / pid).write_text(json.dumps({
+            "cwd": "/work", "started": "2026-09-23 10:00:00",
+            "since": now, "order": now, "session": session}), encoding="utf-8")
+        return pid
+
     def tomb(self, left_ago, pid="40856", session="s1"):
         vd.write_atomic(vd._gone_file(self.log, session), json.dumps({
             "session": session, "pid": pid, "left": time.time() - left_ago,
@@ -74,13 +84,48 @@ class ListenerGoneTest(unittest.TestCase):
 
     def test_a_live_listener_is_still_preferred_over_a_gone_one(self):
         self.tomb(vd.AWAY_HOLD + 30)
-        import os
-        mine = str(os.getpid())
-        (Path(self.tmp.name) / "listeners" / mine).write_text(json.dumps({
-            "cwd": "/work", "started": "2026-09-23 10:00:00",
-            "since": time.time(), "order": time.time(), "session": "s2"}),
-            encoding="utf-8")
+        mine = self.live()
         self.assertEqual(vd.resolve_target(self.log), mine)
+
+    def test_it_stays_in_the_row_long_after_the_grace(self):
+        # Someone who steps away and comes back hours later still has to see
+        # that the session is there and is not listening. LEAVE_GRACE is only
+        # how long it can be adopted, which is a different question.
+        self.tomb(vd.LEAVE_GRACE + 3600)
+        entry, = vd.list_active_listeners(self.log)
+        self.assertTrue(entry.get("gone"))
+
+    def test_it_goes_for_good_once_the_showing_is_over(self):
+        self.tomb(vd.GONE_SHOW + 60)
+        self.assertEqual(vd.list_active_listeners(self.log), [])
+
+    def test_only_the_most_recent_few_are_kept(self):
+        # The row cannot grow without bound. Older than the newest few, and
+        # the file goes too rather than sit there unseen.
+        for i in range(vd.GONE_KEEP + 3):
+            self.tomb(vd.AWAY_HOLD + 60 + i * 60, pid=str(50000 + i),
+                      session="s-old-%d" % i)
+        out = vd.list_active_listeners(self.log)
+        self.assertEqual(len(out), vd.GONE_KEEP)
+        # The newest ones, which are the ones that left least long ago.
+        self.assertEqual({e["pid"] for e in out},
+                         {str(50000 + i) for i in range(vd.GONE_KEEP)})
+
+    def test_a_gone_one_does_not_hold_a_number_a_live_one_should_have(self):
+        # The tombstone registered long before the live session did, so by
+        # plain order it would come first and take number 1.
+        self.tomb(vd.LEAVE_GRACE + 3600)
+        mine = self.live()
+        order = [str(e["pid"]) for e in vd.list_active_listeners(self.log)]
+        self.assertEqual(order, [mine, "40856"])
+
+    def test_one_between_two_watches_keeps_its_place(self):
+        # Away is not gone. Its next watch takes the same number back, so it
+        # must not be pushed to the end the way a gone one is.
+        self.tomb(5)
+        mine = self.live()
+        order = [str(e["pid"]) for e in vd.list_active_listeners(self.log)]
+        self.assertEqual(order, ["40856", mine])
 
 
 if __name__ == "__main__":

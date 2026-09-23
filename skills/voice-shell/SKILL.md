@@ -167,7 +167,9 @@ picked last time (`~/.config/voice-shell/config.json`), and the first time it is
    deadline takes the listen with it on Windows too (it used to keep running
    there, still registered, still the destination, reading nothing, and what
    was said next was lost). Past the two minutes the chip stays in the row
-   with its number but is drawn as unusable, and nothing is routed to it.
+   for half a day, drawn as unusable and pushed to the end so the live ones
+   keep their numbers. Nothing is routed to it, and pressing it says to type
+   `/voice-shell` in that session to start it again.
 
 **Keep only one Monitor of your own.** Re-arming on a deadline or "source
 ended" notification (above) is always safe on its own. Re-attaching for some

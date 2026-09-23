@@ -4638,7 +4638,14 @@ async function setRoute2(to) {
      goes. Say why rather than let the fill move and the words disappear
      (#110). The server refuses this one too. */
   const gone = knownListeners.find(l => String(l.pid) === to && l.gone);
-  if (gone) { chime('err'); say(t('listenerGone')); return; }
+  if (gone) {
+    // Pressing it is how someone asks "why can I not use this one". Answer
+    // with what to do about it, in the same status line every other notice
+    // on this screen uses, and give it longer to be read than a plain ack.
+    chime('err');
+    say(t('listenerGoneHow', {name: gone.label}), 9);
+    return;
+  }
   routeTo = to;
   markChosen();
   try { await putJSON('/api/route', {to}); } catch {}
