@@ -80,18 +80,19 @@ const t = (key, vars) => {
 // The default target is whichever document the contents are living in right
 // now. Search document while it floats and not a single [data-i18n] turns up,
 // so changing the language changes no text at all.
+// For an element holding an icon, replace only the text part (do not wipe out
+// the svg). Anything repainting such a label goes through here, not
+// textContent, which would take the drawing with it.
+function setLabel(n, text) {
+  const svg = n.querySelector(':scope > svg');
+  if (!svg) { n.textContent = text; return; }
+  const last = n.lastChild;
+  if (last && last.nodeType === 3) last.nodeValue = text;
+  else n.append(text);
+}
+
 function applyI18n(root = uiDoc()) {
-  for (const n of root.querySelectorAll('[data-i18n]')) {
-    // For an element holding an icon, replace only the text part (do not wipe out the svg)
-    const svg = n.querySelector(':scope > svg');
-    if (svg) {
-      const last = n.lastChild;
-      if (last && last.nodeType === 3) last.nodeValue = t(n.dataset.i18n);
-      else n.append(t(n.dataset.i18n));
-    } else {
-      n.textContent = t(n.dataset.i18n);
-    }
-  }
+  for (const n of root.querySelectorAll('[data-i18n]')) setLabel(n, t(n.dataset.i18n));
   for (const n of root.querySelectorAll('[data-i18n-ph]')) n.placeholder = t(n.dataset.i18nPh);
   // The text shown when the live transcript box is empty (CSS reads it through content)
   for (const n of root.querySelectorAll('[data-i18n-quiet]')) n.dataset.quiet = t(n.dataset.i18nQuiet);
@@ -173,6 +174,17 @@ function decorateIcons(root = document) {
     n.dataset.iconed = '1';
     n.prepend(iconSvg(n.dataset.icon, Number(n.dataset.iconSize) || 18));
   }
+}
+
+// Swap the drawing on one element whose meaning changed under it. Same
+// machinery as decorateIcons, only pointed at a single node, and it does
+// nothing when the drawing is already the one wanted.
+function setIcon(n, name) {
+  if (!n || n.dataset.icon === name) return;
+  n.dataset.icon = name;
+  const svg = n.querySelector(':scope > svg');
+  if (svg) svg.remove();
+  n.prepend(iconSvg(name, Number(n.dataset.iconSize) || 18));
 }
 
 /* Cleaning up the text is the daemon's job. Fixing only the look here does
@@ -3499,16 +3511,52 @@ const enginePicked = value => value === BROWSER_LOCAL
   ? {engine: BROWSER_ENGINE, local: true}
   : {engine: value, local: false};
 
+/* What our own server saw on the disk (GET /api/ondevice). engine is the
+   SODA engine, pack the model for this one language, and either can be null
+   when nothing could be told. Only both being there means Chrome really
+   holds it, and then downloadable is only this site not having asked yet. */
+const onDeviceHasModel = disk => !!disk && disk.engine === true && disk.pack === true;
+// What that model weighs, for the line that says so. '' when the server could
+// not tell, and the wording falls back to a rough figure per language.
+const onDeviceSizeText = disk => {
+  const bytes = disk && disk.packBytes > 0 ? disk.packBytes : 0;
+  return bytes ? Math.round(bytes / 1048576) + ' MB' : '';
+};
+
 /* What the settings say for each answer SR.available() can give. '' is not
    asked yet (or asked for a language no longer chosen), and a refusal from
    Chrome itself outranks whatever available() last said, since it is Chrome
-   saying no to the real thing. */
+   saying no to the real thing.
+
+   downloadable is the one answer that does not say what it looks like.
+   Chrome tells a site downloadable until that site has called install()
+   itself, model on disk or not, so that no site can read off what you have.
+   With the disk saying the model is right there, nothing is fetched at all,
+   it is this page being let at what Chrome already holds, and it is over in
+   seconds. Told that, the line says so, and so does the one shown while it
+   runs (the "few minutes" of a real download would be wrong there). */
 const ON_DEVICE_KEYS = {
   available: 'onDeviceReady', downloadable: 'onDeviceNeedsDownload',
   downloading: 'onDeviceDownloading', unavailable: 'onDeviceUnavailable',
 };
-const onDeviceStatusKey = (status, refused) =>
-  refused ? 'onDeviceRefused' : ON_DEVICE_KEYS[status] || 'onDeviceChecking';
+const ON_DEVICE_HERE_KEYS = {downloadable: 'onDeviceEnable', downloading: 'onDeviceEnabling'};
+const onDeviceStatusKey = (status, refused, disk) =>
+  refused ? 'onDeviceRefused'
+    : (onDeviceHasModel(disk) && ON_DEVICE_HERE_KEYS[status])
+      || ON_DEVICE_KEYS[status] || 'onDeviceChecking';
+
+/* Whether a press anywhere on the page may finish it by itself.
+   Chrome only starts install() from inside a press, so nothing here can be
+   fully unattended. But when the model is already on the disk there is
+   nothing to fetch, and letting the next press of anything at all (mute,
+   send, settings) carry the install too costs that press nothing and is over
+   in seconds. A real download is not slipped into a press meant for something
+   else, so with the model missing, or with the disk unreadable, only the
+   button does it. And nothing fires off the local entry, where recognition on
+   this device is not what was asked for in the first place. */
+const onDeviceMayAutoInstall = (local, chosen, status, refused, installing, disk) =>
+  !!local && !!chosen && status === 'downloadable' && !refused && !installing
+  && onDeviceHasModel(disk);
 
 // Whether recognition may start at all. Off the local entry nothing is held
 // here. On it, only a model Chrome says is on this machine lets it through,
@@ -3538,9 +3586,14 @@ let onDeviceSawDownloading = false;
 let onDeviceProblem = '';     // a download that did not go through, until the next try
 let onDeviceAsk = null;       // the available() call under way, {lang, promise}
 let onDevicePoll = null;
+let onDeviceDisk = null;      // what the server saw on the disk, for onDeviceDisk.lang
+let onDeviceDiskAsk = '';     // the language a look at the disk is under way for
+let onDeviceArmed = null;     // the press listener waiting, while one is armed
 
 // The answer for the language chosen now, or '' if it was for another one
 const onDeviceNow = () => onDeviceLang === browserLang() ? onDeviceStatus : '';
+// And the same for what the disk said, which is per language as well
+const onDeviceDiskNow = () => onDeviceDisk && onDeviceDisk.lang === browserLang() ? onDeviceDisk : null;
 // Held off on purpose, and known to be (an answer still on its way is not a hold yet)
 const onDeviceHeld = () => asrActive() && onDeviceLocal
   && (onDeviceRefused || (onDeviceNow() !== '' && onDeviceNow() !== 'available'));
@@ -3564,6 +3617,8 @@ function askOnDevice() {
     const was = onDeviceNow();
     onDeviceStatus = status;
     onDeviceLang = lang;
+    // Only downloadable is ambiguous, so only it is worth a look at the disk
+    if (status === 'downloadable') checkOnDeviceDisk(lang);
     paintOnDevice();
     // No progress events come out of a download, so it is watched by asking again
     if (status === 'downloading' && lang === onDeviceInstallLang) onDeviceSawDownloading = true;
@@ -3581,6 +3636,30 @@ function askOnDevice() {
   return promise;
 }
 
+/* Ask our own server to look at the disk. Chrome tells every site
+   downloadable until that site has called install() itself, model on disk or
+   not, so the page alone cannot tell a real download from a switch on that
+   takes seconds. The server runs on this machine and can simply look
+   (GET /api/ondevice), read only, without touching Chrome.
+
+   Asked once per language: a model does not come and go while the page is
+   open, and the one way it does (the download we started) ends in available,
+   which never reads the answer again. An answer for a language no longer
+   chosen is dropped, the same as available()'s. */
+function checkOnDeviceDisk(lang) {
+  if (onDeviceDiskAsk === lang || (onDeviceDisk && onDeviceDisk.lang === lang)) return;
+  onDeviceDiskAsk = lang;
+  fetch('/api/ondevice?lang=' + encodeURIComponent(lang))
+    .then(r => r.json())
+    .then(d => {
+      if (onDeviceDiskAsk !== lang) return;
+      onDeviceDiskAsk = '';
+      onDeviceDisk = d && d.lang === lang ? d : null;
+      paintOnDevice();
+    })
+    .catch(() => { if (onDeviceDiskAsk === lang) onDeviceDiskAsk = ''; });
+}
+
 function keepPollingOnDevice() {
   if (onDevicePoll) return;
   onDevicePoll = setTimeout(() => {
@@ -3593,7 +3672,7 @@ function keepPollingOnDevice() {
 function paintOnDevice() {
   const show = asrChosen && onDeviceLocal;
   el.onDeviceField.hidden = !show;
-  if (!show) return;
+  if (!show) { disarmOnDeviceInstall(); return; }
   let status = onDeviceNow();
   // Between the press and Chrome saying downloading, it still says downloadable.
   // Only for the language the press was for: switched to another one while it
@@ -3601,11 +3680,30 @@ function paintOnDevice() {
   // would grey its button out until the first one is done, minutes later.
   const installing = onDeviceInstalling && onDeviceInstallLang === browserLang();
   if (installing && status !== 'available' && status !== 'unavailable') status = 'downloading';
+  const disk = onDeviceDiskNow();
   el.onDeviceStatus.textContent = onDeviceProblem
     ? t(onDeviceProblem, {back: t('unfloatBtn')})
-    : t(onDeviceStatusKey(status, onDeviceRefused), {plain: t('engineBrowser')});
+    : t(onDeviceStatusKey(status, onDeviceRefused, disk),
+        {plain: t('engineBrowser'), size: onDeviceSizeText(disk) || t('onDeviceSizeGuess')});
   el.onDeviceRow.hidden = onDeviceRefused || status !== 'downloadable';
+  // The button says what pressing it really does. Nothing is fetched when
+  // Chrome already holds the model, and calling that a download is the very
+  // thing this whole look at the disk is here to stop saying. The drawing
+  // says it too: a download arrow over something that downloads nothing is
+  // the same untruth in a picture.
+  const here = onDeviceHasModel(disk);
+  setLabel(el.onDeviceDownload, t(here ? 'onDeviceEnableBtn' : 'onDeviceDownload'));
+  setIcon(el.onDeviceDownload, here ? 'bolt' : 'download');
   el.onDeviceDownload.disabled = installing;
+  // Every path that changes any of this comes through here (the engine
+  // dropdown, the language dropdown, another tab's switch, each answer from
+  // available(), the answer from the disk), so the arming is worked out here
+  // rather than being remembered to at each of them.
+  if (onDeviceMayAutoInstall(onDeviceLocal, asrChosen, status, onDeviceRefused, installing, disk)) {
+    armOnDeviceInstall();
+  } else {
+    disarmOnDeviceInstall();
+  }
 }
 
 // Say on the main screen too why nothing is being listened to. Settings
@@ -4926,6 +5024,13 @@ el.onDeviceDownload.onclick = () => startOnDeviceInstall();
 
 function startOnDeviceInstall() {
   const lang = browserLang();
+  // Armed, the press that lands on the button itself gets here twice: once
+  // through the capture listener on pointerdown, once through the button's own
+  // click. The second would take the id the first is waiting on (settle drops
+  // anything but the newest), leaving the line saying downloading for good.
+  // A plain read of two variables, so install() is still the first thing the
+  // press that does get through does.
+  if (onDeviceInstalling && onDeviceInstallLang === lang) return;
   let asked;
   try {
     asked = SR.install({langs: [lang], processLocally: true});
@@ -4957,6 +5062,52 @@ function startOnDeviceInstall() {
   setTimeout(() => {
     if (!onDeviceSawDownloading && onDeviceNow() !== 'available') settle('onDeviceDownloadFailed');
   }, 45000);
+}
+
+/* ── Letting any press do it ──
+   Ideally the model would just be got ready by voice-shell with nobody
+   pressing anything. Chrome will not have that: install() only counts from
+   inside a press. What it does not ask is that the press be on our button.
+   So when the server has looked and Chrome already holds the model, the
+   listener below rides along on the very next press anywhere on the page,
+   whatever that press was for, and hands it to install() before the button
+   or the field under the finger gets it (capture). Nothing is fetched, it is
+   over in a few seconds, and from where you sit the local entry simply
+   started working after you pressed something.
+
+   keydown counts as a press for this too, so a keyboard is not left out.
+   Both go on and come off together, and the first one to fire takes both off
+   so the other cannot fire into a second install. paintOnDevice decides when
+   it is on at all (onDeviceMayAutoInstall), and the guards are read again
+   here at the moment of the press, since a press can land at any time. */
+function armOnDeviceInstall() {
+  if (onDeviceArmed) return;
+  const fire = () => {
+    // Not every keypress is a press as Chrome counts it. Escape (which closes
+    // the settings sheet) and the modifiers on their own hand out no
+    // activation, and install() would throw NotAllowedError, which the line
+    // reads as the floating window and tells you to go back to the tab, which
+    // is nonsense for a key. Stay armed for a press that really is one.
+    try {
+      if (navigator.userActivation && !navigator.userActivation.isActive) return;
+    } catch {}
+    disarmOnDeviceInstall();
+    if (!onDeviceMayAutoInstall(onDeviceLocal, asrChosen, onDeviceNow(), onDeviceRefused,
+                                onDeviceInstalling, onDeviceDiskNow())) return;
+    // As with the button, install() has to be the first thing the press does
+    startOnDeviceInstall();
+  };
+  onDeviceArmed = fire;
+  addEventListener('pointerdown', fire, true);
+  addEventListener('keydown', fire, true);
+}
+
+function disarmOnDeviceInstall() {
+  if (!onDeviceArmed) return;
+  const fire = onDeviceArmed;
+  onDeviceArmed = null;
+  removeEventListener('pointerdown', fire, true);
+  removeEventListener('keydown', fire, true);
 }
 
 /* ── Floating on top ─────────────────────
