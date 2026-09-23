@@ -4216,16 +4216,17 @@ function paintPendingBrowserSends() {
    parked in pendingBrowserSends to wait out a quiet stretch first. Called
    from onresult in place of calling sendUtterance directly. */
 function queueOrSendFinal(text) {
+  // Ahead of every way out below. A clause that trims away to nothing, one
+  // dropped as stale, and a closing mute are all recognition having said
+  // something about what it heard, which is the whole of what lastFinalAt
+  // tracks (see recognizerOwesWords).
+  lastFinalAt = performance.now();
   text = (text || '').trim();
   if (!text) return;
   // The one straggler discardCurrentNow warns about, stale content the newly
   // restarted session can still carry right after an abort. Caught here, at
   // the point of queuing, since sendUtterance's own copy of this same check
   // never gets a turn to run until whatever the queue eventually flushes.
-  // Before the two ways out below: a clause dropped as stale, and a closing
-  // mute, are both recognition having said something, which is the whole of
-  // what lastFinalAt tracks (see recognizerOwesWords).
-  lastFinalAt = performance.now();
   if (dropNextLocal) { dropNextLocal = false; return; }
   // A closing mute must not sit behind whatever else is already waiting for
   // quiet, or the room stays live for however long that wait runs, exactly
