@@ -380,6 +380,18 @@ def main():
             if str(to) not in mine:
                 progress.advance(size)
                 continue
+            # A "stop" names one process, not a session. Reached through an
+            # alias it is somebody else's: either this session's own earlier
+            # listen, whose x was pressed and never read (the line is still
+            # sitting in the log, and a re-arm replays from before it), or a
+            # different session that held that PID before Windows handed it
+            # on. Acting on it would end a listen that is running perfectly
+            # well, and printing it would tell that agent it had been
+            # disconnected when it had not. Drop it: it was already said, or
+            # it was never ours to be told.
+            if rec.get("stop") and str(to) != me:
+                progress.advance(size)
+                continue
         elif "system_warning" not in rec:
             progress.advance(size)
             continue
@@ -389,6 +401,19 @@ def main():
         # better anyway, the reader sees all of it before acting.
         _emit(split_line(rec, line))
         progress.advance(size)
+        # A "stop" on a warning meant for us: this listen is being ended from
+        # the screen. Quitting right here, with the line already printed and
+        # flushed, makes the telling and the ending one thing. The old way
+        # round (write the line, then signal the listen from outside) could
+        # end the process while the line was still sitting unread in the log.
+        # Ending here also lets `listen` go through its own EXIT trap, so the
+        # registration is tidied away rather than swept as a dead PID.
+        if to is not None and "system_warning" in rec and rec.get("stop"):
+            try:
+                sys.stdout.flush()
+            except (OSError, ValueError):
+                pass
+            os._exit(0)
 
 
 if __name__ == "__main__":

@@ -11,7 +11,6 @@ import asyncio
 from contextlib import contextmanager
 import json
 import os
-import signal
 import subprocess
 import sys
 import time
@@ -1280,32 +1279,19 @@ async def main_async(args):
         live = {str(l["pid"]): l for l in vd.list_active_listeners(args.log_file)}
         if pid not in live:
             return web.json_response({"error": "unknown"}, status=404)
-        # Stopped on purpose, so its listen leaves no place behind to be
-        # taken up again. One between two watches has nothing left to stop.
-        vd.mark_stopped(args.log_file, live[pid].get("session"), disconnected=True)
-        if live[pid].get("away"):
-            return web.json_response({"ok": True, "label": live[pid].get("label", pid)})
-        # Tell them first. Cut it quietly and that session sits there never
-        # noticing that talking to it gets no response. Wait just long enough
-        # for tail to read, then stop it.
+        # Telling it and stopping it are one thing, and waiting for the
+        # telling to land is the whole of it, so it lives next to the rest of
+        # the listener bookkeeping (voice_daemon.disconnect_listener). It
+        # waits on a file, so off this thread.
+        loop = asyncio.get_running_loop()
         try:
-            with open(args.log_file, "a", encoding="utf-8") as f:
-                f.write(json.dumps({
-                    "system_warning":
-                        "Someone acted on the screen, and this session stopped "
-                        "listening to the voice. To use it again, type "
-                        "/voice-shell.",
-                    "to": pid,
-                }, ensure_ascii=False) + "\n")
-            await asyncio.sleep(0.5)
-        except OSError:
-            pass
-
-        try:
-            os.kill(int(pid), signal.SIGTERM)
+            entry = await loop.run_in_executor(
+                None, vd.disconnect_listener, args.log_file, pid)
         except (OSError, ValueError) as err:
             return web.json_response({"error": str(err)}, status=500)
-        return web.json_response({"ok": True, "label": live[pid].get("label", pid)})
+        if entry is None:
+            return web.json_response({"error": "unknown"}, status=404)
+        return web.json_response({"ok": True, "label": entry.get("label", pid)})
 
     async def handle_rename(req):
         """Put a display name on one of the listening sessions.

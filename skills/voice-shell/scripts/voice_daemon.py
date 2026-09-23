@@ -2770,6 +2770,90 @@ def mark_stopped(log_path, session, disconnected=False):
         pass
 
 
+DISCONNECT_WARNING = (
+    "Someone acted on the screen, and this session stopped listening to the "
+    "voice. To use it again, type /voice-shell."
+)
+
+# How long a disconnect waits for that listen to really read the warning
+# before it gives up and cuts it.
+DISCONNECT_WAIT = 5.0
+
+
+def warn_listener(log_path, pid, text, stop=False):
+    """Put one system_warning into the log, addressed to that one listen.
+
+    stop=True also tells that listen to end once it has printed the line.
+    Printing it and ending become one thing that way, so the warning cannot
+    be lost to whatever cuts the process next.
+    """
+    rec = {"system_warning": text, "to": str(pid)}
+    if stop:
+        rec["stop"] = True
+    try:
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            f.flush()
+            return f.tell()
+    except OSError:
+        return None
+
+
+def disconnect_listener(log_path, pid, wait=DISCONNECT_WAIT, poll=0.05):
+    """Make that session stop listening, from the screen (the x on a chip).
+
+    It is told first and ends only once it has been told: the agent there has
+    to be able to tell a deliberate stop from a crash.
+
+    The telling used to be a line written into the log, half a second of
+    sleep, then a SIGTERM. On Windows that signal is a TerminateProcess, so
+    the listen shell died where it stood, its EXIT trap never ran, and
+    whatever its tail had not polled up by then went with it. The session got
+    an empty watch that simply ended, and its registration was swept the
+    moment list_active_listeners next saw a dead PID, so from inside it looked
+    exactly like a crash. The sleep is gone: the line itself now ends that
+    listen (listen_filter.py prints it and quits), and this waits for the
+    registration to go, which is that listen's own EXIT trap saying the line
+    is out. The signal is only what is left for a listen that never read it.
+
+    Hands back the listener entry, or None when that PID is not one.
+    """
+    pid = str(pid)
+    live = {str(e["pid"]): e for e in list_active_listeners(log_path)}
+    entry = live.get(pid)
+    if entry is None:
+        return None
+    # Stopped on purpose, so its listen leaves no place behind to be taken up
+    # again. Written before the line below, which can end that listen the
+    # instant it lands: this mark is what makes its departure leave nothing.
+    mark_stopped(log_path, entry.get("session"), disconnected=True)
+    if entry.get("away"):
+        return entry            # between two watches, nothing running to tell
+    warn_listener(log_path, pid, DISCONNECT_WARNING, stop=True)
+    reg = listeners_dir(log_path) / pid
+    deadline = time.time() + wait
+    while True:
+        if not reg.exists():
+            return entry        # it printed the line and let go on its own
+        if time.time() >= deadline:
+            break
+        time.sleep(poll)
+    # Nothing read it within the wait (a listen from before this shipped, or
+    # one whose reader had already gone). Cut it, now that the line has had
+    # its chance rather than half a second of one.
+    #
+    # A process that has already gone is not a failure: the mark is written
+    # and the line is out, which is the whole of what was asked for. Only the
+    # registration outlived it (a forceful kill on Windows leaves one behind,
+    # #82), and the liveness sweep clears that on its own. Raising here
+    # instead put a 500 on the screen for a disconnect that had worked.
+    try:
+        os.kill(int(pid), signal.SIGTERM)
+    except OSError:
+        pass
+    return entry
+
+
 def leave_listener(log_path, reg_path):
     """Turn a departing listen's registration into a tombstone."""
     reg_path = Path(reg_path)
