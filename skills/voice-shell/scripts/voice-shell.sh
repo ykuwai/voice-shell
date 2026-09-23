@@ -702,8 +702,13 @@ REG
     # reason reg_pid above is read out of /proc). $PPID of 1 means there is
     # nothing above this to lose, and listen_filter.py leaves it alone.
     parent_pid="$PPID"
-    if [[ -r "/proc/$PPID/winpid" ]]; then
-      parent_pid="$(cat "/proc/$PPID/winpid" 2>/dev/null || echo "$PPID")"
+    if [[ -r "/proc/$$/winpid" ]]; then
+      # On MSYS the number handed over has to be the real Win32 one, since
+      # Python is what checks it. Falling back to $PPID here would hand over an
+      # MSYS pid to be read as a Win32 one, which can land on some unrelated
+      # process and make this listen quit when that one ends. Nothing readable
+      # means nothing to watch, and listen_filter.py leaves it alone.
+      parent_pid="$(cat "/proc/$PPID/winpid" 2>/dev/null || true)"
     fi
     progress="$STATE_DIR/listeners-gone/$reg_pid.progress"
     progress_native="$progress"

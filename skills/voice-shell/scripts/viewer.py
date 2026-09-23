@@ -1085,15 +1085,21 @@ async def main_async(args):
     async def handle_listeners(_req):
         """The sessions listening right now, and the destination that is picked."""
         import voice_daemon as vd
+        # Asked before the route file is read. resolve_target is what lets go of
+        # a pick whose listen is gone, and reading the file first showed that
+        # PID as picked for one more poll, so the chip came up lit while
+        # already saying it could not be used.
+        listeners = vd.list_active_listeners(args.log_file)
+        target = vd.resolve_target(args.log_file) or ""
         try:
             chosen = route_path.read_text(encoding="utf-8").strip()
         except OSError:
             chosen = ""
         return web.json_response({
-            "listeners": vd.list_active_listeners(args.log_file),
+            "listeners": listeners,
             "route": chosen,                                  # the one that is picked
             # Where it actually lands. With nothing picked, the later start wins.
-            "target": vd.resolve_target(args.log_file) or "",
+            "target": target,
         })
 
     async def handle_machine(req):
