@@ -7,9 +7,9 @@ environment first and **ask the user which way to go before running anything**
 **Most of the time there is nothing to install.** The default uses **the
 browser's own built-in speech recognition** (Chrome's Web Speech API), and
 `pip install numpy aiohttp` is enough to run it. No model to load, nothing to
-wait for. It recognizes on this machine while Chrome holds a model for the
-language, and on Google's servers when it holds none. The note under the entry
-in the settings says which of the two is happening.
+wait for. It recognizes locally while Chrome holds a model for the language,
+and on Google's servers when it holds none. The note in the settings says which
+of the two is happening.
 
 What follows is for when you want everything to stay on your machine, or when you
 want to use it without opening the window.
@@ -29,8 +29,8 @@ sw_vers -productVersion 2>/dev/null      # on macOS
 
 With A and B the audio never leaves the machine, and nothing has to be
 downloaded by Chrome first. In a recent Chrome the settings also offer a browser
-entry that forbids the cloud ("only on this device"), which keeps the audio here
-too once Chrome has the language model.
+choice called "local only", which keeps the audio here too once Chrome has the
+language model.
 
 ## A. macOS 26 or later (the recognition that ships with the OS)
 

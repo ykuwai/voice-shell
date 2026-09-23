@@ -92,13 +92,14 @@ class EntryWordingTest(unittest.TestCase):
         """Each of the three answers the disk can give has its own wording,
         and none of them talks about Chrome deciding anything."""
         en = self.i18n["en"]
-        self.assertIn("is on this machine", en["browserAsrNoteHere"])
-        self.assertIn("recognized right here", en["browserAsrNoteHere"])
+        self.assertIn("recognized locally", en["browserAsrNoteHere"])
         self.assertNotIn("Google", en["browserAsrNoteHere"])
         self.assertIn("Google", en["browserAsrNoteCloud"])
-        self.assertIn("no model for this language", en["browserAsrNoteCloud"])
         # The hedge is only for when nothing could be told
-        self.assertIn("when it is not", en["browserAsrNote"])
+        self.assertIn("if it is not", en["browserAsrNote"])
+        ja = self.i18n["ja"]
+        self.assertIn("ローカル", ja["browserAsrNoteHere"])
+        self.assertIn("Google", ja["browserAsrNoteCloud"])
         for key in ("browserAsrNote", "browserAsrNoteHere", "browserAsrNoteCloud",
                     "browserAsrWarn", "browserAsrWarnHere", "browserAsrWarnCloud"):
             for lang in LANGS:
@@ -124,9 +125,35 @@ class EntryWordingTest(unittest.TestCase):
             self.assertNotEqual(here, self.i18n[lang]["browserAsrWarn"].strip(), lang)
 
     def test_the_on_device_entry_is_the_one_that_guarantees_it(self):
-        ready = self.i18n["en"]["onDeviceReady"]
-        self.assertIn("never leaves this machine", ready)
-        self.assertIn("cloud is not allowed", ready)
+        """It says what the language can do and what happens to the audio,
+        in that order, and nothing about what is or is not permitted."""
+        self.assertEqual(
+            self.i18n["en"]["onDeviceReady"],
+            "This language can be recognized locally. "
+            "Your audio is not sent anywhere outside.")
+        self.assertEqual(
+            self.i18n["ja"]["onDeviceReady"],
+            "この言語はローカルで"
+            "認識できます。"
+            "音声は外部に送信されません。")
+
+    def test_one_vocabulary_across_the_group(self):
+        """The whole group says local in one word, so a reader meets the
+        same idea under the same name wherever the state lands them."""
+        keys = ("browserAsrNoteHere", "browserAsrWarnHere", "browserAsrWarnCloud",
+                "browserAsrNote", "browserAsrWarn", "engineBrowserLocal",
+                "localAsrNote", "onDeviceReady")
+        for key in keys:
+            en = self.i18n["en"][key]
+            if en:
+                self.assertIn("local", en.lower(), f"en.{key}")
+            ja = self.i18n["ja"][key]
+            if ja:
+                self.assertIn("ローカル", ja, f"ja.{key}")
+        # The Japanese lines take the audio as their subject
+        for key in ("browserAsrNoteHere", "browserAsrNoteCloud", "browserAsrNote",
+                    "browserAsrWarnCloud", "browserAsrWarn", "onDeviceReady"):
+            self.assertIn("音声", self.i18n["ja"][key], f"ja.{key}")
 VIEWER_JS = ROOT / "skills/voice-shell/scripts/viewer.js"
 
 # plainAsrWhere sits in the part of viewer.js with no page in it, the same

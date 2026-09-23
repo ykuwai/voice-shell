@@ -75,7 +75,7 @@ Le changement se fait dans les réglages de la fenêtre. Si une installation est
 
 Rien à installer, ça marche tout de suite.\
 C'est la reconnaissance vocale gratuite intégrée à Chrome (Web Speech API).\
-Tant que Chrome a le modèle de votre langue, la reconnaissance a lieu sur la machine. Sans lui, l'audio part vers les serveurs de Google. Les réglages disent laquelle des deux se passe.
+Tant que Chrome a le modèle de votre langue, la reconnaissance a lieu en local. Sans lui, l'audio est envoyé aux serveurs de Google. Les réglages disent laquelle des deux se passe.
 
 ### 2. Mac - la reconnaissance locale d'Apple
 

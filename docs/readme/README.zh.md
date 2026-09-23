@@ -75,7 +75,7 @@ npx skills update voice-shell -y
 
 无需任何配置，马上就能用。\
 使用的是 Chrome 自带的免费语音识别（Web Speech API）。\
-只要 Chrome 有你这个语言的模型，就在本机识别；没有的话，语音会发到 Google 的服务器。现在是哪一种，设置里会写出来。
+只要 Chrome 有你这个语言的模型，就在本机识别；没有的话，语音会发送到 Google 的服务器。现在是哪一种，设置里会写出来。
 
 ### 2. Mac - Apple 本地语音识别
 
