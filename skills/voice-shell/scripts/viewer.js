@@ -3948,6 +3948,11 @@ function checkOnDeviceDisk(lang) {
       onDeviceDiskAsk = '';
       onDeviceDisk = d && d.lang === lang ? d : null;
       paintOnDevice();
+      /* The plain entry's note and caution read this answer too, and
+         paintOnDevice returns at once when that entry is the one chosen, so
+         they are repainted here. Nothing loops: the paint asks for this same
+         language again and is turned away by the answer now being held. */
+      if (asrChosen && !onDeviceLocal) paintBrowserAsr();
     })
     .catch(() => { if (onDeviceDiskAsk === lang) onDeviceDiskAsk = ''; });
 }

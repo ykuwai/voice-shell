@@ -160,3 +160,12 @@ class PlainNoteWiringTest(unittest.TestCase):
         self.assertIn(
             "if (onDeviceDiskAsk === lang || (onDeviceDisk && onDeviceDisk.lang === lang)) return;",
             src)
+
+    def test_the_answer_repaints_the_plain_entry(self):
+        """paintOnDevice returns at once on the plain entry, so the answer
+        landing has to repaint the note and the caution itself. Without this
+        they would keep the hedge they were painted with before it came."""
+        src = VIEWER_JS.read_text(encoding="utf-8")
+        start = src.index("function checkOnDeviceDisk")
+        end = src.index("function keepPollingOnDevice", start)
+        self.assertIn("paintBrowserAsr(", src[start:end])
