@@ -4725,6 +4725,16 @@ function browserGateTick() {
   // as the quiet that sends what was said so far.
   if (recWanted && (!recRunning || recStarting)) lastLoudAt = now;
   if (!pendingBrowserSends.length) return;
+  /* Muted. The drop that empties this queue runs in applyRouteSideEffects,
+     which changeRoute only reaches after telling the server (two round trips),
+     and this tick goes on running through both of them. A queue that was one
+     tick from clearing its wait when the button was pressed went out inside
+     that window, live if the mute had not landed yet and read as muted if it
+     had, which is the whole bug again in a tenth of a second. Read off route,
+     which is set the instant the press happens (setRoute, setRemoteRoute).
+     Only held here, not dropped: a route change that fails rolls back through
+     applyRouteSideEffects(prev), and the queue is still wanted then. */
+  if (route === 'off') return;
   const quietFor = now - lastLoudAt;
   const waitMs = sendWaitMs();
   // A cap against a rising noise floor. Some machines' getUserMedia runs
@@ -4783,7 +4793,10 @@ function dropPendingBrowserSends() {
   if (!pendingBrowserSends.length) return false;
   pendingBrowserSends = [];
   mutedDropNote = true;
-  paintPendingBrowserSends();
+  // Written straight, not through paintPendingBrowserSends, which leaves an
+  // empty string alone on purpose (see there). What was just thrown away is
+  // the one case where the line has to go.
+  el.stream.textContent = browserStreamText();
   return true;
 }
 
@@ -4794,13 +4807,10 @@ function dropPendingBrowserSends() {
 // what belongs on screen rather than each painting their own half of it.
 function paintPendingBrowserSends() {
   const s = browserStreamText();
-  // Nothing to show. Dropping the queue at a mute empties this line, and an
-  // early return with the last string still up would leave exactly the words
-  // that were just thrown away sitting on screen.
-  if (!s) {
-    if (el.stream.textContent) el.stream.textContent = '';
-    return;
-  }
+  // An ordinary flush ends here with nothing left to say, and the words that
+  // just went out stay on the line until the server's echo of them clears it.
+  // Only a drop has to empty it, and it does that itself.
+  if (!s) return;
   if (el.stream.textContent !== s) el.stream.textContent = s;   // see paintStream
   el.tray.classList.remove('idle');
   streamTail();

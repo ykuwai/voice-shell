@@ -95,6 +95,7 @@ const make = new Function(`
       }
     },
     final(text) { queueOrSendFinal(text); },
+    pressed() { route = 'off'; },
     mute() { route = 'off'; el.stream.textContent = ''; applyRouteSideEffects('off'); },
     unmute() { route = 'live'; applyRouteSideEffects('live'); },
     drop: () => dropPendingBrowserSends(),
@@ -162,6 +163,37 @@ assert(h.pending().length === 0, 'the mute throws it away');
 // get out while the microphone sat cut and recognition was not even running.
 h.run(40000);
 assert(h.sent.length === 0, 'nothing reaches the server to be read as unmute, got ' + JSON.stringify(h.sent));
+''')
+
+    def test_the_gate_stops_the_moment_the_button_is_pressed(self):
+        """The window between the press and the drop.
+
+        route goes to off the instant the button is pressed, but the drop runs
+        in applyRouteSideEffects, which changeRoute only reaches after two round
+        trips to the server. The gate keeps ticking through them, so a queue one
+        tick away from clearing its wait went out inside that window, before
+        anything had a chance to throw it away."""
+        run('''
+h.run(2000, {loud: true});
+h.final('one more thing');
+h.pressed();               // route goes off, the server has not answered yet
+h.run(6000);
+assert(h.sent.length === 0, 'the gate holds while the screen says off, got ' + JSON.stringify(h.sent));
+h.mute();                  // the answer lands and the side effects run
+assert(h.pending().length === 0, 'and then it is thrown away');
+''')
+
+    def test_a_route_change_that_rolls_back_keeps_the_queue(self):
+        """Only a mute that really landed throws anything away. changeRoute
+        rolls a failed switch back through applyRouteSideEffects(prev), and the
+        clauses waiting out their quiet are still wanted there."""
+        run('''
+h.run(2000, {loud: true});
+h.final('one more thing');
+h.unmute();                // the rollback path, with nothing muted
+assert(h.pending().length === 1, 'nothing is thrown away, got ' + JSON.stringify(h.pending()));
+h.run(4000);
+assert(h.sent.length === 1 && h.sent[0] === 'one more thing', 'and it still goes out');
 ''')
 
     def test_the_on_device_entry_drops_it_too(self):
