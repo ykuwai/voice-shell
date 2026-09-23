@@ -2978,6 +2978,7 @@ async function openSettings(pane) {
   saveCmds();                       // you can arrive here straight from the signals
   el.helpSheet.hidden = true;       // sheets never stack. Only one of them is up
   el.sheet.hidden = false;
+  el.micSettingsSaid.hidden = true; // what a press said last time is not news now
   fitMini();                        // while it is hidden there is no size to measure
   showSheetPane(pane);
   placeNav();
