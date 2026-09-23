@@ -248,7 +248,10 @@ const make = new Function('SR', 'env', `
   const paintInterimThrottled = v => { env.painted.push('interim:' + v); };
   const paintTinyButtons = () => { env.painted.push('buttons'); };
   const paintPendingBrowserSends = () => { env.painted.push('pending'); };
-  const flushPendingBrowserSends = () => {};
+  // Both live in the send gate block, which is not cut out here.
+  let mutedDropNote = false;
+  const dropPendingBrowserSends = () => false;
+  const muteHint = () => 'muteHint';
   const sendUtterance = t => { env.sent.push(t); };
   const queueOrSendFinal = t => { env.sent.push(t); };
   const disableBrowserASR = () => {};
