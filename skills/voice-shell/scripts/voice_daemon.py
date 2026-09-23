@@ -1982,7 +1982,10 @@ def _folded_chars(text: str) -> list:
     """
     out = []
     for i, c in enumerate(text):
-        for f in c.translate(_CMD_DROP).lower():
+        # to_halfwidth the same as command_key, so a tail said with full-width
+        # letters or digits matches. One character at a time keeps where it came
+        # from intact, since every fold here is one character for one.
+        for f in to_halfwidth(c).translate(_CMD_DROP).lower():
             out.append((f, i))
     return out
 

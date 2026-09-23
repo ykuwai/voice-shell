@@ -1417,6 +1417,26 @@ function isBackchannel(text, words) {
    differently by kind. The two tail kinds match them at the tail like the
    built-ins, mute only when the whole utterance is that wording
    (voice_daemon.mic_command_match), so 「はい」 ahead of one leaves it as speech. */
+// Full-width Latin letters and digits, folded down to half-width.
+//
+// Chrome's on-device Japanese recognition writes them full-width (「ＰＲ」,
+// 「２０２６」), and nobody means that when they say a word of code or a year.
+// The server folds the same set the same way (to_halfwidth in voice_daemon.py),
+// so the words on screen while you are still speaking are the words that get
+// sent. Fold it only there and the card would show 「ＰＲ」 and then flip to PR
+// the moment it went out.
+//
+// Letters, digits and the symbols that only ever mean code when spoken. Japanese
+// punctuation (、。「」・？！), the full-width parentheses, the long vowel mark ー,
+// kana and the full-width space are all left as they are, since each carries
+// meaning at the width it is written in. Half-width katakana goes the other way,
+// a whole run at a time so ｷﾞ comes back as ギ rather than ｷ + ﾞ.
+const FULLWIDTH_CODE_RE = /[Ａ-Ｚａ-ｚ０-９＠＃＆％＋＝／＼＿＜＞＄＊＾｜｀［］｛｝]/g;
+const HALFWIDTH_KANA_RE = /[\uFF61-\uFF9F]+/g;
+const toHalfWidth = text => text
+  .replace(FULLWIDTH_CODE_RE, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+  .replace(HALFWIDTH_KANA_RE, run => run.normalize('NFKC'));
+
 const TAIL_IDS = ['cancel_tail', 'hold_tail', 'mute'];
 let tailWords = {cancel_tail: new Set(), hold_tail: new Set(), mute: new Set()};
 let userWords = {cancel_tail: new Set(), hold_tail: new Set(), mute: new Set()};
@@ -1481,13 +1501,13 @@ const TAIL_PREFIX = ['コマンド', 'こまんど', 'command'];
    the text can be cut at the spoken wording even though the two no longer line
    up character for character. */
 const FOLD_DROP = new Set(' \t\u3000。、．，・…！？!?.,-~〜"\'「」『』()（）');
-const FOLD_WIDE = '１２３４５６７８９０';
 function foldChars(s) {
   const chars = [], at = [];
   let i = 0;
   for (const c of s) {
-    const d = FOLD_WIDE.indexOf(c);
-    const f = d >= 0 ? '1234567890'[d] : FOLD_DROP.has(c) ? '' : c.toLowerCase();
+    // toHalfWidth the same as the server's _folded_chars. One character at a
+    // time keeps where it came from intact, since every fold is one for one.
+    const f = FOLD_DROP.has(c) ? '' : toHalfWidth(c).toLowerCase();
     for (const x of f) { chars.push(x); at.push(i); }
     i += c.length;
   }
@@ -3765,26 +3785,6 @@ const INVENTED_SPACE_RE = /(?<=[^\x00-\x7F\s])[ \t]+(?=[^\x00-\x7F\s])/g;
 const stripInventedSpaces = text =>
   speakingNoSpaceLang() ? text.replace(INVENTED_SPACE_RE, '') : text;
 
-// Full-width Latin letters and digits, folded down to half-width.
-//
-// Chrome's on-device Japanese recognition writes them full-width (「ＰＲ」,
-// 「２０２６」), and nobody means that when they say a word of code or a year.
-// The server folds the same set the same way (to_halfwidth in voice_daemon.py),
-// so the words on screen while you are still speaking are the words that get
-// sent. Fold it only there and the card would show 「ＰＲ」 and then flip to PR
-// the moment it went out.
-//
-// Letters, digits and the symbols that only ever mean code when spoken. Japanese
-// punctuation (、。「」・？！), the full-width parentheses, the long vowel mark ー,
-// kana and the full-width space are all left as they are, since each carries
-// meaning at the width it is written in. Half-width katakana goes the other way,
-// a whole run at a time so ｷﾞ comes back as ギ rather than ｷ + ﾞ.
-const FULLWIDTH_CODE_RE = /[Ａ-Ｚａ-ｚ０-９＠＃＆％＋＝／＼＿＜＞＄＊＾｜｀［］｛｝]/g;
-const HALFWIDTH_KANA_RE = /[\uFF61-\uFF9F]+/g;
-const toHalfWidth = text => text
-  .replace(FULLWIDTH_CODE_RE, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
-  .replace(HALFWIDTH_KANA_RE, run => run.normalize('NFKC'));
-
 /* The one string both writers to el.stream agree on: whatever is queued,
    with whatever was last recognized after it. Two different callers used to
    build two different strings, browserGateTick's own paintPendingBrowserSends
@@ -5700,11 +5700,8 @@ const cmdI18nBase = id =>
    copy kept on the screen. Keep a copy and, the day the accepted kinds change
    over there, one side is left stale. */
 let cmdEditable = new Set();
-const CMD_WIDE = '１２３４５６７８９０';
 const CMD_DROP = /[ \t　。、．，・…！？!?.,\-~〜"'「」『』()（）]/g;
-const cmdNormal = s => s.trim()
-  .replace(/[１２３４５６７８９０]/g, c => '1234567890'[CMD_WIDE.indexOf(c)])
-  .replace(CMD_DROP, '').toLowerCase();
+const cmdNormal = s => toHalfWidth(s.trim()).replace(CMD_DROP, '').toLowerCase();
 
 function cleanPhrase(kind, s) {
   if (!cmdEditable.has(kind)) return '';

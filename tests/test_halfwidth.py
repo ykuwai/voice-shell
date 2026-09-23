@@ -29,7 +29,7 @@ HARNESS = r"""
 const fs = require('fs');
 const source = fs.readFileSync(process.argv[1], 'utf8');
 const start = source.indexOf('// Full-width Latin letters and digits');
-const end = source.indexOf('function browserStreamText()', start);
+const end = source.indexOf('const TAIL_IDS = ', start);
 if (start < 0 || end < 0) process.exit(2);
 const h = new Function(`${source.slice(start, end)}
   return {toHalfWidth};`)();
@@ -75,6 +75,10 @@ class FoldedTextFlowsOnTest(unittest.TestCase):
         self.assertEqual(command_key("ｍｕｔｅ"), "mute")
         self.assertEqual(command_key("２番"), "2番")
         self.assertEqual(command_key("ﾐｭｰﾄ"), "ミュート")
+
+    def test_the_tail_match_folds_the_same_way(self):
+        from voice_daemon import _folded_chars
+        self.assertEqual("".join(f for f, _ in _folded_chars("ＲＯＵＴｅ２")), "route2")
 
     def test_an_acronym_read_out_letter_by_letter_folds_then_collapses(self):
         self.assertEqual(collapse_letter_acronyms(to_halfwidth("Ｇ Ｐ Ｕ")), "GPU")
@@ -141,6 +145,9 @@ assert(h.toHalfWidth('git push') === 'git push', 'plain text untouched');
         self.assertIn("toHalfWidth(stripInventedSpaces(res[0].transcript))", src)
         # The preview's own copy of the dictionary matches on the folded side too
         self.assertIn("toHalfWidth(k), v", src)
+        # and so do the two screen-side copies of the server's command_key
+        self.assertIn("toHalfWidth(c).toLowerCase()", src)
+        self.assertIn("cmdNormal = s => toHalfWidth(s.trim())", src)
 
 
 if __name__ == "__main__":
