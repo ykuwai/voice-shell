@@ -10,6 +10,7 @@ the byte offsets recorded against the old log still read as current.
 """
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -94,6 +95,25 @@ class EmptyLogTest(unittest.TestCase):
                             encoding="utf-8")
         self.assertFalse(vd.empty_log_for_start(self.log))
         self.assertTrue(self.log.read_text(encoding="utf-8"))
+
+    def test_the_shell_runs_this_through_the_command_line(self):
+        """voice-shell.sh's browser start calls `--empty-log` and nothing else.
+
+        Its output is not captured there, it goes straight to whoever is
+        reading the start, so a line printed here would land in the middle of
+        "Listening has started." A non-zero exit would stop the start outright.
+        """
+        for listening, expect in ((False, ""), (True, "already here\n")):
+            self.log.write_text("already here\n", encoding="utf-8")
+            if listening:
+                self.listening()
+            done = subprocess.run(
+                [sys.executable, str(SCRIPTS / "voice_daemon.py"),
+                 "--empty-log", "--log-file", str(self.log)],
+                capture_output=True, text=True)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertEqual(done.stdout, "")
+            self.assertEqual(self.log.read_text(encoding="utf-8"), expect)
 
     def test_a_progress_offset_from_the_old_log_is_no_longer_read(self):
         (self.state / "listeners-gone" / "4321.progress").write_text(
