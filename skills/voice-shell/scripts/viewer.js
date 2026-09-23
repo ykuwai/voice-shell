@@ -3040,6 +3040,15 @@ function onKey(e) {
     const no = Number(digit[1]);
     const pickTo = knownListeners[no - 1];
     if (!pickTo) { chime('err'); say(t('voiceRouteMissing', {n: no})); return; }
+    /* One that is gone keeps its number, so the key is still pressed at it.
+       setRoute2 turns it down and says why, and the ack below would paint
+       over that with "now going there" for a place nothing can reach (#110).
+       So the answer is given here and the ack skipped. */
+    if (pickTo.gone) {
+      chime('err');
+      say(t('listenerGoneHow', {name: pickTo.label}), 9);
+      return;
+    }
     setRoute2(String(pickTo.pid));
     chime('ok');
     say(t('voiceRoute', {name: pickTo.label}));
@@ -4663,13 +4672,18 @@ async function loadListeners() {
   knownListeners.forEach(l => routeNames.set(String(l.pid), l.label));
   relabelEntries();
   effectiveTo = d.target || '';
-  const live = new Set(knownListeners.map(l => String(l.pid)));
+  // One that is gone is still in the row, so counting it as alive here would
+  // let the destination move out from under the person without a word, which
+  // is the very thing this notice exists to stop (#110). Only the ones that
+  // can actually be reached count.
+  const usable = knownListeners.filter(l => !l.gone);
+  const live = new Set(usable.map(l => String(l.pid)));
 
   // If where it was going has ended, move to a session that is still alive and
   // say so. Left hanging silently, you talk and never notice nothing arrives.
   if (routeTo && !live.has(routeTo)) {
     const gone = before.find(l => String(l.pid) === routeTo);
-    const next = knownListeners[knownListeners.length - 1];
+    const next = usable[usable.length - 1];
     routeTo = '';                       // back to nothing chosen, and leave it to the server's default
     await putJSON('/api/route', {to: ''}).catch(() => {});
     el.note.textContent = next
