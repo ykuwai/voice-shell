@@ -102,7 +102,7 @@ Haz clic en «Mantener esta ventana encima» para tenerla siempre delante de las
 ### 2. Activa el micrófono y habla
 
 Lo que dices llega tal cual a Claude Code.\
-Lo muy corto (unas tres palabras o menos) se toma como ruido y no se envía. La longitud mínima se cambia en los ajustes.\
+Lo que tiene menos de 15 caracteres se toma como ruido y no se envía. La longitud mínima se cambia en los ajustes.\
 Cuando quieras dejar de hablar, di «silenciar» y el micrófono se apaga.
 
 ### 3. ¿Te arrepientes? Termina con «cancela eso»
