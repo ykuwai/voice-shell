@@ -236,10 +236,6 @@
   <!-- Input -->
   <div class="group">
     <h3 data-icon="mic" data-icon-size="16" data-i18n="grpInput">Input</h3>
-    <div class="field">
-      <label for="mic" data-icon="mic" data-icon-size="17" data-i18n="micDevice">Microphone</label>
-      <select id="mic"></select>
-    </div>
     <div class="field" id="recogLangField" hidden>
       <label for="recogLang" data-icon="translate" data-icon-size="17" data-i18n="recogLang">Recognition language</label>
       <select id="recogLang"></select>
@@ -289,6 +285,22 @@
   <!-- How recognition is done -->
   <div class="group" id="engineGroup">
     <h3 data-icon="translate" data-icon-size="14" data-i18n="grpEngine">Recognition</h3>
+    <!-- The microphone sits with the engine rather than up in Input, because
+         which engine recognizes decides whether this pick is used at all, and
+         the two were a whole screen apart before. Under browser recognition
+         the pick goes inert and says so, and the address below it is where
+         that one is really changed. -->
+    <div class="field">
+      <label for="mic" data-icon="mic" data-icon-size="17" data-i18n="micDevice">Microphone</label>
+      <select id="mic"></select>
+    </div>
+    <p class="range-note" id="browserMic" hidden>
+      <span data-i18n="micChromeLead"></span>
+      <button class="link" id="micSettingsLink">chrome://settings/content/microphone</button>
+    </p>
+    <!-- What pressing the address did. It belongs here rather than on the
+         main screen's hint line, because this sheet covers that line whole. -->
+    <p class="range-note" id="micSettingsSaid" role="status" hidden></p>
     <div class="field">
       <label for="enginePick" data-icon="graphic_eq" data-icon-size="17" data-i18n="engineLabel">Recognized by</label>
       <select id="enginePick"></select>
@@ -319,13 +331,6 @@
                 data-i18n="onDeviceDownload">Download the model</button>
       </div>
     </div>
-    <p class="range-note" id="browserMic" hidden>
-      <span data-i18n="browserMicNote"></span>
-      <button class="link" id="micSettingsLink">chrome://settings/content/microphone</button>
-    </p>
-    <!-- What pressing the address did. It belongs here rather than on the
-         main screen's hint line, because this sheet covers that line whole. -->
-    <p class="range-note" id="micSettingsSaid" role="status" hidden></p>
     <div class="field" id="idleMuteField" style="margin-top:.7rem" hidden>
       <span data-i18n="idleMute">Turn off when idle</span>
       <label class="switch" data-i18n-title="idleMute"><input type="checkbox" id="idleMuteOn"><span class="track"><span class="knob"></span></span></label>

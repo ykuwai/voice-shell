@@ -87,11 +87,12 @@ pressMicSettings(undefined, URL, (ok, line) => seen.push([ok, line]), tr).then(r
 
     def test_every_language_has_both_lines(self):
         i18n = I18N_JS.read_text(encoding="utf-8")
-        for key in ("browserMicNote", "micSettingsCopied", "micSettingsCopyFailed"):
+        keys = ("micChromeLead", "micChromeDefault", "micSettingsCopied", "micSettingsCopyFailed")
+        for key in keys:
             self.assertEqual(i18n.count(f"    {key}:'"), 8, key)
         # The wording carries no colon and no dash anywhere
         for line in i18n.splitlines():
-            for key in ("browserMicNote", "micSettingsCopied", "micSettingsCopyFailed"):
+            for key in keys:
                 if line.strip().startswith(key + ":'"):
                     body = line.strip()[len(key) + 2:].rstrip("',")
                     self.assertNotIn(":", body, line)

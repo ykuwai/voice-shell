@@ -592,9 +592,9 @@ async function matchDeviceId(label) {
 }
 
 // The mic dropdown picks which device asr_mic.py (the daemon) opens, not
-// which one Chrome's own recognition listens through (browserMicNote says as
-// much: Chrome always uses its own default there, the dropdown does nothing
-// under browser recognition). This analyser exists to gate "pause to send"
+// which one Chrome's own recognition listens through. Chrome always uses its
+// own default there, which is why the dropdown goes inert under browser
+// recognition (paintMicPick). This analyser exists to gate "pause to send"
 // on real quiet, and asking it to open whatever device the dropdown names
 // measures a different microphone than the one actually hearing you the
 // moment that device is not Chrome's default, so the gate reads quiet no
@@ -3389,6 +3389,21 @@ const MIC_SYSTEM_DEFAULT = 'default';
 const micLabel = m => m.id === MIC_SYSTEM_DEFAULT ? t('micSystemDefault') : (m.label || m.id);
 
 function paintMicPick() {
+  /* Under browser recognition the pick has nothing to decide. Chrome listens
+     through its own default whatever is chosen here, so rather than leave a
+     live dropdown that does nothing, it holds one entry naming where the
+     choice really is made and takes no presses. What was picked for the local
+     engines is untouched (micList and micCurrent are left as they are), so
+     switching back brings the real list straight back. */
+  if (asrChosen) {
+    const o = document.createElement('option');
+    o.value = ''; o.textContent = t('micChromeDefault'); o.selected = true;
+    el.mic.replaceChildren(o);
+    el.mic.disabled = true;
+    el.mic.hidden = false;
+    return;
+  }
+  el.mic.disabled = false;
   if (!micList.length) { el.mic.hidden = true; return; }
   el.mic.replaceChildren(...micList.map(m => {
     const o = document.createElement('option');
@@ -5560,6 +5575,9 @@ function paintBrowserAsr() {
   el.asrConflict.textContent = t('asrConflict');
   el.browserMic.hidden = !asrChosen;
   if (!asrChosen) el.micSettingsSaid.hidden = true;   // no stale answer left behind
+  // The microphone pick lives in this group now and changes with the engine,
+  // so every engine repaint goes through it as well.
+  paintMicPick();
   el.asrLangField.hidden = !asrChosen;
   el.idleMuteField.hidden = !asrChosen;
   el.idleMuteNote.hidden = !asrChosen;
