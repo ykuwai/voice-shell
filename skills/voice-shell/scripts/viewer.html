@@ -236,10 +236,6 @@
   <!-- Input -->
   <div class="group">
     <h3 data-icon="mic" data-icon-size="16" data-i18n="grpInput">Input</h3>
-    <div class="field">
-      <label for="mic" data-icon="mic" data-icon-size="17" data-i18n="micDevice">Microphone</label>
-      <select id="mic"></select>
-    </div>
     <div class="field" id="recogLangField" hidden>
       <label for="recogLang" data-icon="translate" data-icon-size="17" data-i18n="recogLang">Recognition language</label>
       <select id="recogLang"></select>
@@ -289,30 +285,46 @@
   <!-- How recognition is done -->
   <div class="group" id="engineGroup">
     <h3 data-icon="translate" data-icon-size="14" data-i18n="grpEngine">Recognition</h3>
+    <!-- The microphone sits with the engine rather than up in Input, because
+         which engine recognizes decides whether this pick is used at all, and
+         the two were a whole screen apart before. Under browser recognition
+         the pick goes inert and says so, and the address below it is where
+         that one is really changed. -->
+    <div class="field">
+      <label for="mic" data-icon="mic" data-icon-size="17" data-i18n="micDevice">Microphone</label>
+      <select id="mic"></select>
+    </div>
+    <p class="range-note" id="browserMic" hidden>
+      <span data-i18n="micChromeLead"></span>
+      <button class="link" id="micSettingsLink">chrome://settings/content/microphone</button>
+    </p>
+    <!-- What pressing the address did. It belongs here rather than on the
+         main screen's hint line, because this sheet covers that line whole. -->
+    <p class="range-note" id="micSettingsSaid" role="status" hidden></p>
     <div class="field">
       <label for="enginePick" data-icon="graphic_eq" data-icon-size="17" data-i18n="engineLabel">Recognized by</label>
       <select id="enginePick"></select>
     </div>
     <p class="range-note" id="engineNote"></p>
-    <!-- The Whisper model. It takes either a name (large-v3-turbo and the
-         like) or the path to a folder on this machine. Changing it means
-         loading the model again, so it lives in config.json rather than
-         tuning.json, which is re-read every 0.5 seconds (the server splits them
-         that way). -->
-    <div class="field" id="whisperModelField" hidden>
-      <label for="whisperModel" data-icon="tune" data-icon-size="17"
-             data-i18n="whisperModel">Model</label>
-      <input class="filter" id="whisperModel" style="margin:0">
-    </div>
-    <p class="range-note" id="whisperModelNote" data-i18n="whisperModelNote" hidden></p>
+    <!-- The Whisper model is not on this screen. Only faster_whisper loads it,
+         so the value has to name a CTranslate2 model or a folder holding one,
+         and anyone who knows that would sooner ask Claude Code than type it
+         here. It is set and remembered by
+         voice-shell.sh start --engine whisper --model <name>. -->
     <div class="field" id="asrLangField" hidden>
       <label for="asrLang" data-icon="language" data-icon-size="17" data-i18n="asrLang">Spoken language</label>
       <select id="asrLang"></select>
     </div>
-    <p class="range-note" id="browserMic" hidden>
-      <span data-i18n="browserMicNote"></span>
-      <button class="link" id="micSettingsLink">chrome://settings/content/microphone</button>
-    </p>
+    <!-- Browser recognition kept on this device. Whether the model for the
+         spoken language above is here, and the button that fetches it. It
+         sits right under the language because the model is per language. -->
+    <div id="onDeviceField" hidden>
+      <p class="range-note" id="onDeviceStatus" role="status"></p>
+      <div class="btn-row" id="onDeviceRow" style="margin:-.3rem 0 .8rem" hidden>
+        <button class="btn" id="onDeviceDownload" data-icon="download" data-icon-size="17"
+                data-i18n="onDeviceDownload">Download the model</button>
+      </div>
+    </div>
     <div class="field" id="idleMuteField" style="margin-top:.7rem" hidden>
       <span data-i18n="idleMute">Turn off when idle</span>
       <label class="switch" data-i18n-title="idleMute"><input type="checkbox" id="idleMuteOn"><span class="track"><span class="knob"></span></span></label>
@@ -345,7 +357,7 @@
       </div>
       <p class="range-note" data-i18n="browserGestureNote">While paused, make several loud sounds to turn the microphone on. This only works with browser recognition.</p>
     </div>
-    <p class="warn-note" id="browserAsrWarn" data-i18n="browserAsrWarn" hidden></p>
+    <p class="warn-note" id="browserAsrWarn" hidden></p>
     <p class="warn-note" id="asrConflict" hidden></p>
     <div id="powerRow">
       <div class="btn-row" style="margin-top:.7rem">
@@ -393,6 +405,11 @@
               data-icon-size="17"><span id="clearHistoryLabel" data-i18n="clearHistory">Clear history</span></button>
     </div>
     <p class="range-note" data-i18n="clearHistoryNote"></p>
+    <!-- Said once it is actually done. The second press is the last thing that
+         happens otherwise, and the button goes back to its own wording, so
+         from the screen there was no telling a clearing that went through
+         from one that never did. -->
+    <p class="dict-note" id="clearHistoryDone" role="status"></p>
   </div>
 
   </div><!-- /paneBasic -->

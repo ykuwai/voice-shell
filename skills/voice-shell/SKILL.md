@@ -12,39 +12,49 @@ allowed-tools:
 
 # Voice prompt mode
 
-Take what the user speaks and receive it as a prompt, without the keyboard.
+Take what the user speaks as a prompt, without the keyboard.
 
-The part that listens to the microphone appends one line to a JSONL file every
+The part that listens to the microphone appends one line to a JSONL file each
 time an utterance is finalized. Follow that log with Monitor and treat each line
-that arrives as an instruction from the user.
+as an instruction from the user.
 
-**There are three ways of recognizing speech.** These are all you can pick from,
-there is no other.
+**There are exactly three ways of recognizing speech.**
 
 | Name | What it is | Where the audio goes |
 |---|---|---|
-| `browser` (default) | Chrome's Web Speech API. Works with nothing installed | **Google's servers** |
+| `browser` (default) | Chrome's Web Speech API. Works with nothing installed | **Local while Chrome holds a model for the language, otherwise Google's servers** |
 | `apple` | On-device recognition that ships with macOS 26. Light | Only inside this machine |
 | `whisper` | faster-whisper. Strong on proper nouns | Only inside this machine |
 
-The argument is `$ARGUMENTS` (`start` / `stop` / `status` / `setup`. `start` when omitted)
+A page cannot ask Chrome for cloud recognition. It can only forbid it, and
+that is what the screen's second browser choice ("local only") does. On the
+plain choice Chrome recognizes locally whenever it holds the model for the
+language, and sends the audio to Google's servers when it does not, so where
+the audio goes is read off the disk (`GET /api/ondevice`) and the note on the
+screen says which of the two is happening. Still never recommend the plain
+choice to someone who wants everything to stay local, since the model can go
+away and the audio then goes out. Recommend the local browser choice, `apple`
+or `whisper` instead.
+
+The argument is `$ARGUMENTS` (`start` / `stop` / `status` / `setup`; `start` when omitted).
 
 ## When it is not set up yet
 
-If `start` fails with `No Python it can run was found`, or if the user says
-"set it up", walk them through [SETUP.md](SETUP.md).
+If `start` fails with `No Python it can run was found`, or the user says "set it
+up", walk them through [SETUP.md](SETUP.md). For browser recognition alone,
+`pip install numpy aiohttp` is enough.
 
-On macOS 26 or newer there is no multi-GB model to download, though `apple` does
-build a small Swift helper the first time and so wants the Command Line Tools
-(`xcode-select --install`), which not every Mac has. Anywhere else it means
-installing Whisper. Check first, then confirm which way to go. Do not install
-everything on your own.
+On macOS 26 or newer `apple` needs no model download, but builds a small Swift
+helper the first time and so needs the Command Line Tools
+(`xcode-select --install`), which not every Mac has. Anywhere else a local
+engine means installing Whisper. Check first, then confirm which way to go. Do
+not install everything on your own.
 
 ## Starting
 
-**When in doubt, just run `start`.** It remembers which way of recognizing was
-picked last time (`~/.config/voice-shell/config.json`), and the first time it is
-"This browser" (Chrome's Web Speech API). Nothing to install, so there is no wait.
+**When in doubt, just run `start`.** It remembers the last choice
+(`~/.config/voice-shell/config.json`); the first time it is `browser`, which
+needs nothing installed and has no wait.
 
 1. Start it.
 
@@ -52,78 +62,63 @@ picked last time (`~/.config/voice-shell/config.json`), and the first time it is
    ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh start
    ```
 
-   **Where browser automation tools (claude-in-chrome and the like) are not
-   available**, the viewer cannot be opened, so the default browser recognition
-   does not hold up. Only in that case, have the user pick from the models that
-   are installed.
+   **Only where browser automation tools (claude-in-chrome and the like) are
+   not available**, the viewer cannot be opened for the user, so browser
+   recognition does not hold up. In that case have the user pick from what is
+   installed:
 
    ```bash
    ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh start --engine auto
    ```
 
-   **Say how it is being recognized, once, the first time only.** The first
-   time `start` runs on that machine, and only then, `start` itself prints
-   `This uses the browser's built-in speech recognition feature to transcribe
-   your voice.` along with the name of a local way that machine can use. Pass
-   that line straight through to the user.
-   **Do not say it again after that.** Repeating it every time does not change
-   the choice, it only adds more to read.
+   **First run only:** `start` prints `This uses the browser's built-in speech
+   recognition feature to transcribe your voice.` plus a local engine this
+   machine can use. Pass that straight to the user once. **Do not repeat it on
+   later starts.**
 
-   **Do not push the user toward a local model yourself.** Working right away
-   with nothing installed is what the default is worth, and switching brings a
-   download and a wait of 1 to 2 minutes. Whether it runs comfortably is not
-   known until it is tried on that machine.
+   **Do not push the user toward a local model yourself.** The default's value
+   is working right away; switching means a download and a 1 to 2 minute wait.
 
-   When the user says "I want recognition to stay local" or "I do not want it
-   sent to the cloud", show the list with `voice-shell.sh engines` and pass
-   `--engine <the one they picked>` **after they have picked it**. On macOS 26
-   or newer `apple` should already be there, so they can switch on the spot with no
-   model to download. Two things still take time the first time on a machine, and
-   only the first: the Swift helper is built (which fails outright without the
-   Command Line Tools, saying so), and the OS fetches the speech model for that
-   language by itself, tens of seconds. It is instant from then on.
+   When the user wants recognition to stay local, show the list with
+   `voice-shell.sh engines` and pass `--engine <choice>` **after they pick**.
+   On macOS 26+ `apple` is usually ready with no download. Its first run on a
+   machine still takes a while once: the Swift helper is built (fails outright
+   without the Command Line Tools, and says so), and the OS fetches the speech
+   model for the language, tens of seconds. Instant after that.
 
-   **Do not pass `--engine X` on your own to recover from a failure.** The name
-   you pass is remembered as the default from then on, so passing it silently
-   rewrites the user's choice for good. Pass it only after you have confirmed.
+   Local engines listen for Japanese by default. For another main language
+   pass it, e.g. `start --engine whisper --language English`.
 
-2. Wait until it has finished starting.
+   **Never pass `--engine X` on your own to recover from a failure.** The name
+   is remembered as the default, so it silently rewrites the user's choice.
+   Confirm first.
+
+2. Wait until it is ready.
 
    ```bash
    ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh wait-ready
    ```
 
-   With browser recognition there is no model to load, so it returns at once.
-   Only when a local model was picked does it take 1 to 2 minutes (other work
-   can go on in the meantime). If `FAILED` comes back, tell the user the error
-   that was shown.
+   Returns at once for browser recognition. A local model takes 1 to 2 minutes
+   (other work can go on meanwhile). On `FAILED`, tell the user the error shown.
 
-3. `start` **tries to open the viewer automatically, in an ordinary tab.**
-   There is no need to open it again yourself. Add `--no-gui` only when the
-   user says they do not want it.
+3. `start` **tries to open the viewer in an ordinary tab**; do not open it
+   again yourself. Add `--no-gui` only if the user does not want it.
 
-   **With browser recognition nothing arrives at all until the viewer is
-   open, and the attempt to open it for them is not always trustworthy.**
-   `start`'s own output always carries the line `The viewer started at
-   http://127.0.0.1:...` (or `already running at`, on a second start).
-   **Read that URL out to the user every time, not only when `Could not open
-   a browser for you` is printed.** A Windows machine has been seen to print
-   neither that failure line nor open anything (`cmd.exe`'s own way of
-   launching a browser can report success without one actually opening), so
-   waiting for an explicit failure line before saying anything left the user
-   talking to a screen that was never going to arrive.
+   With browser recognition nothing arrives until the viewer is open, and the
+   automatic open is not reliable (on Windows it can fail silently). `start`
+   always prints `The viewer started at http://127.0.0.1:...` (or `already
+   running at`). **Give the user that URL every time**, not only when `Could
+   not open a browser for you` is printed.
 
-   To keep it **always on top**, press "Float on top" in the header (a browser
-   rule, it cannot be opened unless a person acts, so the screen itself asks
-   for that one press the first time).
+   To keep it always on top, the user presses "Float on top" in the header (a
+   browser rule requires a person's press; the screen asks for it the first
+   time).
 
-4. Watch the utterance log with Monitor. **Always set `persistent: true`**
-   (voice mode goes on for the whole session). Do not use `tail` directly,
-   always go through `voice-shell.sh listen`. Going through it registers the
-   fact that you are listening under `$STATE_DIR/listeners/`, and the
-   registration disappears once Monitor ends (TaskStop or the end of the
-   session). A raw `tail -F` is not registered, so it never shows up as a
-   choice of where to send.
+4. Watch the utterance log with Monitor. **Always set `persistent: true`.**
+   Always go through `voice-shell.sh listen`, never a raw `tail`: `listen`
+   registers this session under `$STATE_DIR/listeners/` (removed when Monitor
+   ends), and an unregistered `tail -F` never shows up as a destination.
 
    ```
    Monitor(
@@ -133,62 +128,79 @@ picked last time (`~/.config/voice-shell/config.json`), and the first time it is
    )
    ```
 
-   **As of Claude Code 2.1.271, a watch may not run forever even with
-   `persistent: true`** (a deadline, 30 minutes at the longest, replacing
-   what used to be no timeout at all). Whether that holds going forward is
-   not something to build around, a later Claude Code update could just as
-   easily change it back, so nothing here leans on it. If a deadline
-   notification does arrive, **treat it the same as starting fresh: call
-   Monitor again with the exact same command.** A plain re-arm is enough,
-   nothing needs stopping first. The new `listen` takes the old one's place:
-   same number in the row, still the destination if it was, and anything said
-   to it in between is delivered as it starts (the old one keeps its chip and
-   destination for 2 minutes, and its place in the row for 10, for exactly
-   this). If the screen disconnected this session in the meantime, the re-arm
-   is turned away with a `system_warning` saying so. Pass that on and do not
-   re-arm again.
+   **A watch can still end on a deadline** even with `persistent: true`. When
+   a deadline (or "source ended") notification arrives, **call Monitor again
+   with the exact same command**; nothing needs stopping first. The new
+   `listen` takes the old one's place: same number in the row, still the
+   destination if it was, and anything said in between is delivered as it
+   starts (the old one keeps its chip and destination for 2 minutes and its
+   place in the row for 10). If the screen disconnected this session in the
+   meantime, the re-arm returns a `system_warning` saying so: pass it on and do
+   not re-arm again.
 
-   **Stop re-arming once the user has plainly walked away.** Every deadline
-   wakes this session up, so a machine left open overnight would call it
-   again and again for nothing. When **three watches in a row end on their
-   deadline with no utterance at all** (about an hour and a half of silence),
-   do not re-arm the fourth. Say in one line that voice mode stopped
-   listening because nothing was said for a while, and that `/voice-shell`
-   brings it back. Any utterance resets the count. The same goes when the
-   work is clearly finished and the user has said so (a goodbye, "that is all
-   for today"): finish up and let the next deadline end it without re-arming.
-   Either way, when you decide not to re-arm, also run
-   `${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh unlisten`, so the session's
-   chip and any hold on the destination go right away instead of lingering
-   for the two minutes kept for a re-arm.
+   **Stop re-arming once the user has plainly walked away.** When **three
+   watches in a row end on their deadline with no utterance at all**, do not
+   re-arm the fourth. Say in one line that voice mode stopped listening because
+   nothing was said for a while and `/voice-shell` brings it back. Any
+   utterance resets the count. Likewise when the user has said the work is done
+   ("that is all for today"): finish up and do not re-arm at the next deadline.
+   Whenever you decide not to re-arm, also run
+   `${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh unlisten`, so the chip and any
+   hold on the destination go right away instead of lingering 2 minutes.
 
-**Keep only one Monitor of your own.** Re-arming on a deadline or "source
-ended" notification (above) is always safe on its own. Re-attaching for some
-other reason, compacting included, when the old one might still actually be
-alive, stop it with TaskStop first. With two alive the same utterance
+   Forgetting that no longer strands anyone. `listen` ends with the watch it
+   runs in, on Windows too, where it used to keep running, still registered,
+   still the destination, reading nothing. Past the two minutes the chip stays
+   in the row for a week, drawn as unusable and pushed to the end so the live
+   ones keep their numbers. Nothing is routed to it, and pressing it says to
+   type `/voice-shell` in that session. Listening again from that same session
+   takes the chip back rather than arriving as a stranger. Only the five most
+   recent are kept.
+
+5. Say which chip this session is.
+
+   ```bash
+   ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh whoami
+   ```
+
+   It prints this session's number in the chip row at the top of the viewer and
+   the name drawn on that chip. With several sessions listening, the user cannot
+   otherwise tell which one they are talking to.
+
+   **In the first message, right beside the viewer URL, give both in one short
+   sentence, written in the language the user is using** (Japanese when they
+   speak Japanese, English when English, and so on). The command prints the bare
+   facts in English on purpose; the wording is yours to write. Say that it is the
+   number as things stand now, because it changes as other sessions start
+   listening and stop.
+
+   > ビューアは http://127.0.0.1:47865 です。いまのところ、このセッションは2番の
+   > 「認証まわりの修正」として表示されています。
+
+   > The viewer is at http://127.0.0.1:47865, and right now this session shows
+   > as number 2, "Fixing the auth code".
+
+   **Run it once, when listening first starts.** A watch that ends on its
+   deadline and is re-armed keeps the same number and the same name, so there is
+   nothing new to say and repeating it every half hour is noise. Run it again
+   only when the user asks which one they are talking to, or right after a
+   rename.
+
+**Keep only one Monitor of your own.** A re-arm on a deadline is always safe.
+Re-attaching for any other reason (compacting included) while the old one might
+still be alive: stop it with TaskStop first. Two alive means every utterance
 arrives twice.
 
-**A resumed session (`claude -r`) does not know on its own whether its old
-Monitor is still alive**, and folder name plus timestamp are not enough to
-tell one listed session from another started from the same folder. Run
-`voice-shell.sh listeners` (or `status`) and look for **`<- this session`**
-next to an entry, this is added only to the one whose registration carries
-this exact conversation's own id ($CLAUDE_CODE_SESSION_ID, always set while
-you are running), so it settles the question outright instead of being
-guessed. No such mark on any entry means your own Monitor is not registered
-right now (start one with `listen`, as above). Note that starting
-`listen` again is harmless either way, a second one under this same session id
-retires the earlier registration on its own (compacting, #81, and a plain
-re-arm on a deadline, above, are both usual ways this comes up), so this
-check is about knowing where things stand, not about avoiding a duplicate.
-
-**It is normal for other sessions to be listening too.** Using it alongside
-other work is the intended way, and speech goes to **whichever started later**
-(that is, the one you just started). `start` does not list the other sessions.
-There is no need to know, and no report or offer to stop them is wanted. The
-user can pick a different destination at any time from the top of the viewer.
-Show `voice-shell.sh listeners` only when asked who is listening. Stop another
-session only when the user asks for it.
+**A resumed session (`claude -r`) does not know whether its old Monitor is still
+alive.** Run `voice-shell.sh listeners` (or `status`) and look for
+**`<- this session`**: it marks only the entry registered with this
+conversation's `$CLAUDE_CODE_SESSION_ID`, so it settles the question. No mark
+means your Monitor is not registered; start one with `listen`. (Starting
+`listen` again under the same session id retires the earlier registration by
+itself, so this check is for knowing where things stand.) Use `listeners` here
+rather than `whoami`: `whoami` waits up to 10 seconds for a chip to come live,
+which is right when a watch has just been armed and is only delay when the
+question is whether one was.
 
 **Do not stop `voice-shell.sh listen` with pkill.** Your own Monitor matches the
 same pattern and goes down with it.
@@ -197,297 +209,208 @@ same pattern and goes down with it.
 
 | What was seen | What is going on | What to do |
 |---|---|---|
-| With browser recognition, `status` says `This browser does the recognizing` | **Normal** (there is no daemon on this machine) | Nothing. Do not try to start a daemon |
-| Nothing arrives when speaking with browser recognition | The viewer is not open / the mic was refused / not Chrome | Say "open the viewer in Chrome and allow the microphone". Also ask whether a red warning is showing on screen |
-| `No Python it can run was found` | Nothing is installed | Tell them `pip install numpy aiohttp` is enough (for browser recognition alone) |
-| `wait-ready` returns `FAILED` | The model failed to start | Pass the error through as it is. Show what is installed with `engines`, and switch **only after confirming** |
-| `wait-ready` returns `TIMEOUT` | Dragging on, a first model download for instance | Look at the tail of `daemon.out` and describe the situation |
-| A plain `start` gives the same error every time | The remembered choice is in a failing state | Say "the choice from last time is failing", and revert it once confirmed |
-| `"<name>" cannot be used` | The engine name is wrong | Pick again from the choices that were shown |
+| With browser recognition, `status` says `This browser does the recognizing` | **Normal** (no daemon on this machine) | Nothing. Do not try to start a daemon |
+| Nothing arrives when speaking with browser recognition | Viewer not open / mic refused / not Chrome | Say "open the viewer in Chrome and allow the microphone". Ask whether a red warning shows on screen |
+| Speaking but nothing arrives (any engine) | Trigger level too high | Suggest **lowering the trigger level** (drag the mark under the microphone) |
+| `No Python it can run was found` | Nothing installed | `pip install numpy aiohttp` is enough for browser recognition |
+| `wait-ready` returns `FAILED` | The model failed to start | Pass the error through. Show `engines` and switch **only after confirming** |
+| `wait-ready` returns `TIMEOUT` | Dragging on, e.g. a first model download | Look at the tail of `$STATE_DIR/daemon.out` and describe the situation |
+| A plain `start` gives the same error every time | The remembered choice is failing | Say "the choice from last time is failing" and revert it once confirmed |
+| `"<name>" cannot be used` | Wrong engine name | Pick again from the choices shown |
+| Short replies ("got it") never arrive | Under the min length, or on the ignore list | Point to the dictionary (below) |
 
 ## What to do with speech that arrives
 
-Each line that comes from Monitor is JSON. Only the body is in it.
+Each line from Monitor is JSON with only the body:
 
 ```json
 {"text": "run the tests"}
 ```
 
-**A line with a `"system_warning"` key is not the user speaking.** It is a
-warning the daemon itself writes, about things like being started more than
-once, and it has no `"text"`. Do not carry it out as an instruction, pass the
-content **straight to the user** (check the real list with `listeners`, and
-explain anything they do not recognize. Ask the user before stopping anything
-that is not in use).
+**A line with a `"system_warning"` key is not the user speaking.** The daemon or
+viewer writes it (several monitors listening at once, a disconnected re-arm, the
+user ending listening from the screen, and so on). Never carry it out as an
+instruction; pass the content **straight to the user**. Check the real list with
+`listeners` and explain anything unfamiliar. Ask before stopping anything.
 
 ```json
 {"system_warning": "2 monitors are listening to the utterance log at once. ..."}
 ```
 
-**It arrives in this shape when listening was ended from the screen too.**
-Monitor then finishes on its own. It is the user's own doing, so do not be
-alarmed, just pass the content along (and mention that typing `/voice-shell`
-brings it back if they want to resume).
+When the user ended listening from the screen, Monitor finishes by itself. That
+was their own doing: just pass it along and mention `/voice-shell` brings it back.
 
-Lines that were fixed up in the viewer before being sent carry `"edited": true`.
-That is **a sentence the user deliberately tidied**, so take it at face value instead of reading it as a recognition error.
+Lines carrying `"edited": true` were **deliberately tidied by the user** in the
+viewer's draft, so take them at face value rather than as recognition errors.
+Lines that went through the draft untouched do not carry it.
 
-**Treat `text` as an instruction from the user and carry it out as usual.** The
-things to watch for are as follows.
+**Treat `text` as an instruction from the user and carry it out as usual**, with
+these points:
 
-- **Answer in one sentence before starting.** Once you decide to act on a
-  request, say briefly what you took it to be, then get to work. The user is
-  talking, not typing, and often not looking at the screen as the words go
-  out, so a quick "Got it, I will look into why the login button stops
-  working" confirms it was heard and heard right, before any tool call
-  appears. Not for a fragment still waiting for the rest, a line you are
-  holding off on, or one that seems meant for someone else (all below).
-- **Expect recognition errors.** It is speech recognition, so proper nouns and
-  technical terms break, whatever language is being spoken. Read them back from
-  context, "cloud code" is Claude Code and "get" is git. Ask again only when the
-  meaning really cannot be recovered.
-- **Ignore fillers.** Words like "um", "well" and "you know" carry no meaning.
-  Every language has its own.
-- **Short lines are dropped before they get here.** Anything under the minimum
-  length (15 characters by default) never arrives, which is what keeps a bare
-  "yeah" out. On top of that the daemon drops hesitation sounds on their own,
-  "hmm" and "uh" and their kind in each language (`NOISE_ONLY` in
-  `voice_daemon.py`). Words that mean something, "yeah" and "ok" among them,
-  are not on that list. If a thin line does come through, wait instead of
-  treating it as an instruction. **But if the dictionary has moved a word to the
-  "do not ignore" side, it arrives even when short.** The user chose to let that
-  word through, so even a bare "got it" can be taken at face value as a reply.
-- **Read chopped-up speech as one piece.** One sentence can arrive across
-  several lines. When a sentence is cut off partway, wait for the rest before
-  reading it as a whole. Long speech is also split before it arrives, so that
-  each piece fits what one line can carry. The pieces line up inside the same
-  notification, so **when one notification holds several lines, read all of them
-  as one continuous utterance before acting**. Even if the first line ends with
-  a full stop, that does not mean the point is finished there. Some languages,
-  Japanese among them, put the conclusion at the end, so running ahead gets the
-  crucial part of the request wrong.
-- **Always confirm destructive operations.** Speech can be misheard, so confirm
-  with "shall I go ahead with ..." before deleting, pushing, deploying and so on.
-- **An event is the user speaking, but it is not a demand for an answer.** When
-  one arrives mid-task, it is fine to finish what you are doing first.
-- **A single line that reads as plainly unrelated to the current work is not
-  automatically carried out.** A stray remark, one side of a phone call, a
-  reply meant for someone else standing there, these arrive as ordinary text
-  the same as everything else. Acting on that one line immediately is the same
-  mistake the holding section below exists to catch, just one line too early
-  to see the pattern yet. Hold off on it instead. If the next line keeps going
-  in the same unrelated direction, that confirms it and holding below takes
-  over. If the next line returns to the task, the odd one was only an aside,
-  and nothing was lost by not acting on it.
+- **Answer in one sentence before starting.** Once you decide to act, say
+  briefly what you took the request to be ("Got it, I will look into why the
+  login button stops working"), then work. The user is talking, often not
+  watching the screen, so this confirms it was heard right. Skip it for a
+  fragment waiting for the rest, a line you are holding off on, or one meant
+  for someone else.
+- **Expect recognition errors**, especially proper nouns and technical terms,
+  in any language. Recover them from context ("cloud code" is Claude Code,
+  "get" is git). Ask again only when the meaning really cannot be recovered.
+- **Ignore fillers** ("um", "well", "you know", and each language's own).
+- **Short lines are dropped before they arrive**: anything under the minimum
+  length (15 characters by default), and hesitation sounds like "hmm" and "uh"
+  (`NOISE_ONLY` in `voice_daemon.py`). If a thin line does come through, wait
+  rather than treating it as an instruction. **Exception:** a word the user
+  moved to "do not ignore" in the dictionary arrives even when short, so a bare
+  "got it" can then be taken as a reply.
+- **Read chopped-up speech as one piece.** One sentence can arrive over several
+  lines, and long speech is split to fit a line. **When one notification holds
+  several lines, read them all as one utterance before acting**, even if the
+  first ends with a full stop. When a sentence is cut off, wait for the rest.
+  Some languages, Japanese among them, put the conclusion at the end.
+- **Always confirm destructive operations** ("shall I go ahead with ...") before
+  deleting, pushing, deploying and so on. Speech can be misheard.
+- **An event is the user speaking, not a demand for an immediate answer.** Mid
+  task, it is fine to finish what you are doing first.
+- **Hold off on a single line plainly unrelated to the current work** (a stray
+  remark, one side of a phone call, a reply to someone in the room). If the next
+  line continues that way, see holding below. If it returns to the task, the
+  odd one was an aside and nothing was lost.
 
-## It may be used by several pieces of work at once
+## Several sessions at once
 
-Another session may be using voice mode at the same time for different work.
-Once there are two or more listeners, speech **goes by default to the one that
-started later** (when parallel work begins, turning to it is the natural thing).
-Exactly one gets it, there is no "everyone".
+Other sessions may be using voice mode for other work; that is the intended
+use. With two or more listeners, speech goes **to exactly one: by default the
+one that started listening most recently**. `start` does not list the others.
+Do not report on them or offer to stop them. Show `voice-shell.sh listeners`
+only when asked who is listening, and stop another session only when the user
+asks.
 
-So **if you are the older one, speech stops arriving**. That is normal, nothing
-is being dropped. Do not restart because it stopped arriving, and do not change
-the destination on your own. The user can pick again at any time from the
-destinations lined up at the top of the viewer.
+So **if you are the older one, speech stops arriving**. That is normal. Do not
+restart because of it and do not change the destination yourself. The user
+picks a destination at any time from the chips at the top of the viewer.
 
-The order they line up in is decided by "when that conversation first started
-listening". Putting voice mode back on does not change the number (so that "the
-second one" can be said out loud). The default destination is separate from
-this, it is **the one that just started**.
+Chips are numbered by when that conversation first started listening, and
+turning voice mode back on keeps the number (so "the second one" can be said
+out loud). `voice-shell.sh whoami` says which of them this session is. The ×
+on a chip, pressed twice, makes that session stop listening (the session itself
+goes on).
 
-Pressing the × on a chip makes that session stop listening (the session itself
-does not end). It takes two presses so it is not hit by mistake.
-
-The display name is assigned automatically. It starts as the folder name, and
-moves to the conversation's title once it has one. People who keep their
-repositories in one place run several from the same parent folder, so the folder
-name alone is not always enough to tell them apart.
-
-**When told "name this session X", rename it right there.** The conversation
-title is assigned automatically, so it can drift from what is actually being
-done. Renaming it yourself when you notice is fine too.
+The display name starts as the folder name and becomes the conversation's title
+once it has one. **When told "name this session X", rename it right away.**
+Renaming it yourself when the title drifts from the actual work is fine too.
 
 ```bash
 ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh name "Fixing the auth code"
 ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh name ""      # back to the automatic title
 ```
 
-The name that was set stays in `~/.config/voice-shell/names.json`, so it
-survives putting voice mode back on.
+The name is kept in `~/.config/voice-shell/names.json` and survives restarts.
 
 ## When speech that is not an instruction keeps coming, move it to holding
 
-The microphone keeps picking up the room. When the user takes a phone call or
-starts chatting with someone next to them, speech that is not meant for you
-flows in. Keeping all of it means reacting to things that have nothing to do
-with the work.
+The microphone picks up the room: a phone call, a chat with someone nearby.
+Move that to the draft side so you do not react to it:
 
 ```bash
 ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh hold "Sounds like a phone call, so I moved this to holding for now"
 ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh live      # back again
 ```
 
-`hold` is **not mute**. Speech keeps collecting on screen and the user sends as
-much of it as they want. Nothing is lost. **Do not use mute.** Cutting it leaves
-the speech nowhere, and a user who is not watching the screen cannot tell that
-nothing got through.
+`hold` switches the viewer to **Draft**. It is **not mute**: speech keeps
+collecting on screen and the user sends what they want, nothing is lost.
+**Never use mute for this.** Muted speech goes nowhere, and a user not watching
+the screen cannot tell nothing got through.
 
-The note that is passed along shows on screen. A mode change the user did not
-press is only confusing without a reason, so always write something.
+Always pass a note; it shows on screen, and an unexplained mode change is
+confusing.
 
-**Keep the bar for switching high.** Switching by mistake leaves the user
-talking with nothing getting through. Do it only when all of the following hold.
+**Keep the bar for switching high.** A wrong switch leaves the user talking with
+nothing getting through. Switch only when all of these hold:
 
-- **Twice or more in a row**, speech arrived that is plainly not an instruction
-  for you (a conversation with a third person, a "hello?" into a phone, a topic
-  unrelated to the work here)
-- You have not just asked a question (you are not in the middle of waiting for
-  an answer)
-- The user did not say something like "I am just thinking out loud" or "hold
-  on, a phone call" (if they did, just do as they said, no guessing needed)
+- **Two or more lines in a row** plainly not meant for you (a conversation with
+  a third person, a "hello?" into a phone, a topic unrelated to the work)
+- You have not just asked a question (you are not waiting for an answer)
+- The user did not already say something like "hold on, a phone call" (if they
+  did, just do what they said)
 
-**When in doubt, do not switch.** It is enough to take it and say "that did not
-seem to be for me, so I will wait". When you do switch, always write it in the
-chat as well (they may not be watching the screen). Go back the moment the user
-speaks to you again.
+**When in doubt, do not switch.** Saying "that did not seem to be for me, so I
+will wait" is enough. When you do switch, also say so in the chat. Switch back
+(`live`) the moment the user speaks to you again.
 
 ## The live viewer
 
-It comes up together with `start` (**http://127.0.0.1:47865**). Pass this URL
-along when you tell the user it started. It only follows the log and does not
-use the microphone, so it can run alongside the resident process.
-
-Set `VOICE_SHELL_PORT` before starting it to use another port.
-
-What it can do is as follows.
-- Text still being recognized grows inside an "Unsent" card
-- Speech that was sent stacks up as cards
-- The destination can be set to **Instant** (goes straight through) or **Draft**
-  (collects, gets fixed, then sent). `"edited": true` is attached **only to lines
-  that were touched in the draft before sending**. A line that went to the draft but
-  was sent without a single character changed does not get it
-- **Pause** (the ⏸ in the header). Speech while it is stopped is kept nowhere (for use during other work)
-- **It can be driven by voice alone.** "mute" and "unmute" for the microphone,
-  "draft" and "instant" to switch how things are sent, "cancel that" **at the end
-  of a sentence** to take that whole utterance back, and "edit this" likewise at
-  the end to send it to the draft instead, "switch to 2" or "number two" to
-  change the destination.
-  **Every language the screen can show has wordings of its own, and they can all
-  be read from the lightbulb on screen.** The phrases above are the English ones.
-  It only counts when **that phrase alone** is spoken (saying it inside a
-  sentence does nothing). **Mute, unmute, and draft/hold mode are the
-  exception**, a short burst of noise picked up ahead of the word
-  ("はいミュート", "えーとミュート解除", "はい手直し") still counts, so it does
-  not go missing when what the room picked up lands in front of it. Unmute's
-  allowance is tighter, at most a couple of characters, not a whole clause, a
-  false hit there costs the whole stretch the speaker thought was off, not one
-  utterance. Switching back to instant stays exact only, for the same reason.
-  The different ways a number
-  gets read out loud are absorbed. A short sound plays when it switches.
-  Users can add wording of their own
-  (`~/.config/voice-shell/commands.json`). Only phrases said as a whole utterance
-  can be added, not unmute and not the ones tacked onto the end of a sentence,
-  because a false trigger costs too much.
-  **Each kind can also be switched off from that same screen**, and the same file
-  remembers which ones. All seven are independent, so somebody who does not want
-  to mute by voice at all can turn both mute and unmute off. A kind that is off
-  does nothing when spoken, and the words stay listed so it is clear what comes
-  back when it is switched on again.
-  **When several machines are in use at once, turn on "Several machines" in the
-  settings and give each machine a name.** Then only a phrase with the name in
-  front, like "work mute", is taken (without it, a phrase said at one machine
-  sets off every machine). The destination numbers follow the order of the chips
-  on screen, and they can be switched while the mic is off too. **Destination
-  phrases only work when there are two or more listeners** (so that an utterance
-  which was just an answer with a number in it is not eaten). The same code
-  decides this for browser recognition and local models alike. **The one thing
-  that cannot be heard is "unmute" after browser recognition was cut**
-  (cutting it lets go of the audio itself). Turn it back on from the screen
-- **It can be driven from the keyboard too.** Bare keys only move around the
-  screen, keys with `Shift` change where the voice goes. `Shift`+`M` turns the
-  mic on and off, `Shift`+`L` is instant, `Shift`+`H` is draft, `Shift`+`E`
-  drafts just that one utterance, `Shift`+`Backspace` throws away what is
-  unsent, `Shift`+`1` through `Shift`+`9` pick the destination. As bare keys, `,`
-  opens the settings, `?` the list of phrases, `Esc` closes whatever is open.
-  `Ctrl` (`Cmd`)+`Enter` sends the draft. **None of them work while text is
-  being typed.** The list is further down under the lightbulb on screen
-- **Fix just this one.** Pressing the pencil on the unsent card holds that one
-  utterance so it can be fixed. The destination display stays on instant (so it
-  does not look like a permanent switch). Sending it or clearing it puts it back
-- **Float on top.** Moves it to a small always-on-top window (the icon in the
-  header. Chrome only)
-- **It works small too.** Shrinking the window puts the microphone and the send
-  mode side by side, the top strip keeps only the name tags, and shrinking
-  further drops the strip altogether (the state shows in the window title). The
-  destinations change from tags to a single picker. Text and buttons do not
-  shrink. What is kept, in order, is the mic on and off > instant / draft >
-  destination > the text being recognized. Widening it brings everything back
-- **The trigger level can also be changed by dragging the mark under the microphone**
-  (no need to open the settings)
-- Editing the viewer file makes "Updated. Tap to reload" appear at the bottom of
-  an open screen. Pressing it reloads (a floated small window has no way to reload)
-
-### Ways of recognizing
-
-Picked under "Recognized by" in the settings. **The default is "This browser"**
-(Chrome's Web Speech API), which loads no model, so it runs even on a weak
-machine and works with no daemon running. To keep everything local, switch to
-Apple or Whisper. Anything not installed does not appear as a choice.
-
-**But the audio goes to Google's servers.** Do not recommend it to anyone who
-has raised wanting everything to stay local. The screen carries a caution of
-its own next to this setting, worded around "uses the browser's built-in
-speech recognition" rather than naming Google outright (the README does name
-it, for whoever reads that first). Know it either way before recommending
-this one.
-
-When Whisper is picked, the model can be named as well. Both a Hugging Face name
-and the path of a folder on this machine are accepted. What is given is
-remembered, so `start` alone is enough from then on.
-
-```bash
-${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh start --engine whisper --model /path/to/my-model
-```
-
-The session is cut by 7 to 10 seconds of silence by design, but it is re-armed
-ahead of time while nobody is speaking, so nothing is missed. Recognized text
-goes through the same filtering as the daemon, on the server side.
-
-**If there is no voice for a while, the mic is turned off from this side**
-(5 minutes by default, 0 to 30 minutes under "Turn off when idle" in the
-settings, 0 never turns it off). That way it does not keep reconnecting to
-Google while the user is away from the desk. A sound and a note say when it is
-turned off. Pressing the microphone brings it back.
-
-### Settings (the gear)
-
-Moving a control takes effect right then. No daemon restart is needed.
-
-| Item | What it decides | Default |
-|---|---|---|
-| Microphone | Which input device to use | The system default |
-| Trigger level | 0 to 100. Lower picks up fainter sounds | macOS 41 / Linux 74 |
-| Pause to send | Being quiet this long marks the end of a chunk (with browser recognition, that end is already decided elsewhere, so this is the wait before an already-recognized one goes out) | 3 seconds |
-| Min length | Recognition results shorter than this are dropped | 15 characters |
-| Strip filler words | Drops the connecting words before sending (**this affects what is sent too**) | Off |
-| Theme / Language | Looks | Automatic |
-
-The trigger level is set by **dragging the mark under the microphone**. The bar
-just above it is the current level, so have the user talk and put the mark where
-only their voice crosses it. When they say "I am talking but nothing arrives",
-the first thing to suggest is **lowering the trigger level**. The smaller the
-number, the fainter the sound it starts picking up. The slider and the mark both
-sit on the same scale of loudness, so lowering it moves both to the left.
-
-It lives in `~/.config/voice-shell/tuning.json`. The daemon re-reads it every
-0.5 seconds.
+Comes up with `start` at **http://127.0.0.1:47865** (`VOICE_SHELL_PORT` before
+starting changes the port). It does not use the microphone for local engines,
+so it runs alongside the daemon.
 
 ```bash
 ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh viewer        # → http://127.0.0.1:47865
 ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh viewer-stop
 ```
+
+- Text being recognized grows in an "Unsent" card; sent speech stacks up as cards.
+- The send mode is **Instant** (goes straight through) or **Draft** (collects,
+  gets fixed, then sent). The pencil on the unsent card drafts just that one
+  utterance; sending or clearing it returns to Instant.
+- The **microphone button** turns the mic off. Speech while off is kept nowhere.
+- **Float on top** moves it to a small always-on-top window (Chrome only).
+- Narrow windows collapse the header step by step, keeping in order: mic on/off,
+  Instant/Draft, destination, recognized text.
+- After the viewer files change, "Updated. Tap to reload" appears (a floated
+  window cannot reload).
+
+### Voice commands and keyboard
+
+The user can drive the viewer by voice ("mute", "unmute", "draft", "instant",
+"switch to 2", and "cancel that" / "edit this" at the end of a sentence) and by
+keyboard. A command counts only as a whole utterance, never inside a sentence,
+and a wording switched off in the lightbulb never fires. Plain browser
+recognition cannot hear "unmute" (muting releases the audio), so the user
+turns it back on from the screen. Browser recognition on this device keeps
+listening while muted, throws everything it hears there away and acts only on
+"unmute". The exact matching rules, custom wordings, several machines and
+the key map are in [REFERENCE.md](REFERENCE.md); read it when the user asks
+about commands or one misfires.
+
+### Ways of recognizing
+
+Picked under "Recognized by" in the settings; engines not installed are not
+shown. Browser recognition runs **only while the viewer is open**. Chrome cuts
+its session every 7 to 10 seconds, but it is re-armed ahead of time while nobody
+speaks, so nothing is missed. Recognized text goes through the same filtering as
+the daemon.
+
+With Whisper a model can be given, a Hugging Face name or a local folder. It is
+remembered, so plain `start` is enough afterwards:
+
+```bash
+${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh start --engine whisper --model /path/to/my-model
+```
+
+**With browser recognition, the mic is turned off after a stretch of no voice** (5 minutes by default,
+0 to 30 under "Turn off when idle", 0 = never), so it does not keep its
+recognition connected while the user is away. A sound and a note mark it; pressing the
+microphone brings it back.
+
+### Settings (the gear)
+
+Changes take effect immediately, no restart. Stored in
+`~/.config/voice-shell/tuning.json`, which the daemon re-reads every 0.5 seconds.
+
+| Item | What it decides | Default |
+|---|---|---|
+| Microphone | Input device | System default |
+| Trigger level | 0 to 100. Lower picks up fainter sound | macOS 41 / others 74 |
+| Pause to send | Silence that ends a chunk (browser recognition: the wait before an already recognized chunk goes out). Capped at 2 seconds in Draft | 3 seconds |
+| Min length | Shorter results are dropped | 15 characters |
+| Strip filler words | Removes fillers **from what is sent too** | Off |
+| Theme / Language | Looks | Automatic |
+
+The trigger level is also set by **dragging the mark under the microphone**.
+The bar above it is the current level: have the user talk and put the mark
+where only their voice crosses it. Slider and mark share the same loudness
+scale.
 
 ## Checking the state
 
@@ -501,54 +424,35 @@ ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh status
 ${CLAUDE_SKILL_DIR}/scripts/voice-shell.sh stop
 ```
 
-Once it is stopped, stop Monitor with TaskStop as well. The microphone is
-released, and if Whisper was picked the memory the model took comes back. apple
-has the OS do the recognizing, so it was never holding memory in the first place.
+Then stop Monitor with TaskStop as well. The microphone is released, and with
+Whisper the model's memory comes back.
 
 ## The user dictionary
 
-Words that are often misheard can be registered with a replacement, and
-utterances to ignore can be registered too. Edit them from the **dictionary**
-in the viewer (the book in the header). **It saves automatically the moment
-focus leaves, and takes effect from the next utterance** (there is no save
-button, and no daemon restart either).
+Register often misheard words with a replacement, and utterances to ignore, from
+the **dictionary** (the book in the header). **It saves when focus leaves and
+applies from the next utterance**, no save button and no restart. It also
+applies to text still being recognized, so the card already shows the
+replacement ("cloud code" → `Claude Code`); the server rebuilds the sent text.
 
-It also hits the text while it is still being recognized, so **it already looks
-replaced inside the card before it is sent** ("cloud code" turns into
-`Claude Code`).
-What is being replaced is only the look. The server rebuilds the body that gets
-sent. If the user says it again differently, it follows along.
+Words ignored by default (`NOISE_ONLY`, hesitation sounds for the language being
+spoken) can be turned off by pressing their tag. **A word turned off also passes
+the minimum length gate**, so short replies stop disappearing. When the user
+says replies are not getting through, point them here.
 
-Words ignored by default (`NOISE_ONLY`) can be turned off by pressing their tag.
-The list holds hesitation sounds only, and which ones show depends on the
-language being spoken, not the one on screen. **A word that was turned off
-passes straight through the minimum length gate too**, so short replies like
-"got it" stop disappearing. When the user says "my replies do not seem to be
-getting through", point them here.
-
-It lives in `~/.config/voice-shell/dictionary.json`. CSV can be read in and
-written out too. If the user keeps correcting the same misrecognition, it is
-fine to suggest adding it to the dictionary.
+Stored in `~/.config/voice-shell/dictionary.json`; CSV import and export work.
+If the user keeps correcting the same misrecognition, suggest adding it.
 
 ## Limits
 
-**The default (this browser) has no limits at all.** What follows is about
-picking a local model.
+The default (browser) has none beyond needing the viewer open. For local engines:
 
-- Browser recognition runs **only while the viewer is open**. Close it and
-  nothing arrives
-- Whisper **downloads a model and loads it**. The first time there is a download
-  to wait for, and starting takes 1 to 2 minutes as well. How much memory it
-  uses is decided by the size of the model
-  - `--engine apple` (macOS 26 or newer, the recognition that ships with the OS)
-    loads no model of its own, so neither the memory nor the 1 to 2 minutes
-    apply to it. **The first run on a machine still waits**, tens of seconds,
-    while the OS fetches the speech model for that language by itself. Nothing
-    has to be installed for it and it happens on its own, and the model stays
-    on the machine afterwards, so it is the first run only
-- The microphone is taken through `sounddevice` (macOS and Windows) or
-  `arecord` (Linux). Without `sounddevice` installed, macOS and Windows fall
-  back to `ffmpeg`
-- When a local model was picked but the environment is not in place, `start`
-  fails with `No Python it can run was found`. Either go back to browser recognition
-  (`start --engine browser`) or walk them through [SETUP.md](SETUP.md)
+- Whisper downloads a model the first time, and each start takes 1 to 2 minutes.
+  Memory use depends on the model size.
+- `apple` loads no model of its own, so neither applies; only its first run on a
+  machine waits (see Starting).
+- The microphone is read through `sounddevice` (macOS, Windows; falls back to
+  `ffmpeg` without it) or `arecord` (Linux).
+- If a local engine is picked but the environment is missing, `start` fails with
+  `No Python it can run was found`. Go back to `start --engine browser` (after
+  confirming) or walk them through [SETUP.md](SETUP.md).

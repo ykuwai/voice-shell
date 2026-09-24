@@ -500,6 +500,12 @@
   .route-chip.asking { border-color:var(--danger); color:var(--danger); background:none; }
   /* A session between two watches. It comes back on its own in a moment. */
   .route-chip.away { opacity:.45; }
+  /* Gone is not coming back on its own, so it is drawn as a thing that cannot
+     be pressed: struck through, greyed, and the pointer says so too. Faded
+     alone read as "busy, wait a moment" and people kept aiming speech at it. */
+  .route-chip.gone { opacity:.4; cursor:not-allowed; }
+  .route-chip.gone .nm { text-decoration:line-through; }
+  .route-chip.gone:hover { background:inherit; }
   .route-chip.asking .x { opacity:1; }
   .route-chip.on {
     border-color:transparent; color:var(--panel); font-weight:600;
@@ -850,6 +856,14 @@
   .to-menu-item.asking { color:var(--danger); }
   .to-menu-item.asking .x { opacity:1; }
   .entry .text { font-size:.88rem; line-height:1.65; word-break:break-word; }
+  /* Said under the text, not beside the time, because it is about the
+     utterance itself rather than about when it was said. Quiet ink and no
+     ground of its own: it is a fact to read once, not a warning to act on,
+     and the card is already in the log by the time anyone sees it. */
+  .entry .nowhere {
+    margin-top:.3rem; font-size:.7rem; line-height:1.4; color:var(--faint);
+  }
+  .entry .nowhere::before { content:"○"; margin-right:.3rem; font-size:.85em; }
 
   /* The draft card. The live transcript shows up here too (prime spot) */
   /* Stacked vertically, when seats run short only the live transcript has to
@@ -1426,6 +1440,15 @@
     font-size:.85rem;
   }
   select:focus, input:focus, textarea:focus { outline:none; border-color:var(--accent); }
+  /* A pick that is deliberately out of play, not one that failed. Chrome's own
+     grey on a dark panel looks like a broken control, so it keeps the same box
+     and only loses a little of its colour. Only the microphone wears this, by
+     id, because the engine pick is also disabled for the moment a switch takes
+     and there it means busy rather than out of play. */
+  #mic:disabled {
+    color:var(--faint); cursor:default; opacity:1;
+    -webkit-text-fill-color:var(--faint);
+  }
 
   input[type=range] {
     flex:1; min-width:0; -webkit-appearance:none; appearance:none;
@@ -1505,7 +1528,14 @@
   }
   .btn.busy { opacity:.6; }
   .btn:disabled { opacity:.45; }
-  .btn-row { display:flex; align-items:center; gap:.4rem; flex-wrap:wrap; }
+  /* Same standing as a field, so what comes under a row of buttons is set off
+     from it by the same .6rem the fields further up the sheet keep between
+     them. Clear history and the line explaining what it clears were pressed
+     together with nothing in between, and read as one lump rather than a
+     control and a note about it. Nothing is added under the last row in a
+     group, where the group's own padding already does that job. */
+  .btn-row { display:flex; align-items:center; gap:.4rem; flex-wrap:wrap; margin-bottom:.6rem; }
+  .btn-row:last-child { margin-bottom:0; }
   .btn-row .spacer { flex:1; }
 
   /* Dictionary */

@@ -11,7 +11,6 @@ import asyncio
 from contextlib import contextmanager
 import json
 import os
-import signal
 import subprocess
 import sys
 import time
@@ -108,6 +107,143 @@ def _write_json(path: Path, value) -> None:
     temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     temp.write_text(json.dumps(value), encoding="utf-8")
     os.replace(temp, path)
+
+
+# ── Chrome's on-device speech models, as they sit on this disk ──
+#
+# Chrome answers SpeechRecognition.available() per site: until a site has
+# called install() itself, it is told downloadable even when the model is
+# already there, so no site can read off what you have. The page cannot tell
+# the two apart, and would say "download 167 MB" for something that is a
+# three second switch on. The viewer's own server can look, so it does.
+#
+# Read only. Nothing here starts, touches or asks Chrome anything, it lists
+# directories and adds up file sizes. Anything unreadable comes back as None
+# (unknown) rather than as an answer, so the page hedges instead of lying.
+SODA_ENGINE_DIR = "SODA"
+SODA_PACKS_DIR = "SODALanguagePacks"
+
+
+def _chrome_user_data_dirs() -> list:
+    """Where each Chrome-family browser keeps the profile root on this platform.
+
+    The SODA engine and the language packs sit in that root, beside the
+    profiles, since they are shared by every profile of that install.
+    """
+    home = Path.home()
+    if sys.platform.startswith("win"):
+        local = os.environ.get("LOCALAPPDATA") or str(home / "AppData/Local")
+        base = Path(local)
+        return [base / "Google/Chrome/User Data",
+                base / "Google/Chrome Beta/User Data",
+                base / "Google/Chrome SxS/User Data",
+                base / "Chromium/User Data"]
+    if sys.platform == "darwin":
+        base = home / "Library/Application Support"
+        return [base / "Google/Chrome",
+                base / "Google/Chrome Beta",
+                base / "Google/Chrome Canary",
+                base / "Chromium"]
+    base = Path(os.environ.get("XDG_CONFIG_HOME") or (home / ".config"))
+    return [base / "google-chrome",
+            base / "google-chrome-beta",
+            base / "google-chrome-unstable",
+            base / "chromium"]
+
+
+def _dir_bytes(path: Path) -> int:
+    """How much a directory holds, as far as it can be read."""
+    total = 0
+    for here, _dirs, files in os.walk(path, onerror=lambda _e: None):
+        for name in files:
+            try:
+                total += (Path(here) / name).stat().st_size
+            except OSError:
+                pass
+    return total
+
+
+def _lang_matches(folder: str, lang: str) -> bool:
+    """Whether a pack folder is for this language tag.
+
+    Case is ignored, and ja matches ja-JP either way round: the page asks with
+    whatever BCP-47 tag the dropdown holds, and the folder is named however
+    Chrome named it.
+
+    Two regions of one language never stand in for each other, though. Chrome
+    ships a pack per region (SODA en-GB Models is not SODA en-US Models), and
+    the dropdown offers en-US beside en-GB, zh-CN beside zh-TW and zh-HK. Read
+    loosely, an en-US pack on the disk would have the page promise en-GB is
+    already here, and the very next press anywhere would quietly start a real
+    download it said would not happen.
+    """
+    a = folder.casefold().replace("_", "-").split("-")
+    b = lang.casefold().replace("_", "-").split("-")
+    if not a[0] or not b[0] or a[0] != b[0]:
+        return False
+    # Same language. Either it is the same region, or one of the two never
+    # named a region at all and takes whatever this one is.
+    return len(a) < 2 or len(b) < 2 or a[1] == b[1]
+
+
+def on_device_model(lang: str, roots=None) -> dict:
+    """Whether Chrome already holds the on-device recognition model here.
+
+    engine is the SODA engine itself, pack the model for this one language.
+    Each is True, False, or None when nothing could be told (no Chrome
+    directory to look in at all, or every one of them unreadable). Sizes are
+    in bytes, and are 0 when the thing is not there.
+    """
+    out = {"lang": lang, "engine": None, "pack": None,
+           "engineBytes": 0, "packBytes": 0, "root": ""}
+    try:
+        looked = False
+        for root in (roots if roots is not None else _chrome_user_data_dirs()):
+            root = Path(root)
+            if not root.is_dir():
+                continue
+            looked = True
+            # Any SODA/<version>/SODAFiles holding something counts. The
+            # engine file is SODA.dll on Windows and libsoda.so elsewhere, so
+            # the directory having contents is what is asked, not a name.
+            engine, engine_bytes = False, 0
+            for version in sorted(_subdirs(root / SODA_ENGINE_DIR)):
+                files = version / "SODAFiles"
+                size = _dir_bytes(files) if files.is_dir() else 0
+                if size > 0:
+                    engine, engine_bytes = True, max(engine_bytes, size)
+            pack, pack_bytes = False, 0
+            for folder in _subdirs(root / SODA_PACKS_DIR):
+                if not _lang_matches(folder.name, lang):
+                    continue
+                size = _dir_bytes(folder)
+                if size > 0:
+                    pack, pack_bytes = True, max(pack_bytes, size)
+            # The first install that has both wins, so a second Chrome with
+            # the engine but not this language cannot mask the one that has it
+            if engine and pack:
+                return {"lang": lang, "engine": True, "pack": True,
+                        "engineBytes": engine_bytes, "packBytes": pack_bytes,
+                        "root": str(root)}
+            if engine and out["engine"] is not True:
+                out.update(engine=True, engineBytes=engine_bytes, root=str(root))
+            if pack and out["pack"] is not True:
+                out.update(pack=True, packBytes=pack_bytes)
+        if looked:
+            out["engine"] = bool(out["engine"])
+            out["pack"] = bool(out["pack"])
+    except Exception:
+        return {"lang": lang, "engine": None, "pack": None,
+                "engineBytes": 0, "packBytes": 0, "root": ""}
+    return out
+
+
+def _subdirs(path: Path) -> list:
+    """The directories directly inside, or nothing if it cannot be read."""
+    try:
+        return [p for p in path.iterdir() if p.is_dir()]
+    except OSError:
+        return []
 
 
 def _secure_dir(path: Path) -> None:
@@ -747,8 +883,12 @@ async def main_async(args):
         # around, a line arriving while an await is open rides neither history
         # nor broadcast, and just that one goes missing.
         tail.clients.add(ws)
+        # Marked as the history rather than something that just happened. The
+        # page says so out loud when an utterance reaches nowhere, and without
+        # this every old line of a session spent working alone would say it
+        # again on every reload, all at once.
         for rec in list(tail.history):
-            await ws.send_str(json.dumps(rec, ensure_ascii=False))
+            await ws.send_str(json.dumps({**rec, "replay": True}, ensure_ascii=False))
         # watch_partial only broadcasts on change, one text shared by every
         # connected client, so a browser that opens (or reloads) mid-sentence
         # never gets told what is already sitting there until it changes
@@ -1085,16 +1225,33 @@ async def main_async(args):
     async def handle_listeners(_req):
         """The sessions listening right now, and the destination that is picked."""
         import voice_daemon as vd
+        # Asked before the route file is read. resolve_target is what lets go of
+        # a pick whose listen is gone, and reading the file first showed that
+        # PID as picked for one more poll, so the chip came up lit while
+        # already saying it could not be used.
+        listeners = vd.list_active_listeners(args.log_file)
+        target = vd.resolve_target(args.log_file) or ""
         try:
             chosen = route_path.read_text(encoding="utf-8").strip()
         except OSError:
             chosen = ""
         return web.json_response({
-            "listeners": vd.list_active_listeners(args.log_file),
+            "listeners": listeners,
             "route": chosen,                                  # the one that is picked
             # Where it actually lands. With nothing picked, the later start wins.
-            "target": vd.resolve_target(args.log_file) or "",
+            "target": target,
         })
+
+    async def handle_ondevice(req):
+        """Whether Chrome already holds the on-device model for this language.
+
+        Chrome tells a site downloadable until that site has called install()
+        itself, even with the model on disk, so the page cannot tell a real
+        167 MB download from a switch on that takes seconds. This looks at the
+        disk and says which it is. Read only, and it never fails: unknown
+        comes back as null and the page falls back to hedging.
+        """
+        return web.json_response(on_device_model(req.query.get("lang", "")))
 
     async def handle_machine(req):
         """This machine's name, and multi-machine mode on and off.
@@ -1122,32 +1279,19 @@ async def main_async(args):
         live = {str(l["pid"]): l for l in vd.list_active_listeners(args.log_file)}
         if pid not in live:
             return web.json_response({"error": "unknown"}, status=404)
-        # Stopped on purpose, so its listen leaves no place behind to be
-        # taken up again. One between two watches has nothing left to stop.
-        vd.mark_stopped(args.log_file, live[pid].get("session"), disconnected=True)
-        if live[pid].get("away"):
-            return web.json_response({"ok": True, "label": live[pid].get("label", pid)})
-        # Tell them first. Cut it quietly and that session sits there never
-        # noticing that talking to it gets no response. Wait just long enough
-        # for tail to read, then stop it.
+        # Telling it and stopping it are one thing, and waiting for the
+        # telling to land is the whole of it, so it lives next to the rest of
+        # the listener bookkeeping (voice_daemon.disconnect_listener). It
+        # waits on a file, so off this thread.
+        loop = asyncio.get_running_loop()
         try:
-            with open(args.log_file, "a", encoding="utf-8") as f:
-                f.write(json.dumps({
-                    "system_warning":
-                        "Someone acted on the screen, and this session stopped "
-                        "listening to the voice. To use it again, type "
-                        "/voice-shell.",
-                    "to": pid,
-                }, ensure_ascii=False) + "\n")
-            await asyncio.sleep(0.5)
-        except OSError:
-            pass
-
-        try:
-            os.kill(int(pid), signal.SIGTERM)
+            entry = await loop.run_in_executor(
+                None, vd.disconnect_listener, args.log_file, pid)
         except (OSError, ValueError) as err:
             return web.json_response({"error": str(err)}, status=500)
-        return web.json_response({"ok": True, "label": live[pid].get("label", pid)})
+        if entry is None:
+            return web.json_response({"error": "unknown"}, status=404)
+        return web.json_response({"ok": True, "label": entry.get("label", pid)})
 
     async def handle_rename(req):
         """Put a display name on one of the listening sessions.
@@ -1170,8 +1314,16 @@ async def main_async(args):
 
     async def handle_route(req):
         """Pick the destination. Empty means everyone."""
+        import voice_daemon as vd
         body = await req.json()
         to = str(body.get("to") or "").strip()
+        # A session whose listen is gone is still in the row, so it can still
+        # be asked for. Nothing reads it, so choosing it would only hide where
+        # speech really goes, which is how one was lost (#110). Refused here
+        # rather than on the page alone, since the page is not the only caller.
+        if to and any(str(l.get("pid")) == to and l.get("gone")
+                      for l in vd.list_active_listeners(args.log_file)):
+            return web.json_response({"error": "gone"}, status=409)
         # Write under another name first, then replace. If the daemon reads
         # between the truncate and the write it gets a chopped PID, and one
         # utterance goes to somebody else.
@@ -1189,7 +1341,15 @@ async def main_async(args):
         the way it was recognized.
         """
         body = await req.json()
-        text = (body.get("text") or "").strip()
+        # Imported up here, above the first use. A name imported anywhere in a
+        # function is local to the whole of it, so with the import further down
+        # the fold below reads an unbound local and every utterance 500s.
+        import voice_daemon as vd
+        # Folded before anything is decided about it, the same as in the daemon.
+        # Chrome's on-device Japanese recognition writes Latin letters and digits
+        # full-width, and the page folds them for what it shows, so the two roads
+        # have to agree or the card would flip when the words were sent.
+        text = vd.to_halfwidth((body.get("text") or "")).strip()
         if not text:
             return web.json_response({"error": "empty"}, status=400)
         tab = str(body.get("tab") or "")[:40]
@@ -1201,8 +1361,6 @@ async def main_async(args):
         if not owns:
             return web.json_response({"error": "asr_owner_conflict",
                                       "owner": owner or None}, status=409)
-
-        import voice_daemon as vd
 
         # If the daemon is recognizing too, take nothing. Both write to the same
         # utterance log, so taking it sends one instruction to Claude twice.
@@ -1220,9 +1378,10 @@ async def main_async(args):
         user_dict = vd.load_dictionary()
 
         # Voice-only signals. They go through the same function as the daemon,
-        # so they bite the same however recognition is done (browser recognition
-        # lets go of the audio itself when cut, though, so 「ミュート解除」 after
-        # a cut is the one thing it cannot hear).
+        # so they bite the same however recognition is done (the plain browser
+        # entry lets go of the audio itself when cut, though, so 「ミュート解除」
+        # after a cut is the one thing it cannot hear; on-device browser
+        # recognition keeps listening and answers that one itself, in the page).
         kind = vd.apply_voice_command(text, args.log_file,
                                       mute_file.exists(), user_dict)
         if kind:
@@ -1233,12 +1392,13 @@ async def main_async(args):
             return web.json_response({"dropped": "muted"})
 
         # a trailing 「キャンセル」 or 「手直し」 gets the same treatment.
-        # active_tail hands back nothing for a signal the user switched off, and
-        # then the phrase travels on as ordinary speech, the same as in the daemon.
-        if vd.take_tail(text, vd.active_tail("cancel_tail")) is not None:
+        # take_active_tail hands back nothing for a signal (or the wording at the
+        # tail) the user switched off, and then the phrase travels on as ordinary
+        # speech, the same as in the daemon.
+        if vd.take_active_tail(text, "cancel_tail") is not None:
             vd.note_voice_cmd(args.log_file, "cancelled", "", text)
             return web.json_response({"dropped": "cancelled"})
-        body_text = vd.take_tail(text, vd.active_tail("hold_tail"))
+        body_text = vd.take_active_tail(text, "hold_tail")
         force_hold = body_text is not None
         if force_hold:
             if not body_text:
@@ -1444,7 +1604,7 @@ async def main_async(args):
         wording. **It goes back whole, every kind and every language, not just
         the language being laid out.** The page needs the ones it cannot draw
         too, because the tail wordings it tests the send drawing against are
-        gathered across all seven languages, and a wording struck while the
+        gathered across every screen language, and a wording struck while the
         screen was in another language still has to stop filling that drawing.
         """
         import voice_daemon as vd
@@ -1558,31 +1718,11 @@ async def main_async(args):
             "current": cur,
         })
 
-    async def handle_whisper_model_get(_req):
-        """The Whisper model. Gives back the remembered one and the default name.
-
-        Swapping it needs a reload, so it lives in config.json (the one read
-        once at startup), not tuning.json. Mixed into the tuning.json that is
-        reread every 0.5 seconds, whoever wrote it would think it had taken.
-        """
-        import voice_daemon as vd
-        return web.json_response({
-            "model": vd.read_config().get("whisper_model") or "",
-            "default": "large-v3-turbo",
-        })
-
-    async def handle_whisper_model_put(req):
-        """Remember the Whisper model. Send it empty to go back to the default.
-
-        Whether the name is right is not checked here. It takes both a Hugging
-        Face name and the path of a folder kept locally, so there is no telling
-        until it is loaded.
-        """
-        import voice_daemon as vd
-        body = await req.json()
-        name = (body.get("model") or "").strip()
-        vd.write_config(whisper_model=name)
-        return web.json_response({"model": name})
+    # The Whisper model had a GET and a PUT here, for a box on the settings
+    # screen. The screen no longer offers one, and nothing else ever called
+    # them, so both are gone. The setting itself is untouched. voice-shell.sh
+    # start --engine whisper --model <name> writes it through voice_daemon.py
+    # (--remember-model) and reads it back with --resolve-model.
 
     async def handle_mics(_req):
         """Give back the usable mics and the one picked right now."""
@@ -1607,8 +1747,7 @@ async def main_async(args):
     app.router.add_get("/api/tuning", handle_tuning_get)
     app.router.add_put("/api/tuning", handle_tuning_put)
     app.router.add_get("/api/languages", handle_languages)
-    app.router.add_get("/api/whisper-model", handle_whisper_model_get)
-    app.router.add_put("/api/whisper-model", handle_whisper_model_put)
+    app.router.add_get("/api/ondevice", handle_ondevice)
     app.router.add_put("/api/mics", handle_mic_put)
     app.router.add_get("/api/dictionary", handle_dict_get)
     app.router.add_put("/api/dictionary", handle_dict_put)

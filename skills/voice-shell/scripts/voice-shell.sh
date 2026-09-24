@@ -11,6 +11,7 @@
 #   voice-shell.sh codex-forward          send new utterances to this Codex App Server thread
 #   voice-shell.sh engines                the ways of recognizing on offer, and the last choice
 #   voice-shell.sh listeners              the sessions listening right now
+#   voice-shell.sh whoami                 which chip this session is (number and name)
 #   voice-shell.sh name "NAME"            give this session a display name
 #   voice-shell.sh whisper                recognize with Whisper (strong on proper nouns)
 #   voice-shell.sh apple                  run on the recognition that ships with macOS 26 (light)
@@ -331,8 +332,13 @@ case "$cmd" in
     # Bring up only the viewer and finish (opening the screen starts it).
     if [[ "$engine" == "browser" ]]; then
       mkdir -p "$STATE_DIR"
-      # Same as daemon startup. Leave it and last time's utterances line up again.
-      : > "$LOG_FILE"
+      # Same as daemon startup. Leave it and last time's utterances line up
+      # again. Not while another session is already listening, though: what is
+      # in the log then is what was said a moment ago and has not been handed
+      # over yet, and emptying it loses that with nothing said anywhere. A new
+      # epoch is stamped on whenever it really is emptied, so no offset
+      # recorded against the old log is ever read against the new one.
+      "$PY" "$APP" --empty-log
       # Here the screen itself does the recognizing, so speak up once it is up.
       # Its own line ("The viewer started at ..." / "It is already running at
       # ...") carries the URL through to whoever is reading this output, since
@@ -510,6 +516,73 @@ case "$cmd" in
     if [ -n "$listeners_now" ]; then echo "$listeners_now"
     else echo "  none (the voice is reaching nowhere)"; fi
     ;;
+  whoami)
+    # Which chip this session is, so the agent can say it at startup.
+    #
+    # Not printed from `listen`. Everything listen writes goes through Monitor
+    # and is read as an utterance, so a plain line there would look like
+    # something the user said. Not printed from `start` either, because at that
+    # moment this session has not registered yet and has no place in the row.
+    # Asked for on its own, once the watch is up, which also makes it something
+    # the user can ask for again later.
+    #
+    # No conversation id means there is nothing to look this session up by, and
+    # waiting changes nothing. Say so at once, the way `name` already does.
+    if [[ -z "${CLAUDE_CODE_SESSION_ID:-${CODEX_THREAD_ID:-${CODEX_SESSION_ID:-}}}" ]]; then
+      echo "This tool has no session id, so which chip it is cannot be looked up." >&2
+      exit 1
+    fi
+    # The registration is written a moment after Monitor starts the watch, so
+    # wait a little rather than tell a session that is about to be listening
+    # that it is not.
+    #
+    # A chip in the row is not the same as somebody reading it. A session
+    # between two watches, and one whose listen has ended for good, both keep
+    # their place in the row. Keep waiting on either, because at startup that
+    # is the old chip still sitting there while this watch's own registration
+    # lands a moment later, and it takes the same number over, so the answer
+    # does not move.
+    #
+    # Ten seconds means ten seconds on the clock, not twenty tries of unknown
+    # cost. Counting the tries instead had each one paying for a whole Python
+    # start on top of its own sleep, so the wait a session that never comes up
+    # live actually sat through was half again as long as what is written here
+    # and in SKILL.md (measured: 15s). The sleep only happens when there is
+    # still time left to sleep into, so the last try is not followed by one.
+    found=""; state=""; _deadline=$((SECONDS + 10))
+    while :; do
+      found="$("$PY" "$APP" --whoami 2>/dev/null || true)"
+      # The name is the last field on purpose: it is the one that could itself
+      # hold a tab, and read gives everything left over to the last variable.
+      IFS=$'\t' read -r _no _total _live state _label <<< "$found"
+      [[ "$state" == "live" ]] && break
+      (( SECONDS < _deadline )) || break
+      sleep 0.5
+    done
+    # Only the facts. The wording the user hears is the agent's to write, in
+    # whatever language the conversation is in, so nothing is translated here.
+    if [[ -n "$found" ]]; then
+      echo "  number  $_no"
+      echo "  name    $_label"
+    fi
+    if [[ "$state" != "live" ]]; then
+      if [[ -n "$found" ]]; then
+        echo "  That chip is in the row, but nothing is listening through it." >&2
+      else
+        echo "  This session has no chip." >&2
+      fi
+      echo "  Start listening first, with voice-shell.sh listen under Monitor." >&2
+      exit 1
+    fi
+    # Two different numbers, and saying the row size as though it were the
+    # number listening would tell the user more sessions can hear them than
+    # really can: an away chip and a gone one both sit in the row holding a
+    # number with nobody behind it.
+    echo "  It is the number as things stand right now, out of $_total in the" \
+         "row, $_live listening."
+    echo "  It changes as other sessions start listening and stop."
+    echo "  Tell the user the number and the name in the language they are using."
+    ;;
   codex-forward)
     if [[ -z "${CODEX_THREAD_ID:-}" ]]; then
       echo "codex-forward needs CODEX_THREAD_ID from a Codex CLI or App Server thread." >&2
@@ -601,6 +674,21 @@ except Exception:
       fi
     fi
 
+    # Where the reading starts, measured before this registration exists.
+    #
+    # Taken after it instead, anything written in between (the viewer telling
+    # this very session it was disconnected, say, which it can do the moment
+    # the registration appears) landed behind the point tail is told to start
+    # from, so it was never read and never printed. Measured from before,
+    # nothing addressed to this listen can fall in the gap: it did not exist
+    # yet, so nothing earlier can be meant for it.
+    #
+    # Only where the reading starts. Where the old PID stops counting as this
+    # session's own is a different question with a different answer, measured
+    # further down once the handover is really done (alias_until).
+    start_size="$(wc -c < "$LOG_FILE" 2>/dev/null | tr -d ' ')"
+    [[ "$start_size" =~ ^[0-9]+$ ]] || start_size=0
+
     # An escape hatch so any tool can name itself. VOICE_SHELL_NAME wins outright.
     "$PY" - "$reg" "$agent" "$session" "${VOICE_SHELL_NAME:-}" "$inherit_order" <<'REG' || true
 import json, os, sys, time
@@ -676,11 +764,30 @@ REG
       replay_offset="$("$PY" "$APP" --progress-of "$old_pid" 2>/dev/null || true)"
     fi
     [[ -n "$old_pid" ]] && rm -f "$STATE_DIR/listeners-gone/$old_pid.progress"
+    # Coming back after days rather than between two watches. --adopt says so
+    # by handing back "-" for the order. There is nothing worth replaying then
+    # (nothing has been addressed to this session since it went), and a whole
+    # day of log read back at once would bury whatever is said next. The
+    # progress file is normally cleared long before this, but it outlives the
+    # sweep whenever nothing was running to do the sweeping.
+    [[ "$inherit_order" == "-" ]] && replay_offset=""
+    # How far the old PID still counts as this session's own (listen_filter.py
+    # reads it as VOICE_SHELL_ALIAS_UNTIL). Measured here, after the
+    # registration and the destination have both moved over, because up to
+    # this moment the daemon was still tagging speech with the old PID: that
+    # is exactly what the alias is for. Measured before the handover instead,
+    # every word said while it was going through fell outside the window and
+    # was dropped, which is the one thing the replay exists to prevent.
     log_size="$(wc -c < "$LOG_FILE" 2>/dev/null | tr -d ' ')"
-    [[ "$log_size" =~ ^[0-9]+$ ]] || log_size=0
-    start_offset="$log_size"
+    [[ "$log_size" =~ ^[0-9]+$ ]] || log_size="$start_size"
+    start_offset="$start_size"
+    # No replay means no handover to bridge, so no window either: the old PID
+    # is just a number, and Windows hands those out again. Left open, a word
+    # meant for whoever holds it now would be taken here (#73).
+    alias_until="$start_offset"
     if [[ "$replay_offset" =~ ^[0-9]+$ ]] && (( replay_offset <= log_size )); then
       start_offset="$replay_offset"
+      alias_until="$log_size"
     fi
     # By byte position rather than -n 0, so it starts exactly where the
     # progress count starts.
@@ -690,13 +797,34 @@ REG
     # below are about the filter alone. Under Git Bash, waiting on a
     # background pipeline waits for tail too, and tail (held to this listen by
     # --pid) waits right back, so the filter quitting never let listen go.
+    # The shell this listen was started from. Claude Code runs the skill's
+    # command inside one, and ending a Monitor watch (stopped by hand or at
+    # its deadline) takes that shell down. On Windows it takes nothing else:
+    # measured, everything under this listen carried on for as long as it was
+    # watched, with its heal loop still touching the registration, so the
+    # session stayed on screen and stayed the destination while nobody read a
+    # word of it (#110). listen_filter.py watches this pid and quits when it
+    # goes, which ends the pipeline waited on below and runs the EXIT trap.
+    # The real Win32 pid on Windows, since Python is what checks it (the same
+    # reason reg_pid above is read out of /proc). $PPID of 1 means there is
+    # nothing above this to lose, and listen_filter.py leaves it alone.
+    parent_pid="$PPID"
+    if [[ -r "/proc/$$/winpid" ]]; then
+      # On MSYS the number handed over has to be the real Win32 one, since
+      # Python is what checks it. Falling back to $PPID here would hand over an
+      # MSYS pid to be read as a Win32 one, which can land on some unrelated
+      # process and make this listen quit when that one ends. Nothing readable
+      # means nothing to watch, and listen_filter.py leaves it alone.
+      parent_pid="$(cat "/proc/$PPID/winpid" 2>/dev/null || true)"
+    fi
     progress="$STATE_DIR/listeners-gone/$reg_pid.progress"
     progress_native="$progress"
     command -v cygpath >/dev/null 2>&1 && progress_native="$(cygpath -w "$progress")"
     epoch_native="$STATE_DIR/log_epoch"
     command -v cygpath >/dev/null 2>&1 && epoch_native="$(cygpath -w "$epoch_native")"
     VOICE_SHELL_PROGRESS="$progress_native" VOICE_SHELL_START_OFFSET="$start_offset" \
-    VOICE_SHELL_EPOCH_FILE="$epoch_native" VOICE_SHELL_ALIAS_UNTIL="$log_size" \
+    VOICE_SHELL_EPOCH_FILE="$epoch_native" VOICE_SHELL_ALIAS_UNTIL="$alias_until" \
+    VOICE_SHELL_PARENT_PID="$parent_pid" \
       "$PY" -u "$HERE/listen_filter.py" "$reg_pid" $old_pid < <(tail "${tail_opts[@]}" "$LOG_FILE") &
     tail_pid=$!
 
@@ -916,7 +1044,7 @@ except Exception:
     ;;
   *)
     echo "Usage is voice-shell.sh {start [--engine X] [--no-gui]|stop|status|engines}" >&2
-    echo "        voice-shell.sh {listen|codex-forward|listeners|name|hold|live|log-path|wait-ready|viewer}" >&2
+    echo "        voice-shell.sh {listen|codex-forward|listeners|whoami|name|hold|live|log-path|wait-ready|viewer}" >&2
     echo "        voice-shell.sh {apple|whisper}" >&2
     exit 1
     ;;

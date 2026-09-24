@@ -2,145 +2,195 @@
   <img src="images/logo.svg" alt="Voice Shell" width="88">
 </p>
 
-# Voice Shell
-
-[English](../../README.md) · [日本語](README.ja.md) · [Español](README.es.md) · [Français](README.fr.md) · Deutsch · [简体中文](README.zh.md) · [한국어](README.ko.md)
+<h1 align="center">Voice Shell</h1>
 
 <p align="center">
-  <img src="https://img.shields.io/github/license/ykuwai/voice-shell" alt="License">
-  <img src="https://img.shields.io/github/last-commit/ykuwai/voice-shell" alt="Last commit">
+  <a href="../../README.md">English</a> · <a href="README.ja.md">日本語</a> · <a href="README.es.md">Español</a> · <a href="README.fr.md">Français</a> · Deutsch · <a href="README.zh.md">简体中文</a> · <a href="README.zh-TW.md">繁體中文</a> · <a href="README.ko.md">한국어</a>
 </p>
-
-Das Original ist [README.md](../../README.md) auf Englisch. Bei Widersprüchen gilt das
-Englische.
-
-**Sprechen Sie mit Claude Code. Keine Tastatur.**
-
-Sie denken beim Arbeiten laut, und der Satz kommt als Prompt an, ganz ohne Enter zu
-drücken. Das ist keine Diktierfunktion, die nachträglich an ein Textfeld geklebt
-wurde. Stummschalten, Gegenlesen, Rückgängigmachen und die Wahl, welche Sitzung Sie
-hört, all das per Stimme, während Ihre Hände bei der eigentlichen Arbeit bleiben.
 
 <p align="center">
-  <img src="images/viewer.png" alt="Der Voice-Shell-Viewer. Ein schwebendes Fenster mit laufender Transkription, Sitzungsauswahl und Sendemodus" width="360">
+  <img src="https://img.shields.io/github/license/ykuwai/voice-shell" alt="Lizenz">
+  <img src="https://img.shields.io/github/last-commit/ykuwai/voice-shell" alt="Letzter Commit">
 </p>
 
-## 💡 Warum Voice Shell
+<h3 align="center">Sag einfach, was du willst, und Claude Code legt los!</h3>
 
-- **Nichts zu drücken, um es abzuschicken.** Die meisten Sprachwerkzeuge füllen
-  ein Textfeld und warten, bis Sie auf Senden klicken. Hier geht der Satz direkt
-  durch, sobald er erkannt ist, kein Knopf, kein Bestätigungsschritt, kein
-  Fenster zum Anklicken.
-- **Kostenlos ausprobieren, nichts zusätzlich zu installieren.** Die
-  Spracherkennung läuft standardmäßig im Browser. Kein Modell zum
-  Herunterladen, kein Warten, kein API-Schlüssel. Wollen Sie es später
-  ganz privat, wechseln Sie mit einer einzigen Einstellung zur Erkennung
-  auf dem Gerät (Apple oder Whisper), ohne etwas neu lernen zu müssen.
-- **Eine vollständige Sprachbedienung, nicht nur ein Mikrofon-Symbol.**
-  Stummschalten, zwischen Entwurf und Sofortmodus wechseln, das gerade Gesagte
-  rückgängig machen, wählen, welche Sitzung zuhört, all das funktioniert auch
-  per Stimme. Siehe „Was Sie sagen können" weiter unten. Das schwebende
-  Fenster zeigt genau das, was gerade erkannt wird, während Sie sprechen.
-- **Für mehr als eine Sache gleichzeitig nutzbar.** Lassen Sie den Sprachmodus in
-  mehreren Claude-Code-Sitzungen gleichzeitig an und wählen Sie im Fenster oder
-  per Stimme, welche Ihre Worte bekommt.
-- **Falsch verstandene Namen korrigieren sich von selbst.** Tragen Sie die
-  Korrektur einmal ein („cloud code → Claude Code"), und sie gilt von da an,
-  sogar bei Text, der gerade noch erkannt wird.
+<p align="center">Voice Shell ist ein Agent Skill, mit dem du Claude Code per Stimme steuerst, statt zu tippen.</p>
 
-## 📦 Voice Shell installieren
+<p align="center">
+  <img src="images/screen-de.png" alt="Das Voice-Shell-Fenster mit Mikrofon, Sendemodus, Zielsitzungen und laufender Erkennung" width="380">
+</p>
+
+## 💡 Funktionen
+
+### 1. Claude Code nur mit der Stimme steuern
+
+Kein Enter, kein Senden-Knopf. Drei Sekunden nachdem du aufgehört hast zu sprechen, geht dein Prompt automatisch an Claude Code.\
+Stummschalten, Verwerfen und den Wechsel der Sitzung erledigst du ebenfalls per Stimme.
+
+### 2. Ein Wörterbuch für deine Begriffe
+
+Häufig falsch erkannte Wörter werden automatisch korrigiert, etwa „cloud code“ zu „Claude Code“.\
+Namen von Personen, Firmen oder Diensten trägst du mit wenigen Klicks ein.
+
+### 3. Komplett kostenlos und sicher
+
+Gute Spracherkennung ohne Kosten und ohne Abo.\
+Auf dem Laptop nutzt du die Spracherkennung des Browsers. Auf einem Mac oder einem leistungsstarken PC kann alles lokal laufen.
+
+## 📦 Einrichtung
+
+### Voraussetzungen
+
+- Claude Code
+- Python 3
+- Node.js
+- Google Chrome
+
+### Installation
+
+Füge diese Befehle in dein Terminal ein und führe sie aus.
 
 ```bash
 pip install numpy aiohttp "sounddevice>=0.5.6"
 npx skills add ykuwai/voice-shell -g -a claude-code -y
 ```
 
-Wenn Sie Chrome haben, reicht das schon. `-g` legt es in `~/.claude/skills/` ab,
-damit steht es in jedem Projekt zur Verfügung. Nur in einem Projekt
-ausprobieren? `-g` weglassen, dann landet es nur im `.claude/skills/` dieses
-Projekts. `-a claude-code` benennt Claude Code direkt, statt es `npx` raten zu
-lassen, und `-y` überspringt die Bestätigung, die sonst käme.
+Danach tippst du in Claude Code `/voice-shell`. Es prüft, was noch fehlt, und startet von selbst.
 
-Tippen Sie `/voice-shell` in Claude Code, oder sagen Sie „Sprachmodus", um zu
-starten. Die Schritte, denen ein Agent von da an folgt, stehen in
-[SKILL.md](../../skills/voice-shell/SKILL.md).
+### Aktualisieren
 
-### 🔄 Aktualisieren
+Neue Funktionen kommen laufend dazu. Aktualisiere deshalb ab und zu mit diesem Befehl.
 
 ```bash
 npx skills update voice-shell -y
 ```
 
-Ohne `-y` fragt es zuerst. Ohne den Namen aktualisiert es alle installierten
-Skills, diesen eingeschlossen.
+## 🎙️ Die passende Spracherkennung
 
-## 🔒 Wohin Ihre Stimme geht
+Es gibt drei Arten der Spracherkennung. Wähle die, die zu deinem Rechner passt.\
+Umschalten kannst du in den Einstellungen im Fenster. Wenn eine Einrichtung nötig ist, sag es einfach Claude Code.
 
-Voreingestellt ist die Web Speech API des Browsers, der schnellste Weg
-zum Start und der einzige, bei dem Ihre Stimme den Rechner verlässt.
-Die anderen beiden halten alles lokal, und der Wechsel zu einer davon
-ist nur eine Einstellung entfernt. Welche Art gerade aktiv ist, sehen
-Sie immer im Fenster.
+### 1. Laptops — Spracherkennung im Browser
+
+Keine Einrichtung nötig, funktioniert sofort.\
+Sie nutzt die kostenlose Spracherkennung, die in Chrome eingebaut ist (Web Speech API).\
+Solange Chrome das Modell für deine Sprache hat, wird lokal erkannt. Ohne es geht dein Audio an die Server von Google. Was davon gerade passiert, steht in den Einstellungen.
+
+### 2. Macs — Apple Erkennung auf dem Gerät
+
+Wenn dein Audio den Rechner nicht verlassen soll, nimm eine Erkennung, die lokal läuft.\
+Auf einem Mac mit macOS 26 oder neuer steht die Spracherkennung von Apple bereit. Sie ist schnell und braucht wenig Strom.\
+Beim ersten Start wird ein Sprachmodell heruntergeladen, das dauert einen Moment.
+
+### 3. Leistungsstarke PCs (Windows / Linux) — Faster Whisper
+
+Mit einer NVIDIA-GPU unter Windows oder Linux läuft mit [Faster Whisper](https://github.com/SYSTRAN/faster-whisper) alles lokal.\
+Beim ersten Start wird die Umgebung eingerichtet und ein Modell heruntergeladen, das dauert einen Moment.
+
+## 🚀 Verwendung
+
+Starte `/voice-shell` in Claude Code, und der Sprachmodus beginnt.\
+Sprich einfach aus, was dir durch den Kopf geht, und die Arbeit läuft weiter.\
+Deine Einstellungen werden gespeichert, beim nächsten Mal geht es also genau dort weiter, wo du aufgehört hast.
+
+### 1. `/voice-shell` in Claude Code eingeben
+
+Das Voice-Shell-Fenster öffnet sich in Chrome.\
+Mit „Dieses Fenster oben halten“ bleibt es immer im Vordergrund.
+
+### 2. Stummschaltung aufheben und lossprechen
+
+Was du sagst, geht direkt an Claude Code.\
+Was kürzer als 15 Zeichen ist, gilt als Geräusch und wird nicht gesendet. Die Mindestlänge kannst du in den Einstellungen ändern.\
+Sag „Stumm“, wenn das Mikrofon aus sein soll.
+
+### 3. Doch nicht senden? Zum Schluss „streich das“
+
+Sagst du am Ende „streich das“, wird das eben Gesagte verworfen statt gesendet.\
+Willst du vor dem Senden noch etwas korrigieren, klick auf den Text im Fenster und bearbeite ihn mit der Tastatur.
+
+### 4. Mit mehreren Sitzungen nutzen
+
+Startest du `/voice-shell` in mehreren Claude-Code-Sitzungen, erscheinen sie nummeriert oben im Fenster.\
+Klick auf eine oder sag „Nummer zwei“ oder „Sitzung 2“, um das Ziel zu wechseln.
 
 > [!NOTE]
-> Voreingestellt ist die Erkennung im Browser, das Audio geht also an Googles
-> Server. Wenn es auf Ihrem Rechner bleiben soll, wählen Sie in den
-> Einstellungen im Fenster eine andere Art. Derselbe Hinweis steht dort an
-> Ort und Stelle.
+> **Sprachmodus beenden**
+>
+> Sag Claude Code „Beende den Sprachmodus“ oder tippe `/voice-shell stop`.
 
-| Art | Was sie braucht | Wohin das Audio geht |
-|---|---|---|
-| **Dieser Browser** (Voreinstellung) | Chrome. Läuft nur bei geöffnetem Fenster | **Googles Server** |
-| Apple auf dem Gerät | macOS 26 oder neuer. Nichts zusätzlich zu installieren | Bleibt auf dem Rechner |
-| Whisper | `faster-whisper`. Stark bei Eigennamen | Bleibt auf dem Rechner |
+## 📨 Sendemodi
 
-Die gewählte Art wird gemerkt, beim nächsten Mal startet es also genauso. Die beiden
-Arten, die alles lokal halten, stehen in
-[SETUP.md](../../skills/voice-shell/SETUP.md).
+Mit den Knöpfen neben dem Mikrofon wechselst du den Sendemodus.
 
-Die gewählte Art entscheidet, welche Sprachen erkannt werden. Der Browser bietet, was
-Chrome mitbringt, Apple die im System installierten Locales, Whisper das, was das
-Modell abdeckt. Das Fenster selbst gibt es in sieben Sprachen.
+- **Sofort** (Standard) → Was du sagst, geht direkt raus.
+- **Prüfen** → Was du sagst, sammelt sich im Fenster. Du kannst es bei Bedarf mit der Tastatur korrigieren und sendest, wann du willst.
 
-## 🗣️ Was Sie sagen können
+Willst du nur das eben Gesagte korrigieren, sag am Ende „das ändere ich“. Dann gilt nur dafür vorübergehend der Modus Prüfen, und du kannst es vor dem Senden anpassen.
 
-Sagen Sie eines dieser Worte für sich allein, und es wirkt sofort.
+## 🗣️ Sprachbefehle
 
-| Sagen Sie das | Was passiert |
+| Sprachbefehl | Aktion |
 |---|---|
-| „Stummschalten" oder „Mikro aus" | Das Mikrofon geht aus |
-| „Stummschaltung aufheben" | Das Mikrofon kommt zurück (die Erkennung auf dem Gerät hört dafür weiter zu, der Browser nicht) |
-| „Entwurf" oder „Entwurfsmodus" | Was Sie ab hier sagen, sammelt sich, statt rauszugehen, sodass Sie es vor dem Senden korrigieren können |
-| „Sofortmodus" | Zurück zum direkten Senden |
-| „Sitzung 2" oder „Nummer zwei" | Legt fest, welche Sitzung Ihre Worte bekommt, wenn mehr als eine zuhört |
+| „Stumm“, „Mikro aus“ | Schaltet das Mikrofon aus |
+| „Stummschaltung aufheben“, „Mikrofon an“ | Schaltet das Mikrofon wieder ein. Die lokale Erkennung hört es, und die Browser-Erkennung auch, wenn sie auf diesem Gerät läuft.<br>Bei der gewöhnlichen Browser-Erkennung klickst du stattdessen auf das Mikrofon im Fenster |
+| „Nummer zwei“, „Sitzung 2“ | Wechselt zu dieser Sitzung, wenn mehrere laufen |
+| „streich das“ am Ende | Verwirft das eben Gesagte |
+| „das ändere ich“ am Ende | Wechselt nur dafür vorübergehend in den Modus Prüfen |
+| „Entwurfsmodus“, „Sofortmodus“ | Wechselt den Sendemodus |
 
-Hängen Sie eines davon an das Ende dessen an, was Sie sagen, und es gilt nur
-für diesen einen Satz.
+> [!TIP]
+> Die vollständige Liste findest du hinter dem Glühbirnen-Symbol im Fenster.\
+> Dort kannst du auch eigene Formulierungen hinzufügen oder Befehle abschalten, die du nicht brauchst.
 
-| Sagen Sie das | Was passiert |
+### Mehrere Rechner
+
+Hören zwei Rechner gleichzeitig zu, schaltet „Stumm“ beide stumm.\
+Öffne das Glühbirnen-Symbol, aktiviere unter der Befehlsliste „Mehrere Rechner“ und gib jedem Rechner einen Namen, etwa „Arbeit“ oder „Privat“. Dann schaltet „Arbeit stumm“ nur diesen einen stumm.
+
+## ✨ Praktische Funktionen und Einstellungen
+
+### 1. Wann gesendet wird, stellst du selbst ein
+
+Standardmäßig wird drei Sekunden nach dem Ende deines Satzes gesendet. Wenn du gern Pausen machst, stell 5 oder 10 Sekunden ein.\
+Ab welcher Lautstärke du als fertig giltst, stellst du mit der Marke unter dem Mikrofon ein. Bei viel Umgebungslärm schieb sie etwas höher.
+
+### 2. Nebengespräche werden automatisch zurückgehalten
+
+Vergessen stummzuschalten, und ein paar Sätze ohne Bezug sind durchgerutscht? Claude Code merkt das, wechselt in den Modus Prüfen und hält sie zurück.\
+Alles Gesagte bleibt im Fenster stehen, es geht also nichts verloren.
+
+### 3. Das Ziel nachträglich ändern
+
+An die falsche Sitzung gesendet? Wähl mit der Maus einfach die richtige aus.
+
+### 4. Per Ziehen ins Wörterbuch
+
+Wird ein Wort falsch erkannt, markiere es durch Ziehen und füge es so dem Wörterbuch hinzu.\
+Ab dann wird es richtig erkannt.
+
+## ⌨️ Tastenkürzel
+
+| Taste | Aktion |
 |---|---|
-| „streich das" | Der Satz, den Sie gerade gesagt haben, wird verworfen |
-| „das ändere ich" | Der Satz landet im Feld statt rauszugehen, sodass Sie ihn zuerst korrigieren können |
+| `Shift` + `M` | Schaltet das Mikrofon ein oder aus |
+| `Shift` + `L` | Wechselt in den Modus Sofort |
+| `Shift` + `H` | Wechselt in den Modus Prüfen |
+| `Shift` + `E` | Wechselt nur für das eben Gesagte in den Modus Prüfen |
+| `Shift` + `1` bis `9` | Wählt eine Sitzung per Nummer |
+| `Shift` + `Backspace` | Verwirft alles, was noch nicht gesendet ist |
+| `Ctrl` + `Enter` (auf dem Mac `Cmd` + `Enter`) | Sendet den bearbeiteten Text |
+| `,` | Öffnet die Einstellungen |
+| `.` | Öffnet das Wörterbuch |
+| `?` | Zeigt alle Tastenkürzel und Sprachbefehle |
 
-Jedes der oben genannten Worte lässt sich in den Einstellungen abschalten,
-und Sie können ihm Ihre eigene Formulierung beibringen, alles im Fenster.
-Die vollständige Liste, in allen sieben Sprachen des Fensters, steckt hinter
-dem Glühbirnen-Symbol auf dem Bildschirm.
+## 📖 Für KI-Agenten
 
-## 📖 Zum Weiterlesen
+Diese Dokumente lesen Claude Code und andere KI-Agenten, wenn sie Voice Shell ausführen.
 
-Die beiden unten gibt es nur auf Englisch. Was die meisten brauchen, steht schon
-weiter oben.
-
-| Was zu lesen ist | Was drinsteht |
-|---|---|
-| [SETUP.md](../../skills/voice-shell/SETUP.md) | Die Installation je nach Umgebung, und was zu tun ist, wenn es hakt |
-| [SKILL.md](../../skills/voice-shell/SKILL.md) | Die Schritte, die der Agent liest. Das feine Verhalten steht hier |
-
-## 🔗 Verweise
-
-- [Web Speech API (MDN)](https://developer.mozilla.org/docs/Web/API/SpeechRecognition)
-- [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
+- [SKILL.md](../../skills/voice-shell/SKILL.md) beschreibt die Bedienung und das Verhalten
+- [SETUP.md](../../skills/voice-shell/SETUP.md) erklärt die Einrichtung je nach Umgebung und hilft bei Problemen
 
 ## 📄 Lizenz
 

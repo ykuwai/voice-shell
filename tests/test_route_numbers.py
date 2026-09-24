@@ -28,6 +28,7 @@ class RouteNumberTest(unittest.TestCase):
         self.assertEqual(route_shape("session deux"), 2)
         self.assertEqual(route_shape("Sitzung zwei"), 2)
         self.assertEqual(route_shape("会话二"), 2)
+        self.assertEqual(route_shape("第二個"), 2)
 
     def test_korean_native_reading(self):
         # 이번 alone is exactly 이 (2) + 번 (the counter), the same shape every

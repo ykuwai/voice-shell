@@ -126,6 +126,7 @@ const makeHarness = new Function('SR', 'beat', `
   let canBrowserASR = true, recWanted = true, rec = null, recRunning = false;
   let recStarting = false, recGeneration = 0, recFails = 0, recStartedAt = 0;
   let route = 'on', asrDeniedFlag = false, lastVoiceAt = 0;
+  let onDeviceLocal = false;
   const MAX_FAILS = 6;
   const browserLang = () => 'en-US';
   const performance = {now: () => 0};
@@ -210,7 +211,7 @@ beat('gone').then(() => process.exit(posts === 1 ? 0 : 1));
                       Path(SCRIPTS / "viewer.py").read_text(encoding="utf-8"))
         self.assertIn('"error": "daemon_running"',
                       Path(SCRIPTS / "viewer.py").read_text(encoding="utf-8"))
-        self.assertEqual(I18N.read_text(encoding="utf-8").count("asrConflict:"), 7)
+        self.assertEqual(I18N.read_text(encoding="utf-8").count("asrConflict:"), 8)
 
 
 if __name__ == "__main__":
