@@ -2523,7 +2523,33 @@ async function handleWsMessage({ev, message, number, discardInProgress: wasDisca
       // On the review side the line below never shows in the first place, so
       // clearing it here is only to be safe.
       clearSendCountdown();
+      // Held by a trailing 「手直し」 (tail), not by the pause. On instant,
+      // appendHeld alone threw it away, so the screen flashed "moved to a
+      // draft" while the words vanished from it. This one has its explanation
+      // (the person said the word), so it opens Edit this one the way
+      // editThisOne does, and what is said next lands in the same box.
+      // setRoute turns route to 'hold' at once, so the line goes in before the
+      // round trip. A switch that fails and rolls back leaves it in the box to
+      // send or discard, rather than gone from the screen once more.
+      // No hintOnce here. The voice_cmd for the same utterance already says
+      // voiceHeld, and the two arrive in no fixed order.
+      let opening = null;
+      if (m.tail && route === 'live' && !oneShot) {
+        oneShot = true;
+        opening = setRoute('hold');
+      } else if (m.tail && carryDraft && voiceSinceCarry) {
+        // Said after switching back to instant with a draft still in the box.
+        // The carry below would send the box the moment this arrived, the
+        // opposite of what the word asks. It stays open as Edit this one
+        // instead, and the daemon goes back to the draft's short quiet.
+        carryDraft = false;
+        post('/api/pause', {paused: true}).catch(() => {});
+      }
       appendHeld(m.held);
+      if (opening) {
+        await opening;
+        el.tray.scrollIntoView({block: 'end'});
+      }
       // It is in the box now, so take it out of the live line above, the same
       // as a sent one is. Left there, it sat in both places until the next
       // repaint came round, a few seconds later. Whatever is being said right
@@ -2571,6 +2597,8 @@ function appendHeld(text) {
   text = (text || '').trim();
   if (!text) return;
   // Something arriving outside review mode never opens the edit box (that display would have no explanation)
+  // A trailing 「手直し」 is the one that does, and the WebSocket handler
+  // switches to hold for it before calling here.
   if (route !== 'hold') return;
   const cur = el.draft.value;
   el.draft.value = cur ? cur.replace(/\s*$/, '') + '\n' + text : text;

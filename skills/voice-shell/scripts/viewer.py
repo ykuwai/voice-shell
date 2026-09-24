@@ -742,6 +742,10 @@ class Tail:
         The browser takes these and adds them to the end of the textarea. Send
         the whole text and it wrecks what is being edited, so only the
         difference goes.
+
+        A line held by a trailing 「手直し」 carries tail, and the page opens
+        Edit this one for it even in instant mode. Any other held line is only
+        taken in while the page is already holding.
         """
         path = self.path.parent / "held.jsonl"
         seen = 0
@@ -756,7 +760,10 @@ class Tail:
             for line in lines[seen:]:
                 rec = self._parse(line)
                 if rec:
-                    await self.broadcast_result({"held": rec.get("text", "")})
+                    msg = {"held": rec.get("text", "")}
+                    if rec.get("tail"):
+                        msg["tail"] = True
+                    await self.broadcast_result(msg)
             seen = len(lines)
             await asyncio.sleep(0.25)
 
@@ -1440,7 +1447,7 @@ async def main_async(args):
         if force_hold or pause_file.exists():
             written, owner = append_asr_owned(
                 asr_owner_file, tab, hold_file,
-                json.dumps({"time": stamp, "text": text}, ensure_ascii=False) + "\n")
+                vd.held_line(stamp, text, force_hold))
             if written is None:
                 return web.json_response({"error": "asr_lease_unavailable"}, status=503)
             if not written:
