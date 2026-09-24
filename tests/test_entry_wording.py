@@ -105,6 +105,28 @@ class EntryWordingTest(unittest.TestCase):
             for lang in LANGS:
                 self.assertNotIn("Chrome", self.i18n[lang][key], f"{lang}.{key}")
 
+    # One machine, one name for it. The screen used to call the same thing a
+    # machine in some places and a device in others, which read as two
+    # different things being talked about. The word on the left is the one
+    # that was dropped, in every language.
+    DROPPED_NAMES = {
+        "en": "this machine",
+        "ja": "この機械",
+        "es": "esta máquina",
+        "fr": "cette machine",
+        "de": "Rechner",
+        "zh": "这台机器",
+        "zh-TW": "這台電腦",
+        "ko": "이 기계",
+    }
+
+    def test_the_machine_has_one_name_in_each_language(self):
+        for lang, dropped in self.DROPPED_NAMES.items():
+            for key, text in self.i18n[lang].items():
+                if not isinstance(text, str):
+                    continue
+                self.assertNotIn(dropped, text, f"{lang}.{key} still says {dropped}")
+
     def test_nothing_to_install_is_gone(self):
         """It meant nothing to a reader. What it works without is setup."""
         for lang in LANGS:
