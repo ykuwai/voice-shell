@@ -2614,8 +2614,14 @@ function paintPower() {
   // Unless the browser is doing the recognizing, in which case it still works
   // with the daemon stopped.
   const usable = engineOnish() || asrActive();
-  for (const b of [el.segLive, el.segHold, el.segOff, el.mic,
+  for (const b of [el.segLive, el.segHold, el.segOff,
                    el.miniMic, el.helpMini]) b.disabled = !usable;
+  /* The microphone has a second reason to be out of play: under browser
+     recognition it holds one entry naming Chrome's own setting and decides
+     nothing (paintMicPick). Kept out of the row above because this runs on
+     every frame, and in that row it would be switched back on a frame after
+     paintMicPick had just put it out of play. */
+  el.mic.disabled = !usable || asrChosen;
 
   /* A button that does nothing when pressed is not shown. With browser
      recognition there is nothing to load, and pressing it just ends with

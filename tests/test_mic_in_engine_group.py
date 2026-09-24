@@ -79,6 +79,16 @@ class MicInEngineGroupTest(unittest.TestCase):
         self.assertIn("#mic:disabled", css)
         self.assertNotIn("\n  select:disabled", css)
 
+    def test_the_frame_by_frame_paint_does_not_switch_it_back_on(self):
+        # paint() runs on every frame and used to enable the microphone along
+        # with the mode buttons, which put the pick back in play a frame after
+        # paintMicPick had taken it out. The mic carries its own line now.
+        source = VIEWER_JS.read_text(encoding="utf-8")
+        row = source[source.index("const usable = engineOnish()"):]
+        row = row[:row.index("el.mic.disabled")]
+        self.assertNotIn("el.mic,", row, "the microphone is not in the row that follows usable alone")
+        self.assertIn("el.mic.disabled = !usable || asrChosen;", source)
+
     def test_under_the_browser_it_names_chromes_setting_and_takes_no_presses(self):
         run(r'''
 const mic = freshPick();
