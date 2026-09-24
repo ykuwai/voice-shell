@@ -53,6 +53,18 @@ def run(script):
     subprocess.run(["node", "-e", HARNESS + script, str(VIEWER_JS)], check=True, cwd=ROOT)
 
 
+# The wordings themselves, read as the page reads them rather than as text, so
+# a claim about one language is checked against that language's own strings.
+I18N_HARNESS = r'''
+const assert = require('assert');
+const I18N = new Function(require('fs').readFileSync(process.argv[1], 'utf8') + '; return I18N;')();
+'''
+
+
+def run_i18n(script):
+    subprocess.run(["node", "-e", I18N_HARNESS + script, str(I18N_JS)], check=True, cwd=ROOT)
+
+
 class MicInEngineGroupTest(unittest.TestCase):
     def test_the_pick_sits_at_the_head_of_the_recognition_group(self):
         html = VIEWER_HTML.read_text(encoding="utf-8")
@@ -78,6 +90,23 @@ class MicInEngineGroupTest(unittest.TestCase):
         css = VIEWER_CSS.read_text(encoding="utf-8")
         self.assertIn("#mic:disabled", css)
         self.assertNotIn("\n  select:disabled", css)
+
+    def test_the_model_note_quotes_the_two_buttons_by_their_real_names(self):
+        # The note used to say the model is picked up when you stop and start
+        # listening "below", which named neither button and broke the moment
+        # anything moved. It quotes both, in the reader's own language, and
+        # the names have to be the ones actually printed on them.
+        run_i18n(r'''
+for (const lang of Object.keys(I18N)) {
+  const note = I18N[lang].whisperModelNote;
+  for (const key of ['powerStop', 'powerStart']) {
+    assert.ok(note.includes(I18N[lang][key]),
+      lang + ' names ' + key + ' (' + I18N[lang][key] + ') in the model note, got ' + note);
+  }
+  assert.ok(!/下の|下面|below|abajo|ci-dessous|unten|下方|아래/.test(note),
+    lang + ' points at a place rather than at the buttons, got ' + note);
+}
+''')
 
     def test_the_frame_by_frame_paint_does_not_switch_it_back_on(self):
         # paint() runs on every frame and used to enable the microphone along
