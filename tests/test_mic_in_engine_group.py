@@ -91,22 +91,35 @@ class MicInEngineGroupTest(unittest.TestCase):
         self.assertIn("#mic:disabled", css)
         self.assertNotIn("\n  select:disabled", css)
 
-    def test_the_model_note_quotes_the_two_buttons_by_their_real_names(self):
-        # The note used to say the model is picked up when you stop and start
-        # listening "below", which named neither button and broke the moment
-        # anything moved. It quotes both, in the reader's own language, and
-        # the names have to be the ones actually printed on them.
-        run_i18n(r'''
-for (const lang of Object.keys(I18N)) {
-  const note = I18N[lang].whisperModelNote;
-  for (const key of ['powerStop', 'powerStart']) {
-    assert.ok(note.includes(I18N[lang][key]),
-      lang + ' names ' + key + ' (' + I18N[lang][key] + ') in the model note, got ' + note);
-  }
-  assert.ok(!/下の|下面|below|abajo|ci-dessous|unten|下方|아래/.test(note),
-    lang + ' points at a place rather than at the buttons, got ' + note);
-}
-''')
+    def test_the_whisper_model_box_is_not_on_the_screen(self):
+        # Only faster_whisper loads the name, so it has to be a CTranslate2
+        # model or a folder holding one. Nobody types that into a settings box,
+        # and the box is gone, along with its wordings, its wiring and the two
+        # server calls that served nothing else. No read only display either.
+        html = VIEWER_HTML.read_text(encoding="utf-8")
+        source = VIEWER_JS.read_text(encoding="utf-8")
+        server = (ROOT / "skills/voice-shell/scripts/viewer.py").read_text(encoding="utf-8")
+        i18n = I18N_JS.read_text(encoding="utf-8")
+        self.assertNotIn('id="whisperModel"', html)
+        self.assertNotIn('id="whisperModelField"', html)
+        self.assertNotIn('id="whisperModelNote"', html)
+        self.assertNotIn("el.whisperModel", source)
+        self.assertNotIn("/api/whisper-model", source)
+        self.assertNotIn('add_get("/api/whisper-model"', server)
+        self.assertNotIn('add_put("/api/whisper-model"', server)
+        for key in ("whisperModel:'", "whisperModelNote:'"):
+            self.assertNotIn(key, i18n)
+
+    def test_the_model_is_still_set_and_remembered_off_the_screen(self):
+        # Taking the box away must not take the setting away. The shell hands
+        # --model to voice_daemon.py, which writes it into config.json, and
+        # reads it back when nothing was passed.
+        shell = (ROOT / "skills/voice-shell/scripts/voice-shell.sh").read_text(encoding="utf-8")
+        daemon = (ROOT / "skills/voice-shell/scripts/voice_daemon.py").read_text(encoding="utf-8")
+        self.assertIn("--remember-model", shell)
+        self.assertIn("--resolve-model", shell)
+        self.assertIn("write_config(whisper_model=args.remember_model.strip())", daemon)
+        self.assertIn('read_config().get("whisper_model")', daemon)
 
     def test_the_frame_by_frame_paint_does_not_switch_it_back_on(self):
         # paint() runs on every frame and used to enable the microphone along

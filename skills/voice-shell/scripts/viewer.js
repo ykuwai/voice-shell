@@ -122,7 +122,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'mic','recogLang','recogLangField','thresh','threshVal','gaugeFill','gaugeMark',
                   'silence','silenceVal','silenceNote','minChars','minCharsVal','clean',
                   'wakeLockField','wakeLockOn','wakeLockNote',
-                  'engineGroup','enginePick','engineNote','whisperModel','whisperModelField','whisperModelNote',
+                  'engineGroup','enginePick','engineNote',
                   'browserAsrWarn','asrConflict','browserMic','micSettingsLink','micSettingsSaid',
                   'asrLang','asrLangField',
                   'onDeviceField','onDeviceStatus','onDeviceRow','onDeviceDownload',
@@ -3135,7 +3135,7 @@ async function openSettings(pane) {
   showSheetPane(pane);
   placeNav();
   paintNav();
-  await Promise.all([loadMics(), loadLangs(), loadTuning(), loadDict(), loadWhisperModel()]);
+  await Promise.all([loadMics(), loadLangs(), loadTuning(), loadDict()]);
   el.dictNote.textContent = '';
 }
 el.closeSettings.onclick = () => {
@@ -3489,28 +3489,11 @@ el.recogLang.onchange = async () => {
   saveDict().then(loadDict);
 };
 
-/* The Whisper model. There is no telling whether a name is right until it is
-   loaded, so nothing is checked here. The default name shows in faint type (as
-   a placeholder), so an empty box reads as leaving the default alone. */
-let whisperModelSaved = '';
-async function loadWhisperModel() {
-  try {
-    const d = await (await fetch('/api/whisper-model')).json();
-    whisperModelSaved = d.model || '';
-    el.whisperModel.placeholder = d.default || '';
-    // Never touched while you are typing (the refetch on reopening settings would wipe it)
-    if (uiDoc().activeElement !== el.whisperModel) el.whisperModel.value = whisperModelSaved;
-  } catch {}
-}
-function saveWhisperModel() {
-  const name = el.whisperModel.value.trim();
-  el.whisperModel.value = name;
-  if (name === whisperModelSaved) return;   // if it was only touched, do not write
-  whisperModelSaved = name;
-  putJSON('/api/whisper-model', {model: name});
-}
-el.whisperModel.onchange = saveWhisperModel;
-el.whisperModel.onblur = saveWhisperModel;   // for the paths where change never fires
+/* The Whisper model is not on this screen, and neither is a display of it.
+   Only faster_whisper loads the name, so it has to be a CTranslate2 model or a
+   folder holding one, which is not something to type into a box. It is set and
+   remembered by voice-shell.sh start --engine whisper --model <name>, kept in
+   config.json, and read by voice_daemon.py at startup. */
 
 /* ── Sensitivity and breaks ──────────────
    All three take effect on the daemon the moment they are saved (it re-reads
@@ -5611,12 +5594,6 @@ function paintBrowserAsr() {
   // with whether anything is running).
   paintPower();
   if (el.recogLangField) el.recogLangField.hidden = asrChosen || el.recogLangField.hidden;
-  /* The Whisper model field. It shows while stopped as well. You use it by
-     swapping the name and then loading again, so if the field vanished the
-     moment you stopped, you could never reach it. */
-  const whisper = chosenEngine === WHISPER_ENGINE;
-  el.whisperModelField.hidden = !whisper;
-  el.whisperModelNote.hidden = !whisper;
 }
 
 async function loadEngines() {
