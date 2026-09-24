@@ -393,7 +393,7 @@ const I18N = {
     cmdHoldTailWhat:'文の終わりに付けると、出さずに下の欄へ回します。',
     cmdFixed:'ここは言い方を足せません。聞き違えたときに失うものが大きすぎます。',
     cmdYours:'自分の言い方',
-    cmdAddPh:'この言い方でも効かせる',
+    cmdAddPh:'この言い方でも使う',
     cmdAddRoutePh:'ナンバー{n}',
     cmdSlotNote:'数の入るところに {n} と書きます。',
     cmdBadPhrase:'その書き方は使えません。2文字以上にしてください。{n} を書けるのは送信先だけで、ちょうど1つです。',
