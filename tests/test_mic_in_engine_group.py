@@ -31,6 +31,7 @@ const start = source.indexOf('function paintMicPick()');
 const end = source.indexOf('async function loadMics', start);
 if (start < 0 || end < 0) process.exit(2);
 const make = new Function('asrChosen', 'el', 'document', 't', 'micList', 'micCurrent', 'micLabel',
+  'micPickUsable',
   `${source.slice(start, end)}; return paintMicPick;`);
 
 const document = {createElement: () => ({value:'', textContent:'', selected:false})};
@@ -44,8 +45,19 @@ function freshPick() {
     get value() { const s = this.options.find(o => o.selected); return s ? s.value : ''; },
   };
 }
-const paint = (asrChosen, mic, list, current) =>
-  make(asrChosen, {mic}, document, t, list, current, micLabel)();
+// usable is what paintPower reads too: something is listening, so the pick
+// decides something. Stopped, it is out of play just like the mode buttons.
+const paint = (asrChosen, mic, list, current, usable = true) =>
+  make(asrChosen, {mic}, document, t, list, current, micLabel, () => usable)();
+
+// vizDeviceLabel, cut out the same way. It says which device the analyser
+// opens, and it is read while the pick may still be holding the browser's
+// placeholder.
+const vizLabel = (asrChosen, mic, micCurrent) =>
+  new Function('asrChosen', 'el', 'micCurrent',
+    'return (' + source.slice(source.indexOf('asrChosen ? \'\' :', source.indexOf('const vizDeviceLabel')),
+                              source.indexOf(';', source.indexOf('const vizDeviceLabel'))) + ');'
+  )(asrChosen, {mic}, micCurrent);
 '''
 
 
@@ -126,7 +138,7 @@ class MicInEngineGroupTest(unittest.TestCase):
         # with the mode buttons, which put the pick back in play a frame after
         # paintMicPick had taken it out. The mic carries its own line now.
         source = VIEWER_JS.read_text(encoding="utf-8")
-        row = source[source.index("const usable = engineOnish()"):]
+        row = source[source.index("const usable = micPickUsable()"):]
         row = row[:row.index("el.mic.disabled")]
         self.assertNotIn("el.mic,", row, "the microphone is not in the row that follows usable alone")
         self.assertIn("el.mic.disabled = !usable || asrChosen;", source)
@@ -150,6 +162,44 @@ paint(false, mic, list, 'usb');
 assert.equal(mic.disabled, false);
 assert.equal(mic.options.length, 2);
 assert.equal(mic.value, 'usb', 'what was picked before is still picked');
+''')
+
+    def test_it_is_out_of_play_while_nothing_is_listening(self):
+        # The pick is rebuilt on paths paintPower does not follow (opening the
+        # settings, switching the language), so it has to reach paintPower's
+        # own answer rather than simply switching itself back on.
+        run(r'''
+const mic = freshPick();
+paint(false, mic, [{id:'default', label:''}], 'default', false);
+assert.equal(mic.disabled, true, 'nothing is listening, so it decides nothing');
+paint(false, mic, [{id:'default', label:''}], 'default', true);
+assert.equal(mic.disabled, false, 'and it comes back once something is');
+''')
+
+    def test_the_pick_is_remembered_so_the_poll_does_not_undo_it(self):
+        # The five second poll repaints the engine group, and the pick is
+        # rebuilt from micCurrent. Without micCurrent moving when the pick is
+        # changed, that repaint puts the old device back at the top while the
+        # daemon is already on the new one.
+        source = VIEWER_JS.read_text(encoding="utf-8")
+        handler = source[source.index("el.mic.onchange = async () => {"):]
+        handler = handler[:handler.index("\n};")]
+        self.assertIn("micCurrent = dev;", handler)
+
+    def test_the_analyser_opens_the_picked_device_not_the_default(self):
+        # An engine switch rebuilds the capture before the pick has been
+        # repainted, so while the browser's placeholder is still in the element
+        # the device has to come from micCurrent instead.
+        run(r'''
+const placeholder = freshPick();
+placeholder.replaceChildren({value:'', textContent:'<micChromeDefault>', selected:true});
+assert.equal(vizLabel(false, placeholder, 'usb'), 'usb',
+             'the placeholder is not an answer, micCurrent is');
+assert.equal(vizLabel(true, placeholder, 'usb'), '',
+             'under browser recognition no device is named on purpose');
+const real = freshPick();
+paint(false, real, [{id:'default', label:''}, {id:'usb', label:'USB mic'}], 'usb');
+assert.equal(vizLabel(false, real, 'default'), 'usb', 'the element wins while it holds a real pick');
 ''')
 
 
