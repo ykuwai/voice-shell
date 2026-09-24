@@ -1718,31 +1718,11 @@ async def main_async(args):
             "current": cur,
         })
 
-    async def handle_whisper_model_get(_req):
-        """The Whisper model. Gives back the remembered one and the default name.
-
-        Swapping it needs a reload, so it lives in config.json (the one read
-        once at startup), not tuning.json. Mixed into the tuning.json that is
-        reread every 0.5 seconds, whoever wrote it would think it had taken.
-        """
-        import voice_daemon as vd
-        return web.json_response({
-            "model": vd.read_config().get("whisper_model") or "",
-            "default": "large-v3-turbo",
-        })
-
-    async def handle_whisper_model_put(req):
-        """Remember the Whisper model. Send it empty to go back to the default.
-
-        Whether the name is right is not checked here. It takes both a Hugging
-        Face name and the path of a folder kept locally, so there is no telling
-        until it is loaded.
-        """
-        import voice_daemon as vd
-        body = await req.json()
-        name = (body.get("model") or "").strip()
-        vd.write_config(whisper_model=name)
-        return web.json_response({"model": name})
+    # The Whisper model had a GET and a PUT here, for a box on the settings
+    # screen. The screen no longer offers one, and nothing else ever called
+    # them, so both are gone. The setting itself is untouched. voice-shell.sh
+    # start --engine whisper --model <name> writes it through voice_daemon.py
+    # (--remember-model) and reads it back with --resolve-model.
 
     async def handle_mics(_req):
         """Give back the usable mics and the one picked right now."""
@@ -1768,8 +1748,6 @@ async def main_async(args):
     app.router.add_put("/api/tuning", handle_tuning_put)
     app.router.add_get("/api/languages", handle_languages)
     app.router.add_get("/api/ondevice", handle_ondevice)
-    app.router.add_get("/api/whisper-model", handle_whisper_model_get)
-    app.router.add_put("/api/whisper-model", handle_whisper_model_put)
     app.router.add_put("/api/mics", handle_mic_put)
     app.router.add_get("/api/dictionary", handle_dict_get)
     app.router.add_put("/api/dictionary", handle_dict_put)

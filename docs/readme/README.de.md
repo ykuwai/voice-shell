@@ -102,7 +102,7 @@ Mit „Dieses Fenster oben halten“ bleibt es immer im Vordergrund.
 ### 2. Stummschaltung aufheben und lossprechen
 
 Was du sagst, geht direkt an Claude Code.\
-Sehr kurze Ergebnisse (etwa drei Wörter oder weniger, wie „ja“ oder „okay“) gelten als Geräusch und werden nicht gesendet. Die Mindestlänge kannst du in den Einstellungen ändern.\
+Was kürzer als 15 Zeichen ist, gilt als Geräusch und wird nicht gesendet. Die Mindestlänge kannst du in den Einstellungen ändern.\
 Sag „Stumm“, wenn das Mikrofon aus sein soll.
 
 ### 3. Doch nicht senden? Zum Schluss „streich das“

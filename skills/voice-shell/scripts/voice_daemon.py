@@ -3402,6 +3402,10 @@ def main():
         return
 
     if args.remember_model is not None:
+        # config.json, not tuning.json. Swapping the model means loading it
+        # again, and config.json is the file read once at startup. In the
+        # tuning.json that is reread every 0.5 seconds, a new name would look
+        # as though it had taken while the old model was still the one running.
         write_config(whisper_model=args.remember_model.strip())
         return
 

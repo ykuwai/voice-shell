@@ -102,7 +102,7 @@ Cliquez sur « Garder cette fenêtre au-dessus » pour qu'elle reste toujours au
 ### 2. Réactivez le micro et parlez
 
 Ce que vous dites est envoyé tel quel à Claude Code.\
-Les phrases très courtes (environ trois mots ou moins, comme « oui » ou « d'accord ») sont considérées comme du bruit et ne partent pas. La longueur minimale se change dans les réglages.\
+Ce qui fait moins de 15 caractères est considéré comme du bruit et ne part pas. La longueur minimale se change dans les réglages.\
 Pour arrêter de parler, dites « couper le micro » et le micro s'éteint.
 
 ### 3. Pour ne pas envoyer, finissez par « annule ça »

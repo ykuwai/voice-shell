@@ -122,7 +122,7 @@ for (const id of ['beacon','stateText','modes','segLive','segHold','segOff',
                   'mic','recogLang','recogLangField','thresh','threshVal','gaugeFill','gaugeMark',
                   'silence','silenceVal','silenceNote','minChars','minCharsVal','clean',
                   'wakeLockField','wakeLockOn','wakeLockNote',
-                  'engineGroup','enginePick','engineNote','whisperModel','whisperModelField','whisperModelNote',
+                  'engineGroup','enginePick','engineNote',
                   'browserAsrWarn','asrConflict','browserMic','micSettingsLink','micSettingsSaid',
                   'asrLang','asrLangField',
                   'onDeviceField','onDeviceStatus','onDeviceRow','onDeviceDownload',
@@ -592,16 +592,24 @@ async function matchDeviceId(label) {
 }
 
 // The mic dropdown picks which device asr_mic.py (the daemon) opens, not
-// which one Chrome's own recognition listens through (browserMicNote says as
-// much: Chrome always uses its own default there, the dropdown does nothing
-// under browser recognition). This analyser exists to gate "pause to send"
+// which one Chrome's own recognition listens through. Chrome always uses its
+// own default there, which is why the dropdown goes inert under browser
+// recognition (paintMicPick). This analyser exists to gate "pause to send"
 // on real quiet, and asking it to open whatever device the dropdown names
 // measures a different microphone than the one actually hearing you the
 // moment that device is not Chrome's default, so the gate reads quiet no
 // matter what you say and sends the instant a clause finalizes regardless of
 // silence_duration. Naming no device at all here, under browser recognition,
 // is what keeps the two listening to the same one.
-const vizDeviceLabel = () => asrChosen ? '' : (el.mic.value || '');
+/* Read off the dropdown, and off micCurrent when the dropdown holds nothing
+   real. Under browser recognition the pick carries one placeholder entry whose
+   value is empty (paintMicPick), and an engine switch rebuilds this capture
+   before that placeholder has been painted away, so the element alone would
+   say "no device" there and open the system default instead of the one
+   asr_mic.py is on. No real entry ever has an empty value ("whatever the OS is
+   set to" is the string 'default'), so an empty one always means the dropdown
+   is not holding the answer. */
+const vizDeviceLabel = () => asrChosen ? '' : (el.mic.value || micCurrent || '');
 
 async function startViz(label) {
   const generation = ++vizGeneration;
@@ -2595,6 +2603,12 @@ let startedAt = 0;     // when start was pressed
 const BOOT_SEC = 40;   // measured at roughly 40 seconds
 let tick = null;
 
+/* Whether anything is actually listening. With nothing running, the modes and
+   the microphone decide nothing. Shared with paintMicPick, which rebuilds the
+   microphone on its own schedule and has to reach the same answer paintPower
+   would: the two used to disagree, and whichever ran last won. */
+function micPickUsable() { return engineOnish() || asrActive(); }
+
 function paintPower() {
   const busy = engine === 'booting' || engine === 'stopping';
   // Back when this sat in the header as a round icon, it got mistaken for
@@ -2613,9 +2627,15 @@ function paintPower() {
   // With nothing running, choosing a mode means nothing.
   // Unless the browser is doing the recognizing, in which case it still works
   // with the daemon stopped.
-  const usable = engineOnish() || asrActive();
-  for (const b of [el.segLive, el.segHold, el.segOff, el.mic,
+  const usable = micPickUsable();
+  for (const b of [el.segLive, el.segHold, el.segOff,
                    el.miniMic, el.helpMini]) b.disabled = !usable;
+  /* The microphone has a second reason to be out of play: under browser
+     recognition it holds one entry naming Chrome's own setting and decides
+     nothing (paintMicPick). Kept out of the row above because this runs on
+     every frame, and in that row it would be switched back on a frame after
+     paintMicPick had just put it out of play. */
+  el.mic.disabled = !usable || asrChosen;
 
   /* A button that does nothing when pressed is not shown. With browser
      recognition there is nothing to load, and pressing it just ends with
@@ -3129,7 +3149,7 @@ async function openSettings(pane) {
   showSheetPane(pane);
   placeNav();
   paintNav();
-  await Promise.all([loadMics(), loadLangs(), loadTuning(), loadDict(), loadWhisperModel()]);
+  await Promise.all([loadMics(), loadLangs(), loadTuning(), loadDict()]);
   el.dictNote.textContent = '';
 }
 el.closeSettings.onclick = () => {
@@ -3389,6 +3409,26 @@ const MIC_SYSTEM_DEFAULT = 'default';
 const micLabel = m => m.id === MIC_SYSTEM_DEFAULT ? t('micSystemDefault') : (m.label || m.id);
 
 function paintMicPick() {
+  /* Under browser recognition the pick has nothing to decide. Chrome listens
+     through its own default whatever is chosen here, so rather than leave a
+     live dropdown that does nothing, it holds one entry naming where the
+     choice really is made and takes no presses. What was picked for the local
+     engines is untouched (micList and micCurrent are left as they are), so
+     switching back brings the real list straight back. */
+  if (asrChosen) {
+    const o = document.createElement('option');
+    o.value = ''; o.textContent = t('micChromeDefault'); o.selected = true;
+    el.mic.replaceChildren(o);
+    el.mic.disabled = true;
+    el.mic.hidden = false;
+    return;
+  }
+  /* Not a plain false. With nothing running this pick decides nothing either,
+     exactly as the mode buttons do, and paintPower says so on the same terms.
+     Left as a plain false, opening the settings (loadMics) or switching the
+     language (applyLang) put it back in play with the engine stopped, because
+     those two reach paintMicPick without paintPower following. */
+  el.mic.disabled = !micPickUsable();
   if (!micList.length) { el.mic.hidden = true; return; }
   el.mic.replaceChildren(...micList.map(m => {
     const o = document.createElement('option');
@@ -3425,6 +3465,13 @@ el.mic.onchange = async () => {
   const label = el.mic.selectedOptions[0].textContent;
   const dev = el.mic.value;
   el.hint.textContent = t('micSwitching', {name: label});
+  /* What is picked, remembered here as well as in the element. The list is
+     rebuilt from micCurrent, and it is now rebuilt by the engine repaint that
+     the five second poll runs (paintBrowserAsr), not just by opening the
+     settings. Left behind, that poll would put the old device back at the top
+     within five seconds while the daemon was already on the new one. loadMics
+     overwrites it with the server's answer the next time it runs. */
+  micCurrent = dev;
   micConfirmDevice = dev;
   clearTimeout(micConfirmTimer);
   // A backstop for an older daemon that never sends mic_active. If the real
@@ -3468,28 +3515,11 @@ el.recogLang.onchange = async () => {
   saveDict().then(loadDict);
 };
 
-/* The Whisper model. There is no telling whether a name is right until it is
-   loaded, so nothing is checked here. The default name shows in faint type (as
-   a placeholder), so an empty box reads as leaving the default alone. */
-let whisperModelSaved = '';
-async function loadWhisperModel() {
-  try {
-    const d = await (await fetch('/api/whisper-model')).json();
-    whisperModelSaved = d.model || '';
-    el.whisperModel.placeholder = d.default || '';
-    // Never touched while you are typing (the refetch on reopening settings would wipe it)
-    if (uiDoc().activeElement !== el.whisperModel) el.whisperModel.value = whisperModelSaved;
-  } catch {}
-}
-function saveWhisperModel() {
-  const name = el.whisperModel.value.trim();
-  el.whisperModel.value = name;
-  if (name === whisperModelSaved) return;   // if it was only touched, do not write
-  whisperModelSaved = name;
-  putJSON('/api/whisper-model', {model: name});
-}
-el.whisperModel.onchange = saveWhisperModel;
-el.whisperModel.onblur = saveWhisperModel;   // for the paths where change never fires
+/* The Whisper model is not on this screen, and neither is a display of it.
+   Only faster_whisper loads the name, so it has to be a CTranslate2 model or a
+   folder holding one, which is not something to type into a box. It is set and
+   remembered by voice-shell.sh start --engine whisper --model <name>, kept in
+   config.json, and read by voice_daemon.py at startup. */
 
 /* ── Sensitivity and breaks ──────────────
    All three take effect on the daemon the moment they are saved (it re-reads
@@ -5560,6 +5590,9 @@ function paintBrowserAsr() {
   el.asrConflict.textContent = t('asrConflict');
   el.browserMic.hidden = !asrChosen;
   if (!asrChosen) el.micSettingsSaid.hidden = true;   // no stale answer left behind
+  // The microphone pick lives in this group now and changes with the engine,
+  // so every engine repaint goes through it as well.
+  paintMicPick();
   el.asrLangField.hidden = !asrChosen;
   el.idleMuteField.hidden = !asrChosen;
   el.idleMuteNote.hidden = !asrChosen;
@@ -5587,12 +5620,6 @@ function paintBrowserAsr() {
   // with whether anything is running).
   paintPower();
   if (el.recogLangField) el.recogLangField.hidden = asrChosen || el.recogLangField.hidden;
-  /* The Whisper model field. It shows while stopped as well. You use it by
-     swapping the name and then loading again, so if the field vanished the
-     moment you stopped, you could never reach it. */
-  const whisper = chosenEngine === WHISPER_ENGINE;
-  el.whisperModelField.hidden = !whisper;
-  el.whisperModelNote.hidden = !whisper;
 }
 
 async function loadEngines() {

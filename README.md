@@ -102,7 +102,7 @@ Click "Keep this window on top" to keep it in front of everything else.
 ### 2. Unmute and start talking
 
 What you say is sent to Claude Code.\
-Anything very short (about three words or fewer) is treated as background noise and isn't sent. You can change the minimum length in the settings.\
+Anything shorter than 15 characters is treated as noise and isn't sent. You can change the minimum length in the settings.\
 Say "mute" whenever you want the microphone off.
 
 ### 3. Changed your mind? End with "cancel that"

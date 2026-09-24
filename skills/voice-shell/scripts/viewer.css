@@ -1440,6 +1440,15 @@
     font-size:.85rem;
   }
   select:focus, input:focus, textarea:focus { outline:none; border-color:var(--accent); }
+  /* A pick that is deliberately out of play, not one that failed. Chrome's own
+     grey on a dark panel looks like a broken control, so it keeps the same box
+     and only loses a little of its colour. Only the microphone wears this, by
+     id, because the engine pick is also disabled for the moment a switch takes
+     and there it means busy rather than out of play. */
+  #mic:disabled {
+    color:var(--faint); cursor:default; opacity:1;
+    -webkit-text-fill-color:var(--faint);
+  }
 
   input[type=range] {
     flex:1; min-width:0; -webkit-appearance:none; appearance:none;
