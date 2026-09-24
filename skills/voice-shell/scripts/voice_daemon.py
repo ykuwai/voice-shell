@@ -2231,6 +2231,20 @@ def note_voice_cmd(log_path, kind: str, label: str = "", said: str = "") -> None
         pass
 
 
+def held_line(stamp: str, text: str, tail: bool = False) -> str:
+    """One line of the hold file, the same from the daemon and the viewer.
+
+    tail marks a line held by a trailing 「手直し」 rather than by the pause.
+    The screen opens Edit this one for that one even in instant mode, while a
+    line held by the pause never opens the box on its own. Left off otherwise,
+    so an ordinary held line looks exactly as it always has.
+    """
+    rec = {"time": stamp, "text": text}
+    if tail:
+        rec["tail"] = True
+    return json.dumps(rec, ensure_ascii=False) + "\n"
+
+
 def parse_args():
     p = argparse.ArgumentParser(description="The resident daemon for voice prompts")
     asr_mic.add_common_args(p)
@@ -3980,8 +3994,7 @@ def main():
                 # (The viewer shows the time, so the timestamp is kept here.)
                 if force_hold or pause_path.exists():
                     with open(hold_path, "a") as h:
-                        h.write(json.dumps({"time": stamp, "text": text},
-                                           ensure_ascii=False) + "\n")
+                        h.write(held_line(stamp, text, force_hold))
                     print(f"[{stamp}] (held) {text}", file=sys.stderr, flush=True)
                     if force_hold:
                         note_voice_cmd(log_path, "held", "", text)
